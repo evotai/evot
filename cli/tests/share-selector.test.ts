@@ -8,6 +8,19 @@ const shares: SharedSession[] = ['Alpha', 'Beta'].map((title, index) => ({
   created_at: 1_700_000_000_000, size_bytes: 2048,
 }))
 
+test('share rows show published URLs while internal IDs stay in details', () => {
+  const task = { ...shares[1]!, id: 'task-share', kind: 'task', url: 'https://evot.ai/share/t/task-share' }
+  const state = shareSelectorState([shares[0]!, task])
+  for (const share of [shares[0]!, task]) {
+    const row = state.items.find(item => item.id === share.id)
+    expect(row?.label).toBe(share.title)
+    expect(row?.detail).toBe(share.url)
+    expect(row?.preview).toContain(share.url)
+    expect(row?.preview).toContain(`Share: ${share.id}`)
+    expect(selectorType(state, share.url).items.filter(item => !item.header).map(item => item.id)).toEqual([share.id])
+  }
+})
+
 test('shares use the same gestures as sessions and tasks: d d deletes, / searches, esc closes', () => {
   const state = shareSelectorState(shares)
   expect(state.listFocused).toBe(true)

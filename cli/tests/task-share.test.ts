@@ -291,7 +291,7 @@ describe('/task <link> in the session', () => {
 })
 
 describe('shared links selector', () => {
-  test('tasks and sessions are grouped, labelled by kind, and previewed differently', () => {
+  test('tasks and sessions are grouped by kind, show their URLs, and preview differently', () => {
     const state = shareSelectorState([
       { id: 'sess00000001', url: 'https://evot.ai/share/sess00000001', title: 'Fix flaky test', created_at: 1 },
       { id: 'task00000001', url: 'https://evot.ai/share/t/task00000001', title: 'Daily HN digest', kind: 'task', created_at: 2,
@@ -302,7 +302,7 @@ describe('shared links selector', () => {
     const rows = state.allItems.filter(item => !item.header)
     expect(rows.map(item => item.id)).toEqual(['task00000001', 'sess00000001'])
     expect(rows[0]?.label).toBe('Daily HN digest')
-    expect(rows[0]?.detail).toBe('task · task0000')
+    expect(rows[0]?.detail).toBe('https://evot.ai/share/t/task00000001')
     expect(rows[0]?.preview).toEqual(expect.arrayContaining([
       'Schedule: 0 9 * * 1-5 · Asia/Shanghai', 'Model: claude-opus · high', 'Task revision: 7',
       'Deleting revokes this link, not the task.',
@@ -312,6 +312,6 @@ describe('shared links selector', () => {
     const flat = shareSelectorState([{ id: 'sess00000001', url: 'u', title: 't' }])
     expect(flat.allItems.some(item => item.header)).toBe(false)
     expect(flat.allItems[0]?.label).toBe('t')
-    expect(flat.allItems[0]?.detail).toBe('session · sess0000')
+    expect(flat.allItems[0]?.detail).toBe('u')
   })
 })

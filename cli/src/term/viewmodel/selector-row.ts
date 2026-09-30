@@ -84,13 +84,18 @@ export function buildSelectorRow(item: SelectorItem, options: SelectorRowOptions
   }
 }
 
-/** Title-first two-line row for browsing durable objects. Status has its own
- * width budget; long titles cannot push running/paused/open off screen. */
+/** Title-first two-line entry for browsing durable objects. The continuation
+ * rail and shared selection band bind metadata to its title. Status has its
+ * own width budget, so long titles cannot push running/paused/open off screen. */
 export function buildBrowseRow(item: SelectorItem, options: SelectorRowOptions, width: number): StyledLine[] {
+  const { brandHex, mutedHex, subtleHex, selectionMutedHex } = getTheme()
+  const secondaryHex = options.highlighted ? selectionMutedHex : mutedHex
   const status = item.status
   const statusText = status ? truncateToWidth(status.text, Math.max(0, Math.min(18, width - 8))) : ''
-  const right = statusText ? [colored(statusText, status?.tone === 'attention' ? 'red'
-    : status?.tone === 'success' ? 'green' : status?.tone === 'active' ? 'cyan' : 'gray')] : []
+  const right: StyledSpan[] = statusText ? [status?.tone === 'attention' ? colored(statusText, 'red')
+    : status?.tone === 'success' ? colored(statusText, 'green')
+    : status?.tone === 'active' ? colored(statusText, 'cyan')
+    : { text: statusText, hex: secondaryHex }] : []
   const title = buildSelectorRow({ ...item, detail: undefined }, options)
   const titleWidth = Math.max(1, width - spansWidth(right) - (right.length ? 2 : 0))
   const left = truncateSpansToWidth(title.spans, titleWidth)
@@ -98,8 +103,16 @@ export function buildBrowseRow(item: SelectorItem, options: SelectorRowOptions, 
   const bg = title.bg
   const top: StyledLine = { spans: [...left, { text: ' '.repeat(gap), ...(bg ? { bg } : {}) },
     ...right.map(span => ({ ...span, ...(bg ? { bg } : {}) }))], ...(bg ? { bg } : {}) }
-  const detail = highlightSelectorMatches(truncateToWidth(item.detail ?? '', Math.max(0, width - 2)), options.query ?? '', { dim: true })
-  return [top, line(plain('  '), ...detail)]
+  const detail = highlightSelectorMatches(item.detail ?? '', options.query ?? '', { hex: secondaryHex })
+  const bottom = truncateSpansToWidth([
+    { text: item.detail ? '│ ' : '  ', hex: options.highlighted ? brandHex : subtleHex },
+    ...detail,
+  ], width)
+  bottom.push({ text: ' '.repeat(Math.max(0, width - spansWidth(bottom))) })
+  return [top, {
+    spans: bottom.map(span => ({ ...span, ...(bg ? { bg } : {}) })),
+    ...(bg ? { bg } : {}),
+  }]
 }
 
 /** Highlight every filter-token occurrence without changing the source text. */

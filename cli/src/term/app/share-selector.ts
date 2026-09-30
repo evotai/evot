@@ -49,7 +49,7 @@ function taskFacts(summary: unknown): string[] {
 }
 
 function preview(share: SharedSession): string[] {
-  const head = [share.title || '(untitled)', share.url, '', ...created(share.created_at)]
+  const head = [share.title || '(untitled)', share.url, '', `Share: ${share.id}`, ...created(share.created_at)]
   if (shareKind(share) === 'task') {
     return [...head, ...source(share.source_id, 'Task'), ...taskFacts(share.summary), '',
       'Anyone with the link can read the instruction.',
@@ -66,7 +66,7 @@ function row(share: SharedSession): SelectorItem {
     id: share.id,
     label: share.title || '(untitled)',
     status: { text: age(share.created_at), tone: 'muted' },
-    detail: `${kind} · ${share.id.slice(0, 8)}`,
+    detail: share.url,
     group: kind === 'task' ? 'Tasks' : 'Sessions',
     searchText: `${kind} ${share.title ?? ''} ${share.id} ${share.url} ${share.source_id ?? ''}`,
     preview: preview(share),
