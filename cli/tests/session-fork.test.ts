@@ -178,11 +178,11 @@ describe('fork tree in /sessions', () => {
     expect(orderAsForkTree([a, b]).map(r => r.session.session_id).sort()).toEqual(['a', 'b'])
   })
 
-  test('resume rows hang the graph edge off the id column and keep titles clean', () => {
+  test('resume rows lead with title and retain graph edges and real ids', () => {
     const rows = formatSessionItems([grandchild, child, root], '/work').filter(i => !i.header)
-    expect(rows.map(i => i.label)).toEqual(['aaaaaaaa', '└─ bbbbbbbb', '   └─ cccccccc'])
+    expect(rows.map(i => i.label)).toEqual(['重构 session 存储', '└─ 抽 Storage trait', '   └─ 修测试 helper'])
     const details = rows.map(i => stripAnsi(i.detail ?? ''))
-    expect(details[1]).toContain('抽 Storage trait')
+    expect(details[1]).toContain('bbbbbbbb')
     expect(details.join('\n')).not.toContain('⑂')
     // Selecting a row still resolves to the real id.
     expect(rows.map(i => i.id)).toEqual([root.session_id, child.session_id, grandchild.session_id])

@@ -12,6 +12,8 @@ export interface SelectorItem {
   renameTitle?: string
   label: string
   detail?: string
+  /** Browse-row status, kept visible independently of title truncation. */
+  status?: { text: string; tone?: 'muted' | 'success' | 'attention' | 'active' }
   /** Compact provenance label, independent of search match snippets. */
   badge?: string
   /** Skill package row; children stay searchable while collapsed. */
@@ -134,7 +136,7 @@ export interface SelectorState {
   subtitle?: string
   /** Model selection and live background output use dedicated editor-replacement
    * presentations instead of the generic titled selector. */
-  presentation?: 'model' | 'skill' | 'background-list' | 'background-output'
+  presentation?: 'model' | 'skill' | 'background-list' | 'background-output' | 'browser'
   /** Ephemeral state for an output detail: undefined offset follows the tail. */
   outputView?: {
     scrollOffset?: number

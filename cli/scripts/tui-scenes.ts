@@ -5,8 +5,11 @@ import { createInitialState } from '../src/term/app/state.js'
 import { createEditorState, insertText } from '../src/term/input/editor.js'
 import { promptFromSnapshot } from '../src/term/viewmodel/prompt-snapshot.js'
 import type { ShellSnapshot } from '../src/term/viewmodel/shell.js'
+import { createTaskWindow } from '../src/task/window.js'
+import { shareSelectorState } from '../src/term/app/share-selector.js'
+import { createBackgroundPanelState } from '../src/term/app/background-panel.js'
 
-export const SCENES = ['idle', 'streaming', 'model-preview', 'model-focused', 'resume', 'ask', 'help', 'planning'] as const
+export const SCENES = ['idle', 'streaming', 'model-preview', 'model-focused', 'resume', 'tasks', 'shares', 'background', 'ask', 'help', 'planning'] as const
 export type Scene = typeof SCENES[number]
 
 /** Offline product fixtures. Deliberately no Agent, user config, network or
@@ -52,6 +55,34 @@ export function previewScene(scene: Scene, columns: number, rows: number): Shell
         { id: 'session-a', label: 'Fix streaming layout', preview: ['Fix streaming layout', 'fast · 3 turns', '', '› Support 中文 and emoji 🙂'] },
         { id: 'session-b', label: 'Review configuration transactions' },
       ]) }
+      input.prompt.active = false
+      break
+    case 'tasks':
+      input.overlay = { kind: 'selector', state: createTaskWindow({
+        cache: { ready: true, stale: false, synced_at: 0 },
+        tasks: [true, false].map((enabled, index) => ({
+          id: `task-${index}`, revision: 1, name: index ? 'Weekly project review' : '每日技术摘要',
+          cron: '0 9 * * 1-5', timezone: 'Asia/Shanghai', instruction: 'Summarize changes and send the important findings.',
+          enabled, next_run_at: 0, executor_id: '', model_policy: 'default', model_spec: '',
+          thinking_level: '', workspace_ref: '', delivery_channel: '', delivery_target: '',
+          timeout_seconds: 900, max_lateness_seconds: 3600,
+        })),
+      }) }
+      input.prompt.active = false
+      break
+    case 'shares':
+      input.overlay = { kind: 'selector', state: shareSelectorState([
+        { id: 'task-link', kind: 'task', title: '每日技术摘要', url: 'https://evot.ai/share/t/example' },
+        { id: 'session-link', title: 'Review streaming layout', url: 'https://evot.ai/share/example' },
+      ]) }
+      input.prompt.active = false
+      break
+    case 'background':
+      input.overlay = { kind: 'selector', state: createBackgroundPanelState([{
+        task_id: 'offline-shell', command: 'bun test tests/browse-selector.test.ts', status: 'running',
+        cwd: '/workspace/project', output_path: '/tmp/offline-preview.txt', output_file_truncated: false,
+        elapsed_ms: 24_000, exit_code: null, stopped_by_user: false,
+      }]) }
       input.prompt.active = false
       break
     case 'ask':

@@ -1,5 +1,6 @@
 import { editSessionName } from './session-rename-editor.js'
 import type { KeyEvent } from '../input.js'
+import { browseSearchKey } from './browse-window.js'
 import { handleSplitPaneKey, resetPaneForSelection } from '../split-pane.js'
 import {
   selectorAdjustEffort,
@@ -63,6 +64,8 @@ function handleControl(state: SelectorState, event: KeyEvent, columns: number, r
   }
   const paneAction = handleSplitPaneKey(state, event, columns, rows)
   if (paneAction) return paneAction
+  const filtered = browseSearchKey(state, event)
+  if (filtered) return { kind: 'update', state: filtered }
   // Sessions and shared links are the same kind of list: letters are actions
   // while the list owns the input (`d d` deletes, `/` opens the filter), and
   // typing filters once the filter owns it. Only sessions can be renamed.

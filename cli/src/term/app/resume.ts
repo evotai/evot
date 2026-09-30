@@ -1,11 +1,10 @@
-import { padRight, relativeTime } from '../../render/format.js'
+import { relativeTime } from '../../render/format.js'
 import type { SessionMeta, SessionWithText } from '../../native/index.js'
 import { PREVIEW_SECTION_PREFIX, type SelectorItem } from '../selector.js'
 import { recognitionSections, type SessionRecognition } from './session-recognition.js'
 import { orderAsForkTree } from './fork-tree.js'
-import { CLOUD_LABEL_WIDTH } from '../../session/cloud-sessions.js'
 
-export const RESUME_SELECTOR_TITLE = 'Resume session'
+export const RESUME_SELECTOR_TITLE = 'Sessions'
 
 /**
  * Stem of the synthetic user message compaction injects ahead of a summary.
@@ -194,13 +193,6 @@ function shortModel(session: SessionMeta): string {
   return session.model || session.provider || ''
 }
 
-/**
- * Columns the list spends on a title. The side pane carries the full title, so
- * the row only needs enough of it to tell neighbouring sessions apart — the
- * saved columns keep turn count and timestamp on screen next to the pane.
- */
-const TITLE_COLUMN_WIDTH = 44
-
 function commonPrefixLength(left: string, right: string): number {
   const end = Math.min(left.length, right.length)
   let index = 0
@@ -245,6 +237,16 @@ export function sessionSourceBadge(source: string | undefined): string {
   }
 }
 
+const SESSION_HINTS = [
+  { keys: ['up', 'down'], action: 'select' },
+  { keys: 'tab', action: 'details' },
+  { keys: 'enter', action: 'resume' },
+  { keys: '/', action: 'search' },
+  { keys: 'e', action: 'rename' },
+  { keys: 'd', action: 'delete' },
+  { keys: 'escape', action: 'close' },
+]
+
 function formatSessionItem(
   s: SessionMeta,
   label: string,
@@ -254,34 +256,24 @@ function formatSessionItem(
   open: boolean,
   edge = '',
   cloud = '',
-  anyCloud = false,
 ): SelectorItem {
   // The source column only earns its space when it tells rows apart.
   const badge = sessionSourceBadge(s.source)
-  const source = showSource ? `${padRight(badge, 6)} ` : ''
-  const title = padRight(sanitizeSessionTitle(s.custom_title ?? s.title), TITLE_COLUMN_WIDTH)
-  const turns = padRight(s.turns ? `${s.turns} turns` : '', 10)
+  const source = showSource ? badge : ''
+  const title = sanitizeSessionTitle(s.custom_title ?? s.title)
+  const turns = `${s.turns || 0} turns`
   // The session this REPL is in says so where the others show their age.
   const time = open ? '● open' : relativeTime(s.updated_at)
   const host = s.cloud?.origin_host && cloud.includes('⇣') ? ` (${s.cloud.origin_host})` : ''
   const cwd = otherCwd ? `  ${shortenSessionCwd(s.cwd)}` : ''
-  // The cloud column exists only when some row is on the cloud, and then for
-  // every row, so titles stay aligned.
-  const cloudColumn = anyCloud ? `${padRight(cloud, CLOUD_LABEL_WIDTH)} ` : ''
+  // Identity stays in subdued metadata; titles are what people recognize.
   return {
-    // The graph edge hangs off the id column, like `git log --graph`.
-    label: `${edge}${label}`,
+    label: `${edge}${title}`,
+    status: { text: time, tone: open ? 'active' : 'muted' },
     id: s.session_id,
     renameTitle: s.custom_title ?? s.title ?? '',
-    hints: [
-      { keys: ['up', 'down'], action: 'select' },
-      { keys: 'tab', action: 'details' },
-      { keys: 'enter', action: 'resume' },
-      { keys: 'e', action: 'rename' },
-      { keys: 'd', action: 'delete' },
-      { keys: 'escape', action: 'close' },
-    ],
-    detail: `${cloudColumn}${source}${title} ${turns} ${time}${host}${cwd}`,
+    hints: SESSION_HINTS,
+    detail: [turns, `${cloud}${host}`, source, `${label}${cwd}`].filter(Boolean).join(' · '),
     ...(cloud ? { cloud: true } : {}),
     // Transcript text is searchable once loaded; until then a row still matches
     // on the metadata the list already displays.
@@ -313,7 +305,6 @@ function sessionRowFormatter(
   const labels = sessionIdLabels(sessions)
   const showSource = mixedSources(sessions)
   const badges = new Map(sessions.map(session => [session.session_id, cloudBadge(session)]))
-  const anyCloud = [...badges.values()].some(Boolean)
   return (session, otherCwd, edge) => formatSessionItem(
     session,
     labels.get(session.session_id) ?? session.session_id,
@@ -323,7 +314,6 @@ function sessionRowFormatter(
     session.session_id === openSessionId,
     edge,
     badges.get(session.session_id) ?? '',
-    anyCloud,
   )
 }
 

@@ -1,5 +1,5 @@
 import { wrapTextWithAnsi } from '../render/wrap.js'
-import { PREVIEW_ALERT_PREFIX, PREVIEW_SECTION_PREFIX } from './selector.js'
+import { PREVIEW_ALERT_PREFIX, PREVIEW_SECTION_PREFIX, type SelectorState } from './selector.js'
 
 /**
  * One split for every list-with-details window (sessions, shares, tasks,
@@ -31,6 +31,15 @@ export function previewGeometry(columns: number, rows: number) {
     height,
     listRows: sideBySide ? Math.max(1, height - 2) : 3,
   }
+}
+
+/** Browse entries spend two rows, plus a search/action shell. Reserve room
+ * for the transcript and composer; keyboard paging uses this exact budget. */
+export function selectorPreviewGeometry(state: SelectorState, columns: number, rows: number) {
+  const geometry = previewGeometry(columns, rows)
+  if (state.presentation !== 'browser') return geometry
+  const terminalRows = Number.isFinite(rows) ? Math.floor(rows) : 24
+  return { ...geometry, height: Math.max(3, Math.min(geometry.height, terminalRows - (geometry.paneWidth ? 16 : 19))) }
 }
 
 export interface PreviewRow {

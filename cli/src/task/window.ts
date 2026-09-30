@@ -1,4 +1,5 @@
 import { createAppSelectorState } from '../term/app/selector-identity.js'
+import { browseWindow } from '../term/app/browse-window.js'
 import { PREVIEW_ALERT_PREFIX, PREVIEW_SECTION_PREFIX, type SelectorItem, type SelectorState } from '../term/selector.js'
 import type { ScheduledTask, TaskListResponse, TaskRunSummary, TaskStats } from './types.js'
 
@@ -6,7 +7,8 @@ const hints = [
   { keys: ['up', 'down'], action: 'select' },
   { keys: 'tab', action: 'details' },
   { keys: 'enter', action: 'runs' },
-  { keys: 'h', action: 'runs' },
+  { keys: '/', action: 'search' },
+  { keys: 'n', action: 'new' },
   { keys: 'e', action: 'edit' },
   { keys: 'r', action: 'run now' },
   { keys: 'space', action: 'pause/resume' },
@@ -101,7 +103,7 @@ function taskState(task: ScheduledTask): string {
   if (!latest) return 'Ready'
   if (latest.status === 'running' || latest.status === 'claimed') return `Running${stateAge(latest)}`
   if (latest.status === 'pending') return `Queued${stateAge(latest)}`
-  if (latest.status === 'failed' || latest.status === 'needs_attention') return 'Attention'
+  if (runWentWrong(latest)) return 'Attention'
   return 'On'
 }
 
@@ -152,15 +154,17 @@ function preview(
   return [
     task.name,
     `Model  ${model(task, modelLabels)}`,
-    `Schedule  ${task.cron} · ${task.timezone}`,
-    `Next  ${task.enabled ? dateTime(task.next_run_at) : 'Paused'}`,
-    `Delivery  ${delivery}`,
     '',
     `${PREVIEW_SECTION_PREFIX}Recent runs`,
     ...history,
     '',
     `${PREVIEW_SECTION_PREFIX}Activity`,
     `${stats.runs} runs · ${stats.succeeded} succeeded · last ${stats.window_days || 30} days`,
+    '',
+    `${PREVIEW_SECTION_PREFIX}Configuration`,
+    `Schedule  ${task.cron} · ${task.timezone}`,
+    `Next  ${task.enabled ? dateTime(task.next_run_at) : 'Paused'}`,
+    `Delivery  ${delivery}`,
     `Workspace  ${task.workspace_ref || 'Default workspace'}`,
     `Timeout  ${task.timeout_seconds}s · Max lateness ${task.max_lateness_seconds}s`,
     '',
@@ -174,16 +178,14 @@ function item(
   allRuns?: TaskRunSummary[],
   modelLabels: TaskModelLabels = {},
 ): SelectorItem {
-  const stats = task.stats ?? emptyStats
   const taskModel = model(task, modelLabels)
+  const state = taskState(task)
   return {
     id: task.id,
     label: task.name,
-    detail: [
-      schedule(task),
-      taskState(task),
-      `${stats.runs} runs · ${stats.succeeded} succeeded`,
-    ].join('  ·  '),
+    status: { text: state, tone: state === 'Attention' ? 'attention'
+      : state.startsWith('Running') || state.startsWith('Queued') ? 'active' : 'muted' },
+    detail: [schedule(task), task.timezone, task.enabled ? `Next ${dateTime(task.next_run_at)}` : 'Schedule paused'].join(' · '),
     searchText: `${task.name} ${task.instruction} ${task.cron} ${task.timezone} ${taskModel}`,
     preview: preview(task, allRuns, modelLabels),
     hints,
@@ -204,16 +206,13 @@ export function createTaskWindow(
   })
   const index = focusId ? items.findIndex(row => row.id === focusId) : 0
   return {
-    ...createAppSelectorState('task', 'Tasks', items),
+    ...browseWindow(createAppSelectorState('task', 'Tasks', items), true),
     focusIndex: index >= 0 ? index : 0,
-    noFilter: true,
-    previewPane: { offset: 0, confirmDeleteKey: 'd' },
-    listFocused: true,
-    lowercaseHints: true,
+    searchHint: 'names and instructions',
     hints: items.length ? hints : [{ keys: 'n', action: 'new' }, { keys: 'escape', action: 'close' }],
     subtitle: response.cache.stale
       ? 'Data may be stale'
-      : `${items.length} task${items.length === 1 ? '' : 's'}`,
+      : '',
     emptyMessage: 'No scheduled tasks · n to create',
   }
 }

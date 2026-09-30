@@ -1,12 +1,11 @@
-import stringWidth from 'string-width'
 import { getTheme } from '../../render/theme/index.js'
 import { clipDisplayText } from '../../render/format.js'
 import { wrapTextWithAnsi } from '../../render/wrap.js'
-import { CURSOR_MARKER } from '../render-frame.js'
 import { SELECTOR_VIEWPORT, type SelectorState } from '../selector.js'
 import { previewGeometry } from '../preview-scroll.js'
 import { buildSelectorRow } from './selector-row.js'
-import { styledLineToAnsi } from './types.js'
+import { line, plain, styledLineToAnsi } from './types.js'
+import { selectorColumns, selectorHints, selectorSearch, selectorTitle } from './selector-chrome.js'
 
 /** Source-grouped tree on the left, bounded usage details on the right. */
 export function buildSkillSelectorLines(state: SelectorState, width: number, rows: number, active: boolean): string[] {
@@ -73,24 +72,26 @@ export function buildSkillSelectorLines(state: SelectorState, width: number, row
   const body: string[] = []
   if (wide) {
     const height = Math.max(list.length, details.length, Math.min(budget + 2, 8))
-    for (let index = 0; index < height; index++) {
-      const left = list[index] ?? ''
-      body.push(left + ' '.repeat(Math.max(0, listWidth - stringWidth(left))) + muted('  │  ') + (details[index] ?? ''))
-    }
+    const pad = (values: string[]) => Array.from({ length: height }, (_, index) => line(plain(values[index] ?? '')))
+    body.push(...selectorColumns(pad(list), pad(details), listWidth, '  │  ').map(styledLineToAnsi))
   } else {
     body.push(...list, ...(details.length ? ['', ...details.map(text => `  ${text}`)] : []))
   }
   const focused = active && state.listFocused !== true
-  const cursor = focused ? CURSOR_MARKER : ''
-  const search = state.query ? theme.text.paint(clip(state.query, width - 4)) : muted('Search skills…')
+  const search = styledLineToAnsi(selectorSearch(state.query, width, focused, 'Search skills…'))
+  const hints = [
+    { keys: ['up', 'down'], action: 'move' },
+    ...(selected?.expanded !== undefined && !state.query ? [{ keys: 'enter', action: selected.expanded ? 'collapse' : 'expand' }] : []),
+    { keys: 'type', action: 'search' },
+    { keys: 'escape', action: 'close' },
+    { keys: '/skill list', action: 'manage' },
+  ]
   return [
-    theme.accentBold.paint('Skills'),
-    `  ${cursor}${search}`,
+    styledLineToAnsi(selectorTitle('Skills', `${state.items.length}`, width)),
+    search,
     '',
     ...body,
     '',
-    muted(clip(selected?.expanded !== undefined && !state.query
-      ? `↑↓ move · Enter ${selected.expanded ? 'collapse' : 'expand'} · Esc close`
-      : '↑↓ move · type to search · Esc close · /skill list manage')),
+    ...selectorHints(hints, width).map(styledLineToAnsi),
   ].map(text => wrapTextWithAnsi(text, width)[0] ?? '')
 }

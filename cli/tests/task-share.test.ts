@@ -301,7 +301,8 @@ describe('shared links selector', () => {
     expect(state.allItems.filter(item => item.header).map(item => item.label)).toEqual(['Tasks', 'Sessions'])
     const rows = state.allItems.filter(item => !item.header)
     expect(rows.map(item => item.id)).toEqual(['task00000001', 'sess00000001'])
-    expect(rows[0]?.label).toBe('task    task0000')
+    expect(rows[0]?.label).toBe('Daily HN digest')
+    expect(rows[0]?.detail).toBe('task · task0000')
     expect(rows[0]?.preview).toEqual(expect.arrayContaining([
       'Schedule: 0 9 * * 1-5 · Asia/Shanghai', 'Model: claude-opus · high', 'Task revision: 7',
       'Deleting revokes this link, not the task.',
@@ -310,6 +311,7 @@ describe('shared links selector', () => {
     // A list of one kind stays flat, as it always was.
     const flat = shareSelectorState([{ id: 'sess00000001', url: 'u', title: 't' }])
     expect(flat.allItems.some(item => item.header)).toBe(false)
-    expect(flat.allItems[0]?.label).toBe('session sess0000')
+    expect(flat.allItems[0]?.label).toBe('t')
+    expect(flat.allItems[0]?.detail).toBe('session · sess0000')
   })
 })

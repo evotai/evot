@@ -68,9 +68,11 @@ test('the sessions list shows a cloud column only when some row is on the cloud'
   const synced = meta('a', { cloud: { visibility: 'private', synced_seq: 5, synced_at: '2024-01-03T00:00:00Z' } })
   const items = rows(formatSessionItems([synced, meta('b')], '/w', () => undefined, null,
     s => s.session_id === 'a' ? 'team' : ''))
-  // One fixed-width column, so titles line up whatever the label.
-  expect(items[0]!.detail ?? '').toStartWith(`${'team'.padEnd(CLOUD_LABEL_WIDTH)} t-a`)
-  expect(items[1]!.detail ?? '').toStartWith(`${''.padEnd(CLOUD_LABEL_WIDTH)} t-b`)
+  // Titles lead; provenance is compact metadata, not a padded column.
+  expect(items[0]!.label).toBe('t-a')
+  expect(items[1]!.label).toBe('t-b')
+  expect(items[0]!.detail).toContain(' · team · ')
+  expect(items[1]!.detail).not.toContain('team')
   expect(items[0]!.cloud).toBe(true)
   expect(items[1]!.cloud).toBeUndefined()
   // Remote rows name their origin so the user knows which machine they came from.

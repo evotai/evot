@@ -61,7 +61,7 @@ describe('session name editor', () => {
   })
   test('renders lowercase shortcuts and prefilled editable title', () => {
     const list = buildSelectorRegionLines(window(), 120).map(stripAnsi).join('\n')
-    expect(list).toContain('e to rename')
+    expect(list).toContain('e rename')
     expect(list).not.toContain('ctrl+r')
     expect(list).toContain('enter')
     expect(list).not.toMatch(/Ctrl\+|Enter|Esc/)

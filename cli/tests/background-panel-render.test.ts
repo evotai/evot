@@ -43,15 +43,13 @@ describe('background panel rendering', () => {
       proc({ task_id: 'a' }),
       proc({ task_id: 'b', status: 'completed', exit_code: 0 }),
     ])
-    expect(lines[1]).toBe('Background')
+    expect(lines[1]).toBe('Background  1')
     expect(lines[2]).toBe('1 active shell')
   })
 
-  test('the title carries no generic row tally', () => {
-    // The subtitle and group headings already count things; "Background  2"
-    // beside the title would be a third count of the same list.
+  test('the shared title keeps the row tally independent of status', () => {
     const lines = render([proc(), proc({ task_id: 'b' })])
-    expect(lines[1]).toBe('Background')
+    expect(lines[1]).toBe('Background  2')
   })
 
   test('no filter line is offered, since bare letters are actions', () => {
@@ -60,10 +58,10 @@ describe('background panel rendering', () => {
     expect(text).not.toContain('type to search')
   })
 
-  test('hints read as "<key> to <action>" joined by a middot', () => {
+  test('hints use compact key/action pairs joined by a middot', () => {
     const lines = render([proc()])
     expect(lines[lines.length - 1])
-      .toBe('↑/↓ to select · Enter to view output · x to stop · Esc to close')
+      .toBe('↑/↓ select · Enter view output · x stop · Esc close')
   })
 
   test('navigation cannot select a finished task', () => {
@@ -73,7 +71,7 @@ describe('background panel rendering', () => {
     ]
     for (const moves of [0, 1, 2]) {
       const lines = render(processes, moves)
-      expect(lines[lines.length - 1]).toContain('x to stop')
+      expect(lines[lines.length - 1]).toContain('x stop')
       expect(lines.join('\n')).not.toContain('finished command')
     }
   })
@@ -81,8 +79,8 @@ describe('background panel rendering', () => {
   test('stop all is only advertised with more than one live shell', () => {
     const one = render([proc()])
     const two = render([proc({ task_id: 'a' }), proc({ task_id: 'b' })])
-    expect(one[one.length - 1]).not.toContain('X to stop all')
-    expect(two[two.length - 1]).toContain('X to stop all')
+    expect(one[one.length - 1]).not.toContain('X stop all')
+    expect(two[two.length - 1]).toContain('X stop all')
   })
 
   test('a single group renders without a heading', () => {
@@ -124,7 +122,7 @@ describe('background panel rendering', () => {
   test('an empty panel states it in the body and offers only close', () => {
     const lines = render([])
     expect(lines).toContain('  No tasks currently running')
-    expect(lines[lines.length - 1]).toBe('Esc to close')
+    expect(lines[lines.length - 1]).toBe('Esc close')
     // No count line above an empty body: the body is the whole message.
     expect(lines.join('\n')).not.toContain('active shell')
   })
@@ -137,7 +135,7 @@ describe('background panel rendering', () => {
     expect(lines).toContain('⌘ Background task · aaaaaaaa')
     expect(lines.some(line => line.trim() === 'line 30')).toBe(true)
     expect(lines.some(line => line.trim() === 'line 1')).toBe(false)
-    expect(lines.join('\n')).toContain('Esc to back')
+    expect(lines.join('\n')).toContain('Esc back')
     expect(lines.every(line => line.length <= 100)).toBe(true)
 
     const short = buildSelectorRegionLines(state, 100, 12).map(stripAnsi)
@@ -149,12 +147,12 @@ describe('background panel rendering', () => {
     for (const status of ['running', 'completed'] as const) {
       const state = createBackgroundOutputState(proc({ status }), 'hello')
       const lines = buildSelectorRegionLines(state, 120, 30).map(stripAnsi)
-      const footer = lines.find(line => line.includes('Esc to back'))
+      const footer = lines.find(line => line.includes('Esc back'))
       expect(footer).toBeDefined()
       expect(footer).toContain('scroll')
       expect(footer).not.toContain('follow')
       expect(footer).not.toContain('command')
-      if (status === 'running') expect(footer).toContain('x to stop')
+      if (status === 'running') expect(footer).toContain('x stop')
       else expect(footer).not.toContain('stop')
     }
   })

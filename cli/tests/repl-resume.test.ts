@@ -63,15 +63,15 @@ describe('repl resume helpers', () => {
     const items = formatSessionItems(sessions, '/work')
     expect(items.map(item => item.label)).toEqual([
       'Current cwd · /work',
-      'aaaaaaaa',
+      'cwd session',
       'Other cwd',
-      'bbbbbbbb',
+      'other session',
     ])
     expect(items[0]).toMatchObject({ header: true, focusable: false, group: 'current-cwd' })
     expect(items[1]).toMatchObject({ id: sessions[0]!.session_id, group: 'current-cwd' })
     // Sources differ across rows (`local` vs none), so the column is shown.
-    expect(items[1]!.detail).toContain('local ')
-    expect(items[1]!.detail).toContain('cwd session')
+    expect(items[1]!.detail).toContain('local')
+    expect(items[1]!.label).toBe('cwd session')
     expect(items[1]!.detail).toContain('3 turns')
     expect(items[1]!.detail).not.toContain('[3 turns]')
     expect(items[1]!.searchText).toContain('/work')
@@ -93,10 +93,10 @@ describe('repl resume helpers', () => {
 
     expect(state.items.map(item => item.label)).toEqual([
       'Current cwd · /work',
-      'aaaaaaaa',
+      'cwd session',
     ])
     for (const char of 'other session') state = selectorType(state, char)
-    expect(state.items.map(item => item.label)).toEqual(['Other cwd', 'bbbbbbbb'])
+    expect(state.items.map(item => item.label)).toEqual(['Other cwd', 'other session'])
   })
 
   test('formatSessionItems extends colliding UUIDv7 prefixes', () => {
@@ -107,7 +107,7 @@ describe('repl resume helpers', () => {
     ]
     const labels = formatSessionItems(colliding, '/work')
       .filter(item => !item.header)
-      .map(item => item.label)
+      .map(item => item.detail?.split(' · ').at(-1))
 
     expect(labels).toEqual(['01a069e9-4c', '01a069e9-4d', '01a069f0'])
     expect(new Set(labels).size).toBe(labels.length)
@@ -121,7 +121,7 @@ describe('repl resume helpers', () => {
     let state = createSelectorState(RESUME_SELECTOR_TITLE, items, items)
     expect(state.items).toHaveLength(0)
     for (const char of 'cwd session') state = selectorType(state, char)
-    expect(state.items.map(item => item.label)).toEqual(['Other cwd', 'aaaaaaaa'])
+    expect(state.items.map(item => item.label)).toEqual(['Other cwd', 'cwd session'])
   })
 
   test('loaded text supplies the searchable body, metadata carries the rest', () => {
@@ -254,7 +254,7 @@ describe('repl resume helpers', () => {
     const same = sessions.map(session => ({ ...session, source: 'tui' }))
     const items = formatSessionItems(same, '/work')
     expect(items[1]!.detail).not.toContain('tui')
-    expect(items[1]!.detail).toStartWith('cwd session')
+    expect(items[1]!.label).toBe('cwd session')
   })
 
   test('sessionPreviewLines shows a time span for sessions that ran across time', () => {
@@ -279,7 +279,7 @@ describe('repl resume helpers', () => {
   })
 
   test('resume title stays free of implementation shortcuts', () => {
-    expect(RESUME_SELECTOR_TITLE).toBe('Resume session')
+    expect(RESUME_SELECTOR_TITLE).toBe('Sessions')
   })
 
   test('sanitizeSessionTitle hides compaction boilerplate titles', () => {
@@ -341,8 +341,8 @@ describe('repl resume helpers', () => {
     const items = formatSessionItems(sessions, '/work', () => undefined, sessions[0]!.session_id)
     const open = items.find(item => item.id === sessions[0]!.session_id)!
     const other = items.find(item => item.id === sessions[1]!.session_id)!
-    expect(open.detail).toContain('● open')
-    expect(other.detail).not.toContain('● open')
+    expect(open.status).toEqual({ text: '● open', tone: 'active' })
+    expect(other.status?.text).not.toContain('● open')
     expect(open.preview?.[1]).toContain('this session')
     expect(other.preview?.[1]).not.toContain('this session')
   })

@@ -6,7 +6,7 @@
  */
 
 import type { ConfigInfo, ModelOption } from '../native/contracts/config-info.js'
-import { selectorDown, selectorFocusOn, selectorUp, type SelectorState } from '../term/selector.js'
+import { selectorDown, selectorFocusOn, selectorType, selectorUp, type SelectorState } from '../term/selector.js'
 import { handleSplitPaneKey, resetPaneForSelection } from '../term/split-pane.js'
 import type { TranscriptItem } from '../native/index.js'
 import type { KeyEvent } from '../term/input.js'
@@ -354,7 +354,7 @@ export class TaskSession {
     const size = this.#host.dimensions?.()
     const action = handleTaskKey(state, event, size?.columns, size?.rows)
     const focused = state.items[state.focusIndex]?.id
-    if (focused && this.#pending.has(focused) && event.type === 'char' && event.char === 'd') return
+    if (state.listFocused === true && focused && this.#pending.has(focused) && event.type === 'char' && event.char === 'd') return
     switch (action.kind) {
       case 'none':
         return
@@ -584,10 +584,11 @@ export class TaskSession {
           this.#transcript = undefined
           this.#detail = undefined
         } else if (this.#view === 'tasks') this.#detail = undefined
-      } catch (error) {
+      } catch {
         if (this.#disposed || this.#host.destroyed() || revision !== this.#revision) return
+        // List loads are retried by the background scheduler. Keep failures
+        // in the task window, not as permanent lines in the chat transcript.
         this.#loadError = true
-        if (this.#host.isTaskOverlay()) this.#host.notifyError(`Failed to load tasks: ${message(error)}`)
       } finally {
         if (this.#listRequest === request) {
           this.#listRequest = null
@@ -630,7 +631,12 @@ export class TaskSession {
       const state = createTaskRunsWindow(task, runs)
       return this.#keepBrowsePosition(state, current, focus)
     }
-    const state = createTaskWindow(response, focus, this.#detail, this.#modelLabels())
+    let state = createTaskWindow(response, focus, this.#detail, this.#modelLabels())
+    if (current?.presentation === 'browser') {
+      state = { ...state, listFocused: current.listFocused }
+      if (current.query) state = selectorType(state, current.query)
+      if (focus) state = selectorFocusOn(state, row => row.id === focus)
+    }
     // Before the first response the empty body carries the whole message;
     // the subtitle only speaks once there is a list to annotate.
     if (!this.#response) {

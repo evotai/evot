@@ -53,15 +53,16 @@ describe('task window', () => {
   beforeAll(() => { chalk.level = 3 })
   const modelLabels = { 'evot-pro:claude-opus': 'Claude Opus' }
 
-  test('list row shows task name and simple counts, not model or rates', () => {
+  test('list row leads with name, schedule and status; statistics stay in details', () => {
     const state = createTaskWindow(response, undefined, undefined, modelLabels)
     expect(state.title).toBe('Tasks')
-    expect(state.subtitle).toBe('1 task')
-    expect(state.noFilter).toBe(true)
+    expect(state.subtitle).toBe('')
+    expect(state.presentation).toBe('browser')
+    expect(state.noFilter).toBeUndefined()
     expect(state.items[0]?.label).toBe('Daily report')
-    expect(state.items[0]?.detail).toBe(
-      'Weekdays 09:00  ·  Running  ·  12 runs · 9 succeeded',
-    )
+    expect(state.items[0]?.status).toEqual({ text: 'Running', tone: 'active' })
+    expect(state.items[0]?.detail).toStartWith('Weekdays 09:00 · Asia/Shanghai · Next ')
+    expect(state.items[0]?.detail).not.toContain('runs')
   })
 
   test('side pane includes instructions, configuration, counts and history', () => {
@@ -103,8 +104,8 @@ describe('task window', () => {
     const preview = state.items[0]?.preview ?? []
     expect(preview.find(line => line.includes('Needs attention'))).toContain(error)
     for (const columns of [90, 120]) {
-      const rendered = Array.from({ length: 12 }, (_, page) => buildSelectorRegionLines(
-        { ...state, previewPane: { ...state.previewPane!, offset: page * 5 } }, columns, 20,
+      const rendered = Array.from({ length: 40 }, (_, page) => buildSelectorRegionLines(
+        { ...state, previewPane: { ...state.previewPane!, offset: page * 2 } }, columns, 20,
       ).map(stripAnsi).join('\n')).join('\n')
       expect(rendered).toContain('provider)')
     }
@@ -127,8 +128,8 @@ describe('task window', () => {
   test('rendered two-pane layout keeps model, metrics, and recent activity visible', () => {
     for (const [columns, rows] of [[120, 24], [90, 20]] as const) {
       const state = createTaskWindow(response, undefined, undefined, modelLabels)
-      const rendered = Array.from({ length: 8 }, (_, page) => buildSelectorRegionLines(
-        { ...state, previewPane: { ...state.previewPane!, offset: page * 5 } }, columns, rows,
+      const rendered = Array.from({ length: 30 }, (_, page) => buildSelectorRegionLines(
+        { ...state, previewPane: { ...state.previewPane!, offset: page * 2 } }, columns, rows,
       ).map(stripAnsi).join('\n')).join('\n')
       expect(rendered).toContain('Model  Claude Opus · high')
       expect(rendered).toContain('12 runs')
@@ -162,12 +163,12 @@ describe('task window', () => {
     }
     const queued = { ...task, last_run: stale, recent_runs: [stale] }
     const state = createTaskWindow({ ...response, tasks: [queued] })
-    expect(state.items[0]?.detail).toContain('Queued 3m')
+    expect(state.items[0]?.status?.text).toBe('Queued 3m')
     const preview = state.items[0]?.preview ?? []
     expect(preview.some(line => line.includes('Queued') && line.includes('awaiting an executor'))).toBe(true)
     const fresh: TaskRunSummary = { ...stale, scheduled_for: now - 10_000, updated_at: now - 10_000 }
     const freshState = createTaskWindow({ ...response, tasks: [{ ...task, last_run: fresh, recent_runs: [fresh] }] })
-    expect(freshState.items[0]?.detail).toContain('Queued')
+    expect(freshState.items[0]?.status?.text).toBe('Queued')
     expect((freshState.items[0]?.preview ?? []).some(line => line.includes('awaiting an executor'))).toBe(false)
   })
 
@@ -185,7 +186,7 @@ describe('task window', () => {
       },
     }
     const state = createTaskWindow({ ...response, tasks: [cold] })
-    expect(state.items[0]?.detail).toContain('0 runs · 0 succeeded')
+    expect(state.items[0]?.preview?.join('\n')).toContain('0 runs · 0 succeeded')
     expect(state.items[0]?.preview).toContain('No runs yet')
   })
 
@@ -266,7 +267,8 @@ describe('task window', () => {
       { keys: ['up', 'down'], action: 'select' },
       { keys: 'tab', action: 'details' },
       { keys: 'enter', action: 'runs' },
-      { keys: 'h', action: 'runs' },
+      { keys: '/', action: 'search' },
+      { keys: 'n', action: 'new' },
       { keys: 'e', action: 'edit' },
       { keys: 'r', action: 'run now' },
       { keys: 'space', action: 'pause/resume' },
@@ -282,15 +284,15 @@ describe('task window', () => {
       expect(text).toContain(focused ? 'scroll' : 'select')
       expect(text).not.toContain('page-up')
       if (focused) {
-        expect(text).not.toContain('to delete')
+        expect(text).not.toContain('d delete')
         expect(text).not.toContain('pause/resume')
       } else {
-        expect(text).toContain('to edit')
-        expect(text).toContain('to run now')
-        expect(text).toContain('space to pause/resume')
-        expect(text).toContain('to delete')
+        expect(text).toContain('e edit')
+        expect(text).toContain('r run now')
+        expect(text).toContain('space pause/resume')
+        expect(text).toContain('d delete')
       }
-      if (!focused) expect(text).toContain('to runs')
+      if (!focused) expect(text).toContain('enter runs')
       expect(text).not.toContain('Tab to focus')
       expect(text).not.toContain('Tab back')
     }

@@ -58,8 +58,8 @@ test('delete confirmation colors the action and subtitle but not cancel; Esc cle
   if (armed.kind !== 'update') throw new Error('expected confirmation')
   state = armed.state
   const spans = buildSelectorBlocks(state, 120).flatMap(b => b.lines).flatMap(l => l.spans)
-  const action = spans.find(s => s.text === 'd to confirm delete')
-  expect(action).toEqual(confirmationHint('d to confirm delete', true))
+  const action = spans.find(s => s.text === 'd confirm delete')
+  expect(action).toEqual(confirmationHint('d confirm delete', true))
   const cancel = spans.find(s => s.text === 'esc')
   expect(cancel?.hex).not.toBe(getTheme().accentHex)
   const cleared = handleSelectorControl(state, { type: 'escape' })

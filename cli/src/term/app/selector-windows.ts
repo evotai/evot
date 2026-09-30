@@ -9,6 +9,7 @@ import {
 import { createAppSelectorState } from './selector-identity.js'
 import { currentModelSpec, modelOptions, modelSelectorItems } from './provider.js'
 import { RESUME_SELECTOR_TITLE } from './resume.js'
+import { browseWindow } from './browse-window.js'
 
 /** One factory for preview and explicitly opened model windows. */
 /** Enter uses a model for this session; Space only saves the highlighted row
@@ -72,10 +73,7 @@ export function createResumeWindow(
 ): SelectorState {
   const state = createAppSelectorState('resume', RESUME_SELECTOR_TITLE, items, items, initialQuery)
   return {
-    ...state,
-    previewPane: { offset: 0, confirmDeleteKey: 'd' },
-    listFocused,
-    lowercaseHints: true,
+    ...browseWindow(state, listFocused),
     ...(state.query.length === 0 && state.items.length === 0 && state.allItems.some(item => !item.header)
       ? { emptyMessage: listFocused
         ? 'No sessions in current cwd · press / to search all sessions'

@@ -2,6 +2,7 @@ import stripAnsi from 'strip-ansi'
 import type { TranscriptItem } from '../native/index.js'
 import { transcriptToMessages } from '../session/transcript.js'
 import { createAppSelectorState } from '../term/app/selector-identity.js'
+import { browseWindow } from '../term/app/browse-window.js'
 import type { SelectorItem, SelectorState } from '../term/selector.js'
 import type { ScheduledTask, TaskRunSummary } from './types.js'
 
@@ -46,8 +47,8 @@ export function createTaskRunsWindow(task: ScheduledTask, runs: TaskRunSummary[]
     hints: run.session_id ? browseHints : browseHints.filter(hint => hint.keys !== 'enter'),
   }))
   return {
-    ...createAppSelectorState('task', `${task.name} · Runs`, items),
-    noFilter: true, listFocused: true, lowercaseHints: true,
+    ...browseWindow(createAppSelectorState('task', `${task.name} · Runs`, items), true),
+    noFilter: true,
     previewPane: { offset: 0 },
     hints: items.length ? browseHints : [{ keys: 'escape', action: 'back to tasks' }],
     subtitle: `${items.length === 20 ? 'Latest 20' : items.length} run${items.length === 1 ? '' : 's'}`,
@@ -92,8 +93,8 @@ export function createTaskTranscriptWindow(
     }
   }
   return {
-    ...createAppSelectorState('task', `${task.name} · Transcript`, items),
-    noFilter: true, listFocused: true, lowercaseHints: true,
+    ...browseWindow(createAppSelectorState('task', `${task.name} · Transcript`, items), true),
+    noFilter: true,
     previewPane: { offset: 0 },
     hints: items.length ? transcriptHints : [{ keys: 'escape', action: 'back to runs' }],
     subtitle: `${date(run.scheduled_for || run.updated_at)} · read-only`,

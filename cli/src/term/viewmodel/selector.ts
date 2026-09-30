@@ -3,13 +3,11 @@ import { buildSessionRenameLines } from './session-rename.js'
 import { buildOutputBlocks } from './output.js'
 import { clipDisplayText } from '../../render/format.js'
 import { SELECTOR_OWNER } from '../app/selector-identity.js'
-import stringWidth from 'string-width'
 import { wrapTextWithAnsi } from '../../render/wrap.js'
-import { CURSOR_MARKER } from '../render-frame.js'
 import { line, block, plain, dim, bold, colored, blocksToLines, styledLineToAnsi, type ViewBlock, type StyledSpan, type StyledLine } from './types.js'
-import { finiteSize, spansWidth, truncateSpansToWidth, truncateToWidth } from './width.js'
+import { finiteSize, spansWidth, truncateToWidth } from './width.js'
 import { PREVIEW_ALERT_PREFIX, PREVIEW_SECTION_PREFIX, SELECTOR_VIEWPORT, selectorEffortLevel, type SelectorItem, type SelectorState } from '../selector.js'
-import { HINT_SEPARATOR, formatChord, type Hint } from '../design/key-hints.js'
+import { HINT_SEPARATOR, formatChord } from '../design/key-hints.js'
 import { getTheme } from '../../render/theme/index.js'
 import { buildSkillSelectorLines } from './skill-selector.js'
 import { scrollPreview } from './scroll-preview.js'
@@ -18,6 +16,8 @@ import { previewGeometry } from '../preview-scroll.js'
 import { splitPaneHints } from '../split-pane.js'
 import { buildSelectorHeader, buildSelectorRow } from './selector-row.js'
 import { buildEffortCell, effortLabel, planEffortLayout } from './model-effort.js'
+import { buildBrowseSelectorLines } from './browse-selector.js'
+import { selectorColumns, selectorHints, selectorTitle, selectorSearch } from './selector-chrome.js'
 
 /** Render a selector in pi's editorContainer position, never as a modal. */
 export function buildSelectorRegionLines(
@@ -32,6 +32,9 @@ export function buildSelectorRegionLines(
   const border = styledLineToAnsi(line(dim('─'.repeat(width))))
   if (state.owner === SELECTOR_OWNER.resume && state.rename) {
     return ['', border, ...buildSessionRenameLines(state.rename, width), border]
+  }
+  if (state.presentation === 'browser') {
+    return ['', border, ...buildBrowseSelectorLines(state, width, rows, active), border]
   }
   if (state.presentation === 'skill') {
     return ['', border, ...buildSkillSelectorLines(state, width, rows, active), border]
@@ -57,9 +60,9 @@ export function buildSelectorRegionLines(
       if (item.activity && visible.length < budget) visible.push(line(dim(`    ↳ ${clipDisplayText(item.activity, Math.max(1, width - 6))}`)))
     }
     return ['', border,
-      styledLineToAnsi(line(bold(state.title), dim(state.subtitle ? ` · ${state.subtitle}` : ''))),
+      styledLineToAnsi(selectorTitle(state.title, state.subtitle ?? `${state.items.length}`, width)),
       ...(visible.length ? visible : [line(dim(state.emptyMessage ?? 'No tasks'))]).map(styledLineToAnsi),
-      styledLineToAnsi(buildHintLine(selected?.hints ?? state.hints ?? [])), border,
+      ...selectorHints(selected?.hints ?? state.hints ?? [], width).map(styledLineToAnsi), border,
     ].map(text => wrapTextWithAnsi(text, width)[0] ?? '')
   }
   if (state.presentation === 'background-output') {
@@ -103,7 +106,7 @@ function buildBackgroundOutputRegionLines(state: SelectorState, width: number, r
       return styledLineToAnsi(line(plain(`${indent}${text}`)))
     }),
     styledLineToAnsi(line(dim(formatOutputPosition(viewport)))),
-    styledLineToAnsi(buildHintLine(hints)),
+    ...selectorHints(hints, width).map(styledLineToAnsi),
   ].map(text => wrapTextWithAnsi(text, width)[0] ?? '')
 }
 
@@ -240,27 +243,9 @@ function buildModelSelectorRegionLines(state: SelectorState, width: number, acti
 }
 
 function buildModelSearchLine(query: string, width: number, active: boolean): StyledLine {
-  // pi's Input returns the two-column prompt unchanged when there is no room
-  // for input text or a cursor cell.
   if (width <= 2) return line(plain('> '))
-
-  const availableTextWidth = width - 3
-  let visibleQuery = ''
-  for (const char of [...query].reverse()) {
-    if (stringWidth(char + visibleQuery) > availableTextWidth) break
-    visibleQuery = char + visibleQuery
-  }
-  const padding = Math.max(0, width - (active ? 3 : 2) - stringWidth(visibleQuery))
-  if (!active) {
-    return line(plain('> '), dim(visibleQuery), plain(' '.repeat(padding)))
-  }
-  return line(
-    plain('> '),
-    plain(visibleQuery),
-    plain(CURSOR_MARKER),
-    plain(' '),
-    plain(' '.repeat(padding)),
-  )
+  const search = selectorSearch(query, width, active, '', '> ')
+  return line(...search.spans, plain(' '.repeat(Math.max(0, width - spansWidth(search.spans)))))
 }
 
 function highlightSpans(text: string, query: string, base: Partial<StyledSpan>): StyledSpan[] {
@@ -303,16 +288,9 @@ export function buildSelectorBlocks(
   rows = 24,
 ): ViewBlock[] {
   const selectable = (items: SelectorItem[]) => items.filter(i => !i.header).length
-  // The tally beside the title is dropped only when the subtitle already carries
-  // it (task lists say "3 tasks" there). Hints alone are not a reason to hide it:
-  // the resume list has no count in its subtitle, so hiding it there would remove
-  // the only on-screen total.
-  const ownsHeader = state.hints !== undefined && state.subtitle !== undefined
   const countLabel = `${selectable(state.items)}${state.query ? ` of ${selectable(state.allItems)}` : ''}`
   const lines: StyledLine[] = [
-    ownsHeader
-      ? line(colored(state.title, 'cyan', { bold: true }))
-      : line(bold(state.title), dim(`  ${countLabel}`)),
+    selectorTitle(state.title, countLabel, Math.max(1, finiteSize(columns, 80) - 1)),
   ]
 
   if (state.subtitle) {
@@ -325,27 +303,9 @@ export function buildSelectorBlocks(
   // line: offering one would invite typing that goes nowhere.
   if (!state.noFilter) {
     const filterFocused = active && state.listFocused !== true
-    if (state.query) {
-      lines.push(line(
-        colored('Filter  ', 'cyan'),
-        plain(state.query),
-        ...(filterFocused ? [plain(CURSOR_MARKER)] : []),
-      ))
-    } else if (filterFocused) {
-      lines.push(line(
-        colored('Filter  ', 'cyan'),
-        plain(CURSOR_MARKER),
-        dim(`type to search ${state.searchHint ?? SEARCH_TARGET}`),
-      ))
-    } else {
-      // Nothing typed yet: the filter line doubles as the discoverability hint,
-      // otherwise there is no on-screen signal that typing filters at all. A
-      // list that owns its letters instead names the key that starts a search,
-      // because there typing an `e` would be an action.
-      const target = state.searchHint ?? SEARCH_TARGET
-      const searchEntry = state.listFocused === true ? `/ to search ${target}` : `type to search ${target}`
-      lines.push(line(colored('Filter  ', 'cyan'), dim(searchEntry)))
-    }
+    const target = state.searchHint ?? SEARCH_TARGET
+    const searchEntry = state.listFocused === true ? `/ to search ${target}` : `type to search ${target}`
+    lines.push(selectorSearch(state.query, Math.max(1, finiteSize(columns, 80) - 1), filterFocused, searchEntry, 'Filter  '))
     lines.push(line(plain('')))
   }
 
@@ -384,40 +344,15 @@ export function buildSelectorBlocks(
   // hint list keep their hand-written lines below.
   const hints = state.previewPane ? splitPaneHints(state) : state.items[state.focusIndex]?.hints ?? state.hints
   if (hints) {
-    lines.push(buildHintLine(hints, state.lowercaseHints))
-  } else if (state.owner === SELECTOR_OWNER.queue) {
-    lines.push(line(
-      colored('enter', 'cyan'), dim(' edit   '),
-      colored('Ctrl+D', 'cyan'), dim(' remove   '),
-      colored('esc', 'cyan'), dim(' close'),
-    ))
+    lines.push(...selectorHints(hints, available, state.lowercaseHints))
   } else {
-    lines.push(line(
-      colored('↑↓', 'cyan'), dim(state.circularNavigation ? ' move · wraps   ' : ' move   '),
-      colored('enter', 'cyan'), dim(' select   '),
-      colored('type', 'cyan'), dim(' filter   '),
-      colored('esc', 'cyan'), dim(' close'),
-    ))
+    const defaults = state.owner === SELECTOR_OWNER.queue
+      ? [{ keys: 'enter', action: 'edit' }, { keys: 'Ctrl+D', action: 'remove' }, { keys: 'esc', action: 'close' }]
+      : [{ keys: '↑↓', action: state.circularNavigation ? 'move · wraps' : 'move' },
+        { keys: 'enter', action: 'select' }, { keys: 'type', action: 'filter' }, { keys: 'esc', action: 'close' }]
+    lines.push(...selectorHints(defaults, available))
   }
   return [block(lines, 1)]
-}
-
-/**
- * Render hints as `↑/↓ to select · Enter to view output · Esc to close`.
- *
- * The key is coloured and the rest dimmed, so the line scans as a row of keys
- * rather than a sentence.
- */
-function buildHintLine(hints: Hint[], lowercase = false): StyledLine {
-  const spans: StyledSpan[] = []
-  for (const hint of hints) {
-    if (spans.length > 0) spans.push(dim(HINT_SEPARATOR))
-    const chord = formatChord(hint.keys)
-    const key = lowercase ? chord.toLowerCase() : chord
-    if (hint.confirmationPending) spans.push(confirmationHint(`${key} to ${hint.action}`, true))
-    else spans.push(colored(key, 'cyan'), dim(` to ${hint.action}`))
-  }
-  return line(...spans)
 }
 
 /** The list rows themselves — everything between the filter line and the hints. */
@@ -720,18 +655,7 @@ function wrapPreviewEntry(entry: string, width: number): string[] {
  * enough.
  */
 function joinPaneColumns(listLines: StyledLine[], paneLines: StyledLine[], listWidth: number): StyledLine[] {
-  const rows = Math.max(listLines.length, paneLines.length)
-  const result: StyledLine[] = []
-  for (let i = 0; i < rows; i++) {
-    const left = listLines[i]?.spans ?? [plain('')]
-    const right = paneLines[i]?.spans ?? [plain('')]
-    const spans = spansWidth(left) > listWidth ? truncateSpansToWidth(left, listWidth) : left
-    const padding = Math.max(0, listWidth - spansWidth(spans))
-    // Layout only supplies spacing; the shared row component exclusively owns
-    // selection styling, so pane-backed rows look exactly like model rows.
-    result.push(line(...spans, plain(' '.repeat(padding)), dim(PANE_DIVIDER), ...right))
-  }
-  return result
+  return selectorColumns(listLines, paneLines, listWidth, PANE_DIVIDER)
 }
 
 /** Keep the pane the same height as the list, even when the preview is short. */

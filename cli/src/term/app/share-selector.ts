@@ -1,6 +1,7 @@
 import { relativeTime } from '../../render/format.js'
 import { selectorExpandItems, selectorRemoveItem, type SelectorItem, type SelectorState } from '../selector.js'
 import { createAppSelectorState } from './selector-identity.js'
+import { browseWindow } from './browse-window.js'
 
 /** One published link. Sessions and tasks share the table, the quota and the
  *  revocation gesture; `kind` tells them apart and an absent kind is a session
@@ -63,8 +64,9 @@ function row(share: SharedSession): SelectorItem {
   const kind = shareKind(share)
   return {
     id: share.id,
-    label: `${kind === 'task' ? 'task    ' : 'session '}${share.id.slice(0, 8)}`,
-    detail: [share.title || '(untitled)', age(share.created_at)].filter(Boolean).join('  ·  '),
+    label: share.title || '(untitled)',
+    status: { text: age(share.created_at), tone: 'muted' },
+    detail: `${kind} · ${share.id.slice(0, 8)}`,
     group: kind === 'task' ? 'Tasks' : 'Sessions',
     searchText: `${kind} ${share.title ?? ''} ${share.id} ${share.url} ${share.source_id ?? ''}`,
     preview: preview(share),
@@ -85,10 +87,7 @@ export function shareSelectorState(shares: SharedSession[]): SelectorState {
     : [...tasks, ...sessions]
   const state = createAppSelectorState('shares', 'Shared links', items)
   return {
-    ...state,
-    previewPane: { offset: 0, confirmDeleteKey: 'd' },
-    listFocused: true,
-    lowercaseHints: true,
+    ...browseWindow(state, true),
     searchHint: 'titles, ids and links',
     ...(shares.length ? {} : { emptyMessage: 'No shared links yet · /share publishes a session, s in /task publishes a task' }),
   }

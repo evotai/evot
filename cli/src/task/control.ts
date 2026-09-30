@@ -1,6 +1,7 @@
 import type { KeyEvent } from '../term/input.js'
+import { browseSearchKey } from '../term/app/browse-window.js'
 import { handleSplitPaneKey, resetPaneForSelection } from '../term/split-pane.js'
-import { selectorDown, selectorSelect, selectorUp, type SelectorState } from '../term/selector.js'
+import { selectorDown, selectorFocusList, selectorSelect, selectorUp, type SelectorState } from '../term/selector.js'
 
 export type TaskAction =
   | { kind: 'update'; state: SelectorState }
@@ -24,11 +25,13 @@ export function handleTaskKey(state: SelectorState, event: KeyEvent, columns = 8
   if (paneAction) return paneAction
   const disarmed = { ...state, pendingDeleteId: undefined,
     subtitle: state.pendingDeleteId ? undefined : state.subtitle }
+  const filtered = browseSearchKey(state, event)
+  if (filtered) return { kind: 'update', state: resetPaneForSelection(state, filtered) }
   if (event.type === 'up' || (event.type === 'char' && event.char === 'k')) {
-    return { kind: 'update', state: resetPaneForSelection(state, selectorUp(disarmed)) }
+    return { kind: 'update', state: resetPaneForSelection(state, selectorUp(selectorFocusList(disarmed))) }
   }
   if (event.type === 'down' || (event.type === 'char' && event.char === 'j')) {
-    return { kind: 'update', state: resetPaneForSelection(state, selectorDown(disarmed)) }
+    return { kind: 'update', state: resetPaneForSelection(state, selectorDown(selectorFocusList(disarmed))) }
   }
   if (event.type === 'escape') return { kind: 'close' }
   if (event.type === 'enter') {

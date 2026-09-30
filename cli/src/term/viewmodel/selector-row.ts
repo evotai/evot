@@ -1,6 +1,7 @@
 import { getTheme } from '../../render/theme/index.js'
 import type { SelectorItem } from '../selector.js'
 import { colored, dim, line, plain, type StyledLine, type StyledSpan } from './types.js'
+import { spansWidth, truncateSpansToWidth, truncateToWidth } from './width.js'
 
 const ROW_MARKER = '·'
 
@@ -81,6 +82,24 @@ export function buildSelectorRow(item: SelectorItem, options: SelectorRowOptions
     spans: [prefix, ...label, ...detail, ...pinned, ...selected],
     ...(bg ? { bg } : {}),
   }
+}
+
+/** Title-first two-line row for browsing durable objects. Status has its own
+ * width budget; long titles cannot push running/paused/open off screen. */
+export function buildBrowseRow(item: SelectorItem, options: SelectorRowOptions, width: number): StyledLine[] {
+  const status = item.status
+  const statusText = status ? truncateToWidth(status.text, Math.max(0, Math.min(18, width - 8))) : ''
+  const right = statusText ? [colored(statusText, status?.tone === 'attention' ? 'red'
+    : status?.tone === 'success' ? 'green' : status?.tone === 'active' ? 'cyan' : 'gray')] : []
+  const title = buildSelectorRow({ ...item, detail: undefined }, options)
+  const titleWidth = Math.max(1, width - spansWidth(right) - (right.length ? 2 : 0))
+  const left = truncateSpansToWidth(title.spans, titleWidth)
+  const gap = Math.max(0, width - spansWidth(left) - spansWidth(right))
+  const bg = title.bg
+  const top: StyledLine = { spans: [...left, { text: ' '.repeat(gap), ...(bg ? { bg } : {}) },
+    ...right.map(span => ({ ...span, ...(bg ? { bg } : {}) }))], ...(bg ? { bg } : {}) }
+  const detail = highlightSelectorMatches(truncateToWidth(item.detail ?? '', Math.max(0, width - 2)), options.query ?? '', { dim: true })
+  return [top, line(plain('  '), ...detail)]
 }
 
 /** Highlight every filter-token occurrence without changing the source text. */

@@ -172,7 +172,7 @@ test('run now restores focus on the acted-on row after the confirm overlay', asy
   h.session.dispose()
 })
 
-test('background refresh preserves navigation and armed deletion; errors keep cached rows', async () => {
+test('background refresh preserves navigation and armed deletion', async () => {
   const refresh = deferred<TaskListResponse>()
   let calls = 0
   const h = harness({ list: () => ++calls === 1 ? Promise.resolve(list(true)) : refresh.promise })
@@ -188,15 +188,101 @@ test('background refresh preserves navigation and armed deletion; errors keep ca
   expect(h.view()?.items[h.view()!.focusIndex]?.id).toBe('b')
   expect(h.view()?.pendingDeleteId).toBe('b')
   h.session.dispose()
+})
 
-  const broken = harness({ list: async () => { throw new Error('offline') } })
-  broken.session.open()
-  await flush()
-  expect(broken.view()?.emptyMessage).toBe('Could not load tasks · reopen /task to retry')
-  // One message, not a subtitle echoing the body; empty keeps the Task header.
-  expect(broken.view()?.subtitle).toBe('')
-  expect(broken.errors[0]).toContain('offline')
-  broken.session.dispose()
+test('repeated cold list failures stay in the task window without transcript errors', async () => {
+  let calls = 0
+  const h = harness({ list: async () => { calls++; throw new Error('offline') } })
+  try {
+    h.session.open()
+    await flush()
+    expect(h.view()?.emptyMessage).toBe('Could not load tasks · reopen /task to retry')
+    // Empty keeps the Task header, with no subtitle echoing the body.
+    expect(h.view()?.subtitle).toBe('')
+    for (let i = 0; i < 3; i++) await h.session.refreshIfVisible()
+    expect(calls).toBe(4)
+    expect(h.view()?.emptyMessage).toBe('Could not load tasks · reopen /task to retry')
+    expect(h.errors).toEqual([])
+
+    await h.session.handleKey({ type: 'escape' })
+    await h.session.refreshIfVisible()
+    expect(calls).toBe(4)
+    expect(h.view()).toBeNull()
+
+    h.session.open()
+    await flush()
+    expect(calls).toBe(5)
+    expect(h.errors).toEqual([])
+  } finally {
+    h.session.dispose()
+  }
+})
+
+test('failed background refresh keeps cached rows and focus, then recovers silently', async () => {
+  let offline = false
+  const h = harness({ list: async () => {
+    if (offline) throw new Error('offline')
+    return list()
+  } })
+  try {
+    h.session.open()
+    await flush()
+    await h.session.handleKey({ type: 'down' })
+    offline = true
+    for (let i = 0; i < 3; i++) await h.session.refreshIfVisible()
+    expect(h.view()?.items.map(row => row.id)).toEqual(['a', 'b'])
+    expect(h.view()?.items[h.view()!.focusIndex]?.id).toBe('b')
+    expect(h.view()?.subtitle).toBe('Could not refresh · reopen /task to retry')
+    expect(h.errors).toEqual([])
+
+    offline = false
+    await h.session.refreshIfVisible()
+    expect(h.view()?.subtitle).not.toContain('Could not refresh')
+    expect(h.view()?.subtitle).not.toBe('Refreshing…')
+    expect(h.view()?.items[h.view()!.focusIndex]?.id).toBe('b')
+    expect(h.errors).toEqual([])
+  } finally {
+    h.session.dispose()
+  }
+})
+
+test('task refresh preserves the active search, focus and input ownership', async () => {
+  const h = harness()
+  try {
+    h.session.open()
+    await flush()
+    await h.session.handleKey({ type: 'char', char: '/' })
+    await h.session.handleKey({ type: 'char', char: 'b' })
+    const before = h.view()
+    expect(before?.query).toBe('b')
+    expect(before?.listFocused).toBe(false)
+    const ids = before?.items.map(row => row.id)
+    const focused = before?.items[before.focusIndex]?.id
+    await h.session.refreshIfVisible()
+    expect(h.view()?.query).toBe('b')
+    expect(h.view()?.listFocused).toBe(false)
+    expect(h.view()?.items.map(row => row.id)).toEqual(ids)
+    expect(h.view()?.items[h.view()!.focusIndex]?.id).toBe(focused)
+    expect(h.view()?.pendingDeleteId).toBeUndefined()
+  } finally {
+    h.session.dispose()
+  }
+})
+
+test('failed composer preview loads stay inline without opening an overlay', async () => {
+  const h = harness({ list: async () => { throw new Error('offline') } })
+  let repaints = 0
+  const mounted = h.session.preview(() => { repaints++ })
+  try {
+    await flush()
+    expect(repaints).toBeGreaterThan(0)
+    expect(h.session.previewState().emptyMessage).toBe('Could not load tasks · reopen /task to retry')
+    expect(h.view()).toBeNull()
+    expect(h.errors).toEqual([])
+  } finally {
+    mounted.unmount()
+    h.session.dispose()
+  }
 })
 
 test('task list stays open during same-account auth/catalog refresh and closes on real account switch', async () => {
