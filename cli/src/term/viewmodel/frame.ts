@@ -100,7 +100,9 @@ export function createFrame(columns: number, options: FrameOptions = {}): Frame 
       }
       // A blank filler row has nothing to indent. Emitting the prefix anyway
       // would leave two spaces on an otherwise empty row for a selection to pick up.
-      if (!caret && !styled.bg && width === 0) return line(plain(''))
+      // Zero-width is not blank: an empty draft line still carries the cursor
+      // marker, and dropping it hides the cursor after Enter.
+      if (!caret && !styled.bg && styled.spans.every(span => span.text === '')) return line(plain(''))
       // The prefix carries the row background so a selected row reads as one
       // continuous band from the left edge.
       const prefix: StyledSpan = caret

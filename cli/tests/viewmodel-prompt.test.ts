@@ -159,6 +159,13 @@ describe('prompt editor', () => {
     expect(rows[rows.indexOf('a'.repeat(20)) + 1]).toBe(CURSOR_MARKER)
   })
 
+  test('keeps the cursor on an empty line after a newline', () => {
+    const rows = interiorRows(defaultInput({ columns: 60, lines: ['first line:', ''], cursorLine: 1, cursorCol: 0, placeholder: false }))
+    const caretRow = rows.findIndex(row => row.includes(CURSOR_MARKER))
+    expect(caretRow).toBeGreaterThan(rows.findIndex(row => stripAnsi(row).includes('first line:')))
+    expect(stripAnsi(rows[caretRow]!)).toBe(`  ${CURSOR_MARKER}`)
+  })
+
   test('limits long input to 30 percent of terminal rows and follows the cursor', () => {
     const lines = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`)
     const plain = renderPlain(defaultInput({
