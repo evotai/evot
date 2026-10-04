@@ -2,7 +2,8 @@
 //!
 //! Only typed transcript and engine message content is rewritten, including
 //! compacted context. Tool arguments, details and extension data are opaque.
-//! An unreadable image fails the share instead of publishing broken content.
+//! An unreadable image (e.g. a deleted temp file) is replaced by a text block
+//! naming the file, so the share never publishes a dangling local path.
 
 use base64::Engine;
 use serde_json::Value;
@@ -124,20 +125,34 @@ fn embed_content_images(message: &mut Value) -> Result<bool> {
             let path = source
                 .get("path")
                 .and_then(Value::as_str)
-                .ok_or_else(|| EvotError::Conf("image source has no file path".into()))?;
-            let bytes = std::fs::read(path).map_err(|error| {
-                EvotError::Conf(format!(
-                    "cannot share session: image {path} is unavailable: {error}"
-                ))
-            })?;
-            source.insert("type".into(), Value::String("base64".into()));
-            source.remove("path");
-            source.insert(
-                "data".into(),
-                Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
-            );
+                .ok_or_else(|| EvotError::Conf("image source has no file path".into()))?
+                .to_owned();
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    source.insert("type".into(), Value::String("base64".into()));
+                    source.remove("path");
+                    source.insert(
+                        "data".into(),
+                        Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
+                    );
+                }
+                Err(_) => *block = unavailable_image_placeholder(&path),
+            }
             changed = true;
         }
     }
     Ok(changed)
+}
+
+/// Text block shown in place of an image whose file no longer exists.
+/// Only the file name is kept so local directory layout is not published.
+fn unavailable_image_placeholder(path: &str) -> Value {
+    let name = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "image".into());
+    serde_json::json!({
+        "type": "text",
+        "text": format!("[image unavailable: {name}]"),
+    })
 }

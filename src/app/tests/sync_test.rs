@@ -357,11 +357,15 @@ async fn share_push_preserves_thinking_metadata_and_tool_sequence() -> TestResul
 }
 
 #[tokio::test]
-async fn share_with_missing_path_image_fails_before_contacting_server() -> TestResult {
+async fn share_replaces_missing_path_image_with_placeholder_text() -> TestResult {
     let server = MockServer::start().await;
     let state = state(&server)?;
     let root = TempDir::new()?;
     let storage = fs_storage(&root)?;
+    let kept = root.path().join("kept.png");
+    std::fs::write(&kept, b"image bytes")?;
+    let gone = root.path().join("gone.png");
+    let gone_path = gone.to_string_lossy().into_owned();
     storage
         .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
         .await?;
@@ -372,32 +376,56 @@ async fn share_with_missing_path_image_fails_before_contacting_server() -> TestR
             1,
             1,
             TranscriptItem::User {
-                text: "photo".into(),
-                content: vec![TranscriptUserContent::Image {
-                    mime_type: "image/png".into(),
-                    source: TranscriptImageSource::Path {
-                        path: root.path().join("gone.png").to_string_lossy().into_owned(),
+                text: "photos".into(),
+                content: vec![
+                    TranscriptUserContent::Image {
+                        mime_type: "image/png".into(),
+                        source: TranscriptImageSource::Path {
+                            path: kept.to_string_lossy().into_owned(),
+                        },
                     },
-                }],
+                    TranscriptUserContent::Image {
+                        mime_type: "image/png".into(),
+                        source: TranscriptImageSource::Path {
+                            path: gone_path.clone(),
+                        },
+                    },
+                ],
             },
         ))
         .await?;
-    let error = sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test")
-        .await
-        .err()
-        .ok_or("expected unavailable image error")?;
-    assert!(error.to_string().contains("image"));
-    assert!(server
-        .received_requests()
-        .await
-        .unwrap_or_default()
-        .is_empty());
-    assert!(storage
-        .get_session("s1")
-        .await?
-        .ok_or("missing")?
-        .cloud
-        .is_none());
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .mount(&server)
+        .await;
+    sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    let content = &body["entries"][0]["item"]["content"];
+    assert_eq!(
+        content[0]["source"],
+        json!({"type":"base64","data":"aW1hZ2UgYnl0ZXM="})
+    );
+    assert_eq!(
+        content[1],
+        json!({"type":"text","text":"[image unavailable: gone.png]"})
+    );
+    // The local directory of the missing file is never published.
+    assert!(!body.to_string().contains(&gone_path));
+    // The local transcript keeps the original path reference.
+    let entries = storage
+        .list_entries(evot::types::ListTranscriptEntries {
+            session_id: "s1".into(),
+            run_id: None,
+            after_seq: None,
+            limit: None,
+        })
+        .await?;
+    assert!(serde_json::to_string(&entries)?.contains(&gone_path));
     Ok(())
 }
 
