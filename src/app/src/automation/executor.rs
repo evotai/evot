@@ -30,6 +30,23 @@ pub fn executor_name(executor_id: &str) -> String {
         .unwrap_or_else(|| executor_id.to_string())
 }
 
+/// Attach the reporting machine to failures using the existing error string.
+/// The shared executor registration is mutable and cannot identify a past run.
+/// Keep successful reports empty and the original error intact for older clients.
+pub fn error_with_executor(error: &str, hostname: &str) -> String {
+    if error.is_empty() {
+        return String::new();
+    }
+    let hostname: String = hostname.chars().filter(|ch| !ch.is_control()).collect();
+    let hostname = hostname.trim();
+    let hostname = if hostname.is_empty() {
+        "Unknown host"
+    } else {
+        hostname
+    };
+    format!("{error}\nExecutor: {hostname}")
+}
+
 /// What this device can do for scheduled tasks right now. Recomputed from
 /// config on every poll so console edits take effect without a restart.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +75,23 @@ impl ExecutorCapabilities {
             self.feishu_ready
         )
     }
+}
+
+/// Only advertise tasks whose delivery can be resolved on this device.
+/// Pin the revision so an edit between listing and claiming cannot assign an
+/// incompatible snapshot. Paused tasks remain eligible for manual runs.
+pub fn eligible_tasks(
+    channels: &ChannelsConfig,
+    tasks: &[super::model::Task],
+) -> std::collections::BTreeMap<String, i64> {
+    tasks
+        .iter()
+        .filter(|task| {
+            super::delivery::validate(channels, &task.delivery_channel, &task.delivery_target)
+                .is_ok()
+        })
+        .map(|task| (task.id.clone(), task.revision))
+        .collect()
 }
 
 pub async fn register_executor(

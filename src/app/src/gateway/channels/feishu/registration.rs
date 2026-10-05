@@ -41,10 +41,14 @@ fn resolve_delivery(
     target: &str,
 ) -> crate::error::Result<crate::delivery::resolve::ResolvedDelivery> {
     use crate::error::EvotError;
-    let config = channels
-        .feishu
-        .as_ref()
-        .ok_or_else(|| EvotError::Run("Feishu channel is not configured".into()))?;
+    let config = channels.feishu.as_ref().ok_or_else(|| {
+        EvotError::Run("Feishu is not configured on the executor that ran this task".into())
+    })?;
+    if config.app_id.trim().is_empty() || config.app_secret.trim().is_empty() {
+        return Err(EvotError::Run(
+            "Feishu credentials are incomplete on the executor that ran this task".into(),
+        ));
+    }
     let targets = super::target::resolve_targets(config, target)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

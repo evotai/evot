@@ -90,7 +90,7 @@ describe('task window', () => {
     expect(runs).toEqual([
       expect.stringMatching(/^◷ just now {2}Running$/),
       expect.stringMatching(/^✓ .* {2}Succeeded · sent$/),
-      expect.stringMatching(/^! ✗ .* {2}Delivery failed · manual · delivery failed · delivery failed$/),
+      expect.stringMatching(/^! ✗ .* {2}Delivery failed · manual$/),
     ])
   })
 
@@ -102,7 +102,9 @@ describe('task window', () => {
     }
     const state = createTaskWindow({ ...response, tasks: [{ ...task, recent_runs: [failed] }] })
     const preview = state.items[0]?.preview ?? []
-    expect(preview.find(line => line.includes('Needs attention'))).toContain(error)
+    expect(preview.find(line => line.includes('Needs attention'))).not.toContain(error)
+    expect(preview).toContain('# Latest issue')
+    expect(preview).toContain(error.replace(/^conf error: /, ''))
     for (const columns of [90, 120]) {
       const rendered = Array.from({ length: 40 }, (_, page) => buildSelectorRegionLines(
         { ...state, previewPane: { ...state.previewPane!, offset: page * 2 } }, columns, 20,
@@ -113,7 +115,9 @@ describe('task window', () => {
 
   test('the alert marker renders the run in red and is not shown as text', () => {
     const state = createTaskWindow(response, undefined, undefined, modelLabels)
-    const lines = buildSelectorRegionLines(state, 120, 24)
+    const lines = Array.from({ length: 3 }, (_, offset) => buildSelectorRegionLines(
+      { ...state, previewPane: { ...state.previewPane!, offset: offset * 3 } }, 120, 24,
+    )).flat()
     const failed = lines.find(line => stripAnsi(line).includes('Delivery failed · manual'))
     expect(failed).toBeDefined()
     expect(stripAnsi(failed!)).not.toContain('! ✗')
@@ -152,8 +156,44 @@ describe('task window', () => {
     const detail = { ...task, runs: fullHistory }
     const preview = createTaskWindow(response, task.id, detail).items[0]?.preview ?? []
     expect(preview.filter(line => line === '# Recent runs')).toHaveLength(1)
-    expect(preview.filter(line => /^(! )?[✓✗◷–] /.test(line))).toHaveLength(8)
+    expect(preview.filter(line => /^(! )?[✓✗◷–] /.test(line))).toHaveLength(3)
+    expect(preview).toContain('Enter to view all runs')
     expect(preview.some(line => line.includes('Delivery failed'))).toBe(true)
+  })
+
+  test('delivery errors are separated from compact run rows and scoped to the executor', () => {
+    const error = 'run error: Feishu channel is not configured'
+    const failed = { ...recentRuns[2]!, error }
+    const state = createTaskWindow({ ...response, tasks: [{ ...task, last_run: failed, recent_runs: [failed] }] })
+    const preview = state.items[0]?.preview ?? []
+    expect(preview).toContain('Delivery  Feishu · All bot direct conversations')
+    const summary = preview.find(line => line.startsWith('! ✗')) ?? ''
+    expect(summary.match(/delivery failed/gi)).toHaveLength(1)
+    expect(summary).not.toContain('run error')
+    expect(preview).toContain('# Latest issue')
+    expect(preview).toContain('Feishu was not configured on the executor that ran this task')
+    expect(preview).toContain('Executor  Not recorded')
+  })
+
+  test('the issue shows its actual host separately from the Feishu destination', () => {
+    const failed = { ...recentRuns[2]!, error: 'run error: Feishu channel is not configured\nExecutor: build-server' }
+    const preview = createTaskWindow({ ...response, tasks: [{
+      ...task, last_run: failed, recent_runs: [failed],
+    }] }).items[0]?.preview ?? []
+    expect(preview).toContain('Executor  build-server')
+    expect(preview).toContain('Delivery  Feishu · All bot direct conversations')
+    expect(preview).toContain('Feishu was not configured on the executor that ran this task')
+    expect(preview.join('\n')).not.toContain('Executor:')
+  })
+
+  test('a recovered task labels the older failure as a previous issue', () => {
+    const state = createTaskWindow({ ...response, tasks: [{
+      ...task, last_run: recentRuns[1], recent_runs: [recentRuns[1]!, recentRuns[2]!],
+    }] })
+    const preview = state.items[0]?.preview ?? []
+    expect(state.items[0]?.status?.text).toBe('On')
+    expect(preview).not.toContain('# Latest issue')
+    expect(preview.some(line => line.startsWith('# Previous issue · '))).toBe(true)
   })
 
   test('a queued run shows its age, and an unclaimed one names the missing executor', () => {

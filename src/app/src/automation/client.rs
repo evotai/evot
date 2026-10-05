@@ -131,18 +131,23 @@ pub async fn register_executor(
     Ok(())
 }
 
-/// Claim the next due run for this executor. `Ok(None)` means nothing is due.
+/// Claim only locally deliverable task revisions. `Ok(None)` means no match.
 pub async fn claim(
     auth: &AuthState,
     executor_id: &str,
     request_id: &str,
+    eligible_tasks: &std::collections::BTreeMap<String, i64>,
 ) -> Result<Option<ClaimedRun>> {
     let path = "/v1/task-runs/claim";
     let url = format!("{}{}", auth.server_base_url.trim_end_matches('/'), path);
     let response = crate::http::client()?
         .post(url)
         .bearer_auth(&auth.cli_token)
-        .json(&serde_json::json!({"executor_id": executor_id, "request_id": request_id}))
+        .json(&serde_json::json!({
+            "executor_id": executor_id,
+            "request_id": request_id,
+            "eligible_tasks": eligible_tasks,
+        }))
         .timeout(REQUEST_TIMEOUT)
         .send()
         .await

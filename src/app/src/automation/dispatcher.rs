@@ -70,6 +70,22 @@ pub fn spawn(config: &Config, agent: Arc<Agent>, cancel: CancellationToken) -> J
             let executor_id = super::executor_id(&auth.user.id);
             let executor_name = super::executor_name(&executor_id);
             let capabilities = ExecutorCapabilities::from_channels(&config.channels);
+            // Shared registration cannot describe a particular polling device.
+            // Supply locally deliverable revisions on every claim instead.
+            let eligible_tasks = match super::list_tasks(&auth).await {
+                Ok(list) if list.cache.ready && !list.cache.stale => {
+                    super::executor::eligible_tasks(&config.channels, &list.tasks)
+                }
+                Ok(_) => {
+                    wait(&cancel, RETRY_INTERVAL).await;
+                    continue;
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "task dispatcher could not check delivery requirements");
+                    wait(&cancel, RETRY_INTERVAL).await;
+                    continue;
+                }
+            };
             let fingerprint = capabilities.fingerprint(&auth.user.id, &executor_id, &executor_name);
             if registered != fingerprint {
                 if let Err(error) =
@@ -82,7 +98,7 @@ pub fn spawn(config: &Config, agent: Arc<Agent>, cancel: CancellationToken) -> J
                 }
                 registered = fingerprint;
             }
-            match super::claim(&auth, &executor_id, &claim_request_id).await {
+            match super::claim(&auth, &executor_id, &claim_request_id, &eligible_tasks).await {
                 Ok(Some(run)) => {
                     claim_request_id = Uuid::new_v4().to_string();
                     let session_id =
@@ -119,6 +135,24 @@ async fn execute(
     cancel: CancellationToken,
 ) {
     let task = &claimed.task_snapshot;
+    // Check before running the agent, so missing local channel configuration
+    // cannot consume a full run only to fail at the final delivery step.
+    if let Err(error) = super::delivery::validate(
+        &config.channels,
+        &task.delivery_channel,
+        &task.delivery_target,
+    ) {
+        finish(
+            auth,
+            claimed,
+            "needs_attention",
+            "",
+            super::delivery::NOT_REQUESTED,
+            &error.to_string(),
+        )
+        .await;
+        return;
+    }
     let locator = SessionLocator::new("automation", &format!("run:{}", claimed.id));
     let session_id = locator.session_id();
     let mut request = QueryRequest::text(&task.instruction)
@@ -216,14 +250,25 @@ async fn execute(
         }
     };
 
-    match super::delivery::deliver(
-        &config.channels,
-        &task.delivery_channel,
-        &task.delivery_target,
-        &text,
-    )
-    .await
-    {
+    // A run can last an hour. Use the current credentials/targets rather than
+    // the snapshot taken when it was claimed (setup may have changed meanwhile).
+    let delivery_result = if task.delivery_channel.trim().is_empty() {
+        Ok(super::delivery::NOT_REQUESTED)
+    } else {
+        match Config::load_with_env_file(config.env_file_path.to_str()) {
+            Ok(fresh) => {
+                super::delivery::deliver(
+                    &fresh.channels,
+                    &task.delivery_channel,
+                    &task.delivery_target,
+                    &text,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        }
+    };
+    match delivery_result {
         Ok(status) => finish(auth, claimed, "succeeded", &text, status, "").await,
         Err(error) => {
             finish(
@@ -286,6 +331,10 @@ async fn finish(
     delivery_status: &str,
     error: &str,
 ) {
+    // Record the actual reporting host, never the account-wide executor id
+    // or its mutable server-side registration name.
+    let hostname = super::executor_name("Unknown host");
+    let error = super::executor::error_with_executor(error, &hostname);
     for attempt in 0..3 {
         if super::report(
             auth,
@@ -294,7 +343,7 @@ async fn finish(
             status,
             summary,
             delivery_status,
-            error,
+            &error,
         )
         .await
         .is_ok()

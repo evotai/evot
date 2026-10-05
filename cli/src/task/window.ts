@@ -2,6 +2,7 @@ import { createAppSelectorState } from '../term/app/selector-identity.js'
 import { browseWindow } from '../term/app/browse-window.js'
 import { PREVIEW_ALERT_PREFIX, PREVIEW_SECTION_PREFIX, type SelectorItem, type SelectorState } from '../term/selector.js'
 import type { ScheduledTask, TaskListResponse, TaskRunSummary, TaskStats } from './types.js'
+import { taskRunError } from './run-error.js'
 
 const hints = [
   { keys: ['up', 'down'], action: 'select' },
@@ -127,12 +128,7 @@ function recentRun(run: TaskRunSummary): string {
     run.status === 'pending' && run.scheduled_for && Date.now() - run.scheduled_for > 60_000
       ? 'awaiting an executor'
       : '',
-    run.delivery_status === 'sent'
-      ? 'sent'
-      : run.delivery_status === 'failed'
-        ? 'delivery failed'
-        : '',
-    run.error ? run.error.replace(/\s+/g, ' ') : '',
+    run.delivery_status === 'sent' ? 'sent' : '',
   ].filter(Boolean)
   const alert = runWentWrong(run) ? PREVIEW_ALERT_PREFIX : ''
   return `${alert}${statusIcon(run)} ${relativeTime(at)}  ${status(run)}${details.length ? ` · ${details.join(' · ')}` : ''}`
@@ -145,19 +141,32 @@ function preview(
 ): string[] {
   const stats = task.stats ?? emptyStats
   const runs = allRuns ?? task.recent_runs ?? []
-  const history = runs.length > 0 ? runs.map(recentRun) : ['No runs yet']
-  const delivery = !task.delivery_channel ? 'Not configured'
-    : `${task.delivery_channel} · ${task.delivery_target === 'p2p:*' ? 'All bot direct conversations' : task.delivery_target}`
-  // Runs lead: they are what the user opens the pane to check, and the pane
-  // pins its first section when space is short. Newest first, so a cut keeps
-  // the latest outcome. Instructions are the long tail and go last.
+  const history = runs.length > 0 ? runs.slice(0, 3).map(recentRun) : ['No runs yet']
+  const issue = runs.find(run => run.error?.trim())
+  // This is historical executor state, not a diagnosis of the current CLI.
+  const issueError = issue?.error ? taskRunError(issue.error) : undefined
+  const issueText = issueError?.message.replace(/^(?:run error:|conf error:)\s*/i, '').replace(/\s+/g, ' ')
+    .replace(/^Feishu channel is not configured$/, 'Feishu was not configured on the executor that ran this task')
+  const errors = issue ? [
+    `${PREVIEW_SECTION_PREFIX}${issue === runs[0] ? 'Latest issue' : `Previous issue · ${relativeTime(issue.updated_at || issue.scheduled_for)}`}`,
+    `Executor  ${issueError?.executor ?? 'Not recorded'}`,
+    issueText ?? '',
+    '',
+  ] : []
+  const delivery = !task.delivery_channel ? 'Local result only'
+    : `${task.delivery_channel === 'feishu' ? 'Feishu' : task.delivery_channel} · ${task.delivery_target === 'p2p:*' ? 'All bot direct conversations' : task.delivery_target}`
+  // A compact overview first; full history belongs in the runs window.
+  // Keep the latest issue separate so wrapped errors don't bury the overview.
   return [
     task.name,
     `Model  ${model(task, modelLabels)}`,
+    `Delivery  ${delivery}`,
     '',
     `${PREVIEW_SECTION_PREFIX}Recent runs`,
     ...history,
+    ...(runs.length > 3 ? ['Enter to view all runs'] : []),
     '',
+    ...errors,
     `${PREVIEW_SECTION_PREFIX}Activity`,
     `${stats.runs} runs · ${stats.succeeded} succeeded · last ${stats.window_days || 30} days`,
     '',

@@ -14,6 +14,20 @@ pub const NOT_REQUESTED: &str = "not_requested";
 pub const SENT: &str = "sent";
 pub const FAILED: &str = "failed";
 
+/// Validate local configuration and resolve targets without sending anything.
+pub fn validate(channels: &ChannelsConfig, channel: &str, target: &str) -> Result<()> {
+    if channel.trim().is_empty() {
+        return Ok(());
+    }
+    resolve_delivery(
+        crate::gateway::registry::delivery_registrations(),
+        channels,
+        channel,
+        target,
+    )?;
+    Ok(())
+}
+
 /// Send one task result. Returns the delivery status to report.
 pub async fn deliver(
     channels: &ChannelsConfig,

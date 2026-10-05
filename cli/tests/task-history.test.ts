@@ -28,6 +28,16 @@ test('task history sorts runs, includes pre-agent failures and never offers them
   expect(state.title).toContain('Daily report · Runs')
 })
 
+test('run errors show the reporting host without mistaking the shared executor id for a machine', () => {
+  const hosted = { ...failed, error: 'run error: Feishu is not configured\nExecutor: remote-linux' }
+  const state = createTaskRunsWindow(task, [hosted])
+  expect(state.items[0]?.preview).toContain('Executor  remote-linux')
+  expect(state.items[0]?.preview).toContain('run error: Feishu is not configured')
+  expect(state.items[0]?.preview?.join('\n')).not.toContain('Executor:')
+  const legacy = createTaskRunsWindow(task, [failed])
+  expect(legacy.items[0]?.preview).toContain('Executor  Not recorded')
+})
+
 test('transcript is read-only and keeps entire user, answer and tool result', () => {
   const state = createTaskTranscriptWindow(task, success, [
     { type: 'user', text: 'What happened?' },

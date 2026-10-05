@@ -5,6 +5,7 @@ import { createAppSelectorState } from '../term/app/selector-identity.js'
 import { browseWindow } from '../term/app/browse-window.js'
 import type { SelectorItem, SelectorState } from '../term/selector.js'
 import type { ScheduledTask, TaskRunSummary } from './types.js'
+import { taskRunError } from './run-error.js'
 
 const browseHints = [
   { keys: ['up', 'down'], action: 'select' },
@@ -40,7 +41,7 @@ export function createTaskRunsWindow(task: ScheduledTask, runs: TaskRunSummary[]
       `Execution  ${run.status}`,
       `Delivery  ${run.delivery_status || 'Not requested'}`,
       `Source  ${run.source === 'manual' ? 'Manual' : 'Scheduled'}`,
-      ...(run.error ? ['', '# Error', plain(run.error)] : []),
+      ...(run.error ? ['', '# Error', `Executor  ${taskRunError(run.error).executor}`, taskRunError(run.error).message] : []),
       ...(run.result_summary ? ['', '# Result', plain(run.result_summary)] : []),
       ...(run.session_id ? ['', 'Enter to view the execution transcript (read-only).'] : ['', 'No execution transcript for this run.']),
     ],
