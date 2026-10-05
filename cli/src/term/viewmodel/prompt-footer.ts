@@ -169,7 +169,7 @@ function buildFooter(input: PromptFooterVM, columns: number, modeShownAbove: boo
 type FooterContextDetail = 'full' | 'compact' | 'hidden'
 
 interface FooterLayout {
-  dashboard: boolean
+  dashboard: 'full' | 'port' | false
   context: FooterContextDetail
   branch: boolean
   thinking: boolean
@@ -179,12 +179,13 @@ interface FooterLayout {
 
 /** Widest first: the first entry that fits wins, so detail sheds in this order. */
 const FOOTER_LAYOUTS: FooterLayout[] = [
-  { dashboard: true, context: 'full', branch: true, thinking: true, model: true, truncateCwd: false },
-  { dashboard: false, context: 'full', branch: true, thinking: true, model: true, truncateCwd: false },
-  { dashboard: false, context: 'compact', branch: true, thinking: true, model: true, truncateCwd: false },
-  { dashboard: false, context: 'compact', branch: false, thinking: true, model: true, truncateCwd: false },
-  { dashboard: false, context: 'hidden', branch: false, thinking: true, model: true, truncateCwd: true },
-  { dashboard: false, context: 'hidden', branch: false, thinking: false, model: true, truncateCwd: true },
+  { dashboard: 'full', context: 'full', branch: true, thinking: true, model: true, truncateCwd: false },
+  { dashboard: 'port', context: 'full', branch: true, thinking: true, model: true, truncateCwd: false },
+  { dashboard: 'port', context: 'compact', branch: true, thinking: true, model: true, truncateCwd: false },
+  { dashboard: 'port', context: 'compact', branch: false, thinking: true, model: true, truncateCwd: true },
+  { dashboard: 'port', context: 'hidden', branch: false, thinking: true, model: true, truncateCwd: true },
+  { dashboard: 'port', context: 'hidden', branch: false, thinking: false, model: true, truncateCwd: true },
+  { dashboard: 'port', context: 'hidden', branch: false, thinking: false, model: false, truncateCwd: true },
   { dashboard: false, context: 'hidden', branch: false, thinking: false, model: false, truncateCwd: true },
 ]
 
@@ -204,7 +205,7 @@ function buildFooterCandidate(
   const dashboard = layout.dashboard && input.dashboardUrl
     ? [
         { text: 'dashboard ', dim: true } satisfies StyledSpan,
-        { text: input.dashboardUrl, dim: true, link: input.dashboardUrl } satisfies StyledSpan,
+        { text: layout.dashboard === 'port' ? dashboardPort(input.dashboardUrl) : input.dashboardUrl, dim: true, link: input.dashboardUrl } satisfies StyledSpan,
       ]
     : null
 
@@ -264,6 +265,15 @@ function renderFooterCandidate(candidate: FooterCandidate, columns: number): Sty
   if (!candidate.dashboard) return line(...candidate.left)
   const padding = columns - spansWidth(candidate.left) - spansWidth(candidate.dashboard)
   return line(...candidate.left, plain(' '.repeat(Math.max(2, padding))), ...candidate.dashboard)
+}
+
+function dashboardPort(address: string): string {
+  try {
+    const url = new URL(address)
+    return `:${url.port || (url.protocol === 'https:' ? '443' : '80')}`
+  } catch {
+    return address
+  }
 }
 
 function compactCwd(cwd: string): string {

@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { inspectConsole } from '../../channels/console-client.js'
 import type { BackgroundScheduler } from '../../background/scheduler.js'
 
@@ -16,9 +18,10 @@ export async function tryStartServer(port?: number, envFile?: string): Promise<S
   const { startServerBackground } = await import('../../native/index.js')
   const endpoint = await startServerBackground(port, undefined, envFile)
   if (endpoint === null) {
-    activePort = null
+    const shared = await discoverDashboard(port ?? 8082, envFile)
+    activePort = shared?.port ?? null
     ownedSince = null
-    return null
+    return shared
   }
   const snapshot = await inspectConsole(endpoint.address)
   if (activePort !== endpoint.port || ownedSince === null) ownedSince = Date.now()
@@ -34,13 +37,34 @@ export async function tryStartServer(port?: number, envFile?: string): Promise<S
   }
 }
 
+/** Reuse only a verified evot console serving this CLI's configuration.
+ * Discovery does not acquire ownership; native stop still stops only our server. */
+export async function discoverDashboard(port: number, envFile?: string): Promise<ServerState | null> {
+  if (!envFile) return null
+  const address = `http://127.0.0.1:${port}`
+  try {
+    const snapshot = await inspectConsole(address)
+    if (canonicalPath(snapshot.env_file_path) !== canonicalPath(envFile)) return null
+    return {
+      port, address, channels: snapshot.feishu ? ['feishu'] : [],
+      envFile: snapshot.env_file_path, startedAt: Date.now(),
+    }
+  } catch {
+    return null
+  }
+}
+
+function canonicalPath(path: string): string {
+  try { return realpathSync(path) } catch { return resolve(path) }
+}
+
 export interface DashboardHost {
   attempt: () => Promise<ServerState | null>
   stop: () => Promise<void>
   publish: (state: ServerState | null) => void
 }
 
-/** Publish only native-confirmed ownership, never a discovered foreign URL. */
+/** Publish owned or verified same-config consoles; cleanup only releases ownership. */
 export function registerDashboard(scheduler: BackgroundScheduler, host: DashboardHost): () => void {
   const unregister = scheduler.register({
     name: 'dashboard', intervalMs: 5000,

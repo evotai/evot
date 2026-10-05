@@ -322,8 +322,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         console: async () => {
           await backgroundJobs.trigger('dashboard')
           if (serverState) return serverState
-          // Discovery permits setup on another process, but never publishes
-          // that process as this CLI's dashboard.
+          // Setup may explicitly inspect another console even when it is
+          // not eligible for same-config Dashboard reuse.
           const address = `http://127.0.0.1:${opts.serverPort ?? 8082}`
           const snapshot = await inspectConsole(address)
           return { address, envFile: snapshot.env_file_path }
@@ -3591,7 +3591,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     },
   }))
   resources.add(registerDashboard(backgroundJobs, {
-    attempt: () => tryStartServer(opts.serverPort, opts.envFile),
+    attempt: () => tryStartServer(opts.serverPort, configInfo?.envPath ?? opts.envFile),
     stop: stopOwnedServer,
     publish: state => {
       const changed = serverState?.address !== state?.address

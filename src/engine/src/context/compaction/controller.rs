@@ -275,13 +275,16 @@ impl CompactionController {
                     messages.pop();
                 }
 
-                // Match pi: overflow first uses the normal compaction pipeline.
-                // The provider request is retried only after compaction
-                // completed; cancellation or no plan leaves the turn terminal
-                // instead of resending the same oversized context.
+                // A provider overflow overrides the configured window and
+                // local estimate. Do not accept a prune-only pass merely
+                // because it falls below the ordinary summary threshold:
+                // that would spend the recovery allowance on a request the
+                // provider may still reject. Summarize before retrying.
+                // Cancellation or no plan leaves the turn terminal instead
+                // of resending the same oversized context.
                 let request_overhead_tokens = contexts.request_overhead_tokens();
                 let mut stats = self
-                    .run_compaction(
+                    .summarize_compaction(
                         messages,
                         contexts,
                         request_overhead_tokens,
@@ -297,7 +300,7 @@ impl CompactionController {
                     // same reason (e.g. a relay byte limit). First retry the
                     // same pi-style plan with a deterministic summary.
                     stats = self
-                        .run_compaction(
+                        .summarize_compaction(
                             messages,
                             SummaryContexts::default(),
                             request_overhead_tokens,
@@ -322,7 +325,7 @@ impl CompactionController {
                     // summarize the complete tool turn rather than resending it.
                     let minimum_first_kept = messages.len();
                     stats = self
-                        .run_compaction(
+                        .summarize_compaction(
                             messages,
                             SummaryContexts::default(),
                             request_overhead_tokens,

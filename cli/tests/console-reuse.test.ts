@@ -1,4 +1,9 @@
 import { expect, test } from 'bun:test'
+import { mkdtempSync, symlinkSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { BackgroundScheduler } from '../src/background/scheduler.js'
+import { discoverDashboard, registerDashboard } from '../src/term/app/server.js'
 import { inspectConsole } from '../src/channels/console-client.js'
 import { observeFeishu, bindFeishuChat } from '../src/channels/feishu/client.js'
 import { setupFeishu } from '../src/channels/feishu/onboarding.js'
@@ -21,6 +26,66 @@ test('an existing console exposes settings and setup from its owning process', a
     expect((await observeFeishu(address)).chats).toEqual(['oc_owner'])
     await bindFeishuChat(address, 'v1', 'oc_owner')
     expect(bound).toEqual({ revision: 'v1', chat_id: 'oc_owner' })
+  } finally { await server.stop(true) }
+})
+
+test('dashboard reuses only the same configuration, including symlink aliases', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'evot-dashboard-'))
+  const envFile = join(dir, 'evot.env')
+  const alias = join(dir, 'alias.env')
+  writeFileSync(envFile, '')
+  symlinkSync(envFile, alias)
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return Response.json({ ...snapshot, env_file_path: envFile })
+  } })
+  try {
+    const state = await discoverDashboard(server.port, alias)
+    expect(state?.address).toBe(`http://127.0.0.1:${server.port}`)
+    expect(state?.envFile).toBe(envFile)
+    expect(await discoverDashboard(server.port, join(dir, 'other.env'))).toBeNull()
+    expect(await discoverDashboard(server.port)).toBeNull()
+  } finally { await server.stop(true); rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('shared dashboard is published, cleared on outage, and not stopped on window close', async () => {
+  let available = true
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return available ? Response.json(snapshot) : new Response('', { status: 503 })
+  } })
+  const scheduler = new BackgroundScheduler()
+  const published: (string | null)[] = []
+  let ownedStops = 0
+  const dispose = registerDashboard(scheduler, {
+    attempt: () => discoverDashboard(server.port, snapshot.env_file_path),
+    // Native stop is ownership-scoped, not an HTTP shutdown of a discovered server.
+    stop: async () => { ownedStops++ },
+    publish: state => { published.push(state?.address ?? null) },
+  })
+  try {
+    await scheduler.trigger('dashboard')
+    expect(published.at(-1)).toBe(`http://127.0.0.1:${server.port}`)
+    available = false
+    await scheduler.trigger('dashboard')
+    expect(published.at(-1)).toBeNull()
+    available = true
+    await scheduler.trigger('dashboard')
+    expect(published.at(-1)).not.toBeNull()
+    dispose()
+    expect(published.at(-1)).toBeNull()
+    expect(ownedStops).toBe(1)
+    expect((await inspectConsole(`http://127.0.0.1:${server.port}`)).env_file_path).toBe(snapshot.env_file_path)
+  } finally { scheduler.dispose(); await server.stop(true) }
+})
+
+test('dashboard discovery hides unrelated services and redirects', async () => {
+  let redirect = false
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() {
+    return redirect ? Response.redirect('http://127.0.0.1:1', 302) : Response.json({ ok: true })
+  } })
+  try {
+    expect(await discoverDashboard(server.port, snapshot.env_file_path)).toBeNull()
+    redirect = true
+    expect(await discoverDashboard(server.port, snapshot.env_file_path)).toBeNull()
   } finally { await server.stop(true) }
 })
 

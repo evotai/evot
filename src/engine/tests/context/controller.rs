@@ -1280,6 +1280,84 @@ async fn threshold_with_judge_prunes_instead_of_summarising() {
     );
 }
 
+/// A provider rejection is authoritative even when the local estimate fits.
+/// A prune-only cut must not consume the sole compact-and-retry allowance.
+#[tokio::test]
+async fn overflow_with_judge_summarizes_even_when_pruning_would_fit() {
+    for summarizer_fails in [false, true] {
+        let config = config_small();
+        let mut ctrl = CompactionController::new(config.clone()).with_judge(Arc::new(DropAllJudge));
+        let mut messages = vec![
+            user_msg(&big_text(8_000)),
+            tool_call_msg("c1"),
+            tool_result_msg("c1", &big_text(12_000)),
+        ];
+        // Leave the old tool call outside the judge's protected recent tail.
+        for _ in 0..6 {
+            messages.push(assistant_msg("done"));
+        }
+        messages.push(user_msg("continue the task"));
+        assert!(evotengine::context::total_tokens(&messages) < config.trigger_threshold());
+        messages.push(assistant_msg("overflow error"));
+
+        let replies = if summarizer_fails {
+            vec![Reply::error("HTTP 413: request too large"); 2]
+        } else {
+            vec![Reply::text("Preserve the task and continue investigating."); 2]
+        };
+        let provider = Arc::new(RecordingProvider::new(replies));
+        let captured = provider.captured();
+        let ctx = SummarizerContext {
+            provider,
+            model: "test".into(),
+            api_key: "key".into(),
+            thinking_level: ThinkingLevel::Off,
+            system_prompt: String::new(),
+            tools: vec![],
+            max_tokens: Some(1024),
+            cache_config: CacheConfig::default(),
+            prompt_cache_key: None,
+            model_config: None,
+        };
+        let usage = UsageSnapshot {
+            input: 0,
+            cache_read: 0,
+            cache_write: 0,
+            output: 0,
+            total_tokens: 0,
+            model: model_id(),
+            timestamp: evotengine::context::now_ms() + 60_000,
+            stop_reason: StopReason::Error,
+            error_message: Some("HTTP 413: request too large".into()),
+        };
+        let response = ctrl
+            .after_response(
+                &mut messages,
+                &usage,
+                &model_id(),
+                Some(&ctx),
+                CancellationToken::new(),
+            )
+            .await;
+
+        assert_eq!(response.action, AfterResponseAction::Retry);
+        assert!(!response.overflow_recovery_failed);
+        let stats = match response.stats {
+            Some(stats) => stats,
+            None => panic!("overflow recovery must compact before retrying"),
+        };
+        assert!(stats.summary.is_some(), "overflow requires a real summary");
+        assert_ne!(stats.method, Some(evotengine::CompactionMethod::Prune));
+        assert!(stats.after_tokens < stats.before_tokens);
+        assert!(!captured.lock().is_empty(), "attempt the LLM summary first");
+        assert!(messages.iter().any(|message| matches!(
+            message,
+            AgentMessage::Llm(Message::User { content, .. })
+                if content.iter().any(|block| matches!(block, Content::Text { text } if text == "continue the task"))
+        )), "retain the active task for the automatic retry");
+    }
+}
+
 /// Between the prune threshold (60% of the window) and the summary threshold
 /// a response triggers the prune branch alone: pending edits land, the
 /// response reports them, and no compaction is planned.

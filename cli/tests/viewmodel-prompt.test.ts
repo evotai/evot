@@ -959,6 +959,22 @@ describe('prompt footer', () => {
     expect(footer).not.toContain('@Evot Premium')
   })
 
+  test('compact dashboard port keeps the full clickable URL', () => {
+    const address = 'http://127.0.0.1:8788'
+    const blocks = buildPromptFooterBlocks(defaultInput({
+      columns: 80,
+      model: 'gpt-5.6-sol',
+      thinkingLevel: 'max',
+      dashboardUrl: address,
+      contextTokens: 105800,
+      contextWindow: 272000,
+    }))
+    const links = blocks.flatMap(block => block.lines.flatMap(row => row.spans)).filter(span => span.link)
+    expect(links).toHaveLength(1)
+    expect(links[0]?.text).toBe(':8788')
+    expect(links[0]?.link).toBe(address)
+  })
+
   test('degrades footer details in priority order as width narrows', () => {
     const footerAt = (columns: number) => blocksToLines(buildPromptFooterBlocks(defaultInput({
       columns,
@@ -974,27 +990,32 @@ describe('prompt footer', () => {
     expect(withDashboard).toContain('dashboard')
     expect(withDashboard).toContain('context: 38.9% (105.8k/272k)')
 
-    const withoutDashboard = footerAt(80)
-    expect(withoutDashboard).not.toContain('dashboard')
-    expect(withoutDashboard).toContain('context: 38.9% (105.8k/272k)')
+    const compactDashboard = footerAt(80)
+    expect(compactDashboard).toEndWith('dashboard :8082')
+    expect(compactDashboard).toContain('context: 38.9%')
+    expect(compactDashboard).not.toContain('http://')
 
     const compactContext = footerAt(70)
     expect(compactContext).toContain('gpt-5.6-sol • max')
     expect(compactContext).toContain('context: 38.9%')
     expect(compactContext).not.toContain('105.8k')
-    expect(compactContext).toContain('(main)')
+    expect(compactContext).not.toContain('(main)')
+    expect(compactContext).toEndWith('dashboard :8082')
 
     const withoutBranch = footerAt(60)
     expect(withoutBranch).not.toContain('(main)')
     expect(withoutBranch).toContain('context: 38.9%')
 
-    const withoutContext = footerAt(50)
+    const withoutContext = footerAt(40)
     expect(withoutContext).toContain('gpt-5.6-sol • max')
     expect(withoutContext).not.toContain('context:')
 
-    for (const columns of [119, 80, 70, 60, 50, 30, 20]) {
+    for (const columns of [119, 80, 70, 60, 50, 40, 30, 20]) {
       expect(stringWidth(footerAt(columns))).toBeLessThanOrEqual(columns)
+      expect(footerAt(columns)).toContain('dashboard')
     }
+    expect(footerAt(10)).not.toContain('dashboard')
+    expect(stringWidth(footerAt(10))).toBeLessThanOrEqual(10)
   })
 
   test('truncates a wide CJK cwd only after optional segments are gone', () => {
