@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use evot::command::parse_command;
 use evot::command::Command;
 use evot::search::SessionSearch;
@@ -53,23 +51,6 @@ fn describe_window_names_common_windows() {
     assert_eq!(search("q", Some(30)).describe_window(), "last month");
     assert_eq!(search("q", Some(10)).describe_window(), "last 10 days");
     assert_eq!(search("q", None).describe_window(), "all time");
-}
-
-#[test]
-fn prompt_states_archive_window_and_answer_shape() {
-    let now = chrono::DateTime::parse_from_rfc3339("2026-03-10T00:00:00Z")
-        .map(|t| t.with_timezone(&chrono::Utc))
-        .unwrap_or_default();
-    let prompt = search("fts tuning", Some(7)).prompt(Path::new("/home/u/.evotai/sessions"), now);
-    assert!(prompt.starts_with("Find my past sessions that are about: fts tuning"));
-    assert!(prompt.contains("/home/u/.evotai/sessions/<session_id>/"));
-    assert!(prompt.contains("on or after 2026-03-03T00:00:00Z (last week)"));
-    assert!(prompt.contains("source is \"automation\""));
-    assert!(prompt.contains("- <session_id> — <title> — <one-line reason>"));
-
-    let all = search("fts", None).prompt(Path::new("/s"), now);
-    assert!(all.contains("Consider the whole archive."));
-    assert!(!all.contains("on or after"));
 }
 
 #[test]

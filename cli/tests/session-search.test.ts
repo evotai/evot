@@ -18,6 +18,16 @@ test('parseSessionSearchResults extracts ids in order, once, ignoring prose', ()
   expect(parseSessionSearchResults('NONE')).toEqual([])
 })
 
+test('parseSessionSearchResults accepts dated skill results and incomplete coverage', () => {
+  const text = [
+    'Only 24 sessions were included; older history was omitted.',
+    `- ${B} — Warehouse restarts — 2026-03-09 — Diagnosed memory pressure`,
+    `- ${A} — Query costs — 2026-03-08 — Reduced excessive scanning`,
+  ].join('\n')
+  expect(parseSessionSearchResults(text)).toEqual([B, A])
+  expect(parseSessionSearchResults('No match among the included candidates.\nNONE')).toEqual([])
+})
+
 test('lastAssistantText joins text blocks of the final assistant message', () => {
   const messages: UIMessage[] = [
     { id: 'u', role: 'user', text: 'find', timestamp: 0 },

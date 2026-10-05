@@ -14,8 +14,8 @@ struct BuiltinDef {
     content: &'static str,
 }
 
-// A skill is builtin only when evot itself dispatches to it by name: `/harden`
-// and `/clip all` both load their instructions from here. Everything else ships
+// A skill is builtin only when evot itself dispatches to it by name:
+// `/harden`, `/clip all`, and `/sessions <query>`. Everything else ships
 // in the evot-skills catalog and is installed on demand.
 const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef {
@@ -25,6 +25,10 @@ const BUILTINS: &[BuiltinDef] = &[
     BuiltinDef {
         name: "memory",
         content: include_str!("prompts/memory.md"),
+    },
+    BuiltinDef {
+        name: "session-search",
+        content: include_str!("prompts/session-search.md"),
     },
 ];
 

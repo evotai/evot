@@ -104,11 +104,12 @@ pub enum SubmitOutcome {
 /// Commands that run as an ordinary agent turn with a prepared prompt.
 pub(super) struct PromptCommandContext<'a> {
     pub skills_dirs: &'a [PathBuf],
-    /// Root of the session archive; `None` when storage is not on disk.
-    pub sessions_dir: Option<&'a std::path::Path>,
+    pub storage: &'a dyn crate::storage::Storage,
+    pub session: &'a crate::sessions::Session,
+    pub llm: &'a LlmConfig,
 }
 
-pub(super) fn expand_prompt_command(
+pub(super) async fn expand_prompt_command(
     mut request: QueryRequest,
     ctx: &PromptCommandContext<'_>,
 ) -> Result<QueryRequest> {
@@ -125,10 +126,35 @@ pub(super) fn expand_prompt_command(
             clip_session_prompt(&instructions)
         }
         Some(Command::SessionSearch(search)) => {
-            let sessions_dir = ctx.sessions_dir.ok_or_else(|| {
-                EvotError::Conf("Session search needs the on-disk session archive.".to_string())
-            })?;
-            search.prompt(sessions_dir, chrono::Utc::now())
+            let skill = crate::agent::prompt::skill::load_skill(ctx.skills_dirs, "session-search")
+                .map_err(|error| {
+                    EvotError::Agent(format!("cannot load session-search skill: {error}"))
+                })?;
+            let instructions = crate::agent::prompt::skill::load_skill_instructions(&skill)
+                .map_err(|error| {
+                    EvotError::Agent(format!("cannot read session-search skill: {error}"))
+                })?;
+            let current_session_id = ctx.session.session_id().await;
+            let (history, _, _) = ctx.session.context_snapshot().await;
+            let history_tokens = evot_engine::context::total_tokens(&history)
+                .max(ctx.session.meta().await.context_tokens);
+            let window = ctx.llm.model_config.context_window() as usize;
+            // Reserve output and system/tools/skill overhead; search evidence
+            // must not dominate the model window even in an empty conversation.
+            let budget = window
+                .saturating_sub(history_tokens)
+                .saturating_sub((ctx.llm.model_config.max_tokens() as usize).min(8_192))
+                .saturating_sub(8_192)
+                .min(window / 2);
+            let candidates = crate::search::SessionCandidates::collect(
+                ctx.storage,
+                &search,
+                chrono::Utc::now(),
+                &current_session_id,
+                budget,
+            )
+            .await?;
+            candidates.prompt(&search.query, &instructions)?
         }
         _ => return Ok(request),
     };

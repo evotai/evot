@@ -492,11 +492,14 @@ impl Agent {
         // `/clip all` and `/sessions <query>` become prepared prompts and
         // continue as a normal run.
         let skills_dirs = self.assembler.skills_dirs.read().clone();
-        let sessions_dir = self.assembler.sessions_dir();
+        let llm = request.llm.clone().unwrap_or_else(|| self.llm());
         let request = expand_prompt_command(request, &PromptCommandContext {
             skills_dirs: &skills_dirs,
-            sessions_dir: sessions_dir.as_deref(),
-        })?;
+            storage: self.storage.as_ref(),
+            session: &session,
+            llm: &llm,
+        })
+        .await?;
 
         let run = self.start_run(request, session).await?;
         Ok(SubmitOutcome::Run(run))

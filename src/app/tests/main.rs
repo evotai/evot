@@ -78,8 +78,6 @@ mod run_registry_test;
 mod run_user_persistence_test;
 #[path = "schema_compat_test.rs"]
 mod schema_compat_test;
-#[path = "search_test.rs"]
-mod search_test;
 #[path = "server_protocol_test.rs"]
 mod server_protocol_test;
 mod session_fork_test;
@@ -92,6 +90,7 @@ mod session_observability_test;
 #[path = "session_queries_test.rs"]
 mod session_queries_test;
 mod session_rename_test;
+mod session_search_test;
 mod session_service_test;
 #[path = "session_task_test.rs"]
 mod session_task_test;

@@ -1,11 +1,4 @@
-//! `/sessions <query>`: the task prompt a normal agent turn expands into.
-//!
-//! Code owns the deterministic part — the time window, where the archive
-//! lives, what a transcript looks like, the answer shape. The agent owns the
-//! semantic part with its ordinary tools: list the sessions in the window,
-//! grep transcripts with keyword variants, read the matching parts, decide.
-
-use std::path::Path;
+//! Command arguments for semantic session retrieval.
 
 /// Lookback when the user gives no window.
 pub const DEFAULT_WINDOW_DAYS: u32 = 7;
@@ -49,39 +42,6 @@ impl SessionSearch {
             None => "all time".to_string(),
             Some(days) => describe_days(days),
         }
-    }
-
-    /// The user turn the agent receives.
-    pub fn prompt(&self, sessions_dir: &Path, now: chrono::DateTime<chrono::Utc>) -> String {
-        let dir = sessions_dir.display();
-        let scope = match self.window_days {
-            None => "Consider the whole archive.".to_string(),
-            Some(days) => {
-                let cutoff = now - chrono::Duration::days(i64::from(days));
-                format!(
-                    "Consider only sessions whose session.json `updated_at` is on or after {} ({}).",
-                    cutoff.format("%Y-%m-%dT%H:%M:%SZ"),
-                    describe_days(days),
-                )
-            }
-        };
-        format!(
-            "Find my past sessions that are about: {query}\n\n\
-             Archive: {dir}/<session_id>/ holds session.json (metadata: title, custom_title, cwd, \
-             source, updated_at) and transcript.jsonl (one JSON object per line; items with \
-             \"type\":\"user\" carry my prompts in \"text\", assistant items carry replies and tool calls).\n\
-             {scope} Skip sessions whose source is \"automation\". Directory mtimes track updated_at, \
-             so listing by mtime is a fast way to find the window.\n\n\
-             Method: match on meaning — synonyms, translations, abbreviations and closely related \
-             concepts all count. Start from titles, then confirm with grep over the transcripts \
-             using several keyword variants, reading only the matching parts. A session that merely \
-             mentions a query word in passing is not a hit. Do not modify anything.\n\n\
-             Answer with one short summary line, then one line per relevant session, most relevant \
-             first, in exactly this form and nothing else after it:\n\
-             - <session_id> — <title> — <one-line reason>\n\
-             If nothing is relevant, end with exactly: NONE",
-            query = self.query,
-        )
     }
 }
 

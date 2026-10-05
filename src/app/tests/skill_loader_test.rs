@@ -292,7 +292,7 @@ fn nested_frontmatter_error_keeps_valid_siblings() -> Result<(), Box<dyn std::er
 #[test]
 fn builtin_directory_contains_all_builtin_skills() -> Result<(), Box<dyn std::error::Error>> {
     let root = ensure_builtin_skills_dir()?;
-    for name in ["harden", "memory"] {
+    for name in ["harden", "memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
     }
     Ok(())
@@ -304,7 +304,7 @@ fn all_builtin_skills_load() -> Result<(), Box<dyn std::error::Error>> {
     let specs = load_skills(&empty)?;
     let names: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
 
-    assert_eq!(names, vec!["harden", "memory"]);
+    assert_eq!(names, vec!["harden", "memory", "session-search"]);
     assert!(specs.iter().all(|skill| !skill.description.is_empty()));
     Ok(())
 }
@@ -345,7 +345,7 @@ fn stale_builtin_dirs_are_removed() -> Result<(), Box<dyn std::error::Error>> {
 
     let root = ensure_builtin_skills_dir()?;
     assert!(!stale.exists(), "stale builtin dir should be removed");
-    for name in ["harden", "memory"] {
+    for name in ["harden", "memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
     }
     Ok(())

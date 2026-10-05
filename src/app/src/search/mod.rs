@@ -1,10 +1,10 @@
-mod matcher;
-mod session_search;
-mod session_task;
+mod session_candidates;
+mod session_digest;
+mod session_query;
+mod session_text;
 
-pub use matcher::TextMatcher;
-pub use session_search::SearchHit;
-pub use session_search::SessionSearcher;
-pub use session_search::SessionWithText;
-pub use session_task::SessionSearch;
-pub use session_task::DEFAULT_WINDOW_DAYS;
+pub use session_candidates::SessionCandidates;
+pub use session_digest::SessionDigest;
+pub use session_query::SessionSearch;
+pub use session_query::DEFAULT_WINDOW_DAYS;
+pub use session_text::SessionWithText;

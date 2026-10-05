@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use evot::search::SessionSearcher;
 use evot::search::SessionWithText;
 use evot::storage::fs::FsStorage;
 use evot::storage::MemoryStorage;
@@ -32,9 +31,6 @@ async fn contract(storage: Arc<dyn Storage>) -> TestResult {
     assert!(SessionWithText::extract(persisted.clone(), &[])
         .search_text
         .contains("生产告警排查"));
-    assert!(SessionSearcher::new("生产告警")
-        .matches_meta(&persisted)
-        .is_some());
     assert_eq!(
         storage.list_sessions(ListSessions::default()).await?[0].custom_title,
         persisted.custom_title

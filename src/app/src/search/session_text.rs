@@ -1,14 +1,6 @@
-use super::TextMatcher;
 use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 use crate::types::TranscriptItem;
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct SearchHit {
-    pub session: SessionMeta,
-    pub matched_field: String,
-    pub snippet: String,
-}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SessionWithText {
@@ -45,64 +37,6 @@ impl SessionWithText {
             changed_paths: collect_changed_paths(entries),
             session,
         }
-    }
-}
-
-pub struct SessionSearcher {
-    matcher: TextMatcher,
-}
-
-impl SessionSearcher {
-    pub fn new(query: &str) -> Self {
-        Self {
-            matcher: TextMatcher::new(query.trim()),
-        }
-    }
-
-    pub fn matches_meta(&self, session: &SessionMeta) -> Option<SearchHit> {
-        if self.matcher.is_empty() {
-            return Some(hit(session, "all", ""));
-        }
-
-        let fields = [
-            (
-                "custom_title",
-                session.custom_title.as_deref().unwrap_or(""),
-            ),
-            ("title", session.title.as_deref().unwrap_or("")),
-            ("cwd", &session.cwd),
-            ("source", &session.source),
-            ("model", &session.model),
-            ("session_id", &session.session_id),
-        ];
-
-        for (name, value) in &fields {
-            if self.matcher.is_substring(value) {
-                return Some(hit(session, name, value));
-            }
-        }
-        None
-    }
-
-    pub fn matches_transcript(
-        &self,
-        session: &SessionMeta,
-        entries: &[TranscriptEntry],
-    ) -> Option<SearchHit> {
-        if self.matcher.is_empty() {
-            return None;
-        }
-
-        for entry in entries {
-            let Some(text) = extract_text(&entry.item) else {
-                continue;
-            };
-            if self.matcher.matches(&text) {
-                let snippet = truncate(&text, 120);
-                return Some(hit(session, "content", &snippet));
-            }
-        }
-        None
     }
 }
 
@@ -293,35 +227,5 @@ fn collect_item_text(
         }
         TranscriptItem::ToolResult { content, .. } => push(tool_results, content),
         _ => {}
-    }
-}
-
-fn extract_text(item: &TranscriptItem) -> Option<String> {
-    let mut conversation = Vec::new();
-    let mut tool_results = Vec::new();
-    collect_item_text(item, &mut conversation, &mut tool_results);
-    conversation.extend(tool_results);
-    (!conversation.is_empty()).then(|| conversation.join(" "))
-}
-
-fn hit(session: &SessionMeta, field: &str, snippet: &str) -> SearchHit {
-    SearchHit {
-        session: session.clone(),
-        matched_field: field.to_string(),
-        snippet: snippet.to_string(),
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    let first_line = s.lines().next().unwrap_or(s);
-    if first_line.chars().count() <= max {
-        first_line.to_string()
-    } else {
-        let end: usize = first_line
-            .char_indices()
-            .nth(max)
-            .map(|(i, _)| i)
-            .unwrap_or(first_line.len());
-        format!("{}…", &first_line[..end])
     }
 }

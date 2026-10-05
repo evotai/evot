@@ -1,9 +1,9 @@
 /**
  * `/sessions <query>` on the TUI side.
  *
- * The search itself is an ordinary agent turn: the engine expands the
- * command into a task prompt and the agent works the archive with its normal
- * tools. This module only reads the answer back — the `- <id> — …` lines —
+ * The search itself is an ordinary agent turn: the app prepares compact
+ * session evidence and loads the session-search skill for semantic ranking.
+ * This module only reads the answer back — the `- <id> — …` lines —
  * so the REPL can open the resume selector on what the agent found.
  */
 

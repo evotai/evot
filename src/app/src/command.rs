@@ -23,9 +23,8 @@ pub enum Command {
     /// command that saves the latest assistant reply locally.
     ClipSession,
     /// `/sessions <query> [--days N | --since 2w | --all]` — search past
-    /// sessions by meaning through a normal agent turn: the command expands
-    /// into a task prompt and the agent uses its ordinary tools on the
-    /// archive. Bare `/sessions` is a TUI command (the resume selector).
+    /// sessions by meaning with the session-search skill over locally prepared
+    /// evidence. Bare `/sessions` is a TUI command (the resume selector).
     SessionSearch(crate::search::SessionSearch),
     UsageError(String),
 }
