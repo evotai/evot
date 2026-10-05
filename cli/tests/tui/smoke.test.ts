@@ -439,8 +439,11 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await session.waitFor('production alerts')
       session.checkpoint()
       session.write('/production')
-      const filtered = await session.waitFor('production alerts')
-      expect(filtered).toContain(SEEDED_SESSION_ID.slice(0, 8))
+      // Search snippets can truncate the inline ID. Check the actual filtered
+      // row and count rather than requiring hidden metadata to fit on screen.
+      const filtered = await session.waitForScreen(/Search\s+production(?:\s|$)/)
+      expect(filtered).toMatch(/Sessions\s+1 \/ 1(?:\r|\n)/)
+      expect(filtered).toMatch(/·\s+production alerts/)
       session.write('\x1b')
     } finally {
       await session.kill()
@@ -456,16 +459,17 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // and retype the /re prefix immediately; input must remain responsive.
       session.checkpoint()
       session.write('/resume\x7f\x7f\x7f\x7f\x7f\x7f\x7f/re')
-      const preview = await session.waitFor('/re', 1_000)
-      expect(preview).toContain('Resume session')
-      expect(preview).toContain('type to search titles, prompts and transcript text')
+      const preview = await session.waitForScreen('❭ /resume', 1_000)
+      expect(preview).toMatch(/Sessions\s+\d+(?:\r|\n)/)
+      expect(preview).toContain('Search  / to search')
+      expect(preview).toContain('type search')
 
       // A unique prefix is enough: the existing session appears without
       // completing /resume or pressing an arrow. Like `/mo`, the preview uses
       // the complete shared current-row treatment before keyboard promotion.
-      const populated = await session.waitFor(createdSessionId!)
-      expect(populated).toContain('Resume session')
-      expect(populated).toMatch(new RegExp(`·\\s+${createdSessionId}`))
+      const populated = await session.waitForScreen(createdSessionId)
+      expect(populated).toMatch(/Sessions\s+1(?:\r|\n)/)
+      expect(populated).toMatch(/·\s+smoke resume fixture/)
       expect(session.outputSince()).toContain(selectionBackgroundAnsi())
 
       // An ambiguous bare slash is a bridge between command windows. Keep the
@@ -490,7 +494,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // Return to resume so the rest of this test exercises its focus path.
       session.checkpoint()
       session.write('\x7f\x7fre')
-      await session.waitFor(createdSessionId!)
+      await session.waitForScreen(createdSessionId)
 
       // The first arrow transfers focus directly to the first session. The /re
       // composer remains in the same frame while metadata expansion waits for
@@ -531,7 +535,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await Bun.sleep(300)
       const afterLoad = stripAnsi(session.outputSince())
       expect(afterLoad).not.toContain('Loading sessions…')
-      expect(afterLoad).not.toContain('Resume session')
+      expect(afterLoad).not.toMatch(/Sessions\s+\d+/)
     } finally {
       await session.kill()
     }
@@ -573,7 +577,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('/resume\x0d')
       // The first paint can be the async metadata placeholder (count 0).
       // Wait for the real list rather than asserting on that intermediate frame.
-      const reopened = await session.waitForScreen(/Resume session\s+1(?:\r|\n)/)
+      const reopened = await session.waitForScreen(/Sessions\s+1(?:\r|\n)/)
       expect(reopened).toContain('Current cwd')
       // The local provider fails promptly, so the fallback title can already
       // be set. Assert the actual prompt rather than racing title generation.
@@ -588,8 +592,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     try {
       session.checkpoint()
       session.write('/re')
-      const current = await session.waitFor(SEEDED_SESSION_ID.slice(0, 8))
-      expect(current).toContain('Resume session')
+      const current = await session.waitForScreen(SEEDED_SESSION_ID.slice(0, 8))
+      expect(current).toMatch(/Sessions\s+1(?:\r|\n)/)
       expect(current).toContain('smoke resume fixture')
       expect(current).not.toContain('Other cwd')
       expect(current).not.toContain('other cwd fixture')
@@ -605,9 +609,11 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // cross-project history without making it part of the default recents.
       session.checkpoint()
       session.write('other cwd fixture')
-      const searched = await session.waitFor(OTHER_CWD_SESSION_ID.slice(0, 8))
+      // The title search produces a context snippet instead of the inline ID.
+      const searched = await session.waitForScreen(/Search\s+other cwd fixture(?:\s|$)/)
       expect(searched).toContain('Other cwd')
-      expect(searched).toContain('other cwd fixture')
+      expect(searched).toMatch(/·\s+other cwd fixture/)
+      expect(searched).not.toContain('smoke resume fixture')
     } finally {
       await session.kill()
     }
@@ -623,10 +629,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // these current-project rows can come from the bounded startup cache.
       // Seeing all three proves the live preview automatically loaded the same
       // complete metadata catalog used by submitted `/resume`.
-      const expanded = await session.waitFor('11000000')
-      await session.waitFor('12000000')
-      await session.waitFor('13000000')
-      expect(expanded).toMatch(/Resume session.*\s3(?:\r|\n)/)
+      await session.waitForScreen('11000000')
+      await session.waitForScreen('12000000')
+      const expanded = await session.waitForScreen('13000000')
+      expect(expanded).toMatch(/Sessions\s+3(?:\r|\n)/)
       expect(expanded).toContain('older current session 1')
       expect(expanded).not.toContain('Other cwd')
       expect(expanded).not.toContain('newer other session')
