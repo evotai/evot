@@ -4,6 +4,13 @@ DEV_CONFIG ?= $(HOME)/.evotai/evot.env
 CARGO ?= cargo
 BUN_DIR := $(HOME)/.bun/bin
 export PATH := $(BUN_DIR):$(PATH)
+# Prefer the standalone toolchain for local builds when available. Xcode beta
+# linkers can emit addons the host dyld cannot load. Explicit overrides win.
+ifeq ($(shell uname -s),Darwin)
+ifneq ($(wildcard /Library/Developer/CommandLineTools/usr/bin/clang),)
+export DEVELOPER_DIR ?= /Library/Developer/CommandLineTools
+endif
+endif
 NEXTEST := $(CARGO) nextest run --no-tests=pass
 COVERAGE_TARGETS := --workspace --exclude evot-napi
 COVERAGE_CMD := $(CARGO) llvm-cov nextest $(COVERAGE_TARGETS)
@@ -113,7 +120,7 @@ ci: check test
 # -- TS CLI -------------------------------------------------------------------
 
 build-napi:
-	cd cli && bun install && bunx napi build --manifest-path addon/Cargo.toml --release --platform --output-dir .
+	cd cli && bun install && bun run build:napi
 
 build-cli: build-napi
 	cd cli && bun run build:cli
@@ -178,7 +185,7 @@ install: build-cli
 	fi
 
 build-napi-dev:
-	cd cli && bun install && bunx napi build --manifest-path addon/Cargo.toml --platform --output-dir .
+	cd cli && bun install && bunx napi build --manifest-path addon/Cargo.toml --platform --output-dir . --no-js && bun scripts/check-native.ts
 
 dev: build-napi-dev
 	cd cli && bun install && bun run src/index.ts

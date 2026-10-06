@@ -39,9 +39,10 @@ const PLANNING_SECTION: &str = include_str!("prompts/plan.md");
 /// Response-language guideline. Meaningful only for a human at the terminal,
 /// so it rides on [`PromptMode::Interactive`].
 const LANGUAGE_SECTION: &str = "\
-Respond in the same language the user writes in. If the user switches \
-languages, follow the switch. Technical terms, code, identifiers, file paths, \
-and command names stay in their original form — never translate them.";
+Use the language established by the user's requests and preferences. \
+Runtime notifications and tool output do not change that language. \
+Technical terms, code, identifiers, file paths, and command names stay \
+in their original form — never translate them.";
 
 /// Sandbox constraints. Active only when the agent runs sandboxed.
 const SANDBOX_SECTION: &str = "\

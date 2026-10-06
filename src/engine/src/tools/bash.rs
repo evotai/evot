@@ -194,6 +194,7 @@ impl AgentTool for BashTool {
             // tool exists for.
             vec![
                 "Start ordinary commands in the foreground. Reserve `run_in_background: true` for explicitly independent work, not merely commands expected to take time. Read the returned output path to check progress, or call {{task_output}} once to wait when a later step needs the result. Never poll a task with sleep loops or repeated {{task_output}} calls.",
+                "Describe each command's subject and purpose in `description`. Background <task-notification> events report results, not new user requests. Match them to existing work using their task ID and description, while respecting the user's current request.",
             ]
         } else {
             Vec::new()
@@ -205,6 +206,10 @@ impl AgentTool for BashTool {
             "command": {
                 "type": "string",
                 "description": "Bash command to execute"
+            },
+            "description": {
+                "type": "string",
+                "description": "Short description naming the task or subject and purpose of this command. Saved at launch and included in background completion notices; use it to distinguish concurrent work."
             },
             "timeout": {
                 "type": "number",
@@ -234,7 +239,7 @@ impl AgentTool for BashTool {
         serde_json::json!({
             "type": "object",
             "properties": properties,
-            "required": ["command"]
+            "required": ["command", "description"]
         })
     }
 
@@ -322,6 +327,7 @@ impl AgentTool for BashTool {
             .start(StartProcess {
                 command,
                 command_text: command_text.to_string(),
+                description: params["description"].as_str().map(str::to_string),
                 tool_call_id: ctx.tool_call_id.clone(),
                 cwd,
                 timeout,
@@ -466,9 +472,15 @@ fn background_result(
     let snapshot = manager
         .snapshot(task_id)
         .ok_or_else(|| ToolError::Failed(format!("Process task disappeared: {task_id}")))?;
+    let purpose = snapshot
+        .description
+        .as_deref()
+        .map(|description| format!("Task: {description}\n"))
+        .unwrap_or_default();
     let text = format!(
-        "{}\nTask ID: {}\nOutput: {}\n{}",
+        "{}\n{}Task ID: {}\nOutput: {}\n{}",
         background_lede(reason, waited),
+        purpose,
         snapshot.task_id,
         snapshot.output_path.display(),
         BACKGROUND_GUIDANCE,

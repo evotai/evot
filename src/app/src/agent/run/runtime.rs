@@ -111,6 +111,8 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
 
     if !control.is_cancelled() {
         let outcome = match factory.build(initial_input).await {
+            // A stale notification wake has no input left to process.
+            Ok(turn) if turn.input.is_empty() => None,
             Ok(turn) => {
                 Some(drive_one_turn(turn, &tx, &control, &run_id, &session_id, started_at).await)
             }

@@ -50,6 +50,131 @@ pub fn text(result: &evotengine::ToolResult) -> String {
         .join("\n")
 }
 
+/// Contract used by historical CLI readers: field order and a one-line summary
+/// remain unchanged. Only the summary's free-form text gains the task purpose.
+fn strict_legacy_notification(text: &str) -> Result<&str, Box<dyn Error>> {
+    let lines: Vec<_> = text.trim_end().lines().collect();
+    assert_eq!(lines.len(), 7, "{text}");
+    assert_eq!(lines[0], "<task-notification>");
+    assert!(lines[1].starts_with("<task-id>") && lines[1].ends_with("</task-id>"));
+    assert_eq!(lines[2], "<status>completed</status>");
+    assert_eq!(lines[3], "<exit-code>0</exit-code>");
+    assert!(lines[5].starts_with("<output-file>") && lines[5].ends_with("</output-file>"));
+    assert_eq!(lines[6], "</task-notification>");
+    let summary = lines[4]
+        .strip_prefix("<summary>")
+        .and_then(|text| text.strip_suffix("</summary>"))
+        .ok_or("invalid summary")?;
+    assert!(!summary.contains(['<', '>']));
+    Ok(summary)
+}
+
+#[test]
+fn historical_completion_notice_keeps_its_contract() -> Result<(), Box<dyn Error>> {
+    let historical = include_str!("../fixtures/background_notifications/legacy.txt");
+    assert_eq!(
+        strict_legacy_notification(historical)?,
+        "Command \"printf done\" completed"
+    );
+    Ok(())
+}
+
+#[test]
+fn background_description_is_required_and_notifications_are_not_user_requests() {
+    let bash = BashTool::new().with_process_manager(Arc::new(ProcessManager::new()));
+    let schema = bash.parameters_schema();
+    assert_eq!(schema["properties"]["description"]["type"], "string");
+    assert_eq!(
+        schema["required"],
+        serde_json::json!(["command", "description"])
+    );
+    let guidance = bash.prompt_guidelines().join("\n");
+    assert!(guidance.contains("events report results, not new user requests"));
+    assert!(guidance.contains("task ID and description"));
+    assert!(guidance.contains("respecting the user's current request"));
+}
+
+#[tokio::test]
+async fn background_descriptions_survive_detach_and_distinguish_completion_notices(
+) -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let manager = Arc::new(ProcessManager::new());
+    let bash = BashTool::new()
+        .with_process_manager(manager.clone())
+        .with_foreground_wait(Duration::from_millis(1));
+    let mut tasks = Vec::new();
+    // Launch in the foreground and detach: descriptions must not be limited to
+    // explicitly backgrounded commands. Two jobs coexist in the same manager.
+    for description in [
+        "R0022: Q83/Q57 16-pair retest",
+        "performance list: export latest medians",
+    ] {
+        let running = bash
+            .execute(
+                serde_json::json!({
+                    "command": "sleep 0.2;\nprintf done",
+                    "description": format!("  {description}\n<context>  "),
+                }),
+                context("bash", dir.path()),
+            )
+            .await?;
+        let id = task_id(&running)?.to_string();
+        let purpose = format!("{description} <context>");
+        assert!(text(&running).contains(&format!("Task: {purpose}")));
+        assert_eq!(
+            manager
+                .snapshot(&id)
+                .ok_or("missing snapshot")?
+                .description
+                .as_deref(),
+            Some(purpose.as_str())
+        );
+        tasks.push((id, description));
+    }
+    for (id, _) in &tasks {
+        let completed = manager
+            .wait(id, Duration::from_secs(3))
+            .await
+            .ok_or("missing task")?;
+        assert_eq!(completed.status.as_str(), "completed");
+    }
+    let notices = manager.take_notifications();
+    assert_eq!(notices.len(), 2);
+    for (id, description) in tasks {
+        let notice = notices
+            .iter()
+            .find(|text| text.contains(&id))
+            .ok_or("missing notice")?;
+        let summary = strict_legacy_notification(notice)?;
+        assert!(summary.contains(description));
+        assert!(summary.contains("sleep 0.2; printf done"));
+    }
+    assert!(manager.take_notifications().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn blank_description_does_not_block_execution() -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let manager = Arc::new(ProcessManager::new());
+    let bash = BashTool::new().with_process_manager(manager.clone());
+    let result = bash
+        .execute(
+            serde_json::json!({
+                "command": "printf done", "description": "  \n\t", "run_in_background": true,
+            }),
+            context("bash", dir.path()),
+        )
+        .await?;
+    let completed = manager
+        .wait(task_id(&result)?, Duration::from_secs(3))
+        .await
+        .ok_or("missing task")?;
+    assert_eq!(completed.status.as_str(), "completed");
+    assert_eq!(completed.output, "done");
+    Ok(())
+}
+
 #[test]
 fn background_parameters_are_hidden_without_tui_manager() {
     let bash = BashTool::new();

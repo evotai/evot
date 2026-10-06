@@ -1,5 +1,15 @@
 //! Tests for the summarizer subsystem.
 
+#[test]
+fn summary_preserves_background_context_without_attributing_events_to_the_user() {
+    let system = evotengine::context::compaction::summarizer::prompt::SYSTEM_PROMPT;
+    assert!(system.contains("Distinguish user requests from automated <task-notification> events"));
+    assert!(system.contains("both use the user role"));
+    assert!(system.contains("background-task IDs, descriptions, status"));
+    assert!(system.contains("output locations alongside pending work"));
+    assert!(system.contains("Preserve the user's language preferences"));
+}
+
 use std::sync::Arc;
 
 use evotengine::context::compaction::emergency;

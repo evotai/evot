@@ -6,7 +6,10 @@ You are a context summarization assistant. Your task is to read a conversation \
 between a user and an AI coding assistant, then produce a structured summary \
 following the exact format specified.\n\n\
 Do NOT continue the conversation. Do NOT respond to any questions in the \
-conversation. ONLY output the structured summary wrapped in <summary> tags.";
+conversation. ONLY output the structured summary wrapped in <summary> tags.\n\n\
+Distinguish user requests from automated <task-notification> events, even when \
+both use the user role. Preserve background-task IDs, descriptions, status, and \
+output locations alongside pending work. Preserve the user's language preferences.";
 
 /// Initial summarization prompt (no previous summary).
 pub const INITIAL_PROMPT: &str = "\

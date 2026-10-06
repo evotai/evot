@@ -156,6 +156,41 @@ async fn exercise_persistence() -> TestResult {
     }
     drop(calls);
 
+    // A stale completion wake must finish its lifecycle without calling the
+    // provider or persisting a synthetic 'continue' user message.
+    let SubmitOutcome::Run(mut wake) = agent
+        .submit_to_session(QueryRequest::text(""), session.clone())
+        .await?
+    else {
+        return Err("expected wake run".into());
+    };
+    while let Some(event) = wake.next().await {
+        if let evot::agent::RunEventPayload::RunFinished {
+            turn_count,
+            transcript_count,
+            ..
+        } = event.payload
+        {
+            assert_eq!(turn_count, 0);
+            assert_eq!(transcript_count, 0);
+        }
+    }
+    assert_eq!(
+        requests.lock().await.len(),
+        3,
+        "empty wake called the provider"
+    );
+    assert!(!agent.has_active_run(&info.session_id));
+    let after_wake = session.load_all_entries().await?;
+    let users_after_wake: Vec<_> = after_wake
+        .iter()
+        .filter_map(|entry| match &entry.item {
+            TranscriptItem::User { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(users_after_wake, expected);
+
     // A fresh Agent rules out recovering the missing instruction from the old
     // run's in-memory context instead of the persisted session.
     let reloaded_agent = Agent::new_with_provider_for_test(&config, "/work", storage, provider())?;

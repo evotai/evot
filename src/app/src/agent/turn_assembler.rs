@@ -218,14 +218,10 @@ impl TurnAssembler {
                 );
             }
         }
-        // Another turn may have drained the notices that triggered this wake.
-        // Never send a contentless message to the provider in that case.
-        if input.iter().all(|content| matches!(content, evot_engine::Content::Text { text } if text.trim().is_empty())) {
-            input = vec![evot_engine::Content::Text {
-                text: "A background task finished, but its result was already delivered. \
-                       Continue from where you left off, or wait for the user.".to_string(),
-            }];
-        }
+        input.retain(|content| match content {
+            evot_engine::Content::Text { text } => !text.trim().is_empty(),
+            _ => true,
+        });
         Ok(TurnInput {
             options: EngineOptions {
                 provider: llm.provider,

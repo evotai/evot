@@ -9,6 +9,10 @@ async function main() {
   const rawArgs = process.argv.slice(2)
   const opts = await parseArgs(rawArgs)
 
+  // Load outside best-effort catches: a failed first import must terminate
+  // launch, not leave a partial module for createAgent to reuse.
+  const { version } = await import('./native/index.js')
+
   // Apply a background-staged download before any interactive path comes up.
   // A verified archive is already on disk, so this is a local copy-and-swap —
   // the whole point of staging was to keep it off the network. Interactive
@@ -22,7 +26,6 @@ async function main() {
   if (opts.command === 'repl' || opts.command === 'login' || opts.command === 'prompt') {
     try {
       const { applyStagedOnStartup, execIntoInstalledUpdate } = await import('./update/index.js')
-      const { version } = await import('./native/index.js')
       const applied = await applyStagedOnStartup(version())
       if (applied) execIntoInstalledUpdate(applied)
     } catch { /* never block launch on update bookkeeping */ }
@@ -91,7 +94,6 @@ async function main() {
 
     case 'update': {
       const { runUpdate } = await import('./update/index.js')
-      const { version } = await import('./native/index.js')
       console.log('  checking for updates...')
       // The installer runs in its own process group so cancellation can reach
       // curl/tar; Ctrl+C on this CLI must therefore be forwarded explicitly, or

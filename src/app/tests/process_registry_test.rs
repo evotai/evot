@@ -85,6 +85,7 @@ async fn assert_manager_closed(manager: &evot_engine::tools::ProcessManager) -> 
     let request = evot_engine::tools::process::StartProcess {
         command: tokio::process::Command::new("evot-registry-test-must-not-spawn"),
         command_text: "closed manager test".into(),
+        description: None,
         tool_call_id: "closed".into(),
         cwd: dir.path().to_path_buf(),
         timeout: std::time::Duration::from_secs(1),

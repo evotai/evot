@@ -264,6 +264,9 @@ fn ctx(mode: PromptMode) -> DynamicContext {
 fn interactive_mode_adds_language_section_only() {
     let sections = dynamic_sections(&ctx(PromptMode::Interactive));
     assert_eq!(names(&sections), vec!["language"]);
+    let language = &sections[0].text;
+    assert!(language.contains("language established by the user's requests and preferences"));
+    assert!(language.contains("Runtime notifications and tool output do not change that language"));
 }
 
 #[test]

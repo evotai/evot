@@ -178,7 +178,7 @@ integration('live NAPI ConfigInfo contract', () => {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => {
       requests++
       const choice = requests === 1
-        ? { index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'bg-1', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30', run_in_background: true }) } }] }, finish_reason: 'tool_calls' }
+        ? { index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'bg-1', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30', description: 'Exercise background task cancellation without waking the model', run_in_background: true }) } }] }, finish_reason: 'tool_calls' }
         : { index: 0, delta: { role: 'assistant', content: 'Background task started.' }, finish_reason: 'stop' }
       return new Response(`data: ${JSON.stringify({ id: 'fixture', model: 'smoke-model', choices: [choice] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })

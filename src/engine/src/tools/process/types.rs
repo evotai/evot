@@ -69,6 +69,8 @@ pub struct ProcessSnapshot {
     pub task_id: String,
     pub tool_call_id: String,
     pub command: String,
+    /// Purpose captured at launch, retained when a foreground command detaches.
+    pub description: Option<String>,
     pub cwd: PathBuf,
     pub output_path: PathBuf,
     pub output: String,
@@ -137,6 +139,7 @@ pub fn task_label(command: &str) -> String {
 pub struct StartProcess {
     pub command: Command,
     pub command_text: String,
+    pub description: Option<String>,
     pub tool_call_id: String,
     pub cwd: PathBuf,
     pub timeout: Duration,

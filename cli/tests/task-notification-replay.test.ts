@@ -14,6 +14,24 @@ const historical = `<task-notification>
 <output-file>/tmp/tool-results/output.txt</output-file>
 </task-notification>`
 
+test('historical Rust notification fixture is readable by the current CLI', async () => {
+  const historical = await Bun.file(new URL('../../src/engine/tests/fixtures/background_notifications/legacy.txt', import.meta.url)).text()
+  const parts = replayUserText(historical)
+  expect(parts).toHaveLength(1)
+  expect(parts[0]?.kind).toBe('task-notification')
+})
+
+test('described completion notices remain readable without changing the envelope', () => {
+  const described = historical.replace('killed', 'completed').replace(
+    'Command "run tests" was cancelled by the user',
+    'Task "R0022: Q83/Q57 16-pair retest": Command "run tests" completed',
+  )
+  const messages = transcriptToMessages([{ type: 'user', text: `生成中文性能对比清单\n${described}` }])
+  expect(messages.map(message => message.role)).toEqual(['user', 'system'])
+  expect(messages[0]?.text).toBe('生成中文性能对比清单')
+  expect(messages[1]?.text).toContain('Background task completed')
+})
+
 test('legacy task notifications replay as system notices, never user bubbles', () => {
   const messages = transcriptToMessages([{ type: 'user', text: historical }])
   expect(messages).toHaveLength(1)

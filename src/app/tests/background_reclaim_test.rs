@@ -79,6 +79,7 @@ fn agent_that_backgrounds_command(
             name: "bash".into(),
             arguments: serde_json::json!({
                 "command": command,
+                "description": "test background process reclaim",
                 "run_in_background": true,
             }),
         }]),

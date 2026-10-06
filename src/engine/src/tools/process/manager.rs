@@ -119,6 +119,7 @@ struct ProcessTask {
     id: String,
     tool_call_id: String,
     command: String,
+    description: Option<String>,
     cwd: PathBuf,
     output_path: PathBuf,
     started_at: Instant,
@@ -332,6 +333,10 @@ impl ProcessManager {
             id: task_id.clone(),
             tool_call_id: request.tool_call_id,
             command: request.command_text,
+            description: request.description.and_then(|description| {
+                let description = description.split_whitespace().collect::<Vec<_>>().join(" ");
+                (!description.is_empty()).then_some(description)
+            }),
             cwd: request.cwd,
             output_path,
             started_at: Instant::now(),
@@ -983,6 +988,7 @@ impl ProcessTask {
             task_id: self.id.clone(),
             tool_call_id: self.tool_call_id.clone(),
             command: self.command.clone(),
+            description: self.description.clone(),
             cwd: self.cwd.clone(),
             output_path: self.output_path.clone(),
             output: output.text(),
@@ -1042,8 +1048,10 @@ fn format_notification(snapshot: &ProcessSnapshot) -> String {
 }
 
 fn notification_summary(snapshot: &ProcessSnapshot) -> String {
-    let command = snapshot.command.replace(['<', '>'], "");
-    match snapshot.status {
+    // Keep the published single-line envelope intact, even for multiline scripts
+    // and descriptions containing XML-like text.
+    let command = notification_text(&snapshot.command);
+    let outcome = match snapshot.status {
         ProcessStatus::Completed => format!("Command \"{}\" completed", command),
         ProcessStatus::Failed => format!("Command \"{}\" failed", command),
         // Unreachable in practice: notifications are only armed when a task is
@@ -1062,5 +1070,16 @@ fn notification_summary(snapshot: &ProcessSnapshot) -> String {
         ),
         ProcessStatus::Killed => format!("Command \"{}\" was stopped", command),
         _ => format!("Command \"{}\" changed state", command),
+    };
+    match snapshot.description.as_deref() {
+        Some(description) => format!("Task \"{}\": {outcome}", notification_text(description)),
+        None => outcome,
     }
+}
+
+fn notification_text(text: &str) -> String {
+    text.replace(['<', '>'], "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }

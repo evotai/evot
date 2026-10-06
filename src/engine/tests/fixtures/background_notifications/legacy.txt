@@ -1,0 +1,7 @@
+<task-notification>
+<task-id>38d5f299-ea7e-4c3d-b24f-aa704129d831</task-id>
+<status>completed</status>
+<exit-code>0</exit-code>
+<summary>Command "printf done" completed</summary>
+<output-file>/tmp/tool-results/output.txt</output-file>
+</task-notification>

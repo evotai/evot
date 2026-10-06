@@ -100,7 +100,9 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 session.clone(),
                 &locator.session_id(),
                 TurnBuildRequest {
-                    input: Vec::new(),
+                    input: vec![evot_engine::Content::Text {
+                        text: "继续任务".into(),
+                    }],
                     host_tools: None,
                     consume_process_notifications: true,
                 },
@@ -111,7 +113,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
         assert_eq!(prepared.options.limits.is_none(), interactive);
         assert!(
             matches!(prepared.input.as_slice(), [evot_engine::Content::Text { text }]
-            if text == "A background task finished, but its result was already delivered. Continue from where you left off, or wait for the user.")
+            if text == "继续任务")
         );
         assert_eq!(
             prepared.options.system_prompt,
@@ -124,6 +126,128 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 .join("\n\n")
         );
     }
+    for input in [Vec::new(), vec![evot_engine::Content::Text {
+        text: " \n\t".into(),
+    }]] {
+        let skipped = assembler
+            .build_turn(
+                &llm,
+                ToolMode::Interactive,
+                session.clone(),
+                &locator.session_id(),
+                TurnBuildRequest {
+                    input,
+                    host_tools: None,
+                    consume_process_notifications: true,
+                },
+            )
+            .await?;
+        assert!(
+            skipped.input.is_empty(),
+            "empty wake must not create a synthetic prompt"
+        );
+    }
+    // A real notification is still delivered, including when a newer user
+    // request arrives in the same turn. Its purpose is captured at launch.
+    let prepared = assembler
+        .build_turn(
+            &llm,
+            ToolMode::Interactive,
+            session.clone(),
+            &locator.session_id(),
+            TurnBuildRequest {
+                input: vec![evot_engine::Content::Text {
+                    text: "original task".into(),
+                }],
+                host_tools: None,
+                consume_process_notifications: true,
+            },
+        )
+        .await?;
+    let manager = prepared.options.process_manager.ok_or("missing manager")?;
+    for user_text in [None, Some("new user task")] {
+        let mut command = tokio::process::Command::new("bash");
+        command.args(["-c", "printf done"]);
+        let id = manager
+            .start(evot_engine::tools::process::StartProcess {
+                command,
+                command_text: "printf done".into(),
+                description: Some("original task: collect benchmark results".into()),
+                tool_call_id: "fixture".into(),
+                cwd: workspace.path().to_path_buf(),
+                timeout: std::time::Duration::from_secs(3),
+                output_dir: workspace.path().join("output"),
+                tail_bytes: 4096,
+                background_reason: Some(evot_engine::tools::BackgroundReason::Explicit),
+                background_on_timeout: true,
+            })
+            .await?;
+        let completed = manager
+            .wait(&id, std::time::Duration::from_secs(3))
+            .await
+            .ok_or("missing process")?;
+        assert!(completed.status.is_terminal());
+        let input = user_text
+            .into_iter()
+            .map(|text| evot_engine::Content::Text { text: text.into() })
+            .collect();
+        let notified = assembler
+            .build_turn(
+                &llm,
+                ToolMode::Interactive,
+                session.clone(),
+                &locator.session_id(),
+                TurnBuildRequest {
+                    input,
+                    host_tools: None,
+                    consume_process_notifications: true,
+                },
+            )
+            .await?;
+        assert_eq!(
+            notified.input.len(),
+            if user_text.is_some() { 2 } else { 1 }
+        );
+        if let Some(user_text) = user_text {
+            assert!(
+                matches!(&notified.input[0], evot_engine::Content::Text { text } if text == user_text)
+            );
+        }
+        assert!(
+            matches!(notified.input.last(), Some(evot_engine::Content::Text { text })
+            if text.contains(&id) && text.contains("original task: collect benchmark results")
+            && text.contains("<task-notification>"))
+        );
+        assert!(manager.take_notifications().is_empty());
+        assert!(notified
+            .options
+            .tools
+            .iter()
+            .flat_map(|tool| tool.prompt_guidelines())
+            .any(|guideline| guideline.contains("events report results, not new user requests")));
+    }
+    let image_turn = assembler
+        .build_turn(
+            &llm,
+            ToolMode::Interactive,
+            session.clone(),
+            &locator.session_id(),
+            TurnBuildRequest {
+                input: vec![evot_engine::Content::Image {
+                    source: evot_engine::ImageSource::Base64 {
+                        data: "fixture".into(),
+                    },
+                    mime_type: "image/png".into(),
+                }],
+                host_tools: None,
+                consume_process_notifications: true,
+            },
+        )
+        .await?;
+    assert!(
+        !image_turn.input.is_empty(),
+        "image-only user input must not be skipped"
+    );
     for missing_provider in [true, false] {
         let mut invalid = llm.clone();
         if missing_provider {
