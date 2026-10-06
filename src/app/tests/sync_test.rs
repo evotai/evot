@@ -227,6 +227,42 @@ async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
 }
 
 #[tokio::test]
+async fn share_uploads_more_than_the_former_32_mib_limit() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    // Public sharing includes both the raw transcript and viewer document.
+    storage
+        .append_entry(user("s1", 1, &"x".repeat(17 * 1024 * 1024)))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let outcome =
+        sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 1);
+    assert_eq!(cloud.synced_seq, 1);
+    let requests = server.received_requests().await.ok_or("missing requests")?;
+    let request = requests.first().ok_or("missing upload")?;
+    assert!(request.body.len() > 32 * 1024 * 1024);
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn share_embeds_path_images_in_viewer_and_raw_transcript() -> TestResult {
     let server = MockServer::start().await;
     let state = state(&server)?;

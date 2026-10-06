@@ -9,20 +9,8 @@ use crate::auth::AuthState;
 use crate::error::EvotError;
 use crate::error::Result;
 
-/// Refuse locally what the server would reject with a bare 413. The transcript
-/// is already fully materialised at this point, so the ceiling exists to name
-/// the cause, not to protect memory.
-pub const MAX_SHARE_BYTES: usize = 32 * 1024 * 1024;
-
 pub async fn upload(state: &AuthState, payload: &ShareUpload) -> Result<ShareCreated> {
     let body = serde_json::to_vec(payload).map_err(|e| EvotError::Conf(e.to_string()))?;
-    if body.len() > MAX_SHARE_BYTES {
-        return Err(EvotError::Conf(format!(
-            "share is {:.1} MiB, over the {} MiB limit; compact the session or share a shorter one",
-            body.len() as f64 / (1024.0 * 1024.0),
-            MAX_SHARE_BYTES / (1024 * 1024)
-        )));
-    }
     request(state, reqwest::Method::POST, "", Some(body)).await
 }
 

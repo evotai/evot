@@ -1,6 +1,5 @@
 //! HTTP client for `/v1/sessions`. Same auth and transport rules as shares:
-//! bearer `cli_token`, no redirects, a local size ceiling that names the cause
-//! instead of surfacing a bare 413.
+//! bearer `cli_token`, no redirects, no local upload size ceiling.
 
 use std::time::Duration;
 
@@ -14,18 +13,9 @@ use crate::auth::AuthState;
 use crate::error::EvotError;
 use crate::error::Result;
 
-pub const MAX_PUSH_BYTES: usize = 32 * 1024 * 1024;
-
 pub async fn push(state: &AuthState, payload: &SyncPush) -> Result<PushResponse> {
     check_id(&payload.meta.session_id)?;
     let body = serde_json::to_vec(payload).map_err(|e| EvotError::Conf(e.to_string()))?;
-    if body.len() > MAX_PUSH_BYTES {
-        return Err(EvotError::Conf(format!(
-            "sync batch is {:.1} MiB, over the {} MiB limit; compact the session first",
-            body.len() as f64 / (1024.0 * 1024.0),
-            MAX_PUSH_BYTES / (1024 * 1024)
-        )));
-    }
     let response = send(
         state,
         reqwest::Method::PUT,
