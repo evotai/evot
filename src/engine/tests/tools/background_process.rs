@@ -80,18 +80,87 @@ fn historical_completion_notice_keeps_its_contract() -> Result<(), Box<dyn Error
 }
 
 #[test]
-fn background_description_is_required_and_notifications_are_not_user_requests() {
+fn background_description_is_optional_and_notifications_are_not_user_requests() {
     let bash = BashTool::new().with_process_manager(Arc::new(ProcessManager::new()));
     let schema = bash.parameters_schema();
     assert_eq!(schema["properties"]["description"]["type"], "string");
-    assert_eq!(
-        schema["required"],
-        serde_json::json!(["command", "description"])
-    );
+    assert_eq!(schema["required"], serde_json::json!(["command"]));
     let guidance = bash.prompt_guidelines().join("\n");
     assert!(guidance.contains("events report results, not new user requests"));
     assert!(guidance.contains("task ID and description"));
     assert!(guidance.contains("respecting the user's current request"));
+}
+
+#[test]
+fn bash_description_is_optional_in_both_runtime_schemas() -> Result<(), Box<dyn Error>> {
+    use evotengine::tools::validation::validate_and_coerce;
+
+    for bash in [
+        BashTool::new(),
+        BashTool::new().with_process_manager(Arc::new(ProcessManager::new())),
+    ] {
+        let schema = bash.parameters_schema();
+        for input in [
+            serde_json::json!({"command": "printf done"}),
+            serde_json::json!({"command": "printf done", "description": "Legacy description"}),
+            serde_json::json!({"command": "printf done", "description": ""}),
+        ] {
+            assert_eq!(validate_and_coerce("bash", &schema, &input)?, input);
+        }
+        assert!(validate_and_coerce("bash", &schema, &serde_json::json!({})).is_err());
+        assert!(validate_and_coerce(
+            "bash",
+            &schema,
+            &serde_json::json!({"command": "printf done", "description": {}}),
+        )
+        .is_err());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn foreground_command_without_description_executes() -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let bash = BashTool::new();
+    let params = evotengine::tools::validation::validate_and_coerce(
+        "bash",
+        &bash.parameters_schema(),
+        &serde_json::json!({"command": "printf done"}),
+    )?;
+    let result = bash.execute(params, context("bash", dir.path())).await?;
+    assert_eq!(text(&result), "done");
+    Ok(())
+}
+
+#[tokio::test]
+async fn background_command_without_description_keeps_legacy_notification_contract(
+) -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let manager = Arc::new(ProcessManager::new());
+    let bash = BashTool::new().with_process_manager(manager.clone());
+    let params = evotengine::tools::validation::validate_and_coerce(
+        "bash",
+        &bash.parameters_schema(),
+        &serde_json::json!({
+            "command": "sleep 0.05;\nprintf done",
+            "run_in_background": true,
+        }),
+    )?;
+    let result = bash.execute(params, context("bash", dir.path())).await?;
+    let completed = manager
+        .wait(task_id(&result)?, Duration::from_secs(3))
+        .await
+        .ok_or("missing task")?;
+    assert_eq!(completed.status.as_str(), "completed");
+    assert_eq!(completed.output, "done");
+    assert!(completed.description.is_none());
+    let notices = manager.take_notifications();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(
+        strict_legacy_notification(&notices[0])?,
+        "Command \"sleep 0.05; printf done\" completed"
+    );
+    Ok(())
 }
 
 #[tokio::test]

@@ -9,6 +9,8 @@ export interface ServerState {
   channels: string[]
   startedAt: number
   envFile: string
+  /** True only when this process holds the native server, not a discovered console. */
+  owned: boolean
 }
 
 let activePort: number | null = null
@@ -19,7 +21,7 @@ export async function tryStartServer(port?: number, envFile?: string): Promise<S
   const endpoint = await startServerBackground(port, undefined, envFile)
   if (endpoint === null) {
     const shared = await discoverDashboard(port ?? 8082, envFile)
-    activePort = shared?.port ?? null
+    activePort = null
     ownedSince = null
     return shared
   }
@@ -34,6 +36,7 @@ export async function tryStartServer(port?: number, envFile?: string): Promise<S
     channels: endpoint.channels,
     envFile: snapshot.env_file_path,
     startedAt: ownedSince,
+    owned: true,
   }
 }
 
@@ -47,7 +50,7 @@ export async function discoverDashboard(port: number, envFile?: string): Promise
     if (canonicalPath(snapshot.env_file_path) !== canonicalPath(envFile)) return null
     return {
       port, address, channels: snapshot.feishu ? ['feishu'] : [],
-      envFile: snapshot.env_file_path, startedAt: Date.now(),
+      envFile: snapshot.env_file_path, startedAt: Date.now(), owned: false,
     }
   } catch {
     return null
@@ -103,6 +106,10 @@ export function formatUptime(startedAt: number): string {
   const hours = Math.floor(minutes / 60)
   const remainMinutes = minutes % 60
   return `${hours}h${remainMinutes.toString().padStart(2, '0')}m`
+}
+
+export function ownedDashboardPort(state: ServerState | null): number | null {
+  return state?.owned ? state.port : null
 }
 
 export function terminalTitle(prefix?: string): string {

@@ -1,5 +1,6 @@
 export class TerminalTitle {
   private frozen = false
+  private suffix: string | undefined
 
   constructor(
     private readonly cwd: string,
@@ -20,7 +21,13 @@ export class TerminalTitle {
     this.frozen = false
   }
 
+  /** Refresh ownership information without replacing a frozen activity indicator. */
+  refresh(): void {
+    this.write(this.suffix)
+  }
+
   private write(suffix?: string): void {
+    this.suffix = suffix
     const dirName = this.cwd.split('/').pop() || this.cwd
     const base = `evot - ${dirName}`
     const port = this.port()

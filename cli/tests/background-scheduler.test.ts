@@ -8,7 +8,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-const owned: ServerState = { port: 8082, address: 'http://127.0.0.1:8082', channels: [], envFile: '/tmp/test.env', startedAt: 1 }
+const owned: ServerState = { port: 8082, address: 'http://127.0.0.1:8082', channels: [], envFile: '/tmp/test.env', startedAt: 1, owned: true }
 
 test('background jobs are single-flight and cancellable, with no late restart', async () => {
   const scheduler = new BackgroundScheduler()

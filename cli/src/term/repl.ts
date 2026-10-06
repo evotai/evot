@@ -113,7 +113,7 @@ import {
   resolveSubmitText,
 } from './input/paste_refs.js'
 import { InputImageHistory } from './input/image-history.js'
-import { tryStartServer, registerDashboard, stopOwnedServer, type ServerState } from './app/server.js'
+import { tryStartServer, registerDashboard, stopOwnedServer, ownedDashboardPort, type ServerState } from './app/server.js'
 import { BackgroundScheduler } from '../background/scheduler.js'
 import { inspectConsole } from '../channels/console-client.js'
 import {
@@ -298,7 +298,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const manualCompaction = new ManualCompaction()
   let queuedCompactionSubmissions: QueuedCompactionSubmission[] = []
   let spinnerTimer: ReturnType<typeof setInterval> | null = null
-  const terminalTitle = new TerminalTitle(agent.cwd, () => serverState?.port ?? null)
+  const terminalTitle = new TerminalTitle(agent.cwd, () => ownedDashboardPort(serverState))
   const setTerminalTitle = terminalTitle.set.bind(terminalTitle)
   const freezeTerminalTitle = terminalTitle.freeze.bind(terminalTitle)
   // Releasing a '?' freeze must also repaint — unfreeze() only clears the
@@ -3594,11 +3594,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     attempt: () => tryStartServer(opts.serverPort, configInfo?.envPath ?? opts.envFile),
     stop: stopOwnedServer,
     publish: state => {
-      const changed = serverState?.address !== state?.address
+      const changed = serverState?.address !== state?.address || serverState?.owned !== state?.owned
       serverState = state
       if (changed && !destroyed) {
         refreshBannerData()
-        setTerminalTitle()
+        terminalTitle.refresh()
         renderer.requestRender()
       }
     },

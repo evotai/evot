@@ -209,7 +209,7 @@ impl AgentTool for BashTool {
             },
             "description": {
                 "type": "string",
-                "description": "Short description naming the task or subject and purpose of this command. Saved at launch and included in background completion notices; use it to distinguish concurrent work."
+                "description": "Optional short description naming the task or subject and purpose of this command. Saved at launch and included in background completion notices; use it to distinguish concurrent work. If omitted, the command itself identifies the task."
             },
             "timeout": {
                 "type": "number",
@@ -239,7 +239,7 @@ impl AgentTool for BashTool {
         serde_json::json!({
             "type": "object",
             "properties": properties,
-            "required": ["command", "description"]
+            "required": ["command"]
         })
     }
 
