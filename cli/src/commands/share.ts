@@ -22,6 +22,20 @@ export interface ShareContext {
 
 const USAGE = 'Usage: /share [public | team | private | off | list] [session-id | url]'
 
+/** Re-show `notice` with an elapsed-seconds suffix once the wait gets long. */
+function tickWhileWaiting(notice: string, show: (text: string) => void, render: () => void): () => void {
+  const startedAt = Date.now()
+  show(notice)
+  render()
+  const timer = setInterval(() => {
+    const seconds = Math.round((Date.now() - startedAt) / 1000)
+    if (seconds < 3) return
+    show(`${notice} · ${seconds}s`)
+    render()
+  }, 1000)
+  return () => clearInterval(timer)
+}
+
 /** A pasted share page, as opposed to a visibility word or a local id. */
 export function isShareLink(arg: string): boolean {
   return /^(https?:\/\/)?[^\s/]+\/(?:share|team)\/[A-Za-z0-9_-]{22}(?:\/(?:content|session\.json))?(?:[?#][^\s]*)?$/.test(arg)
@@ -103,16 +117,23 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
     }
 
     const requested = word as 'public' | 'team' | 'private' | 'keep'
+    let notice: string | null = null
     if (requested === 'public') {
       // Say what leaves the machine before it does: the page is public-by-link,
       // and turning it private later hides the page, not what was already read.
-      show('Publishing… (transcript, system prompt, tool output — anyone with the link can read it)')
-      ctx.requestRender()
+      notice = 'Publishing… (transcript, system prompt, tool output — anyone with the link can read it)'
     } else if (requested === 'team') {
-      show('Sharing with your team… (transcript, system prompt, tool output — members of your group who sign in can read it)')
-      ctx.requestRender()
+      notice = 'Sharing with your team… (transcript, system prompt, tool output — members of your group who sign in can read it)'
     }
-    const result = await ctx.agent.cloudShareSession(sid, requested)
+    // A long session uploads in batches and can take minutes; keep the line
+    // moving so the wait reads as progress rather than a hang.
+    const stopTicking = notice ? tickWhileWaiting(notice, show, ctx.requestRender) : () => {}
+    let result: CloudPushResult
+    try {
+      result = await ctx.agent.cloudShareSession(sid, requested)
+    } finally {
+      stopTicking()
+    }
     ctx.cloudAcknowledged?.(sid, result)
     const visibility = result.kind === 'synced' ? shareAccess(result.cloud) : requested === 'keep' ? 'private' : requested
     const line = describeShareResult(result, visibility)

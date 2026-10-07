@@ -977,3 +977,114 @@ async fn pull_records_the_team_page() -> TestResult {
     );
     Ok(())
 }
+
+/// A large first share goes up as several compare-and-append batches rather
+/// than one request. Only the last batch carries the viewer; the earlier ones
+/// ask the server to keep whatever page is already up. Every batch continues
+/// from the seq the server acknowledged, so an interruption resumes rather
+/// than restarting.
+#[tokio::test]
+async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    // Three entries of ~3 MiB each against a 4 MiB batch ceiling: one per batch.
+    for seq in 1..=3 {
+        storage
+            .append_entry(user("s1", seq, &"x".repeat(3 * 1024 * 1024)))
+            .await?;
+    }
+    for seq in 1..=3u64 {
+        Mock::given(method("PUT"))
+            .and(path("/v1/sessions/s1"))
+            .and(body_partial_json(json!({"expected_seq": seq - 1})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "seq": seq, "visibility": "public", "public_url": "https://evot.ai/share/token"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let outcome =
+        sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 3);
+    assert_eq!(cloud.synced_seq, 3);
+    let requests = server.received_requests().await.ok_or("missing requests")?;
+    assert_eq!(requests.len(), 3);
+    for (index, request) in requests.iter().enumerate() {
+        let body: serde_json::Value = serde_json::from_slice(&request.body)?;
+        let is_last = index == 2;
+        assert_eq!(body["entries"].as_array().map(Vec::len), Some(1));
+        assert_eq!(body["entries"][0]["seq"], index as u64 + 1);
+        assert_eq!(body.get("viewer").is_some(), is_last, "batch {index}");
+        // `keep_viewer` is omitted (not false) on the last batch, so a server
+        // that predates it sees exactly the old payload.
+        assert_eq!(
+            body.get("keep_viewer"),
+            (!is_last).then_some(&json!(true)),
+            "batch {index}"
+        );
+    }
+    server.verify().await;
+    Ok(())
+}
+
+/// A conflict on a later batch stops the upload and reports it; the batches
+/// already acknowledged stay recorded so the next push resumes after them.
+#[tokio::test]
+async fn share_conflict_mid_upload_keeps_acknowledged_batches() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    for seq in 1..=2 {
+        storage
+            .append_entry(user("s1", seq, &"x".repeat(3 * 1024 * 1024)))
+            .await?;
+    }
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(json!({"expected_seq": 0})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(json!({"expected_seq": 1})))
+        .respond_with(ResponseTemplate::new(409).set_body_json(json!({"seq": 5})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    storage
+        .set_session_cloud(
+            "s1",
+            Some(CloudSync::new(CloudVisibility::Private, "laptop")),
+        )
+        .await?;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false).await?;
+    let sync::PushOutcome::Diverged {
+        local_seq,
+        remote_seq,
+    } = outcome
+    else {
+        return Err(format!("expected Diverged, got {outcome:?}").into());
+    };
+    assert_eq!((local_seq, remote_seq), (2, 5));
+    let meta = storage.get_session("s1").await?.ok_or("missing session")?;
+    assert_eq!(meta.cloud.map(|cloud| cloud.synced_seq), Some(1));
+    server.verify().await;
+    Ok(())
+}

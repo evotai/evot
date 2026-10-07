@@ -22,6 +22,7 @@ use crate::types::CloudSync;
 use crate::types::CloudVisibility;
 use crate::types::ListTranscriptEntries;
 use crate::types::SessionMeta;
+use crate::types::TranscriptEntry;
 
 #[derive(Debug, Clone)]
 pub enum PushOutcome {
@@ -145,29 +146,76 @@ pub async fn push_session(
         .filter(|entry| entry.seq > after_seq)
         .collect();
     let local_seq = all.last().map(|entry| entry.seq).unwrap_or(after_seq);
-    let payload = SyncPush {
-        schema_version: SYNC_SCHEMA_VERSION,
-        evot_version: evot_version.to_string(),
-        meta: wire_meta(&meta),
-        expected_seq: after_seq,
-        entries,
-        visibility: cloud.visibility,
-        team: access == CloudAccess::Team,
-        origin_host: cloud.origin_host.clone(),
-        force,
-        viewer,
-    };
-    let pushed = payload.entries.len();
-    match client::push(state, &payload).await? {
-        PushResponse::Acked(ack) => {
-            let cloud = acknowledge(storage, session_id, cloud, &ack).await?;
-            Ok(PushOutcome::Synced { cloud, pushed })
+    let pushed = entries.len();
+    let batches = split_batches(entries);
+    let last = batches.len().saturating_sub(1);
+    let mut cloud = cloud;
+    let mut expected_seq = after_seq;
+    // Only the first batch may replace: a `force` on every batch would wipe
+    // the ones already appended. Compare-and-append carries the rest.
+    let mut force = force;
+    for (index, batch) in batches.into_iter().enumerate() {
+        let is_last = index == last;
+        let payload = SyncPush {
+            schema_version: SYNC_SCHEMA_VERSION,
+            evot_version: evot_version.to_string(),
+            meta: wire_meta(&meta),
+            expected_seq,
+            entries: batch,
+            visibility: cloud.visibility,
+            team: access == CloudAccess::Team,
+            origin_host: cloud.origin_host.clone(),
+            force,
+            viewer: if is_last { viewer.clone() } else { None },
+            keep_viewer: !is_last,
+        };
+        match client::push(state, &payload).await? {
+            PushResponse::Acked(ack) => {
+                // Record every acknowledged batch, so an interrupted upload
+                // resumes after the last one that landed instead of starting over.
+                cloud = acknowledge(storage, session_id, cloud, &ack).await?;
+                expected_seq = ack.seq;
+                force = false;
+            }
+            PushResponse::Conflict { remote_seq } => {
+                return Ok(PushOutcome::Diverged {
+                    local_seq,
+                    remote_seq,
+                })
+            }
         }
-        PushResponse::Conflict { remote_seq } => Ok(PushOutcome::Diverged {
-            local_seq,
-            remote_seq,
-        }),
     }
+    Ok(PushOutcome::Synced { cloud, pushed })
+}
+
+/// Bytes of serialized entries per request. Well under what one HTTP round
+/// trip through nginx and Cloudflare handles comfortably, and small enough
+/// that progress is visible on a slow uplink.
+const BATCH_BYTES: usize = 4 * 1024 * 1024;
+/// Entries per request; the server bounds the list length of one push.
+const BATCH_ENTRIES: usize = 5_000;
+
+/// Cut the entries into consecutive batches. Always at least one batch, even
+/// when empty: a metadata-only push (rename, turn count) must still go up.
+fn split_batches(entries: Vec<TranscriptEntry>) -> Vec<Vec<TranscriptEntry>> {
+    let mut batches = Vec::new();
+    let mut current = Vec::new();
+    let mut current_bytes = 0usize;
+    for entry in entries {
+        let size = serde_json::to_vec(&entry)
+            .map(|bytes| bytes.len())
+            .unwrap_or(0);
+        let full = !current.is_empty()
+            && (current_bytes + size > BATCH_BYTES || current.len() >= BATCH_ENTRIES);
+        if full {
+            batches.push(std::mem::take(&mut current));
+            current_bytes = 0;
+        }
+        current_bytes += size;
+        current.push(entry);
+    }
+    batches.push(current);
+    batches
 }
 
 /// Remove the server copy and forget sync state locally. The transcript stays.

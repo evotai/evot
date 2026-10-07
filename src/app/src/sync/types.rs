@@ -40,6 +40,12 @@ pub struct SyncPush {
     /// transcript format.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewer: Option<serde_json::Value>,
+    /// A large push goes up as several batches and only the last one carries
+    /// `viewer`. The earlier batches set this so the server keeps the page it
+    /// already shows instead of taking it down between batches. Omitted when
+    /// off, which is exactly what older builds send.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_viewer: bool,
 }
 
 /// Server acknowledgement for a push or a visibility change.

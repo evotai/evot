@@ -9,6 +9,34 @@ use crate::auth::AuthState;
 use crate::error::EvotError;
 use crate::error::Result;
 
+/// Time allowed for one upload request. The flat 120 s that preceded this
+/// assumed small bodies; with no size ceiling a 50 MiB session on a modest
+/// uplink needs minutes, not a timeout mid-transfer.
+pub(crate) fn upload_timeout(body_len: usize) -> Duration {
+    // 120 s base, plus one second per 128 KiB of body (≈1 Mbit/s floor).
+    let extra = body_len / (128 * 1024);
+    Duration::from_secs(120 + extra as u64)
+}
+
+/// Build the error for a failed response. The server explains most
+/// refusals in a JSON `error` field ("invalid session push: invalid
+/// entries", team sharing without a team, …); that text is what the user
+/// needs, so it wins over the per-status line, which stays as the fallback
+/// when no explanation came back.
+pub(crate) async fn explain_failure(response: reqwest::Response, fallback: &str) -> EvotError {
+    let status = response.status();
+    let reason = response
+        .json::<Value>()
+        .await
+        .ok()
+        .and_then(|body| body.get("error")?.as_str().map(str::to_string))
+        .filter(|reason| !reason.trim().is_empty());
+    match reason {
+        Some(reason) => EvotError::Conf(format!("{reason} (HTTP {status})")),
+        None => EvotError::Conf(format!("{fallback} (HTTP {status})")),
+    }
+}
+
 pub async fn upload(state: &AuthState, payload: &ShareUpload) -> Result<ShareCreated> {
     let body = serde_json::to_vec(payload).map_err(|e| EvotError::Conf(e.to_string()))?;
     request(state, reqwest::Method::POST, "", Some(body)).await
@@ -54,7 +82,7 @@ async fn request<T: DeserializeOwned>(
             ),
         )
         .bearer_auth(&state.cli_token)
-        .timeout(Duration::from_secs(120));
+        .timeout(upload_timeout(body.as_ref().map_or(0, Vec::len)));
     if let Some(body) = body {
         request = request
             .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -66,7 +94,7 @@ async fn request<T: DeserializeOwned>(
         .map_err(|e| EvotError::Conf(format!("share: {e}")))?;
     let status = response.status();
     if !status.is_success() {
-        let message = match status.as_u16() {
+        let fallback = match status.as_u16() {
             401 => "share requires sign-in; run evot login",
             403 => "share permission denied",
             413 => "share exceeds size or storage quota",
@@ -74,7 +102,7 @@ async fn request<T: DeserializeOwned>(
             507 => "share storage is full",
             _ => "share request failed",
         };
-        return Err(EvotError::Conf(format!("{message} (HTTP {status})")));
+        return Err(explain_failure(response, fallback).await);
     }
     response
         .json()

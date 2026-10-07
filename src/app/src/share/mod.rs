@@ -1,4 +1,4 @@
-mod client;
+pub(crate) mod client;
 mod export;
 mod import;
 mod link;
