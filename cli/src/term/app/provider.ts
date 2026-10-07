@@ -166,6 +166,8 @@ export function modelSelectorItems(
       label,
       ...(detail ? { detail } : {}),
       id: option.spec,
+      // Survives a provider regroup, where the spec (and so `id`) changes.
+      identity: option.model,
       group,
       selected: active,
       ...(pinned ? { pinned } : {}),

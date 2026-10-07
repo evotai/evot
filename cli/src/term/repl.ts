@@ -1402,20 +1402,20 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     if (outcome === 'unconfigured') return false
 
     appState = { ...appState, model: agent.model }
-    // Only real movement is worth a line. A run in flight keeps repainting
-    // its pinned model into `appState`, so diffing display state here would
-    // re-announce the same landing on every external catalog write.
-    if (outcome === 'kept') return true
+    // Only a different model is worth a line. `kept` and `followed` both
+    // leave the user on the same model (`followed` just re-homed it to another
+    // catalog group, which is routing, not something they chose or can see).
+    // A run in flight keeps repainting its pinned model into `appState`, so
+    // diffing display state here would re-announce the same landing on every
+    // external catalog write.
+    if (outcome !== 'switched') return true
     const next = configInfo?.availableModels.find(model => model.spec === currentModelSpec(configInfo, agent.model))
     const provider = next?.provider ?? configInfo?.provider ?? ''
     const label = formatModelLabel(agent.model, provider, next?.group_label)
-    const reason = outcome === 'followed'
-      ? ` · ${agent.model} moved groups, selection followed it`
-      : ` · ${previousModel} is no longer available`
     commitStatusLine({
       id: 'sys-model',
       kind: 'system',
-      text: `  Model → ${label}${chalk.dim(reason)}`,
+      text: `  Model → ${label}${chalk.dim(` · ${previousModel} is no longer available`)}`,
       shareEvents: modelShareEvents(provider, agent.model, configInfo?.thinkingLevel),
     })
     return true

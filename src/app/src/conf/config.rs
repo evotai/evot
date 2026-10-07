@@ -498,6 +498,12 @@ impl Config {
     /// - `"deepseek-chat"` — find first provider whose model matches
     /// - `"tencent/hy3:free"` — exact model ids win even when they contain `:`
     /// - `"openrouter:google/gemini-2.5-pro"` — exact provider + model override
+    ///
+    /// A `provider:model` whose provider is no longer configured still resolves
+    /// when exactly that model id is listed elsewhere: the cloud catalog
+    /// regroups its providers under new names between refreshes, and a picker
+    /// opened moments earlier hands back the old spec. A typo in the provider
+    /// of a model nobody lists remains an error.
     pub fn resolve_model_spec(&self, spec: &str) -> Result<(String, Option<String>)> {
         let found = self
             .providers
@@ -515,6 +521,10 @@ impl Config {
                 )));
             }
             if !self.providers.contains_key(provider) {
+                if let Some(listing) = self.provider_listing_model(model, provider) {
+                    tracing::info!(%spec, provider = %listing, "model spec provider regrouped");
+                    return Ok((listing, Some(model.to_string())));
+                }
                 return Err(EvotError::Conf(format!(
                     "provider '{}' not found, available: {}",
                     provider,

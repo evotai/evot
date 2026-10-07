@@ -175,6 +175,18 @@ describe('modelSelectorItems', () => {
     expect(active?.detail).toBe('(Fast and free)')
   })
 
+  test('rows carry the model id as a regroup-stable identity', () => {
+    // The spec is the row id; the model id is what survives the catalog
+    // renaming its provider groups, so a refreshed picker can re-find focus.
+    const items = modelSelectorItems(cloudOptions, 'droid:gpt-5.6-sol')
+    const rows = items.filter(item => !item.header)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const row of rows) {
+      expect(row.identity).toBeDefined()
+      expect(row.id?.endsWith(`:${row.identity}`)).toBe(true)
+    }
+  })
+
   test('stars the account default only on the cloud row with that wire id', () => {
     const items = modelSelectorItems(cloudOptions, 'droid:gpt-5.6-sol', undefined, 'cohere/north-mini:free')
     expect(items.find(item => item.id === 'evot-free:cohere/north-mini:free')?.pinned).toBe(true)

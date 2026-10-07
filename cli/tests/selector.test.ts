@@ -1097,6 +1097,35 @@ describe('selectorExpandItems', () => {
     expect(state.query).toBe('')
   })
 
+  test('follows the focused model when a refresh regroups its provider', () => {
+    // The catalog merged `evot-pro-openai` into `evot-pro`: the row's id
+    // (spec) changed under the user, but it is the same model. Enter must
+    // still pick it rather than whatever landed first.
+    const initial = [
+      { label: 'Evot Premium', header: true, focusable: false, group: 'pro-anthropic' },
+      { label: 'claude-opus-4-6', id: 'evot-pro-anthropic:claude-opus-4-6', identity: 'claude-opus-4-6', group: 'pro-anthropic' },
+      { label: 'Evot Premium', header: true, focusable: false, group: 'pro-openai' },
+      { label: 'gpt-6.1-sol', id: 'evot-pro-openai:gpt-6.1-sol', identity: 'gpt-6.1-sol', group: 'pro-openai' },
+    ]
+    let state = { ...createSelectorState('Models', initial), presentation: 'model' as const }
+    state = selectorFocusOn(state, item => item.id === 'evot-pro-openai:gpt-6.1-sol')
+
+    const regrouped = [
+      { label: 'Evot Premium', header: true, focusable: false, group: 'pro' },
+      { label: 'claude-opus-4-6', id: 'evot-pro:claude-opus-4-6', identity: 'claude-opus-4-6', group: 'pro' },
+      { label: 'gpt-6.1-sol', id: 'evot-pro:gpt-6.1-sol', identity: 'gpt-6.1-sol', group: 'pro' },
+    ]
+    state = selectorExpandItems(state, regrouped)
+    expect(state.items[state.focusIndex]?.id).toBe('evot-pro:gpt-6.1-sol')
+
+    // Without an identity the old behaviour stands: the exact row is gone,
+    // so focus falls back to the first choice.
+    let plain = { ...createSelectorState('Models', initial.map(({ identity: _identity, ...item }) => item)), presentation: 'model' as const }
+    plain = selectorFocusOn(plain, item => item.id === 'evot-pro-openai:gpt-6.1-sol')
+    plain = selectorExpandItems(plain, regrouped.map(({ identity: _identity, ...item }) => item))
+    expect(plain.items[plain.focusIndex]?.id).toBe('evot-pro:claude-opus-4-6')
+  })
+
   test('keeps a typed query after an async refresh', () => {
     const initial = [
       { label: 'grok-4.5', id: 'openai:grok-4.5', group: 'openai', searchText: 'grok-4.5 openai' },

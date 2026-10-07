@@ -250,6 +250,43 @@ fn model_switch_preserves_or_clamps_thinking_and_fails_fast() -> TestResult {
 }
 
 #[test]
+fn select_by_spec_follows_model_after_provider_regroup() -> TestResult {
+    // A /model picker built against `evot-pro-openai:gpt-6.1-sol` hands that
+    // spec back after the catalog merged the group into `evot-pro`. The exact
+    // model id is what the user chose, so it must land there, while a
+    // qualified spec whose model nobody lists still fails.
+    let dir = TempDir::new()?;
+    let mut config = Config::new(dir.path().to_path_buf());
+    config.providers.insert("evot-pro".into(), ProviderProfile {
+        protocol: Protocol::OpenAi,
+        api_key: "evot.scoped.key".into(),
+        base_url: "https://auto.evot.ai/v1/llm".into(),
+        models: vec!["gpt-6.1-sol".into(), "claude-opus-4-6".into()],
+        compat_caps: CompatCaps::default(),
+        route_capabilities: Default::default(),
+        thinking_level: None,
+        context_window: None,
+        max_tokens: None,
+        supports_image: None,
+    });
+    config.cloud_providers.insert("evot-pro".into());
+    config.llm.provider = "evot-pro".into();
+    config.llm.model_override = Some("claude-opus-4-6".into());
+
+    let agent = Agent::new(&config, "/work")?;
+    assert_eq!(agent.llm().model, "claude-opus-4-6");
+    agent.set_model_by_spec(&config, "evot-pro-openai:gpt-6.1-sol")?;
+    assert_eq!(agent.llm().provider, "evot-pro");
+    assert_eq!(agent.llm().model, "gpt-6.1-sol");
+
+    assert!(agent
+        .set_model_by_spec(&config, "evot-pro-openai:gpt-6.1-nowhere")
+        .is_err());
+    assert_eq!(agent.llm().model, "gpt-6.1-sol");
+    Ok(())
+}
+
+#[test]
 fn cloud_catalog_thinking_level_wins_on_model_switch() -> TestResult {
     let dir = TempDir::new()?;
     let mut config = anthropic_config(&dir);

@@ -28,6 +28,9 @@ export interface SelectorItem {
   pinned?: boolean
   /** Opaque identifier (e.g. full session id) — not displayed. */
   id?: string
+  /** Stable identity when `id` can change underneath a refresh (e.g. the
+   * model id of a `provider:model` row whose provider group was renamed). */
+  identity?: string
   /** Extra text searched but not displayed (e.g. full session id, cwd). */
   searchText?: string
   /** The row is a cloud session: deleting it removes the server copy too. */
@@ -303,7 +306,12 @@ export function selectorExpandItems(state: SelectorState, allItems: SelectorItem
       }
   if (!focused || focused.header) return next
   // Keep the row the user was looking at across an async catalog refresh.
-  return selectorFocusOn(next, item => focused.id ? item.id === focused.id : item.label === focused.label)
+  const exact = selectorFocusOn(next, item => focused.id ? item.id === focused.id : item.label === focused.label)
+  if (exact !== next || !focused.identity) return exact
+  // The exact row is gone, but the same thing may be listed under a new id
+  // (a catalog regrouped its providers). Follow it rather than jumping to
+  // the top, where Enter would pick something the user never looked at.
+  return selectorFocusOn(next, item => item.identity === focused.identity)
 }
 
 /** Replace one row in both the visible list and the unfiltered pool. */
