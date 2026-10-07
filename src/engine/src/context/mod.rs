@@ -2,6 +2,7 @@
 
 pub mod compaction;
 pub mod history;
+pub mod image_format;
 pub mod image_resize;
 pub mod limits;
 pub mod sanitize;
@@ -40,6 +41,8 @@ pub use compaction::DEFAULT_SUMMARY_MAX_BYTES;
 pub use compaction::DEFAULT_SUMMARY_RESERVE_TOKENS;
 pub use compaction::SUMMARIZER_INPUT_MAX_BYTES;
 pub use history::transform_messages_for_model;
+pub use image_format::detect_image_mime_type;
+pub use image_format::IMAGE_SNIFF_BYTES;
 pub use image_resize::resize_image;
 pub use limits::ExecutionLimits;
 pub use limits::ExecutionTracker;

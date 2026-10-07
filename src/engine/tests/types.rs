@@ -303,3 +303,44 @@ fn test_tool_execution_strategy_roundtrip() {
     roundtrip(&ToolExecutionStrategy::Parallel);
     roundtrip(&ToolExecutionStrategy::Batched { size: 4 });
 }
+
+/// Whatever an image block declares, the provider is sent the type its bytes
+/// are. Blocks come from the read tool, chat channels and attachments, each
+/// naming a type from a file name or a sender's header, and Anthropic rejects
+/// a request whose declared type disagrees with the data.
+#[test]
+fn resolve_image_data_sends_the_type_the_bytes_are() {
+    use base64::Engine;
+    let jpeg = [
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0,
+    ];
+    let b64 = base64::engine::general_purpose::STANDARD.encode(jpeg);
+
+    let declared_png = Content::Image {
+        mime_type: "image/png".into(),
+        source: ImageSource::Base64 { data: b64.clone() },
+    };
+    assert_eq!(declared_png.resolve_image_data().unwrap().1, "image/jpeg");
+
+    let tmp = std::env::temp_dir().join("evot-resolve-really-jpeg.png");
+    std::fs::write(&tmp, jpeg).unwrap();
+    let from_path = Content::Image {
+        mime_type: "image/png".into(),
+        source: ImageSource::Path {
+            path: tmp.to_string_lossy().into(),
+        },
+    };
+    let (data, mime) = from_path.resolve_image_data().unwrap();
+    let _ = std::fs::remove_file(tmp);
+    assert_eq!(mime, "image/jpeg");
+    assert_eq!(data, b64);
+
+    // Bytes nobody recognises keep the declared type: not our call to make.
+    let unknown = Content::Image {
+        mime_type: "image/heic".into(),
+        source: ImageSource::Base64 {
+            data: base64::engine::general_purpose::STANDARD.encode(b"????"),
+        },
+    };
+    assert_eq!(unknown.resolve_image_data().unwrap().1, "image/heic");
+}

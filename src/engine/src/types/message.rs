@@ -117,17 +117,27 @@ impl Content {
     /// Resolve image data: load from disk if path-based, then resize to fit
     /// within 2000×2000 and 5MB limits before sending to the provider.
     /// Returns `(base64_data, mime_type)` or `None` if resolution fails.
+    ///
+    /// The media type sent is what the bytes are, whatever the block
+    /// declared: images arrive from the read tool, chat channels and user
+    /// attachments, each naming a type from a file name or a sender's
+    /// header, and Anthropic rejects the whole request when that disagrees
+    /// with the data. This is the one place every image passes through on
+    /// its way to a provider, so it is where the declaration is settled.
     pub fn resolve_image_data(&self) -> Option<(String, String)> {
+        use base64::Engine;
         let raw = match self {
             Content::Image { mime_type, source } => match source {
                 ImageSource::Base64 { data } if !data.is_empty() => {
-                    Some((data.clone(), mime_type.clone()))
+                    let mime = sniffed_mime_type_from_base64(data).unwrap_or(mime_type.as_str());
+                    Some((data.clone(), mime.to_string()))
                 }
                 ImageSource::Path { path } => match std::fs::read(path) {
                     Ok(bytes) => {
-                        use base64::Engine;
+                        let mime = crate::context::detect_image_mime_type(&bytes)
+                            .unwrap_or(mime_type.as_str());
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        Some((b64, mime_type.clone()))
+                        Some((b64, mime.to_string()))
                     }
                     Err(_) => None,
                 },
@@ -142,6 +152,19 @@ impl Content {
         // If resize fails (e.g., unrecognized format), fall back to original data.
         raw.map(|(data, mime)| crate::context::resize_image(&data, &mime).unwrap_or((data, mime)))
     }
+}
+
+/// Media type of base64 image data, read from the decoded header only.
+fn sniffed_mime_type_from_base64(data: &str) -> Option<&'static str> {
+    use base64::Engine;
+    // 4 base64 chars per 3 bytes; take whole quads so the prefix decodes.
+    let prefix_len = (crate::context::IMAGE_SNIFF_BYTES / 3 + 1) * 4;
+    let prefix = &data[..data.len().min(prefix_len)];
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(prefix)
+        .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(prefix))
+        .ok()?;
+    crate::context::detect_image_mime_type(&decoded)
 }
 
 // ---------------------------------------------------------------------------

@@ -184,28 +184,56 @@ async fn test_read_image_file() {
     let _ = std::fs::remove_file(tmp);
 }
 
+/// What a file is comes from its bytes, never from its name. A `.png` that
+/// holds a JPEG (what chat downloads often are) is sent as image/jpeg, since
+/// Anthropic rejects a request whose media type disagrees with the data; a
+/// `.jpg` holding text is text, not a broken picture.
 #[tokio::test]
-async fn test_read_jpeg_file() {
-    let tmp = std::env::temp_dir().join("yoagent-test-image.jpg");
-    std::fs::write(&tmp, b"fake-jpeg-data").unwrap();
-
-    let tool = ReadFileTool::new();
-    let result = tool
-        .execute(
-            serde_json::json!({"path": tmp.to_str().unwrap()}),
-            ctx("read"),
-        )
-        .await
-        .unwrap();
-
-    match &result.content[0] {
-        Content::Image { mime_type, .. } => {
-            assert_eq!(mime_type, "image/jpeg");
+async fn test_read_image_media_type_follows_bytes_not_extension() {
+    async fn read(name: &str, bytes: &[u8]) -> Vec<Content> {
+        let tmp = std::env::temp_dir().join(name);
+        std::fs::write(&tmp, bytes).unwrap();
+        let result = ReadFileTool::new()
+            .execute(
+                serde_json::json!({"path": tmp.to_str().unwrap()}),
+                ctx("read"),
+            )
+            .await
+            .unwrap();
+        let _ = std::fs::remove_file(tmp);
+        result.content
+    }
+    fn mime(content: &[Content]) -> Option<&str> {
+        match &content[0] {
+            Content::Image { mime_type, .. } => Some(mime_type),
+            _ => None,
         }
-        _ => panic!("expected Content::Image for .jpg"),
     }
 
-    let _ = std::fs::remove_file(tmp);
+    let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+    jpeg.extend_from_slice(b"JFIF\0\x01\x01\x00\x00\x01\x00\x01\x00\x00");
+    assert_eq!(
+        mime(&read("yoagent-really-jpeg.png", &jpeg).await),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        mime(
+            &read(
+                "yoagent-really-png.jpg",
+                b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x01\0\0\0\x01"
+            )
+            .await
+        ),
+        Some("image/png")
+    );
+    assert_eq!(
+        mime(&read("yoagent-unnamed-image", &jpeg).await),
+        Some("image/jpeg")
+    );
+    match &read("yoagent-text.jpg", b"fake-jpeg-data").await[0] {
+        Content::Text { text } => assert!(text.contains("fake-jpeg-data"), "{text}"),
+        other => panic!("a .jpg holding text is text, got {other:?}"),
+    }
 }
 
 #[tokio::test]

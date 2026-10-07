@@ -7,10 +7,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
 
-use super::image::get_image_mime_type;
-use super::image::is_image_file;
-use super::image::MAX_IMAGE_SIZE_BYTES;
+use crate::context::detect_image_mime_type;
+use crate::context::IMAGE_SNIFF_BYTES;
 use crate::types::*;
 
 /// Max lines returned by a single Read call (matches industry standard).
@@ -21,6 +21,30 @@ const MAX_READ_BYTES: usize = 50 * 1024; // 50KB
 const MAX_READ_BYTES_LABEL: &str = "50KB";
 /// Largest integer that can be represented exactly by a JavaScript number.
 const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// 20 MB limit for image files
+const MAX_IMAGE_SIZE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// The first bytes of a file, enough to tell an image format from its header.
+async fn read_header(path: &std::path::Path) -> Result<Vec<u8>, ToolError> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| ToolError::Failed(format!("Cannot read {}: {}", path.display(), e)))?;
+    let mut header = vec![0u8; IMAGE_SNIFF_BYTES];
+    let mut filled = 0;
+    while filled < header.len() {
+        let n = file
+            .read(&mut header[filled..])
+            .await
+            .map_err(|e| ToolError::Failed(format!("Cannot read {}: {}", path.display(), e)))?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    header.truncate(filled);
+    Ok(header)
+}
 
 fn optional_positive_usize(
     params: &serde_json::Value,
@@ -186,19 +210,19 @@ impl AgentTool for ReadFileTool {
             .await
             .map_err(|e| ToolError::Failed(format!("Cannot access {}: {}", path.display(), e)))?;
 
-        // Handle image files
-        if is_image_file(&path) {
+        // An image is whatever the bytes say it is, never what the name says:
+        // a `.png` that holds a JPEG must be sent as image/jpeg or the
+        // provider rejects the request, and a `.txt` that holds a PNG is a
+        // picture. Mirrors pi's read tool.
+        let header = read_header(&path).await?;
+        if let Some(mime_type) = detect_image_mime_type(&header) {
             if metadata.len() > MAX_IMAGE_SIZE_BYTES {
                 return Err(ToolError::Failed(format!(
                     "Image too large ({}MB, max 20MB)",
                     metadata.len() / (1024 * 1024)
                 )));
             }
-            let mime_type = get_image_mime_type(&path)
-                .ok_or_else(|| ToolError::Failed("Unknown image format".into()))?;
-            let meta = tokio::fs::metadata(&path)
-                .await
-                .map_err(|e| ToolError::Failed(format!("Cannot read {}: {}", path.display(), e)))?;
+            let meta = metadata;
             let mut content = vec![Content::Image {
                 mime_type: mime_type.to_string(),
                 source: ImageSource::Path {

@@ -14,6 +14,7 @@ pub use agent::PromptQueue;
 pub use agent::PromptQueueEntry;
 pub use agent::PromptQueueError;
 pub use agent::RunHandle;
+pub use context::detect_image_mime_type;
 pub use context::now_ms;
 pub use context::plan_compaction;
 pub use context::resize_image;
