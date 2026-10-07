@@ -89,6 +89,10 @@ fn background_description_is_optional_and_notifications_are_not_user_requests() 
     assert!(guidance.contains("events report results, not new user requests"));
     assert!(guidance.contains("task ID and description"));
     assert!(guidance.contains("respecting the user's current request"));
+    // A notification-only turn must resume the task, not be acknowledged and
+    // dropped: that is the "replies 收到, then stops" failure users reported.
+    assert!(guidance.contains("is the original task resuming, not a prompt to acknowledge"));
+    assert!(guidance.contains("never end the turn with a bare acknowledgement while work remains"));
 }
 
 #[test]

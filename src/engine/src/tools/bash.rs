@@ -195,6 +195,11 @@ impl AgentTool for BashTool {
             vec![
                 "Start ordinary commands in the foreground. Reserve `run_in_background: true` for explicitly independent work, not merely commands expected to take time. Read the returned output path to check progress, or call {{task_output}} once to wait when a later step needs the result. Never poll a task with sleep loops or repeated {{task_output}} calls.",
                 "Describe each command's subject and purpose in `description`. Background <task-notification> events report results, not new user requests. Match them to existing work using their task ID and description, while respecting the user's current request.",
+                // A notification often arrives as the only input of its turn.
+                // Without this, a model reads it as something to acknowledge,
+                // replies "received", and ends the turn with the original task
+                // half done; the user then has to type "continue" to restart it.
+                "A turn that opens with a <task-notification> is the original task resuming, not a prompt to acknowledge. Read the result and carry the task through its remaining steps right away. Stop only when the whole task is done or genuinely blocked, and say so; never end the turn with a bare acknowledgement while work remains.",
             ]
         } else {
             Vec::new()
