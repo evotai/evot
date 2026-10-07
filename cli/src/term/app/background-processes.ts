@@ -7,6 +7,7 @@
  */
 
 import type { BackgroundProcess } from '../../native/index.js'
+import { truncateHeadTail } from '../../render/format.js'
 import { BACKGROUND_PANEL_SHORTCUT_HINT, formatCommandLabel, sanitizeTerminalOutput } from './background-panel.js'
 
 /** Terminal states, i.e. the task will never produce output again. */
@@ -43,6 +44,14 @@ export function settledNoticeMessage(process: BackgroundProcess): string {
 export const SETTLED_SNAPSHOT_TAIL_LINES = 20
 
 /**
+ * Columns kept per snapshot line. Same cap as a foreground tool result: a
+ * line budget alone does not bound the block, since one minified JSON or
+ * extracted-page line can run to thousands of characters and wrap across
+ * dozens of rows. The full output stays in the file whose path follows.
+ */
+export const SETTLED_SNAPSHOT_LINE_WIDTH = 256
+
+/**
  * Transcript block for a task that finished while its live output view was
  * open.
  *
@@ -59,7 +68,9 @@ export function settledOutputSnapshot(
 ): string {
   const normalized = sanitizeTerminalOutput(output).replace(/\n$/, '')
   const all = normalized.length === 0 ? [] : normalized.split('\n')
-  const visible = all.slice(-tailLines)
+  const visible = all
+    .slice(-tailLines)
+    .map(line => (line.length <= SETTLED_SNAPSHOT_LINE_WIDTH ? line : truncateHeadTail(line, SETTLED_SNAPSHOT_LINE_WIDTH)))
   const hidden = all.length - visible.length
   return [
     settledNoticeMessage(process),

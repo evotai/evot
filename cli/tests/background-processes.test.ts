@@ -3,6 +3,9 @@ import {
   backgroundProcessFingerprint,
   decideSessionSwitch,
   runningBackgroundCount,
+  SETTLED_SNAPSHOT_LINE_WIDTH,
+  SETTLED_SNAPSHOT_TAIL_LINES,
+  settledOutputSnapshot,
   shouldWakeForNotifications,
   stopAllMessage,
   stopOneMessage,
@@ -22,6 +25,30 @@ function proc(overrides: Partial<BackgroundProcess> = {}): BackgroundProcess {
     ...overrides,
   }
 }
+
+describe('settledOutputSnapshot', () => {
+  test('keeps only the tail lines and says how many were hidden', () => {
+    const output = Array.from({ length: SETTLED_SNAPSHOT_TAIL_LINES + 3 }, (_, i) => `line ${i}`).join('\n')
+    const block = settledOutputSnapshot(proc({ status: 'completed', exit_code: 0 }), output)
+    expect(block).toContain('… 3 earlier lines')
+    expect(block).not.toContain('line 2\n')
+    expect(block).toContain(`line ${SETTLED_SNAPSHOT_TAIL_LINES + 2}`)
+    expect(block).toContain('/tmp/out.txt')
+  })
+
+  test('caps a single huge line so one JSON blob cannot fill the screen', () => {
+    // An extracted web page arrives as one minified JSON line of several
+    // thousand characters: a line budget alone would let it wrap for pages.
+    const long = `{"content": "${'x'.repeat(5000)}"}`
+    const block = settledOutputSnapshot(proc({ status: 'completed', exit_code: 0 }), `ok\n${long}`)
+    const bodyLines = block.split('\n').filter(line => line.startsWith('    '))
+    for (const line of bodyLines) {
+      expect(line.length).toBeLessThanOrEqual(SETTLED_SNAPSHOT_LINE_WIDTH + 4)
+    }
+    expect(block).toContain(' ... ')
+    expect(block).toContain('{"content"')
+  })
+})
 
 describe('shouldWakeForNotifications', () => {
   const ready = {
