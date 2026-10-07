@@ -2,12 +2,37 @@
 //! `parseCloudResult`; outcomes that are decisions for the user (diverged,
 //! local ahead) come back as data, not as thrown errors.
 
+use napi::threadsafe_function::ErrorStrategy;
+use napi::threadsafe_function::ThreadsafeFunction;
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi::Error;
 use napi::Result;
 use napi_derive::napi;
 use serde_json::json;
 
 use crate::agent::NapiAgent;
+
+/// `(progressJson: string) => void`, called after each uploaded batch. Wire
+/// shape: `{ "uploaded_entries", "total_entries", "batch", "batches" }`.
+/// napi builds the threadsafe wrapper at the call boundary, so the handle is
+/// `Send` and can ride along into the async push.
+type ProgressCallback = ThreadsafeFunction<String, ErrorStrategy::Fatal>;
+
+fn report(
+    callback: &Option<ProgressCallback>,
+) -> impl Fn(evot::api::sync::PushProgress) + Sync + '_ {
+    move |progress| {
+        let Some(callback) = callback else { return };
+        let payload = json!({
+            "uploaded_entries": progress.uploaded_entries,
+            "total_entries": progress.total_entries,
+            "batch": progress.batch,
+            "batches": progress.batches,
+        });
+        // A dropped progress tick is harmless; the next one carries the total.
+        callback.call(payload.to_string(), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+}
 
 fn failure(error: impl std::fmt::Display) -> Error {
     Error::from_reason(error.to_string())
@@ -47,18 +72,26 @@ fn push_json(outcome: evot::api::sync::PushOutcome) -> Result<String> {
 #[napi]
 impl NapiAgent {
     /// Turn cloud sync on for a session (or change its visibility) and push.
-    #[napi]
+    ///
+    /// `on_progress`, when given, is called with a JSON string after each
+    /// uploaded batch so the UI can draw a bar for a long first share.
+    #[napi(
+        ts_args_type = "sessionId: string, visibility: string, onProgress?: (progress: string) => void"
+    )]
     pub async fn cloud_share_session(
         &self,
         session_id: String,
         visibility: String,
+        on_progress: Option<ProgressCallback>,
     ) -> Result<String> {
+        let callback = on_progress;
         let outcome = evot::api::sync::share_session(
             &auth()?,
             &self.agent.storage(),
             &session_id,
             parse_access(&visibility)?,
             env!("CARGO_PKG_VERSION"),
+            &report(&callback),
         )
         .await
         .map_err(failure)?;
@@ -66,14 +99,23 @@ impl NapiAgent {
     }
 
     /// Incremental push; `force` replaces the server copy with local.
-    #[napi]
-    pub async fn cloud_push_session(&self, session_id: String, force: bool) -> Result<String> {
+    #[napi(
+        ts_args_type = "sessionId: string, force: boolean, onProgress?: (progress: string) => void"
+    )]
+    pub async fn cloud_push_session(
+        &self,
+        session_id: String,
+        force: bool,
+        on_progress: Option<ProgressCallback>,
+    ) -> Result<String> {
+        let callback = on_progress;
         let outcome = evot::api::sync::push_session(
             &auth()?,
             &self.agent.storage(),
             &session_id,
             env!("CARGO_PKG_VERSION"),
             force,
+            &report(&callback),
         )
         .await
         .map_err(failure)?;

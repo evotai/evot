@@ -189,7 +189,7 @@ async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
         .expect(1)
         .mount(&server)
         .await;
-    let outcome = sync::share_session(&state, &storage, "s1", None, "test").await?;
+    let outcome = sync::share_session(&state, &storage, "s1", None, "test", &|_| {}).await?;
     let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
         return Err(format!("expected Synced, got {outcome:?}").into());
     };
@@ -212,7 +212,7 @@ async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
         .expect(1)
         .mount(&server)
         .await;
-    let outcome = sync::push_session(&state, &storage, "s1", "test", false).await?;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
     let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
         return Err(format!("expected Synced, got {outcome:?}").into());
     };
@@ -248,8 +248,15 @@ async fn share_uploads_more_than_the_former_32_mib_limit() -> TestResult {
         .mount(&server)
         .await;
 
-    let outcome =
-        sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
         return Err(format!("expected Synced, got {outcome:?}").into());
     };
@@ -296,7 +303,15 @@ async fn share_embeds_path_images_in_viewer_and_raw_transcript() -> TestResult {
         .expect(1)
         .mount(&server)
         .await;
-    sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let requests = server.received_requests().await.unwrap_or_default();
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
     assert_eq!(
@@ -383,7 +398,15 @@ async fn share_push_preserves_thinking_metadata_and_tool_sequence() -> TestResul
         })))
         .mount(&server)
         .await;
-    sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let requests = server.received_requests().await.unwrap_or_default();
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
     assert_eq!(body["entries"][0], serde_json::to_value(&assistant)?);
@@ -437,7 +460,15 @@ async fn share_replaces_missing_path_image_with_placeholder_text() -> TestResult
         })))
         .mount(&server)
         .await;
-    sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let requests = server.received_requests().await.unwrap_or_default();
     assert_eq!(requests.len(), 1);
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
@@ -533,7 +564,15 @@ async fn share_embeds_images_in_compacted_engine_context_without_changing_tool_i
         })))
         .mount(&server)
         .await;
-    sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let requests = server.received_requests().await.unwrap_or_default();
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
     let item = &body["entries"][0]["item"];
@@ -554,7 +593,10 @@ async fn share_embeds_images_in_compacted_engine_context_without_changing_tool_i
 }
 
 #[tokio::test]
-async fn previously_synced_path_image_cannot_create_a_mismatched_share() -> TestResult {
+async fn widening_access_over_a_synced_path_image_replaces_the_cloud_copy() -> TestResult {
+    // The private copy was synced by a build that sent the image's path. Going
+    // team or public must not refuse and must not leave that entry behind: the
+    // push starts over from seq 0 as a replace, with the bytes embedded.
     let server = MockServer::start().await;
     let state = state(&server)?;
     let root = TempDir::new()?;
@@ -581,24 +623,79 @@ async fn previously_synced_path_image_cannot_create_a_mismatched_share() -> Test
             },
         ))
         .await?;
+    storage.append_entry(user("s1", 2, "later")).await?;
+    let mut synced = CloudSync::new(CloudVisibility::Private, "host");
+    synced.synced_seq = 2;
+    storage.set_session_cloud("s1", Some(synced)).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let sync::PushOutcome::Synced { pushed, .. } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 2, "the whole transcript goes up again");
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["force"], json!(true));
+    assert_eq!(body["expected_seq"], json!(0));
+    assert_eq!(body["entries"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        body["entries"][0]["item"]["content"][0]["source"],
+        json!({"type": "base64", "data": "aW1hZ2UgYnl0ZXM="})
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn widening_access_without_images_stays_incremental() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    storage.append_entry(user("s1", 2, "two")).await?;
     let mut synced = CloudSync::new(CloudVisibility::Private, "host");
     synced.synced_seq = 1;
     storage.set_session_cloud("s1", Some(synced)).await?;
-    let error = sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test")
-        .await
-        .err()
-        .ok_or("expected path-image error")?;
-    assert!(error.to_string().contains("earlier cloud entries"));
-    assert!(server
-        .received_requests()
-        .await
-        .unwrap_or_default()
-        .is_empty());
-    let saved = storage.get_session("s1").await?.ok_or("missing")?;
-    assert_eq!(
-        saved.cloud.ok_or("missing cloud")?.visibility,
-        CloudVisibility::Private
-    );
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["force"], json!(false));
+    assert_eq!(body["expected_seq"], json!(1));
+    assert_eq!(body["entries"].as_array().map(Vec::len), Some(1));
     Ok(())
 }
 
@@ -623,7 +720,7 @@ async fn push_conflict_is_reported_not_raised_and_leaves_state_untouched() -> Te
         .respond_with(ResponseTemplate::new(409).set_body_json(json!({"seq": 5})))
         .mount(&server)
         .await;
-    let outcome = sync::push_session(&state, &storage, "s1", "test", false).await?;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
     let sync::PushOutcome::Diverged {
         local_seq,
         remote_seq,
@@ -879,8 +976,15 @@ async fn share_team_pushes_the_page_and_records_the_link() -> TestResult {
         .expect(2)
         .mount(&server)
         .await;
-    let outcome =
-        sync::share_session(&state, &storage, "s1", Some(CloudAccess::Team), "test").await?;
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await?;
     let sync::PushOutcome::Synced { cloud, .. } = outcome else {
         return Err(format!("expected Synced, got {outcome:?}").into());
     };
@@ -893,7 +997,7 @@ async fn share_team_pushes_the_page_and_records_the_link() -> TestResult {
 
     // Background pushes keep asking for the team page.
     storage.append_entry(user("s1", 2, "b")).await?;
-    sync::push_session(&state, &storage, "s1", "test", false).await?;
+    sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
     let loaded = storage.get_session("s1").await?.ok_or("missing")?;
     let cloud = loaded.cloud.ok_or("missing cloud")?;
     assert_eq!(
@@ -917,10 +1021,17 @@ async fn share_team_on_a_server_without_team_pages_is_an_error() -> TestResult {
         )
         .mount(&server)
         .await;
-    let error = sync::share_session(&state, &storage, "s1", Some(CloudAccess::Team), "test")
-        .await
-        .err()
-        .ok_or("an old server must not look like success")?;
+    let error = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await
+    .err()
+    .ok_or("an old server must not look like success")?;
     assert!(error.to_string().contains("does not support team sharing"));
     // What the server acknowledged is what is recorded: private, no team.
     let loaded = storage.get_session("s1").await?.ok_or("missing")?;
@@ -941,10 +1052,17 @@ async fn team_refusal_carries_the_server_reason() -> TestResult {
         })))
         .mount(&server)
         .await;
-    let error = sync::share_session(&state, &storage, "s1", Some(CloudAccess::Team), "test")
-        .await
-        .err()
-        .ok_or("expected a refusal")?;
+    let error = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await
+    .err()
+    .ok_or("expected a refusal")?;
     assert!(error.to_string().contains("not in any group"));
     Ok(())
 }
@@ -1009,13 +1127,38 @@ async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> Test
             .await;
     }
 
-    let outcome =
-        sync::share_session(&state, &storage, "s1", Some(CloudAccess::Public), "test").await?;
+    // Progress: one tick before the first batch, then one per acknowledged
+    // batch, in entries so a UI can draw a bar from them.
+    let ticks = std::sync::Mutex::new(Vec::new());
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|progress| {
+            if let Ok(mut ticks) = ticks.lock() {
+                ticks.push(progress);
+            }
+        },
+    )
+    .await?;
     let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
         return Err(format!("expected Synced, got {outcome:?}").into());
     };
     assert_eq!(pushed, 3);
     assert_eq!(cloud.synced_seq, 3);
+    let ticks = ticks.into_inner().map_err(|_| "poisoned")?;
+    let seen: Vec<(usize, usize, usize, usize)> = ticks
+        .iter()
+        .map(|t| (t.uploaded_entries, t.total_entries, t.batch, t.batches))
+        .collect();
+    assert_eq!(seen, vec![
+        (0, 3, 0, 3),
+        (1, 3, 1, 3),
+        (2, 3, 2, 3),
+        (3, 3, 3, 3)
+    ]);
     let requests = server.received_requests().await.ok_or("missing requests")?;
     assert_eq!(requests.len(), 3);
     for (index, request) in requests.iter().enumerate() {
@@ -1074,7 +1217,7 @@ async fn share_conflict_mid_upload_keeps_acknowledged_batches() -> TestResult {
             Some(CloudSync::new(CloudVisibility::Private, "laptop")),
         )
         .await?;
-    let outcome = sync::push_session(&state, &storage, "s1", "test", false).await?;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
     let sync::PushOutcome::Diverged {
         local_seq,
         remote_seq,
@@ -1086,5 +1229,85 @@ async fn share_conflict_mid_upload_keeps_acknowledged_batches() -> TestResult {
     let meta = storage.get_session("s1").await?.ok_or("missing session")?;
     assert_eq!(meta.cloud.map(|cloud| cloud.synced_seq), Some(1));
     server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rate_limited_batch_is_retried_after_the_server_says_so() -> TestResult {
+    // The server's per-minute upload cap sees every batch of a chunked push.
+    // A 429 with `Retry-After` means "send that one again later", not "the
+    // upload failed"; the client waits and does so without resending the
+    // batches already acknowledged.
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "1")
+                .set_body_json(json!({"error": "too many sync requests, slow down"})),
+        )
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let started = std::time::Instant::now();
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Private),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 1);
+    assert_eq!(cloud.synced_seq, 1);
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(1),
+        "honoured Retry-After"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rate_limited_pull_is_not_retried() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "60")
+                .set_body_json(json!({"error": "too many sync requests, slow down"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = sync::remote_index(&state)
+        .await
+        .err()
+        .ok_or("expected an error")?;
+    assert!(
+        error.to_string().contains("too many sync requests"),
+        "{error}"
+    );
     Ok(())
 }

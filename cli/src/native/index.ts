@@ -5,8 +5,8 @@
  */
 
 import { shareCreated, shareList, type ShareNotice } from './contracts/share.js'
-import { cloudPushResult, cloudPullResult, remoteSessions, type CloudPushResult, type CloudPullResult, type RemoteSession } from './contracts/cloud.js'
-export type { CloudPushResult, CloudPullResult, RemoteSession } from './contracts/cloud.js'
+import { cloudPushProgress, cloudPushResult, cloudPullResult, remoteSessions, type CloudPushProgress, type CloudPushResult, type CloudPullResult, type RemoteSession } from './contracts/cloud.js'
+export type { CloudPushProgress, CloudPushResult, CloudPullResult, RemoteSession } from './contracts/cloud.js'
 export type { CloudSync, CloudVisibility } from './contracts/results.js'
 // @ts-ignore — binding.js is generated
 import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
@@ -80,6 +80,17 @@ export class CompactionTask {
 
   abort(): void {
     this.raw.abort()
+  }
+}
+
+/**
+ * Decode native progress ticks for a caller's listener. A malformed tick is
+ * dropped: progress is advisory and the final result still arrives.
+ */
+function progressRelay(onProgress?: (progress: CloudPushProgress) => void): ((raw: string) => void) | undefined {
+  if (!onProgress) return undefined
+  return raw => {
+    try { onProgress(decodeResult(raw, cloudPushProgress)) } catch { /* advisory */ }
   }
 }
 
@@ -247,13 +258,26 @@ export class Agent {
   }
 
   // Cloud session sync: the session itself, kept whole, on the owner's server.
-  /** `keep` leaves an already-shared session's access unchanged (new ones start private). */
-  async cloudShareSession(sessionId: string, visibility: 'private' | 'team' | 'public' | 'keep'): Promise<CloudPushResult> {
-    return decodeResult(await this.raw.cloudShareSession(sessionId, visibility), cloudPushResult)
+  /**
+   * `keep` leaves an already-shared session's access unchanged (new ones start
+   * private). `onProgress` fires after each uploaded batch of a long push.
+   */
+  async cloudShareSession(
+    sessionId: string,
+    visibility: 'private' | 'team' | 'public' | 'keep',
+    onProgress?: (progress: CloudPushProgress) => void,
+  ): Promise<CloudPushResult> {
+    const raw = await this.raw.cloudShareSession(sessionId, visibility, progressRelay(onProgress))
+    return decodeResult(raw, cloudPushResult)
   }
 
-  async cloudPushSession(sessionId: string, force = false): Promise<CloudPushResult> {
-    return decodeResult(await this.raw.cloudPushSession(sessionId, force), cloudPushResult)
+  async cloudPushSession(
+    sessionId: string,
+    force = false,
+    onProgress?: (progress: CloudPushProgress) => void,
+  ): Promise<CloudPushResult> {
+    const raw = await this.raw.cloudPushSession(sessionId, force, progressRelay(onProgress))
+    return decodeResult(raw, cloudPushResult)
   }
 
   async cloudUnshareSession(sessionId: string): Promise<void> {

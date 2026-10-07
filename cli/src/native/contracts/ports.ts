@@ -37,8 +37,8 @@ export interface NativeAgent {
   sessionWithText(id: string): Promise<string | null>
   shareSession(id: string): Promise<string>
   listShares(): Promise<string>
-  cloudShareSession(id: string, visibility: string): Promise<string>
-  cloudPushSession(id: string, force: boolean): Promise<string>
+  cloudShareSession(id: string, visibility: string, onProgress?: (progress: string) => void): Promise<string>
+  cloudPushSession(id: string, force: boolean, onProgress?: (progress: string) => void): Promise<string>
   cloudUnshareSession(id: string): Promise<void>
   cloudListSessions(): Promise<string>
   cloudPullSession(id: string): Promise<string>

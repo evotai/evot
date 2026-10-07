@@ -140,7 +140,8 @@ export async function handleClipCommand(ctx: ReplCommandContext): Promise<void> 
 }
 
 export async function handleShareCommand(ctx: ReplCommandContext, args: string): Promise<void> {
-  await runShareCommand(ctx, args)
+  const output = createCommandOutput(ctx, 'share')
+  await runShareCommand({ ...ctx, progressBar: options => output.bar(options) }, args)
 }
 
 /**

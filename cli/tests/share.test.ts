@@ -47,8 +47,39 @@ test('/share private explicitly syncs privately', async () => {
   const { ctx, output, calls } = setup()
   await runShareCommand(ctx, 'private')
   expect(calls).toEqual(['flush', 'share:session:private', 'ack:session'])
-  expect(output[0]).toContain('☁ Shared to cloud')
-  expect(output[0]).toContain('any machine')
+  // No bar factory here: the notice is one line and the result follows it.
+  expect(output[0]).toBe('Syncing to the cloud')
+  expect(output[1]).toContain('☁ Shared to cloud')
+  expect(output[1]).toContain('any machine')
+})
+
+test('with a progress bar the upload is one row that becomes the result', async () => {
+  const { ctx, output, calls } = setup()
+  const bar: Array<[number, number] | string> = []
+  ctx.progressBar = () => ({ set: (done, total) => { bar.push([done, total]) }, finish: text => { bar.push(text) } })
+  ctx.agent.cloudShareSession = async (sid, visibility, onProgress) => {
+    calls.push(`share:${sid}:${visibility}`)
+    onProgress?.({ uploaded_entries: 0, total_entries: 9000, batch: 0, batches: 2 })
+    onProgress?.({ uploaded_entries: 5000, total_entries: 9000, batch: 1, batches: 2 })
+    onProgress?.({ uploaded_entries: 9000, total_entries: 9000, batch: 2, batches: 2 })
+    return synced('public')
+  }
+  await runShareCommand(ctx, 'public')
+  expect(bar.slice(0, 3)).toEqual([[0, 9000], [5000, 9000], [9000, 9000]])
+  expect(String(bar.at(-1))).toContain('https://evot.ai/share/')
+  // The scope warning is its own line; the result lives in the bar's row.
+  expect(output).toHaveLength(1)
+  expect(output[0]).toContain('anyone with the link can read it')
+})
+
+test('a failed upload closes the progress row before the error line', async () => {
+  const { ctx, output } = setup()
+  const bar: string[] = []
+  ctx.progressBar = () => ({ set: () => {}, finish: text => { bar.push(text) } })
+  ctx.agent.cloudShareSession = async () => { throw new Error('invalid session push: too big (HTTP 400)') }
+  await runShareCommand(ctx, 'team')
+  expect(bar).toEqual(['Sharing with your team — failed'])
+  expect(output.at(-1)).toContain('Share failed: invalid session push: too big (HTTP 400)')
 })
 
 test('/share public warns before publishing and returns the live page link', async () => {

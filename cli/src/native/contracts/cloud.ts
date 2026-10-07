@@ -13,6 +13,17 @@ export const cloudPushResult = tagged('kind', {
   not_shared: object({ kind: oneOf('not_shared') }),
 }) as import('./schema.js').Schema<CloudPushResult>
 
+/** One tick of a long push: after each batch the server acknowledged. */
+export interface CloudPushProgress {
+  uploaded_entries: number
+  total_entries: number
+  batch: number
+  batches: number
+}
+export const cloudPushProgress = object({
+  uploaded_entries: uint, total_entries: uint, batch: uint, batches: uint,
+}) as import('./schema.js').Schema<CloudPushProgress>
+
 export type CloudPullResult =
   | { kind: 'pulled'; meta: SessionMeta; appended: number }
   | { kind: 'up_to_date' }

@@ -24,6 +24,21 @@ use crate::types::ListTranscriptEntries;
 use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 
+/// One step of a push, reported after each batch the server acknowledged
+/// (and once before the first, so a caller can draw an empty bar at once).
+/// Entry counts are what a reader sees as progress; batch numbers are what
+/// a log wants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PushProgress {
+    pub uploaded_entries: usize,
+    pub total_entries: usize,
+    pub batch: usize,
+    pub batches: usize,
+}
+
+/// Where a push reports its progress. `&|_| {}` for callers that do not care.
+pub type ProgressSink<'a> = dyn Fn(PushProgress) + Sync + 'a;
+
 #[derive(Debug, Clone)]
 pub enum PushOutcome {
     /// Server now ends at `cloud.synced_seq`; `pushed` entries went up.
@@ -53,6 +68,7 @@ pub async fn share_session(
     session_id: &str,
     access: Option<CloudAccess>,
     evot_version: &str,
+    on_progress: &ProgressSink<'_>,
 ) -> Result<PushOutcome> {
     let meta = load_meta(storage, session_id).await?;
     let previous = meta.cloud;
@@ -63,17 +79,18 @@ pub async fn share_session(
         cloud.set_access(access);
     }
     storage.set_session_cloud(session_id, Some(cloud)).await?;
-    let outcome = match push_session(state, storage, session_id, evot_version, false).await {
-        Ok(PushOutcome::Synced { cloud, pushed }) => PushOutcome::Synced { cloud, pushed },
-        Ok(other) => {
-            storage.set_session_cloud(session_id, previous).await?;
-            return Ok(other);
-        }
-        Err(error) => {
-            storage.set_session_cloud(session_id, previous).await?;
-            return Err(error);
-        }
-    };
+    let outcome =
+        match push_session(state, storage, session_id, evot_version, false, on_progress).await {
+            Ok(PushOutcome::Synced { cloud, pushed }) => PushOutcome::Synced { cloud, pushed },
+            Ok(other) => {
+                storage.set_session_cloud(session_id, previous).await?;
+                return Ok(other);
+            }
+            Err(error) => {
+                storage.set_session_cloud(session_id, previous).await?;
+                return Err(error);
+            }
+        };
     // A server that predates team pages ignores the flag and acknowledges a
     // plain private session. Say so instead of reporting success.
     if access == Some(CloudAccess::Team) {
@@ -101,12 +118,12 @@ pub async fn push_session(
     session_id: &str,
     evot_version: &str,
     force: bool,
+    on_progress: &ProgressSink<'_>,
 ) -> Result<PushOutcome> {
     let meta = load_meta(storage, session_id).await?;
     let Some(cloud) = meta.cloud.clone() else {
         return Ok(PushOutcome::NotShared);
     };
-    let after_seq = if force { 0 } else { cloud.synced_seq };
     let all = storage
         .list_entries(ListTranscriptEntries {
             session_id: session_id.to_string(),
@@ -118,19 +135,25 @@ pub async fn push_session(
     // Private sync and public/team shares must never send local-only image
     // paths. Use the same portable entries for the viewer and the raw copy.
     let access = cloud.access();
-    if access != CloudAccess::Private && !force {
-        // Old clients could sync paths instead of image bytes. A visibility
-        // change only uploads the tail, so the page could show an image while
-        // the raw transcript handed to importers still contains a dead path.
-        for entry in all.iter().filter(|entry| entry.seq <= after_seq) {
+    // Builds before image embedding synced the path, not the bytes, so a copy
+    // the server already holds may carry dead paths. Widening access only
+    // uploads the tail, which would leave those entries as they are for
+    // importers. Entries are stored with paths locally and made portable on
+    // the way out, so the local shape cannot say whether the server copy is
+    // clean; when earlier entries carry images, replace the copy from the
+    // start rather than refuse. That is what `/share off` and re-sharing did
+    // by hand, minus the delete and the round trip.
+    let mut force = force;
+    if access != CloudAccess::Private && !force && cloud.synced_seq > 0 {
+        let synced = all.iter().filter(|entry| entry.seq <= cloud.synced_seq);
+        for entry in synced {
             if has_path_images(entry)? {
-                return Err(EvotError::Conf(
-                    "earlier cloud entries contain local image paths; /share off and re-share to upload the full conversation"
-                        .into(),
-                ));
+                force = true;
+                break;
             }
         }
     }
+    let after_seq = if force { 0 } else { cloud.synced_seq };
     let portable = portable_entries(&all)?;
     let viewer = if access != CloudAccess::Private && !portable.is_empty() {
         Some(serde_json::to_value(crate::share::export_session(
@@ -148,14 +171,22 @@ pub async fn push_session(
     let local_seq = all.last().map(|entry| entry.seq).unwrap_or(after_seq);
     let pushed = entries.len();
     let batches = split_batches(entries);
-    let last = batches.len().saturating_sub(1);
+    let batch_count = batches.len();
+    let last = batch_count.saturating_sub(1);
     let mut cloud = cloud;
     let mut expected_seq = after_seq;
+    let mut uploaded = 0usize;
     // Only the first batch may replace: a `force` on every batch would wipe
     // the ones already appended. Compare-and-append carries the rest.
-    let mut force = force;
+    on_progress(PushProgress {
+        uploaded_entries: 0,
+        total_entries: pushed,
+        batch: 0,
+        batches: batch_count,
+    });
     for (index, batch) in batches.into_iter().enumerate() {
         let is_last = index == last;
+        let batch_len = batch.len();
         let payload = SyncPush {
             schema_version: SYNC_SCHEMA_VERSION,
             evot_version: evot_version.to_string(),
@@ -176,6 +207,13 @@ pub async fn push_session(
                 cloud = acknowledge(storage, session_id, cloud, &ack).await?;
                 expected_seq = ack.seq;
                 force = false;
+                uploaded += batch_len;
+                on_progress(PushProgress {
+                    uploaded_entries: uploaded,
+                    total_entries: pushed,
+                    batch: index + 1,
+                    batches: batch_count,
+                });
             }
             PushResponse::Conflict { remote_seq } => {
                 return Ok(PushOutcome::Diverged {

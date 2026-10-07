@@ -1,10 +1,13 @@
-import type { Agent, CloudPushResult, SessionMeta } from '../native/index.js'
+import type { Agent, CloudPushProgress, CloudPushResult, SessionMeta } from '../native/index.js'
 import { resolveSessionByPrefix } from '../term/app/resume.js'
 import { createHyperlink } from '../render/hyperlink.js'
 import { describeShareResult, shareAccess } from '../session/cloud-sessions.js'
+import type { ProgressBar, ProgressBarOptions } from '../term/progress-bar.js'
 
 export interface ShareContext {
   agent: Pick<Agent, 'listSessions' | 'cloudShareSession' | 'cloudUnshareSession' | 'cloudPushSession' | 'cloudForkRemoteSession' | 'importSharedSession'>
+  /** One in-place progress row for a long upload; absent in hosts without a terminal. */
+  progressBar?(options: ProgressBarOptions): ProgressBar
   openShareList(): Promise<void>
   /** Legacy one-shot share links, kept so they can still be revoked. */
   openShareLinks?(): Promise<void>
@@ -22,18 +25,31 @@ export interface ShareContext {
 
 const USAGE = 'Usage: /share [public | team | private | off | list] [session-id | url]'
 
-/** Re-show `notice` with an elapsed-seconds suffix once the wait gets long. */
-function tickWhileWaiting(notice: string, show: (text: string) => void, render: () => void): () => void {
-  const startedAt = Date.now()
-  show(notice)
-  render()
-  const timer = setInterval(() => {
-    const seconds = Math.round((Date.now() - startedAt) / 1000)
-    if (seconds < 3) return
-    show(`${notice} · ${seconds}s`)
-    render()
-  }, 1000)
-  return () => clearInterval(timer)
+/**
+ * Run an upload behind one progress row. Without a bar factory (tests, hosts
+ * with no terminal) the notice is shown once and the result follows it.
+ */
+async function withUploadProgress(
+  ctx: ShareContext,
+  show: (text: string) => void,
+  label: string,
+  upload: (onProgress: (progress: CloudPushProgress) => void) => Promise<CloudPushResult>,
+): Promise<{ result: CloudPushResult; finish: (text: string) => void }> {
+  const bar = ctx.progressBar?.({ label, unit: 'entries', pending: 'preparing…' })
+  if (!bar) {
+    show(label)
+    ctx.requestRender()
+    const result = await upload(() => {})
+    return { result, finish: show }
+  }
+  try {
+    const result = await upload(progress => bar.set(progress.uploaded_entries, progress.total_entries))
+    return { result, finish: text => bar.finish(text) }
+  } catch (error) {
+    // The row must not stay at 40% forever; the error line follows it.
+    bar.finish(`${label} — failed`)
+    throw error
+  }
 }
 
 /** A pasted share page, as opposed to a visibility word or a local id. */
@@ -110,37 +126,33 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
     }
     if (word === 'local') {
       // Divergence, local side: overwrite the server copy wholesale.
-      const result = await ctx.agent.cloudPushSession(sid, true)
+      const { result, finish } = await withUploadProgress(ctx, show, 'Replacing the cloud copy',
+        onProgress => ctx.agent.cloudPushSession(sid, true, onProgress))
       ctx.cloudAcknowledged?.(sid, result)
-      show(result.kind === 'synced' ? '☁ Cloud copy replaced with this session' : describeShareResult(result, 'private'))
+      finish(result.kind === 'synced' ? '☁ Cloud copy replaced with this session' : describeShareResult(result, 'private'))
       return
     }
 
     const requested = word as 'public' | 'team' | 'private' | 'keep'
-    let notice: string | null = null
+    // Say what leaves the machine before it does: the page is public-by-link,
+    // and turning it private later hides the page, not what was already read.
     if (requested === 'public') {
-      // Say what leaves the machine before it does: the page is public-by-link,
-      // and turning it private later hides the page, not what was already read.
-      notice = 'Publishing… (transcript, system prompt, tool output — anyone with the link can read it)'
+      ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — anyone with the link can read it')
     } else if (requested === 'team') {
-      notice = 'Sharing with your team… (transcript, system prompt, tool output — members of your group who sign in can read it)'
+      ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — members of your group who sign in can read it')
     }
-    // A long session uploads in batches and can take minutes; keep the line
-    // moving so the wait reads as progress rather than a hang.
-    const stopTicking = notice ? tickWhileWaiting(notice, show, ctx.requestRender) : () => {}
-    let result: CloudPushResult
-    try {
-      result = await ctx.agent.cloudShareSession(sid, requested)
-    } finally {
-      stopTicking()
-    }
+    const label = requested === 'public' ? 'Publishing' : requested === 'team' ? 'Sharing with your team' : 'Syncing to the cloud'
+    // A long session uploads in batches and can take minutes; one row shows
+    // how far it has got, then becomes the result.
+    const { result, finish } = await withUploadProgress(ctx, show, label,
+      onProgress => ctx.agent.cloudShareSession(sid, requested, onProgress))
     ctx.cloudAcknowledged?.(sid, result)
     const visibility = result.kind === 'synced' ? shareAccess(result.cloud) : requested === 'keep' ? 'private' : requested
     const line = describeShareResult(result, visibility)
     const url = result.kind !== 'synced' ? null
       : visibility === 'public' ? result.cloud.public_url
       : visibility === 'team' ? result.cloud.team_url : null
-    show(url ? line.replace(url, createHyperlink(url)) : line)
+    finish(url ? line.replace(url, createHyperlink(url)) : line)
     if (visibility === 'private' && result.kind === 'synced') show('  Page for your team or anyone? /share team · /share public')
   } catch (error) {
     ctx.commitSystem('sys-share-error', `Share failed: ${error instanceof Error ? error.message : String(error)}`)
