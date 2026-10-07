@@ -1,3 +1,6 @@
+use evot::error;
+use evot::types;
+
 #[path = "agent_prompt_test.rs"]
 mod agent_prompt_test;
 #[path = "agent_thinking_test.rs"]
@@ -83,6 +86,8 @@ mod server_protocol_test;
 mod session_fork_test;
 #[path = "session_gates_test.rs"]
 mod session_gates_test;
+mod session_listing_bench;
+mod session_listing_cancel_test;
 #[path = "session_locator_test.rs"]
 mod session_locator_test;
 #[path = "session_observability_test.rs"]

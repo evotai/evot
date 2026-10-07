@@ -102,6 +102,110 @@ async fn list_sessions_uses_transcript_activity_for_running_sessions() -> TestRe
 }
 
 #[tokio::test]
+async fn list_sessions_handles_missing_and_invalid_roots() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = open_storage(&StorageConfig::fs(root.path().to_path_buf()))?;
+    assert!(storage
+        .list_sessions(ListSessions::default())
+        .await?
+        .is_empty());
+    std::fs::write(root.path().join("sessions"), b"not a directory")?;
+    assert!(storage
+        .list_sessions(ListSessions::default())
+        .await
+        .is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_sessions_preserves_tolerance_ordering_and_pagination() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = open_storage(&StorageConfig::fs(root.path().to_path_buf()))?;
+    for (id, updated_at) in [
+        ("sess-old", "2020-01-01T00:00:00Z"),
+        ("sess-middle", "2021-01-01T00:00:00Z"),
+        ("sess-new", "2022-01-01T00:00:00Z"),
+    ] {
+        let mut session = SessionMeta::new(id.into(), "/work".into(), "model".into());
+        session.updated_at = updated_at.into();
+        storage.save_session(session).await?;
+    }
+    let sessions_dir = root.path().join("sessions");
+    std::fs::write(sessions_dir.join(".DS_Store"), b"ignored")?;
+    for id in ["sess-missing", "sess-malformed", "sess-unreadable"] {
+        std::fs::create_dir(sessions_dir.join(id))?;
+    }
+    std::fs::write(sessions_dir.join("sess-malformed/session.json"), b"{broken")?;
+    std::fs::create_dir(sessions_dir.join("sess-unreadable/session.json"))?;
+
+    let all = storage.list_sessions(ListSessions::default()).await?;
+    assert_eq!(
+        all.iter()
+            .map(|s| s.session_id.as_str())
+            .collect::<Vec<_>>(),
+        ["sess-new", "sess-middle", "sess-old"]
+    );
+    let page = storage
+        .list_sessions(ListSessions {
+            limit: 1,
+            offset: 1,
+        })
+        .await?;
+    assert_eq!(page.len(), 1);
+    assert_eq!(page[0].session_id, "sess-middle");
+    let tail = storage
+        .list_sessions(ListSessions {
+            limit: 0,
+            offset: 2,
+        })
+        .await?;
+    assert_eq!(tail.len(), 1);
+    assert_eq!(tail[0].session_id, "sess-old");
+    assert!(storage
+        .list_sessions(ListSessions {
+            limit: 20,
+            offset: 10
+        })
+        .await?
+        .is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn list_sessions_activity_does_not_override_newer_saved_time() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = open_storage(&StorageConfig::fs(root.path().to_path_buf()))?;
+    for (id, updated_at) in [
+        ("sess-future", "2099-01-01T00:00:00Z"),
+        ("sess-invalid", "invalid timestamp"),
+    ] {
+        let mut session = SessionMeta::new(id.into(), "/work".into(), "model".into());
+        session.updated_at = updated_at.into();
+        storage.save_session(session).await?;
+        std::fs::write(
+            root.path()
+                .join("sessions")
+                .join(id)
+                .join("transcript.jsonl"),
+            b"[]\n",
+        )?;
+    }
+    let all = storage.list_sessions(ListSessions::default()).await?;
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].session_id, "sess-future");
+    assert_eq!(all[0].updated_at, "2099-01-01T00:00:00Z");
+    assert_eq!(all[1].session_id, "sess-invalid");
+    assert!(chrono::DateTime::parse_from_rfc3339(&all[1].updated_at).is_ok());
+    // Listing adjusts only the returned metadata, not the stored contract.
+    let saved = storage
+        .get_session("sess-invalid")
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(saved.updated_at, "invalid timestamp");
+    Ok(())
+}
+
+#[tokio::test]
 async fn unsupported_transcript_format_returns_clear_error() -> TestResult {
     let root = TempDir::new()?;
     let session_id = "sess-unsupported";

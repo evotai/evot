@@ -536,60 +536,14 @@ impl Storage for FsStorage {
     }
 
     async fn list_sessions(&self, params: ListSessions) -> Result<Vec<SessionMeta>> {
-        let mut entries = match fs::read_dir(self.sessions_dir()).await {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(EvotError::Io(e)),
-        };
-
-        let mut sessions = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            // Skip non-directory entries (e.g. .DS_Store)
-            match entry.file_type().await {
-                Ok(ft) if ft.is_dir() => {}
-                Ok(_) => continue,
-                Err(e) => {
-                    tracing::warn!(path = ?entry.path(), "skipping session entry: {e}");
-                    continue;
-                }
-            }
-            let session_dir = entry.path();
-            let path = session_dir.join("session.json");
-            match self.read_json::<SessionMeta>(&path).await {
-                Ok(Some(mut session)) => {
-                    // Match pi's recent-session semantics: transcript activity is
-                    // authoritative even while a long run has not reached its
-                    // final metadata save yet.
-                    if let Ok(metadata) = fs::metadata(session_dir.join("transcript.jsonl")).await {
-                        if let Ok(modified) = metadata.modified() {
-                            let modified = chrono::DateTime::<chrono::Utc>::from(modified);
-                            let saved = chrono::DateTime::parse_from_rfc3339(&session.updated_at)
-                                .ok()
-                                .map(|value| value.with_timezone(&chrono::Utc));
-                            if saved.is_none_or(|value| modified > value) {
-                                session.updated_at = modified.to_rfc3339();
-                            }
-                        }
-                    }
-                    sessions.push(session);
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    tracing::warn!(path = ?path, "skipping malformed session.json: {e}");
-                }
-            }
-        }
-
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        Ok(sessions
-            .into_iter()
-            .skip(params.offset)
-            .take(if params.limit == 0 {
-                usize::MAX
-            } else {
-                params.limit
-            })
-            .collect())
+        let sessions_dir = self.sessions_dir();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let _cancel_on_drop = cancel.clone().drop_guard();
+        tokio::task::spawn_blocking(move || {
+            super::session_listing::scan(&sessions_dir, params, &cancel)
+        })
+        .await
+        .map_err(|error| EvotError::Store(format!("session listing task failed: {error}")))?
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<bool> {
