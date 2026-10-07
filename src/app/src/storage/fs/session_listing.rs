@@ -8,8 +8,8 @@ use crate::types::ListSessions;
 use crate::types::SessionMeta;
 
 /// Keep one scan on a blocking worker instead of dispatching every small read
-/// and metadata lookup separately. The caller's drop guard cancels abandoned
-/// scans; an in-progress filesystem operation still has to complete first.
+/// and metadata lookup separately. Entered through `crate::blocking::blocking_io`,
+/// which cancels the token when the caller drops the listing future.
 pub(super) fn scan(
     sessions_dir: &Path,
     params: ListSessions,
@@ -91,7 +91,7 @@ pub(super) fn scan(
 
 fn check_cancelled(cancel: &CancellationToken) -> Result<()> {
     if cancel.is_cancelled() {
-        return Err(EvotError::Store("session listing cancelled".into()));
+        return Err(crate::blocking::cancelled("session listing"));
     }
     Ok(())
 }

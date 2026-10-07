@@ -1,3 +1,4 @@
+use evot::blocking;
 use evot::error;
 use evot::types;
 
@@ -19,6 +20,7 @@ mod automation_lease_test;
 mod automation_share_test;
 #[path = "background_reclaim_test.rs"]
 mod background_reclaim_test;
+mod blocking_test;
 #[path = "bootstrap_test.rs"]
 mod bootstrap_test;
 mod channel_supervisor_test;

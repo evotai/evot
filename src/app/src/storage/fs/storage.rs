@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use fs2::FileExt;
 use tokio::fs;
 
+use crate::blocking::blocking_io;
 use crate::error::EvotError;
 use crate::error::Result;
 use crate::search::SessionWithText;
@@ -75,7 +76,7 @@ impl FsStorage {
         let mut line = serde_json::to_vec(&entries)?;
         line.push(b'\n');
 
-        tokio::task::spawn_blocking(move || -> Result<bool> {
+        blocking_io("transcript writer", move |_| -> Result<bool> {
             use std::io::Write;
 
             let Some(parent) = path.parent() else {
@@ -114,66 +115,67 @@ impl FsStorage {
             Ok(true)
         })
         .await
-        .map_err(|error| EvotError::Store(format!("transcript writer task failed: {error}")))?
     }
 
     async fn read_transcript(&self, path: PathBuf) -> Result<Vec<TranscriptEntry>> {
-        tokio::task::spawn_blocking(move || -> Result<Vec<TranscriptEntry>> {
-            let Some(parent) = path.parent() else {
-                return Err(EvotError::Store(
-                    "transcript path has no parent directory".to_string(),
-                ));
-            };
-            std::fs::create_dir_all(parent)?;
-            let lock_file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(parent.join("transcript.lock"))?;
-            FileExt::lock_exclusive(&lock_file)?;
-            ensure_current_transcript_format(&path)?;
-            truncate_incomplete_tail(&path)?;
-            let content = match std::fs::read(&path) {
-                Ok(content) => content,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-                Err(error) => return Err(EvotError::Io(error)),
-            };
-            let entries = parse_current_transcript(&content)?;
-            FileExt::unlock(&lock_file)?;
-            Ok(entries)
-        })
+        blocking_io(
+            "transcript reader",
+            move |_| -> Result<Vec<TranscriptEntry>> {
+                let Some(parent) = path.parent() else {
+                    return Err(EvotError::Store(
+                        "transcript path has no parent directory".to_string(),
+                    ));
+                };
+                std::fs::create_dir_all(parent)?;
+                let lock_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .read(true)
+                    .write(true)
+                    .open(parent.join("transcript.lock"))?;
+                FileExt::lock_exclusive(&lock_file)?;
+                ensure_current_transcript_format(&path)?;
+                truncate_incomplete_tail(&path)?;
+                let content = match std::fs::read(&path) {
+                    Ok(content) => content,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                    Err(error) => return Err(EvotError::Io(error)),
+                };
+                let entries = parse_current_transcript(&content)?;
+                FileExt::unlock(&lock_file)?;
+                Ok(entries)
+            },
+        )
         .await
-        .map_err(|error| EvotError::Store(format!("transcript reader task failed: {error}")))?
     }
 
     async fn read_active_transcript(&self, path: PathBuf) -> Result<Vec<TranscriptEntry>> {
-        tokio::task::spawn_blocking(move || -> Result<Vec<TranscriptEntry>> {
-            let Some(parent) = path.parent() else {
-                return Err(EvotError::Store(
-                    "transcript path has no parent directory".to_string(),
-                ));
-            };
-            std::fs::create_dir_all(parent)?;
-            let lock_file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(parent.join("transcript.lock"))?;
-            FileExt::lock_exclusive(&lock_file)?;
+        blocking_io(
+            "active transcript reader",
+            move |_| -> Result<Vec<TranscriptEntry>> {
+                let Some(parent) = path.parent() else {
+                    return Err(EvotError::Store(
+                        "transcript path has no parent directory".to_string(),
+                    ));
+                };
+                std::fs::create_dir_all(parent)?;
+                let lock_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(false)
+                    .read(true)
+                    .write(true)
+                    .open(parent.join("transcript.lock"))?;
+                FileExt::lock_exclusive(&lock_file)?;
 
-            ensure_current_transcript_format(&path)?;
-            truncate_incomplete_tail(&path)?;
-            let entries = read_current_active_tail(&path)?;
+                ensure_current_transcript_format(&path)?;
+                truncate_incomplete_tail(&path)?;
+                let entries = read_current_active_tail(&path)?;
 
-            FileExt::unlock(&lock_file)?;
-            Ok(entries)
-        })
+                FileExt::unlock(&lock_file)?;
+                Ok(entries)
+            },
+        )
         .await
-        .map_err(|error| {
-            EvotError::Store(format!("active transcript reader task failed: {error}"))
-        })?
     }
 }
 
@@ -491,22 +493,20 @@ fn validate_transcript_batch(entries: &[TranscriptEntry], session_id: &str) -> R
 impl Storage for FsStorage {
     async fn save_session(&self, session: SessionMeta) -> Result<()> {
         let path = self.session_meta_path(&session.session_id)?;
-        tokio::task::spawn_blocking(move || {
+        blocking_io("session writer", move |_| {
             super::session_meta::update(&path, super::session_meta::Edit::Save(Box::new(session)))
         })
-        .await
-        .map_err(|e| EvotError::Store(e.to_string()))??;
+        .await?;
         Ok(())
     }
 
     async fn rename_session(&self, session_id: &str, title: &str) -> Result<SessionMeta> {
         let path = self.session_meta_path(session_id)?;
         let title = crate::storage::session_title::validate(title)?;
-        tokio::task::spawn_blocking(move || {
+        blocking_io("session writer", move |_| {
             super::session_meta::update(&path, super::session_meta::Edit::Rename(title))
         })
         .await
-        .map_err(|e| EvotError::Store(e.to_string()))?
     }
 
     async fn set_session_cloud(
@@ -515,11 +515,10 @@ impl Storage for FsStorage {
         cloud: Option<crate::types::CloudSync>,
     ) -> Result<SessionMeta> {
         let path = self.session_meta_path(session_id)?;
-        tokio::task::spawn_blocking(move || {
+        blocking_io("session writer", move |_| {
             super::session_meta::update(&path, super::session_meta::Edit::Cloud(cloud))
         })
         .await
-        .map_err(|e| EvotError::Store(e.to_string()))?
     }
 
     async fn get_session(&self, session_id: &str) -> Result<Option<SessionMeta>> {
@@ -537,13 +536,10 @@ impl Storage for FsStorage {
 
     async fn list_sessions(&self, params: ListSessions) -> Result<Vec<SessionMeta>> {
         let sessions_dir = self.sessions_dir();
-        let cancel = tokio_util::sync::CancellationToken::new();
-        let _cancel_on_drop = cancel.clone().drop_guard();
-        tokio::task::spawn_blocking(move || {
-            super::session_listing::scan(&sessions_dir, params, &cancel)
+        blocking_io("session listing", move |cancel| {
+            super::session_listing::scan(&sessions_dir, params, cancel)
         })
         .await
-        .map_err(|error| EvotError::Store(format!("session listing task failed: {error}")))?
     }
 
     async fn delete_session(&self, session_id: &str) -> Result<bool> {
@@ -628,7 +624,7 @@ impl Storage for FsStorage {
 
     async fn upsert_variable(&self, record: VariableRecord) -> Result<Vec<VariableRecord>> {
         let path = self.variables_path();
-        tokio::task::spawn_blocking(move || {
+        blocking_io("variables writer", move |_| {
             mutate_variables(&path, |records| {
                 match records.iter_mut().find(|item| item.key == record.key) {
                     Some(existing) => {
@@ -641,13 +637,12 @@ impl Storage for FsStorage {
             })
         })
         .await
-        .map_err(|error| EvotError::Store(format!("variables writer task failed: {error}")))?
         .map(|(_, records)| records)
     }
 
     async fn remove_variable(&self, key: String) -> Result<(bool, Vec<VariableRecord>)> {
         let path = self.variables_path();
-        tokio::task::spawn_blocking(move || {
+        blocking_io("variables writer", move |_| {
             mutate_variables(&path, |records| {
                 let before = records.len();
                 records.retain(|item| item.key != key);
@@ -655,7 +650,6 @@ impl Storage for FsStorage {
             })
         })
         .await
-        .map_err(|error| EvotError::Store(format!("variables writer task failed: {error}")))?
     }
 
     async fn list_sessions_with_text(&self, limit: usize) -> Result<Vec<SessionWithText>> {

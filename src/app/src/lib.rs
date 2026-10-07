@@ -3,6 +3,7 @@ pub mod api;
 pub(crate) mod atomic_file;
 pub mod auth;
 pub mod automation;
+pub mod blocking;
 pub mod bootstrap;
 pub mod command;
 pub mod compact;

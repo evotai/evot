@@ -12,6 +12,13 @@
 - **CLI**: TypeScript (Bun) in `cli/src/`, renders TUI, handles input, sessions, updates
 - `mod.rs` / `lib.rs`: only module declarations, re-exports, and `use` statements — no business logic
 
+# Blocking Filesystem Work
+
+- Write a batch of local file I/O (directory scans, read + parse, lock + write) as one synchronous worker `fn(..., cancel: &CancellationToken) -> Result<T>` instead of awaiting each `tokio::fs` call.
+- In `src/app`, enter workers only through `crate::blocking::blocking_io(label, worker)`; do not call `tokio::task::spawn_blocking` directly. Dropping the future cancels the token.
+- Workers that touch many files must poll `cancel.is_cancelled()` between operations and return `crate::blocking::cancelled(label)`; single-file workers may ignore the token.
+- `src/engine` workers already use the same `&CancellationToken` signature (`walk`, `glob`, `grep`, search index); keep that shape.
+
 # Testing
 
 - All tests go in the crate's `tests/` directory, never inline
