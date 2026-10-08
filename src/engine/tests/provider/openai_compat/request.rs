@@ -31,6 +31,9 @@ fn test_current_profiled_models_send_codex_default_verbosity() {
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
     ] {
         let model_config = ModelConfig::openai(id, id);
         let config = StreamConfigBuilder::openai()
@@ -148,6 +151,9 @@ fn test_gpt_5_6_max_thinking_maps_to_max_reasoning_effort() {
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
     ] {
         let model_config = ModelConfig::openai(id, id);
         let config = StreamConfigBuilder::openai()
@@ -205,6 +211,20 @@ fn test_gpt_5_6_chat_completions_off_sends_none_effort() {
 
     let body = build_request_body(&config, &OpenAiCompat::openai());
     assert_eq!(body["reasoning_effort"], "none");
+}
+
+#[test]
+fn test_gpt_6_1_sol_chat_completions_off_clamps_to_low_effort() {
+    // GPT-6.1 Sol rejects `none`; `off` clamps to `low`.
+    let model_config = ModelConfig::openai("gpt-6.1-sol", "GPT-6.1 Sol");
+    let config = StreamConfigBuilder::openai()
+        .model("gpt-6.1-sol")
+        .model_config(model_config)
+        .thinking(ThinkingLevel::Off)
+        .build();
+
+    let body = build_request_body(&config, &OpenAiCompat::openai());
+    assert_eq!(body["reasoning_effort"], "low");
 }
 
 #[test]

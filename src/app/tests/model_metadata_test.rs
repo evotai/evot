@@ -139,7 +139,7 @@ fn native_openai_gpt_5_6_metadata_applies_without_explicit_overrides() {
         None,
     );
     assert_eq!(mc.protocol(), ApiProtocol::OpenAiResponses);
-    assert_eq!(mc.context_window(), 922_000);
+    assert_eq!(mc.context_window(), 272_000);
     assert_eq!(mc.max_tokens(), 128_000);
     assert!(mc.supports_image());
 }
@@ -212,7 +212,7 @@ fn openrouter_gpt_5_6_gets_catalog_limits_without_explicit_overrides() {
         None,
         None,
     );
-    assert_eq!(mc.context_window(), 922_000);
+    assert_eq!(mc.context_window(), 272_000);
     assert_eq!(mc.max_tokens(), 128_000);
     assert!(mc
         .supported_thinking_levels()
@@ -336,7 +336,7 @@ fn openrouter_gpt_uses_model_effort_without_compat_caps() {
         None,
         None,
     );
-    assert_eq!(mc.context_window(), 922_000);
+    assert_eq!(mc.context_window(), 272_000);
     assert!(mc.reasoning());
     assert!(mc.honors_reasoning_effort());
     assert_eq!(mc.supported_thinking_levels(), vec![
@@ -358,7 +358,7 @@ fn openai_provider_defaults_base_url_when_missing() {
     );
     assert_eq!(mc.base_url(), "https://api.openai.com/v1");
     assert_eq!(mc.protocol(), ApiProtocol::OpenAiResponses);
-    assert_eq!(mc.context_window(), 922_000);
+    assert_eq!(mc.context_window(), 272_000);
 }
 
 #[test]

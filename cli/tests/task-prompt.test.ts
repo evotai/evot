@@ -52,9 +52,13 @@ describe('task prompts', () => {
     const prompt = updateTaskPrompt(task, context)
     expect(prompt).toContain('one brief, user-visible sentence')
     expect(prompt).toContain('ordinary assistant text before calling automation_task_update')
-    expect(prompt).toContain('MUST call ask_user again to collect the new value')
-    expect(prompt).toContain('Do not ask for it using plain assistant text or end the turn')
-    expect(prompt).toContain('Never end an unfinished edit with a plain-text question')
+    // Instruction edits go through the confirm/revise loop with a drafted
+    // rewrite, never a placeholder "type it yourself" option.
+    expect(prompt).toContain('Never offer placeholder options such as "Type new value (use Other)"')
+    expect(prompt).toContain('rewrite the full instruction yourself')
+    expect(prompt).toContain('do not ask them to retype the whole instruction')
+    expect(prompt).toContain('a plain-text reply stays in this edit')
+    expect(prompt).not.toContain('Never end an unfinished edit with a plain-text question')
     expect(prompt).not.toContain('Do not output explanatory text')
     expect(prompt).toContain('Do not call automation_task_update before the user chooses a field')
     expect(prompt).toContain('What do you want to change')

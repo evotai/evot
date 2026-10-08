@@ -147,15 +147,39 @@ fn non_gpt_responses_does_not_raise_output_cap_to_transport_minimum() {
 
 #[test]
 fn first_party_gpt_5_6_responses_off_sends_none_effort() {
-    let config = StreamConfigBuilder::openai()
-        .model("gpt-5.6-sol")
-        .model_config(ModelConfig::openai_responses("gpt-5.6-sol", "GPT-5.6 Sol"))
-        .thinking(ThinkingLevel::Off)
-        .build();
+    for id in [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-6-sol",
+        "gpt-6-luna",
+    ] {
+        let config = StreamConfigBuilder::openai()
+            .model(id)
+            .model_config(ModelConfig::openai_responses(id, id))
+            .thinking(ThinkingLevel::Off)
+            .build();
 
-    let body = build_request_body(&config);
-    assert_eq!(body["reasoning"]["effort"], "none");
-    assert!(body["reasoning"].get("summary").is_none());
+        let body = build_request_body(&config);
+        assert_eq!(body["reasoning"]["effort"], "none", "{id}");
+        assert!(body["reasoning"].get("summary").is_none(), "{id}");
+    }
+}
+
+#[test]
+fn mandatory_reasoning_gpt_6_responses_off_clamps_to_low_effort() {
+    // GPT-6 Astra and GPT-6.1 Sol reject `effort: none`; `off` clamps to `low`.
+    for id in ["gpt-6-astra", "gpt-6.1-sol"] {
+        let config = StreamConfigBuilder::openai()
+            .model(id)
+            .model_config(ModelConfig::openai_responses(id, id))
+            .thinking(ThinkingLevel::Off)
+            .build();
+
+        let body = build_request_body(&config);
+        assert_eq!(body["reasoning"]["effort"], "low", "{id}");
+        assert_eq!(body["reasoning"]["summary"], "auto", "{id}");
+    }
 }
 
 #[test]
@@ -200,12 +224,12 @@ fn uncatalogued_gpt_and_codex_pass_medium_through() {
 
 #[test]
 fn responses_off_uses_fallback_model_none_effort() {
-    // The uncatalogued GPT fallback explicitly declares `off -> "none"`.
+    // The pre-5.6 uncatalogued GPT fallback explicitly declares `off -> "none"`.
     let config = StreamConfigBuilder::openai()
-        .model("gpt-5.7-nova")
+        .model("gpt-5.3-mini")
         .model_config(ModelConfig::openai_responses(
-            "gpt-5.7-nova",
-            "GPT-5.7 Nova",
+            "gpt-5.3-mini",
+            "GPT-5.3 Mini",
         ))
         .thinking(ThinkingLevel::Off)
         .build();
@@ -216,6 +240,22 @@ fn responses_off_uses_fallback_model_none_effort() {
 }
 
 #[test]
+fn responses_off_on_newer_uncatalogued_gpt_clamps_to_low() {
+    // Uncatalogued GPT-5.6+ successors stay conservative and omit `none`.
+    let config = StreamConfigBuilder::openai()
+        .model("gpt-5.7-nova")
+        .model_config(ModelConfig::openai_responses(
+            "gpt-5.7-nova",
+            "GPT-5.7 Nova",
+        ))
+        .thinking(ThinkingLevel::Off)
+        .build();
+
+    let body = build_request_body(&config);
+    assert_eq!(body["reasoning"]["effort"], "low");
+}
+
+#[test]
 fn verbosity_is_only_sent_for_profiled_current_models() {
     for id in [
         "gpt-5.5",
@@ -223,6 +263,9 @@ fn verbosity_is_only_sent_for_profiled_current_models() {
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
     ] {
         let config = StreamConfigBuilder::openai()
             .model(id)

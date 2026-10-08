@@ -259,16 +259,7 @@ fn kimi_profiles_match_catalog_contracts() {
 
 #[test]
 fn current_openai_profiles_expose_limits_and_verbosity() {
-    for id in [
-        "gpt-5.4",
-        "gpt-5.4-pro",
-        "gpt-5.5",
-        "gpt-5.5-pro",
-        "gpt-5.6-luna",
-        "gpt-5.6-sol",
-        "gpt-5.6-terra",
-        "gpt-6-astra",
-    ] {
+    for id in ["gpt-5.4", "gpt-5.4-pro", "gpt-5.5", "gpt-5.5-pro"] {
         let config = ModelConfig::openai(id, id);
         assert_eq!(config.context_window(), 922_000, "{id}");
         assert_eq!(config.advertised_context_window(), 1_000_000, "{id}");
@@ -285,6 +276,9 @@ fn current_openai_profiles_expose_limits_and_verbosity() {
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
     ] {
         assert_eq!(
             ModelConfig::openai(id, id).effective_verbosity(),
@@ -301,11 +295,74 @@ fn current_openai_profiles_expose_limits_and_verbosity() {
     }
 }
 
+/// GPT-5.6 and newer mirror Codex `models.json` and pi: 272k default
+/// context window (the long-context pricing threshold), auto-compaction at
+/// 90%, low..max reasoning and remote compaction on the first-party route.
+#[test]
+fn gpt_5_6_plus_profiles_follow_codex_and_pi() {
+    use evotengine::ThinkingLevel::*;
+
+    for id in [
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-astra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+        "gpt-6.1-sol",
+    ] {
+        let config = ModelConfig::openai(id, id);
+        assert_eq!(config.context_window(), 272_000, "{id}");
+        assert_eq!(config.advertised_context_window(), 272_000, "{id}");
+        assert_eq!(config.max_tokens(), 128_000, "{id}");
+        assert_eq!(
+            config.profile_compaction_limit(ThinkingLevel::Medium),
+            Some(244_800),
+            "{id}"
+        );
+        assert_eq!(config.default_thinking_level(), Medium, "{id}");
+        assert_eq!(config.clamp_thinking_level(Max), Max, "{id}");
+        assert!(
+            ModelConfig::openai_responses(id, id).can_remote_compact(),
+            "{id}"
+        );
+    }
+
+    // `effort: none` is still accepted on these.
+    for id in [
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-6-luna",
+        "gpt-6-sol",
+    ] {
+        let config = ModelConfig::openai(id, id);
+        assert_eq!(
+            config.supported_thinking_levels(),
+            vec![Off, Low, Medium, High, Xhigh, Max],
+            "{id}"
+        );
+        assert!(config.can_disable_thinking(), "{id}");
+    }
+
+    // GPT-6 Astra and GPT-6.1 Sol reject `effort: none`.
+    for id in ["gpt-6-astra", "gpt-6.1-sol"] {
+        let config = ModelConfig::openai(id, id);
+        assert_eq!(
+            config.supported_thinking_levels(),
+            vec![Low, Medium, High, Xhigh, Max],
+            "{id}"
+        );
+        assert!(!config.can_disable_thinking(), "{id}");
+        assert_eq!(config.clamp_thinking_level(Off), Low, "{id}");
+    }
+}
+
 #[test]
 fn unknown_openai_families_keep_reasoning_fallback_without_extensions() {
     use evotengine::ThinkingLevel::*;
 
-    for id in ["codex-mini", "gpt-5.7-nova"] {
+    for id in ["codex-mini", "gpt-5.3-mini"] {
         let config = ModelConfig::openai(id, id);
         assert!(config.reasoning(), "{id}");
         assert_eq!(
@@ -316,6 +373,16 @@ fn unknown_openai_families_keep_reasoning_fallback_without_extensions() {
         assert_eq!(config.effective_verbosity(), None, "{id}");
         assert!(!config.can_remote_compact(), "{id}");
     }
+
+    // GPT-5.6+ successors inherit the 272k window and low..max ladder (no
+    // `none`, which newer models reject) but not the first-party allowlists
+    // (verbosity, remote compaction).
+    let nova = ModelConfig::openai("gpt-5.7-nova", "GPT-5.7 Nova");
+    assert_eq!(nova.supported_thinking_levels(), vec![
+        Low, Medium, High, Xhigh, Max
+    ]);
+    assert_eq!(nova.effective_verbosity(), None);
+    assert!(!nova.can_remote_compact());
 }
 
 #[test]
@@ -340,6 +407,69 @@ fn anthropic_version_rules_cover_current_and_future_models() {
     let opus_4_5 = ModelConfig::anthropic("claude-opus-4-5", "Claude Opus 4.5");
     assert_eq!(opus_4_5.context_window(), 200_000);
     assert_eq!(opus_4_5.max_tokens(), 64_000);
+}
+
+/// Fable 5.x and Opus/Sonnet 5.5+ are always-on adaptive reasoning (`off`
+/// is rejected) on their regular long-context windows; Haiku 5 joins the
+/// adaptive 1M tier with `off` still available.
+#[test]
+fn anthropic_mandatory_reasoning_profiles_follow_pi() {
+    use evotengine::ThinkingLevel::*;
+
+    for (id, window) in [
+        ("claude-fable-5", 867_000),
+        ("claude-fable-5-1", 867_000),
+        ("claude-opus-5-5", 867_000),
+        ("claude-opus-5-6", 867_000),
+        ("claude-sonnet-5-5", 872_000),
+        ("claude-sonnet-5-7", 872_000),
+    ] {
+        let config = ModelConfig::anthropic(id, id);
+        assert_eq!(config.context_window(), window, "{id}");
+        assert_eq!(config.advertised_context_window(), 1_000_000, "{id}");
+        assert_eq!(config.max_tokens(), 128_000, "{id}");
+        assert_eq!(config.default_thinking_level(), High, "{id}");
+        assert_eq!(
+            config.supported_thinking_levels(),
+            vec![Low, Medium, High, Xhigh, Max],
+            "{id}"
+        );
+        assert!(!config.can_disable_thinking(), "{id}");
+        assert_eq!(config.clamp_thinking_level(Off), Low, "{id}");
+    }
+
+    // Opus/Sonnet 5.0 keep `off`.
+    for id in ["claude-opus-5", "claude-sonnet-5", "claude-haiku-5"] {
+        let config = ModelConfig::anthropic(id, id);
+        assert_eq!(config.max_tokens(), 128_000, "{id}");
+        assert!(config.can_disable_thinking(), "{id}");
+        assert_eq!(config.clamp_thinking_level(Xhigh), Xhigh, "{id}");
+    }
+    assert_eq!(
+        ModelConfig::anthropic("claude-haiku-5", "Haiku 5").context_window(),
+        872_000
+    );
+}
+
+/// Haiku 5.5 bills the whole request at 5x once input passes 100k, so the
+/// default window stays in the cheap tier while advertising the 1M ceiling.
+#[test]
+fn anthropic_haiku_5_5_caps_input_at_pricing_threshold() {
+    use evotengine::ThinkingLevel::*;
+
+    for id in ["claude-haiku-5-5", "claude-haiku-5-6"] {
+        let config = ModelConfig::anthropic(id, id);
+        assert_eq!(config.context_window(), 100_000, "{id}");
+        assert_eq!(config.advertised_context_window(), 1_000_000, "{id}");
+        assert_eq!(config.max_tokens(), 128_000, "{id}");
+        assert_eq!(
+            config.profile_compaction_limit(Medium),
+            Some(90_000),
+            "{id}"
+        );
+        assert!(config.can_disable_thinking(), "{id}");
+        assert_eq!(config.clamp_thinking_level(Max), Max, "{id}");
+    }
 }
 
 #[test]
@@ -476,10 +606,15 @@ fn newer_uncatalogued_ids_inherit_family_windows() {
     }
 
     let gpt = ModelConfig::openai("gpt-5.7-nova", "GPT-5.7 Nova");
-    assert_eq!(gpt.context_window(), 922_000);
-    assert_eq!(gpt.advertised_context_window(), 1_000_000);
-    assert_eq!(gpt.max_tokens(), 32_768);
+    assert_eq!(gpt.context_window(), 272_000);
+    assert_eq!(gpt.advertised_context_window(), 272_000);
+    assert_eq!(gpt.max_tokens(), 128_000);
     assert!(!gpt.can_remote_compact());
+
+    let gpt_5_5 = ModelConfig::openai("gpt-5.5-mini", "GPT-5.5 Mini");
+    assert_eq!(gpt_5_5.context_window(), 922_000);
+    assert_eq!(gpt_5_5.advertised_context_window(), 1_000_000);
+    assert_eq!(gpt_5_5.max_tokens(), 32_768);
 
     let gpt4 = ModelConfig::openai("gpt-4o", "GPT-4o");
     assert_eq!(gpt4.context_window(), 128_000);
