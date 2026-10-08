@@ -42,15 +42,24 @@ export interface AskState {
   submitted: boolean
 }
 
+/** A question with no options is a free-text prompt: the only row is the input. */
+export function isFreeText(question: AskQuestion): boolean {
+  return question.options.length === 0
+}
+
+function initialUIState(state: AskState, tab: number): QuestionUIState {
+  const question = state.questions[tab]
+  const freeText = question !== undefined && isFreeText(question)
+  return {
+    focusIndex: 0,
+    inOtherMode: freeText,
+    otherText: '',
+    otherCursor: 0,
+  }
+}
+
 function getUIState(state: AskState, tab: number): QuestionUIState {
-  return (
-    state.uiStates.get(tab) ?? {
-      focusIndex: 0,
-      inOtherMode: false,
-      otherText: '',
-      otherCursor: 0,
-    }
-  )
+  return state.uiStates.get(tab) ?? initialUIState(state, tab)
 }
 
 function setUIState(
@@ -128,6 +137,7 @@ function focusOption(state: AskState, index: number): AskState {
 export function askUp(state: AskState): AskState {
   const tab = state.currentTab
   const ui = getUIState(state, tab)
+  if (isFreeText(state.questions[tab]!)) return state
   if (ui.inOtherMode) {
     return setUIState(state, tab, {
       inOtherMode: false,
@@ -141,6 +151,7 @@ export function askUp(state: AskState): AskState {
 export function askDown(state: AskState): AskState {
   const tab = state.currentTab
   const ui = getUIState(state, tab)
+  if (isFreeText(state.questions[tab]!)) return state
   const max = optionCount(state) - 1
   if (ui.focusIndex >= max) {
     return setUIState(state, tab, { inOtherMode: true, focusIndex: max, otherCursor: ui.otherText.length })
@@ -353,8 +364,10 @@ export function handleAskKeyEvent(
     case 'j':
       return { action: 'update', state: askDown(state) }
     case 'page-up':
+      if (inOther(state)) return { action: 'update', state }
       return { action: 'update', state: focusOption(state, state.focusIndex - 5) }
     case 'page-down':
+      if (inOther(state)) return { action: 'update', state }
       return { action: 'update', state: focusOption(state, state.focusIndex + 5) }
     case 'shift-tab':
       return { action: 'update', state: askPrevTab(state) }

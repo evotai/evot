@@ -53,7 +53,8 @@ export const ASK_USER_SPEC = {
 Return strict JSON matching the schema. Every item in "questions" and "options" is an object and must be enclosed in { }.
 Example: {"questions":[{"header":"Scope","question":"Which scope?","options":[{"label":"Minimal (Recommended)","description":"Make the smallest change."},{"label":"Complete","description":"Cover the broader change."}]}]}
 
-Users can always provide a custom answer. If you recommend an option, put it first and append "(Recommended)" to its label.`,
+Users can always provide a custom answer. If you recommend an option, put it first and append "(Recommended)" to its label.
+When there are no meaningful choices and you only need the user to type something (a description, a value, a name), pass "options": [] — the UI then opens a text field directly.`,
   parameters_schema: {
     type: 'object',
     additionalProperties: false,
@@ -71,9 +72,9 @@ Users can always provide a custom answer. If you recommend an option, put it fir
             question: { type: 'string', description: 'Clear, specific question ending with ?' },
             options: {
               type: 'array',
-              minItems: 2,
+              minItems: 0,
               maxItems: 4,
-              description: "Two to four distinct option objects. Each item must be enclosed in { }. Do not add 'Other'; the UI provides it automatically.",
+              description: "Two to four distinct option objects, or an empty array for a free-text question. Each item must be enclosed in { }. Do not add 'Other'; the UI provides it automatically.",
               items: {
                 type: 'object',
                 additionalProperties: false,

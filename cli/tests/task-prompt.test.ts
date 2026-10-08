@@ -55,9 +55,10 @@ describe('task prompts', () => {
     // Instruction edits go through the confirm/revise loop with a drafted
     // rewrite, never a placeholder "type it yourself" option.
     expect(prompt).toContain('Never offer placeholder options such as "Type new value (use Other)"')
+    expect(prompt).toContain('call ask_user in the same turn with one free-text question ("options": [])')
     expect(prompt).toContain('rewrite the full instruction yourself')
     expect(prompt).toContain('do not ask them to retype the whole instruction')
-    expect(prompt).toContain('a plain-text reply stays in this edit')
+    expect(prompt).toContain('A plain-text reply in the composer stays in this edit')
     expect(prompt).not.toContain('Never end an unfinished edit with a plain-text question')
     expect(prompt).not.toContain('Do not output explanatory text')
     expect(prompt).toContain('Do not call automation_task_update before the user chooses a field')

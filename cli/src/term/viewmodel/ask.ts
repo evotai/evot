@@ -1,6 +1,6 @@
 import { wrapTextWithAnsi } from '../../render/wrap.js'
 import { blocksToLines, styledLineToAnsi } from './types.js'
-import type { AskState } from '../ask.js'
+import { isFreeText, type AskState } from '../ask.js'
 import { prefixedAskLines } from '../app/ask-user.js'
 import { CURSOR_MARKER } from '../render-frame.js'
 import { getTheme } from '../../render/theme/index.js'
@@ -94,7 +94,8 @@ export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
   const q = state.questions[state.currentTab]!
   for (const text of q.question.split('\n')) result.push(line(questionLine(text)))
   result.push(line(plain('')))
-  const ui = state.uiStates.get(state.currentTab) ?? { focusIndex: 0, inOtherMode: false, otherText: '', otherCursor: 0 }
+  const freeText = isFreeText(q)
+  const ui = state.uiStates.get(state.currentTab) ?? { focusIndex: 0, inOtherMode: freeText, otherText: '', otherCursor: 0 }
   const answer = state.answers[state.currentTab]
   const otherSelected = answer !== undefined && answer.customText !== null
   const selectedIndex = !otherSelected ? answer?.selectedOption : null
@@ -117,10 +118,9 @@ export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
 
   const otherFocused = ui.inOtherMode
   const otherText = otherFocused ? ui.otherText : otherSelected ? selectedAnswerText(state, state.currentTab) ?? '' : ui.otherText
-  const otherSpans: StyledSpan[] = [
-    otherFocused ? rowMarker(true) : plain('  '),
-    dim(optionIndex(q.options.length + 1)),
-  ]
+  const placeholder = freeText ? 'Type your answer.' : 'Type something.'
+  const otherSpans: StyledSpan[] = [otherFocused ? rowMarker(true) : plain('  ')]
+  if (!freeText) otherSpans.push(dim(optionIndex(q.options.length + 1)))
   if (otherFocused) {
     if (otherText) {
       const cursor = ui.otherCursor ?? otherText.length
@@ -130,15 +130,16 @@ export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
       otherSpans.push(plain(CURSOR_MARKER))
       if (after) otherSpans.push(plain(after))
     } else {
-      otherSpans.push(plain(CURSOR_MARKER), dim('Type something.'))
+      otherSpans.push(plain(CURSOR_MARKER), dim(placeholder))
     }
   } else {
-    otherSpans.push(otherSelected ? colored(otherText || 'Type something.', 'green') : dim(otherText || 'Type something.'))
+    otherSpans.push(otherSelected ? colored(otherText || placeholder, 'green') : dim(otherText || placeholder))
   }
   if (otherSelected) otherSpans.push(plain(' '))
   result.push(line(...(otherSelected ? appendTick(otherSpans) : otherSpans)), line(plain('')))
-  result.push(line(dim(isMulti
-    ? '↑↓ navigate · ←→ switch tab · enter select · esc cancel'
-    : '↑↓ navigate · enter select · esc cancel')))
+  const hint = freeText
+    ? (isMulti ? 'enter submit · ←→ switch tab · esc cancel' : 'enter submit · esc cancel')
+    : (isMulti ? '↑↓ navigate · ←→ switch tab · enter select · esc cancel' : '↑↓ navigate · enter select · esc cancel')
+  result.push(line(dim(hint)))
   return [block(result, 1)]
 }

@@ -768,3 +768,59 @@ describe('askStateToResponse', () => {
     ])
   })
 })
+
+describe('free-text question (no options)', () => {
+  const freeText = [
+    { header: 'Instruction', question: 'What should the task do differently?', options: [] },
+  ]
+
+  test('opens directly in text mode and renders a single input row', () => {
+    const state = createAskState(freeText)
+    const text = renderAskVM(state)
+    expect(text).toContain('What should the task do differently?')
+    expect(text).toContain('Type your answer.')
+    expect(text).not.toContain('1.')
+    expect(text).toContain('enter submit · esc cancel')
+    expect(text).not.toContain('↑↓ navigate')
+  })
+
+  test('typed characters go straight into the answer', () => {
+    let state = createAskState(freeText)
+    for (const ch of 'no status') {
+      const r = handleAskKeyEvent(state, 'char', ch)
+      if (r.action === 'update') state = r.state
+    }
+    expect(renderAskVM(state)).toContain('no status')
+    const r = handleAskKeyEvent(state, 'enter')
+    expect(r.action).toBe('submit')
+    if (r.action === 'submit') {
+      expect(askStateToResponse(r.state)).toEqual([
+        { header: 'Instruction', question: 'What should the task do differently?', answer: 'no status' },
+      ])
+    }
+  })
+
+  test('up/down/j/k/page keys stay in text mode and type j/k literally', () => {
+    let state = createAskState(freeText)
+    for (const ev of ['up', 'down', 'page-up', 'page-down'] as const) {
+      const r = handleAskKeyEvent(state, ev)
+      if (r.action === 'update') state = r.state
+    }
+    for (const ch of 'jk') {
+      const r = handleAskKeyEvent(state, 'char', ch)
+      if (r.action === 'update') state = r.state
+    }
+    expect(renderAskVM(state)).toContain('jk')
+  })
+
+  test('enter with empty text does nothing', () => {
+    const state = createAskState(freeText)
+    const r = handleAskKeyEvent(state, 'enter')
+    expect(r.action).toBe('update')
+  })
+
+  test('escape cancels', () => {
+    const state = createAskState(freeText)
+    expect(handleAskKeyEvent(state, 'escape').action).toBe('cancel')
+  })
+})
