@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { handleSelectorControl } from '../src/term/app/selector-control.js'
+import { handleSelectorControl, RESUME_UNSHARE_CONFIRM } from '../src/term/app/selector-control.js'
 import { RESUME_SELECTOR_TITLE } from '../src/term/app/resume.js'
 import { SKILL_SELECTOR_TITLE } from '../src/term/app/skill-window.js'
 import { createAppSelectorState } from '../src/term/app/selector-identity.js'
@@ -234,6 +234,53 @@ describe('repl selector control', () => {
     const next = handleSelectorControl(reordered, key('delete'))
     expect(next.kind).toBe('update')
     if (next.kind === 'update') expect(next.state.pendingDeleteId).toBe('session-one')
+  })
+
+  test('u unshares a cloud row after a confirming press and keeps a local row inert', () => {
+    const cloudItems: SelectorItem[] = [
+      { label: 'one', id: 'session-one', detail: 'first', cloud: true },
+      { label: 'two', id: 'session-two', detail: 'second' },
+    ]
+    const list = { ...createAppSelectorState('resume', RESUME_SELECTOR_TITLE, cloudItems), listFocused: true, sessionScope: 'cloud' as const }
+    const armed = handleSelectorControl(list, char('u'))
+    expect(armed.kind).toBe('update')
+    if (armed.kind !== 'update') return
+    expect(armed.state.pendingDeleteId).toBe('session-one')
+    expect(armed.state.pendingDeleteKind).toBe('unshare')
+    expect(armed.state.subtitle).toBe(RESUME_UNSHARE_CONFIRM)
+
+    // `d` after `u` re-arms as a delete rather than confirming anything.
+    const switched = handleSelectorControl(armed.state, char('d'))
+    expect(switched.kind).toBe('update')
+    if (switched.kind === 'update') expect(switched.state.pendingDeleteKind).toBe('delete')
+    // And `u` after `d` likewise.
+    if (switched.kind === 'update') expect(handleSelectorControl(switched.state, char('u')).kind).toBe('update')
+
+    const confirmed = handleSelectorControl(armed.state, char('u'))
+    expect(confirmed.kind).toBe('unshare-session')
+    if (confirmed.kind !== 'unshare-session') return
+    expect(confirmed.sessionId).toBe('session-one')
+    // The /share list is cloud rows only, so the row leaves it.
+    expect(confirmed.state.items.map(item => item.label)).toEqual(['two'])
+    expect(confirmed.state.pendingDeleteId).toBeUndefined()
+    expect(confirmed.state.subtitle).toBeUndefined()
+
+    // In the sessions list the row stays: it is still a session here.
+    const sessions = { ...list, sessionScope: 'all' as const }
+    const armedAll = handleSelectorControl(sessions, char('u'))
+    if (armedAll.kind !== 'update') throw new Error('expected arm')
+    const kept = handleSelectorControl(armedAll.state, char('u'))
+    expect(kept.kind).toBe('unshare-session')
+    if (kept.kind === 'unshare-session') expect(kept.state.items.map(item => item.label)).toEqual(['one', 'two'])
+
+    // Moving away drops the armed unshare and its subtitle.
+    const moved = handleSelectorControl(armed.state, key('down'))
+    if (moved.kind === 'update') {
+      expect(moved.state.pendingDeleteId).toBeUndefined()
+      expect(moved.state.subtitle).toBeUndefined()
+    }
+    // A local-only row has nothing to unshare.
+    expect(handleSelectorControl({ ...list, focusIndex: 1 }, char('u'))).toEqual({ kind: 'none' })
   })
 
   test('non resume delete is ignored', () => {

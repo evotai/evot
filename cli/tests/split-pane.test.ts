@@ -54,6 +54,17 @@ for (const feature of ['task', 'resume'] as const) {
   })
 }
 
+test('an armed unshare asks for u, not the delete key', () => {
+  let state: SelectorState = createResumeWindow([{ ...items[0]!, cloud: true }], undefined, true)
+  const action = handleSelectorControl(state, { type: 'char', char: 'u' }, 120, 32)
+  if (action.kind !== 'update') throw new Error('expected arm')
+  state = action.state
+  expect(splitPaneHints(state)).toEqual([
+    { keys: 'u', action: 'confirm unshare', confirmationPending: true },
+    { keys: 'escape', action: 'cancel' },
+  ])
+})
+
 test('busy rows suppress action hints without relying on status strings', () => {
   const state = createResumeWindow([{ ...items[0]!, pendingAction: true }], undefined, true)
   expect(splitPaneHints(state).map(hint => hint.action)).toEqual(['select', 'details', 'close'])

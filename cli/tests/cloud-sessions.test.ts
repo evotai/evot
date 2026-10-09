@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test'
 import {
   CloudSessionSync, CLOUD_LABEL_WIDTH, cloudBadge, cloudLabel, cloudState, mergeRemoteSessions, describeShareResult, shareAccess,
 } from '../src/session/cloud-sessions.js'
-import { formatSessionItems } from '../src/term/app/resume.js'
+import { applySessionText, formatSessionItems, sessionCloudSection, sessionPreviewLines } from '../src/term/app/resume.js'
 import type { CloudPushResult, RemoteSession, SessionMeta } from '../src/native/index.js'
 
 function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
@@ -90,12 +90,66 @@ test('the shared list shows sessions from every cwd; resume keeps other cwds for
   // /resume: other projects are reachable by search, not listed up front.
   expect(hidden(formatSessionItems([here, elsewhere], '/w'))).toEqual(['Other cwd', 'b'])
   // /share: everything shared is listed, with its cwd on the row.
-  const shared = formatSessionItems([here, elsewhere], '/w', () => undefined, null, () => 'team', true)
+  const shared = formatSessionItems([here, elsewhere], '/w', () => undefined, null, () => 'team', { showOtherCwds: true })
   expect(hidden(shared)).toEqual([])
   expect(shared.map(item => item.header ? item.label.split(' · ')[0] : item.id)).toEqual(['Current cwd', 'a', 'Other cwd', 'b'])
   expect(shared.find(item => item.id === 'b')?.detail).toContain('/home/ubuntu/other')
   // Even when nothing shared is from here.
-  expect(hidden(formatSessionItems([elsewhere], '/w', () => undefined, null, () => 'team', true))).toEqual([])
+  expect(hidden(formatSessionItems([elsewhere], '/w', () => undefined, null, () => 'team', { showOtherCwds: true }))).toEqual([])
+})
+
+test('the pane names the share link and how to take it down', () => {
+  const base = { synced_seq: 4, synced_at: 't' }
+  const published = meta('01a1019d-0000-4000-8000-000000000000',
+    { cloud: { ...base, visibility: 'public', public_url: 'https://evot.ai/share/abcdefghijklmnopqrstuv' } })
+  const section = sessionCloudSection(published)
+  expect(section[0]).toStartWith('# Public link')
+  expect(section[1]).toBe('https://evot.ai/share/abcdefghijklmnopqrstuv')
+  expect(section[2]).toBe('Stop sharing  u in this list · /share off 01a1019d')
+
+  const team = meta('b', { cloud: { ...base, visibility: 'private', team: true, team_url: 'https://evot.ai/team/x', team_name: 'Databend' } })
+  expect(sessionCloudSection(team).slice(0, 2)).toEqual(['# Team link · Databend · members sign in to read', 'https://evot.ai/team/x'])
+
+  const synced = meta('c', { cloud: { ...base, visibility: 'private' } })
+  expect(sessionCloudSection(synced)[0]).toBe('# Cloud · private')
+  // A link the server has not handed back yet is said to be pending, never blank.
+  expect(sessionCloudSection(meta('d', { cloud: { ...base, visibility: 'public', public_url: null } }))[1]).toContain('link pending')
+  expect(sessionCloudSection(meta('e'))).toEqual([])
+})
+
+test('the share list leads with the link; the sessions list keeps it after the transcript', () => {
+  const cloud = { visibility: 'public' as const, synced_seq: 4, synced_at: 't', public_url: 'https://evot.ai/share/x' }
+  const session = meta('a', { cloud })
+  const text = { ...session, search_text: '', user_prompts: ['first ask', 'second ask'], first_prompt: 'first ask' }
+
+  const lead = sessionPreviewLines(session, text, { cloudFirst: true })
+  expect(lead.indexOf('# Public link · anyone with it can read')).toBeLessThan(lead.indexOf('# Started with'))
+  const trail = sessionPreviewLines(session, text)
+  expect(trail.indexOf('# Public link · anyone with it can read')).toBeGreaterThan(trail.indexOf('# Latest'))
+  expect(trail).toContain('https://evot.ai/share/x')
+  // Metadata-only rows carry the link too, so it shows before any transcript is read.
+  expect(sessionPreviewLines(session)).toContain('https://evot.ai/share/x')
+
+  // The /share list rows ask for the link first, and keep that when the
+  // transcript lands for the focused row.
+  const [row] = formatSessionItems([session], '/w', () => undefined, null, () => 'public', { showOtherCwds: true, cloudFirst: true })
+    .filter(item => item.id)
+  expect(row?.preview?.[3]).toBe('# Public link · anyone with it can read')
+  // The row itself carries the link, after the identity so a narrow list
+  // truncates the link and not the id; and it is searchable.
+  expect(row?.detail).toEndWith(' · a · https://evot.ai/share/x')
+  expect(row?.searchText).toContain('https://evot.ai/share/x')
+  const [team] = formatSessionItems([meta('t', { cloud: { ...cloud, visibility: 'private', team: true, team_url: 'https://evot.ai/team/y' } })],
+    '/w', () => undefined, null, () => 'team').filter(item => item.id)
+  expect(team?.detail).toEndWith(' · https://evot.ai/team/y')
+  const [synced] = formatSessionItems([meta('s', { cloud: { ...cloud, visibility: 'private' } })], '/w', () => undefined, null, () => 'private')
+    .filter(item => item.id)
+  expect(synced?.detail).toEndWith(' · s')
+  expect(row?.hints?.map(hint => hint.action)).toContain('unshare')
+  expect(applySessionText(row!, text, '/w', null, true).preview?.[3]).toBe('# Public link · anyone with it can read')
+  // A local-only row offers no unshare.
+  const [local] = formatSessionItems([meta('b')], '/w').filter(item => item.id)
+  expect(local?.hints?.map(hint => hint.action)).not.toContain('unshare')
 })
 
 test('CloudSessionSync pushes once per settle, coalesces, and reports failures softly', async () => {

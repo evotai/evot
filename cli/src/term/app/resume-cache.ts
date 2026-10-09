@@ -80,6 +80,22 @@ export class ResumeSessionCache {
     this.textGeneration++
   }
 
+  /**
+   * Rewrite one row's metadata in place (its cloud block after an unshare).
+   * The transcript is as it was, so the catalog and text snapshots stay; only
+   * memoized rows are told to re-render.
+   */
+  update(id: string, change: Partial<SessionMeta>): void {
+    if (this.disposed) return
+    const swap = <T extends SessionMeta>(rows: T[] | null): T[] | null =>
+      rows?.map(row => row.session_id === id ? { ...row, ...change } : row) ?? null
+    this.rows = swap(this.rows)
+    this.textRows = swap(this.textRows)
+    this.textIndex = null
+    this.textGeneration++
+    if (this.rows) this.onLoaded(this.rows)
+  }
+
   rename(session: SessionMeta): void {
     if (this.disposed) return
     const rows = (this.rows ?? []).map(row => row.session_id === session.session_id ? session : row)

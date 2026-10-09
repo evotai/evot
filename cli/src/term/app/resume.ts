@@ -3,6 +3,7 @@ import type { SessionMeta, SessionWithText } from '../../native/index.js'
 import { PREVIEW_SECTION_PREFIX, type SelectorItem } from '../selector.js'
 import { recognitionSections, type SessionRecognition } from './session-recognition.js'
 import { orderAsForkTree } from './fork-tree.js'
+import { shareAccess } from '../../session/cloud-sessions.js'
 
 export const RESUME_SELECTOR_TITLE = 'Sessions'
 
@@ -102,6 +103,51 @@ const PREVIEW_LATEST_SHOWN = 3
 /** Paths named in the `Changed` section before the rest become `+N`. */
 const PREVIEW_CHANGED_PATHS_SHOWN = 3
 
+/** How the pane reads a session: the same block in both lists, ordered for
+ *  the list it is in. */
+export interface SessionPreviewOptions {
+  /** Name the workspace in the facts line: the session is from another cwd. */
+  showCwd?: boolean
+  /** This REPL is in the session. */
+  open?: boolean
+  /** The `/share` list: who can read the session leads, since that is what
+   *  the list is for. Elsewhere the share block trails the transcript. */
+  cloudFirst?: boolean
+}
+
+/** The page a shared session is read at; empty for a private sync. */
+export function sessionShareLink(session: SessionMeta): string {
+  const cloud = session.cloud
+  if (!cloud) return ''
+  const access = shareAccess(cloud)
+  return (access === 'public' ? cloud.public_url : access === 'team' ? cloud.team_url : null) ?? ''
+}
+
+/**
+ * Where a cloud session can be read, and how to take it down. The link is
+ * what `/share` is opened to find, and it appeared only once, in the line
+ * printed when the share was made; the pane keeps it reachable. Empty for a
+ * session that is not on the cloud.
+ */
+export function sessionCloudSection(session: SessionMeta): string[] {
+  const cloud = session.cloud
+  if (!cloud) return []
+  const access = shareAccess(cloud)
+  const link = sessionShareLink(session)
+  const lines = access === 'public' ? [
+    `${PREVIEW_SECTION_PREFIX}Public link · anyone with it can read`,
+    link || 'link pending · /share public again to get it',
+  ] : access === 'team' ? [
+    `${PREVIEW_SECTION_PREFIX}Team link${cloud.team_name ? ` · ${cloud.team_name}` : ''} · members sign in to read`,
+    link || 'link pending · /share team again to get it',
+  ] : [
+    `${PREVIEW_SECTION_PREFIX}Cloud · private`,
+    'Only you · resume it from any machine you are signed in on',
+  ]
+  lines.push(`Stop sharing  u in this list · /share off ${session.session_id.slice(0, 8)}`)
+  return lines
+}
+
 /**
  * Side-pane content for one session, organised by what identifies it fastest:
  * the title and identity line, what it set out to do (`Started with`), where
@@ -121,15 +167,20 @@ const PREVIEW_CHANGED_PATHS_SHOWN = 3
 export function sessionPreviewLines(
   session: SessionMeta,
   text?: SessionRecognition,
-  showCwd = false,
-  open = false,
+  options: SessionPreviewOptions = {},
 ): string[] {
+  const { showCwd = false, open = false, cloudFirst = false } = options
   const facts = [shortModel(session), `${session.turns || 0} turns`, sessionSpan(session)]
   if (open) facts.unshift('this session')
   if (session.source === 'automation') facts.unshift('task run')
   if (showCwd) facts.push(shortenSessionCwd(session.cwd))
-  const lines = [sanitizeSessionTitle(session.custom_title ?? session.title), facts.filter(Boolean).join(' · ')]
-  if (!text) return lines
+  const header = [sanitizeSessionTitle(session.custom_title ?? session.title), facts.filter(Boolean).join(' · ')]
+  const cloud = sessionCloudSection(session)
+  // In the /share list the link leads; elsewhere the transcript does and the
+  // share block follows it, where a scroll still reaches it.
+  const lines = cloudFirst && cloud.length ? [...header, '', ...cloud] : header
+  const trailing = !cloudFirst && cloud.length ? ['', ...cloud] : []
+  if (!text) return [...lines, ...trailing]
   if (text.recognition) {
     // Generated titles often repeat the first instruction. Keep the title
     // compact so the first screen shows where this session actually left off.
@@ -138,7 +189,7 @@ export function sessionPreviewLines(
     lines.push('', ...recognitionSections(text))
     const paths = text.changed_paths ?? []
     if (paths.length) lines.push('', '# Files referenced by edits', ...paths)
-    lines.push('', '# Session', `ID  ${session.session_id}`,
+    lines.push(...trailing, '', '# Session', `ID  ${session.session_id}`,
       `Source  ${session.source === 'automation' ? 'task run' : session.source || 'unknown'}`,
       `Workspace  ${shortenSessionCwd(session.cwd)}`)
     return lines
@@ -170,6 +221,7 @@ export function sessionPreviewLines(
     ])
   }
   if (sections.length > 0) lines.push('', ...sections.flatMap((section, index) => index === 0 ? section : ['', ...section]))
+  lines.push(...trailing)
   return lines
 }
 
@@ -247,6 +299,20 @@ const SESSION_HINTS = [
   { keys: 'escape', action: 'close' },
 ]
 
+/** A cloud row offers the lighter take-down beside delete: the cloud copy
+ *  goes, this machine keeps the session. */
+const CLOUD_SESSION_HINTS = SESSION_HINTS.flatMap(hint =>
+  hint.keys === 'd' ? [{ keys: 'u', action: 'unshare' }, hint] : [hint])
+
+/** How the list shapes its rows beyond ordering. */
+export interface SessionListOptions {
+  /** List other projects up front instead of hiding them behind search. The
+   *  shared list does: a shared session is as likely to come from elsewhere. */
+  showOtherCwds?: boolean
+  /** The `/share` list: every pane leads with where the session is shared. */
+  cloudFirst?: boolean
+}
+
 function formatSessionItem(
   s: SessionMeta,
   label: string,
@@ -256,6 +322,7 @@ function formatSessionItem(
   open: boolean,
   edge = '',
   cloud = '',
+  cloudFirst = false,
 ): SelectorItem {
   // The source column only earns its space when it tells rows apart.
   const badge = sessionSourceBadge(s.source)
@@ -266,21 +333,24 @@ function formatSessionItem(
   const time = open ? '● open' : relativeTime(s.updated_at)
   const host = s.cloud?.origin_host && cloud.includes('⇣') ? ` (${s.cloud.origin_host})` : ''
   const cwd = otherCwd ? `  ${shortenSessionCwd(s.cwd)}` : ''
+  // The link is what a shared row is scanned for, so it sits on the row and
+  // not only in the pane. Last, so a narrow list cuts it before the identity.
+  const link = cloud ? sessionShareLink(s) : ''
   // Identity stays in subdued metadata; titles are what people recognize.
   return {
     label: `${edge}${title}`,
     status: { text: time, tone: open ? 'active' : 'muted' },
     id: s.session_id,
     renameTitle: s.custom_title ?? s.title ?? '',
-    hints: SESSION_HINTS,
-    detail: [turns, `${cloud}${host}`, source, `${label}${cwd}`].filter(Boolean).join(' · '),
+    hints: cloud ? CLOUD_SESSION_HINTS : SESSION_HINTS,
+    detail: [turns, `${cloud}${host}`, source, `${label}${cwd}`, link].filter(Boolean).join(' · '),
     ...(cloud ? { cloud: true } : {}),
     // Transcript text is searchable once loaded; until then a row still matches
     // on the metadata the list already displays.
-    searchText: `${s.custom_title ?? ''} ${s.title ?? ''} ${badge} ${text?.search_text
+    searchText: `${s.custom_title ?? ''} ${s.title ?? ''} ${badge} ${link} ${text?.search_text
       ?? `${s.session_id} ${s.cwd} ${s.source} ${s.provider ?? ''} ${s.model}`}`,
     contextPrefix: otherCwd ? `${shortenSessionCwd(s.cwd)} · ` : undefined,
-    preview: sessionPreviewLines(s, text, otherCwd, open),
+    preview: sessionPreviewLines(s, text, { showCwd: otherCwd, open, cloudFirst }),
   }
 }
 
@@ -301,6 +371,7 @@ function sessionRowFormatter(
   sessionText: (sessionId: string) => SessionWithText | undefined,
   openSessionId: string | null | undefined,
   cloudBadge: (session: SessionMeta) => string,
+  cloudFirst = false,
 ): SessionRowFormatter {
   const labels = sessionIdLabels(sessions)
   const showSource = mixedSources(sessions)
@@ -314,6 +385,7 @@ function sessionRowFormatter(
     session.session_id === openSessionId,
     edge,
     badges.get(session.session_id) ?? '',
+    cloudFirst,
   )
 }
 
@@ -328,10 +400,10 @@ export function formatSessionItems(
   sessionText: (sessionId: string) => SessionWithText | undefined = () => undefined,
   openSessionId?: string | null,
   cloudBadge: (session: SessionMeta) => string = () => '',
-  showOtherCwds = false,
+  options: SessionListOptions = {},
 ): SelectorItem[] {
-  const row = sessionRowFormatter(sessions, sessionText, openSessionId, cloudBadge)
-  return groupedSessionItems(sessions, currentCwd, row, showOtherCwds)
+  const row = sessionRowFormatter(sessions, sessionText, openSessionId, cloudBadge, options.cloudFirst)
+  return groupedSessionItems(sessions, currentCwd, row, options.showOtherCwds)
 }
 
 /**
@@ -356,10 +428,16 @@ export function formatRankedSessionItems(
  * selector's lowercased-search cache is keyed on: rebuilding the whole list
  * would throw that away on every focus move.
  */
-export function applySessionText(item: SelectorItem, text: SessionWithText, currentCwd: string, openSessionId?: string | null): SelectorItem {
+export function applySessionText(
+  item: SelectorItem,
+  text: SessionWithText,
+  currentCwd: string,
+  openSessionId?: string | null,
+  cloudFirst = false,
+): SelectorItem {
   return {
     ...item,
     searchText: `${text.custom_title ?? ''} ${text.title ?? ''} ${text.search_text}`,
-    preview: sessionPreviewLines(text, text, text.cwd !== currentCwd, text.session_id === openSessionId),
+    preview: sessionPreviewLines(text, text, { showCwd: text.cwd !== currentCwd, open: text.session_id === openSessionId, cloudFirst }),
   }
 }

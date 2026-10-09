@@ -32,6 +32,8 @@ export type SelectorControlAction =
   | { kind: 'pin-default-model'; spec: string }
   | { kind: 'select-task-model'; spec: string; thinkingLevel?: string }
   | { kind: 'delete-session'; sessionId: string; label: string; state: SelectorState }
+  /** `u u` on a cloud row: the server copy goes, the local transcript stays. */
+  | { kind: 'unshare-session'; sessionId: string; label: string; state: SelectorState }
   | { kind: 'queue-edit'; entry: ManagedQueuedPrompt }
   | { kind: 'queue-remove'; entry: ManagedQueuedPrompt; state: SelectorState }
   | { kind: 'rename-session'; sessionId: string; title: string; state: SelectorState }
@@ -40,12 +42,15 @@ export type SelectorControlAction =
 const RESUME_DELETE_CONFIRM = 'd confirm delete · esc cancel'
 /** A cloud session is one logical thing: deleting it here removes both copies. */
 const RESUME_DELETE_CLOUD_CONFIRM = 'd confirm delete here and from cloud · esc cancel'
+/** Unsharing is the lighter action: the page and the cloud copy go, this machine keeps the session. */
+export const RESUME_UNSHARE_CONFIRM = 'u confirm remove from cloud · local copy kept · esc cancel'
+const CONFIRM_SUBTITLES = new Set([RESUME_DELETE_CONFIRM, RESUME_DELETE_CLOUD_CONFIRM, RESUME_UNSHARE_CONFIRM])
 
 /** Drop an armed delete so a stray confirming keypress cannot delete a session. */
 function disarmDelete(state: SelectorState): SelectorState {
   if (state.pendingDeleteId === undefined) return state
-  const subtitle = state.subtitle === RESUME_DELETE_CONFIRM ? undefined : state.subtitle
-  return { ...state, pendingDeleteId: undefined, subtitle }
+  const subtitle = state.subtitle !== undefined && CONFIRM_SUBTITLES.has(state.subtitle) ? undefined : state.subtitle
+  return { ...state, pendingDeleteId: undefined, pendingDeleteKind: undefined, subtitle }
 }
 
 export function handleSelectorControl(state: SelectorState, event: KeyEvent, columns = 80, rows = 24): SelectorControlAction {
@@ -75,6 +80,7 @@ function handleControl(state: SelectorState, event: KeyEvent, columns: number, r
   if (letterList && event.type === 'char' && event.char === '/') {
     return { kind: 'update', state: { ...disarmDelete(state), listFocused: false } }
   }
+  if (resumeListFocused && event.type === 'char' && event.char === 'u') return unshareAction(state)
   if (resumeListFocused && event.type === 'char' && event.char === 'e') {
     const item = selectorSelect(state)
     if (!item?.id || item.header || item.focusable === false) return { kind: 'none' }
@@ -186,7 +192,7 @@ function deleteAction(state: SelectorState): SelectorControlAction {
   // second press confirms. The armed id must still be the focused row: an async
   // list refresh (listSessionsWithText) can reorder rows between the two
   // presses, and matching on index alone would delete the wrong session.
-  if (state.pendingDeleteId === target.id) {
+  if (state.pendingDeleteId === target.id && (state.pendingDeleteKind ?? 'delete') === 'delete') {
     if (state.owner === SELECTOR_OWNER.shares) {
       return { kind: 'delete-share', shareId: target.id, state: { ...state, pendingDeleteId: undefined, subtitle: undefined } }
     }
@@ -204,7 +210,35 @@ function deleteAction(state: SelectorState): SelectorControlAction {
       ...state,
       listFocused: true,
       pendingDeleteId: target.id,
+      pendingDeleteKind: 'delete',
       subtitle: target.cloud ? RESUME_DELETE_CLOUD_CONFIRM : RESUME_DELETE_CONFIRM,
     },
+  }
+}
+
+/**
+ * `u` on a cloud session row. Armed and confirmed like delete: a public or
+ * team page stops working the moment the copy is gone. Only rows the list
+ * marked as cloud respond, so the key is inert on a local-only session.
+ */
+function unshareAction(state: SelectorState): SelectorControlAction {
+  const target = selectorSelect(state)
+  if (!target?.id || !target.cloud) return { kind: 'none' }
+
+  if (state.pendingDeleteId === target.id && state.pendingDeleteKind === 'unshare') {
+    const cleared: SelectorState = { ...state, pendingDeleteId: undefined, pendingDeleteKind: undefined, subtitle: undefined }
+    return {
+      kind: 'unshare-session',
+      sessionId: target.id,
+      label: target.label,
+      // The /share list holds cloud rows only, so the row leaves it; the
+      // sessions list keeps it, now as a local row.
+      state: state.sessionScope === 'cloud' ? selectorRemoveItem(cleared, state.focusIndex) : cleared,
+    }
+  }
+
+  return {
+    kind: 'update',
+    state: { ...state, listFocused: true, pendingDeleteId: target.id, pendingDeleteKind: 'unshare', subtitle: RESUME_UNSHARE_CONFIRM },
   }
 }

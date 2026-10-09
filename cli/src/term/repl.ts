@@ -1018,7 +1018,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       // Focus moved on, or the list was replaced: a later focus reloads from
       // the cache, so there is nothing to reconcile here.
       if (!surface || surface.state.rename || !stillFocused || stillFocused.id !== id) return
-      surface.apply(selectorReplaceItem(surface.state, id, applySessionText(stillFocused, text, agent.cwd, sessionId)))
+      surface.apply(selectorReplaceItem(surface.state, id,
+        applySessionText(stillFocused, text, agent.cwd, sessionId, surface.state.sessionScope === 'cloud')))
       renderer.requestRender()
     })
   }
@@ -1166,7 +1167,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       const sessions = mergeRemoteSessions(resumeCache.metadata ?? [], cloudSessions.remoteSessions)
         .filter(session => sessionCloudLabel(session) !== '')
       // Every shared session, whichever project or machine it came from.
-      const items = formatSessionItems(sessions, agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, true)
+      const items = formatSessionItems(sessions, agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel,
+        { showOtherCwds: true, cloudFirst: true })
       const next = {
         ...selectorExpandItems(state, items),
         emptyMessage: 'No shared sessions yet · /share private to sync, /share public to publish',
@@ -3752,6 +3754,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function openResumeSelector(initialQuery?: string, options: { cloudOnly?: boolean; includeAutomation?: boolean } = {}) {
     const generation = ++explicitResumeSelectorGeneration
     const cached = resumeCache.withText ?? resumeCache.metadata
+    const shape = { showOtherCwds: Boolean(options.cloudOnly || options.includeAutomation), cloudFirst: Boolean(options.cloudOnly) }
     const rows = (sessions: SessionMeta[]) => {
       const merged = mergeRemoteSessions(sessions, cloudSessions.remoteSessions)
       return options.cloudOnly
@@ -3760,7 +3763,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     }
     const items = cached === null
       ? []
-      : formatSessionItems(rows(cached), agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, options.cloudOnly || options.includeAutomation)
+      : formatSessionItems(rows(cached), agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, shape)
     overlay = {
       kind: 'selector',
       state: {
@@ -3795,7 +3798,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         renderer.requestRender()
         return
       }
-      const metaItems = formatSessionItems(visible, agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, options.cloudOnly || options.includeAutomation)
+      const metaItems = formatSessionItems(visible, agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, shape)
       overlay = {
         kind: 'selector',
         // Loaded: the placeholder must not survive as the no-match message.
@@ -4160,6 +4163,39 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
               renderer.requestRender()
             }
           }
+        })
+        renderer.requestRender()
+        return
+      case 'unshare-session':
+        overlay = { kind: 'selector', state: action.state }
+        // The cloud copy goes and the local session stays. A row this machine
+        // has no copy of would lose its only copy, which is `d`'s job to say.
+        void (async () => {
+          const local = (await resumeCache.all()).some(session => session.session_id === action.sessionId)
+          if (!local) throw new Error('this machine has no copy of it · enter resumes it here first, d deletes it from the cloud')
+          await agent.cloudUnshareSession(action.sessionId)
+          cloudSessions.forget(action.sessionId)
+          resumeCache.update(action.sessionId, { cloud: null })
+          if (action.sessionId === sessionId) await refreshForkTrail(action.sessionId)
+          return `Removed ${action.label} from cloud · local copy kept`
+        })().then(text => {
+          commitSystem('sys-share', `  ${text}`)
+          // The cloud list already dropped the row; the sessions list keeps it
+          // and needs its access column redrawn.
+          return { subtitle: text, repaint: action.state.sessionScope !== 'cloud' }
+        }, (error: unknown) => {
+          const text = `Unshare failed: ${errorText(error)}`
+          commitSystem('sys-share-error', renderErrorNotice(text))
+          // The row left the cloud list on the confirming keypress; bring it back.
+          return { subtitle: text, repaint: true }
+        }).then(({ subtitle, repaint }) => {
+          // Also surface it on the overlay, as delete does: resuming another
+          // session clears the screen and would wipe the only confirmation.
+          if (overlay.kind === 'selector' && overlay.state.owner === SELECTOR_OWNER.resume) {
+            overlay = { kind: 'selector', state: { ...overlay.state, subtitle } }
+          }
+          if (repaint) refreshOpenSessionList?.()
+          renderer.requestRender()
         })
         renderer.requestRender()
         return

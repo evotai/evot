@@ -57,7 +57,9 @@ export function splitPaneHints(state: SelectorState): Hint[] {
     { keys: 'escape', action: 'back' },
   ]
   if (selected?.id && state.pendingDeleteId === selected.id && state.previewPane?.confirmDeleteKey) return [
-    { keys: state.previewPane.confirmDeleteKey, action: 'confirm delete', confirmationPending: true },
+    state.pendingDeleteKind === 'unshare'
+      ? { keys: 'u', action: 'confirm unshare', confirmationPending: true }
+      : { keys: state.previewPane.confirmDeleteKey, action: 'confirm delete', confirmationPending: true },
     { keys: 'escape', action: 'cancel' },
   ]
   // A list that does not own the keyboard — a command preview under the

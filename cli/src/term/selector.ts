@@ -151,6 +151,10 @@ export interface SelectorState {
    *  Keyed by id rather than index so an async list refresh or reorder cannot
    *  redirect the confirmation onto a different session. */
   pendingDeleteId?: string
+  /** What the armed keypress will do to `pendingDeleteId`. Absent means
+   *  delete; `unshare` removes only the cloud copy of a session. The confirming
+   *  key must match the arming one, so `u` then `d` re-arms rather than confirms. */
+  pendingDeleteKind?: 'delete' | 'unshare'
   /** Footer hints for this selector. When set, they replace the generic
    *  move/select/filter/close line; a focused row's own `hints` win over these. */
   hints?: Hint[]

@@ -154,7 +154,7 @@ describe('repl resume helpers', () => {
   })
 
   test('sessionPreviewLines adds cwd only for sessions from another directory', () => {
-    expect(sessionPreviewLines(sessions[1]!, undefined, true)[1]).toEndWith(' · /other')
+    expect(sessionPreviewLines(sessions[1]!, undefined, { showCwd: true })[1]).toEndWith(' · /other')
   })
 
   test('sessionPreviewLines splits the opening ask from the latest turns', () => {
