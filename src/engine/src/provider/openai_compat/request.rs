@@ -52,6 +52,7 @@ pub fn build_request_body(config: &StreamConfig, compat: &OpenAiCompat) -> serde
                 let mut reasoning_content = String::new();
                 let mut reasoning = String::new();
                 let mut reasoning_text = String::new();
+                let mut reasoning_details: Vec<serde_json::Value> = Vec::new();
 
                 for c in content {
                     match c {
@@ -73,10 +74,28 @@ pub fn build_request_body(config: &StreamConfig, compat: &OpenAiCompat) -> serde
                         }
                         Content::Thinking { thinking, metadata } => match metadata {
                             Some(ThinkingMetadata::OpenAiCompletions {
+                                details: Some(details),
+                                ..
+                            }) if !details.is_empty() => {
+                                // Structured replay data usually carries the
+                                // summary/text itself; only fall back to the
+                                // plain field when every entry is opaque.
+                                let has_visible_text = details.iter().any(|detail| {
+                                    super::reasoning_details::visible_text(detail)
+                                        .is_some_and(|text| !text.is_empty())
+                                });
+                                if !has_visible_text {
+                                    reasoning_content.push_str(thinking);
+                                }
+                                reasoning_details.extend(details.iter().cloned());
+                            }
+                            Some(ThinkingMetadata::OpenAiCompletions {
                                 field: ReasoningField::Reasoning,
+                                ..
                             }) => reasoning.push_str(thinking),
                             Some(ThinkingMetadata::OpenAiCompletions {
                                 field: ReasoningField::ReasoningText,
+                                ..
                             }) => reasoning_text.push_str(thinking),
                             _ => reasoning_content.push_str(thinking),
                         },
@@ -93,6 +112,7 @@ pub fn build_request_body(config: &StreamConfig, compat: &OpenAiCompat) -> serde
                     && reasoning_content.is_empty()
                     && reasoning.is_empty()
                     && reasoning_text.is_empty()
+                    && reasoning_details.is_empty()
                 {
                     continue;
                 }
@@ -110,6 +130,7 @@ pub fn build_request_body(config: &StreamConfig, compat: &OpenAiCompat) -> serde
                     &reasoning_content,
                     &reasoning,
                     &reasoning_text,
+                    reasoning_details,
                 );
                 messages.push(msg_obj);
             }
@@ -223,9 +244,13 @@ fn apply_assistant_compat(
     reasoning_content: &str,
     reasoning: &str,
     reasoning_text: &str,
+    reasoning_details: Vec<serde_json::Value>,
 ) {
     if !reasoning_content.is_empty() || compat.has_cap(CompatCaps::REASONING_CONTENT_REQUIRED) {
         msg_obj["reasoning_content"] = serde_json::json!(reasoning_content);
+    }
+    if !reasoning_details.is_empty() {
+        msg_obj["reasoning_details"] = serde_json::Value::Array(reasoning_details);
     }
     if !reasoning.is_empty() {
         msg_obj["reasoning"] = serde_json::json!(reasoning);

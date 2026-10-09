@@ -8,9 +8,9 @@ fn transcript_round_trip_preserves_ordered_assistant_blocks_and_provider_metadat
         content: vec![
             evot_engine::Content::Thinking {
                 thinking: "plan".into(),
-                metadata: Some(evot_engine::ThinkingMetadata::OpenAiCompletions {
-                    field: evot_engine::types::ReasoningField::Reasoning,
-                }),
+                metadata: Some(evot_engine::ThinkingMetadata::completions_text_only(
+                    evot_engine::types::ReasoningField::Reasoning,
+                )),
             },
             evot_engine::Content::ToolCall {
                 id: "call-1".into(),
@@ -52,6 +52,7 @@ fn transcript_round_trip_preserves_ordered_assistant_blocks_and_provider_metadat
             ] if thinking == "plan"
                 && matches!(metadata, Some(evot_engine::ThinkingMetadata::OpenAiCompletions {
                     field: evot_engine::types::ReasoningField::Reasoning,
+                    ..
                 }))
                 && id == "call-1"
                 && item_id == "fc-1"

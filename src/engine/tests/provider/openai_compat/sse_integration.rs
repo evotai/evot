@@ -163,7 +163,7 @@ async fn openai_sse_uses_first_non_empty_reasoning_alias_once() {
     assert!(matches!(
         message,
         Message::Assistant { content, .. }
-            if matches!(&content[0], Content::Thinking { thinking, metadata: Some(ThinkingMetadata::OpenAiCompletions { field: ReasoningField::ReasoningContent }) }
+            if matches!(&content[0], Content::Thinking { thinking, metadata: Some(ThinkingMetadata::OpenAiCompletions { field: ReasoningField::ReasoningContent, .. }) }
                 if thinking == "one two three")
     ));
 }
@@ -224,6 +224,121 @@ async fn openai_sse_interleaved_reasoning_and_text_append_in_arrival_order() {
 }
 
 #[tokio::test]
+async fn openai_sse_reasoning_details_are_coalesced_onto_thinking_block() {
+    // OpenRouter-style streaming: summary fragments arrive as separate deltas
+    // and must merge; the encrypted entry stays discrete. None of this is a
+    // user-visible delta.
+    let sse = openai_sse::body(vec![
+        openai_sse::reasoning_details_chunk(Some("plan "), vec![serde_json::json!({
+            "type": "reasoning.summary", "summary": "plan ", "id": "rs_1", "format": "openai-responses-v1", "index": 0
+        })]),
+        openai_sse::reasoning_details_chunk(Some("it"), vec![serde_json::json!({
+            "type": "reasoning.summary", "summary": "it", "id": "rs_1", "format": "openai-responses-v1", "index": 0
+        })]),
+        openai_sse::reasoning_details_chunk(None, vec![serde_json::json!({
+            "type": "reasoning.encrypted", "data": "ENC", "id": "rs_1", "format": "openai-responses-v1", "index": 0
+        })]),
+        openai_sse::tool_call_start(0, "call_1", "read"),
+        openai_sse::tool_call_args(0, "{}"),
+        openai_sse::finish_with_usage("tool_calls", 50, 10),
+        openai_sse::done(),
+    ]);
+
+    let (message, events) = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .unwrap();
+
+    let deltas = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ThinkingDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(deltas, vec!["plan ", "it"]);
+
+    let Message::Assistant { content, .. } = message else {
+        panic!("expected assistant");
+    };
+    let Some(Content::Thinking {
+        thinking,
+        metadata:
+            Some(ThinkingMetadata::OpenAiCompletions {
+                field: ReasoningField::ReasoningContent,
+                details: Some(details),
+            }),
+    }) = content.first()
+    else {
+        panic!("expected thinking block with details, got {content:?}");
+    };
+    assert_eq!(thinking, "plan it");
+    assert_eq!(details.len(), 2);
+    assert_eq!(details[0]["type"], "reasoning.summary");
+    assert_eq!(details[0]["summary"], "plan it");
+    assert_eq!(details[0]["id"], "rs_1");
+    assert_eq!(details[1]["type"], "reasoning.encrypted");
+    assert_eq!(details[1]["data"], "ENC");
+    assert!(matches!(&content[1], Content::ToolCall { name, .. } if name == "read"));
+}
+
+#[tokio::test]
+async fn openai_sse_encrypted_only_reasoning_keeps_empty_thinking_block() {
+    // Models that never stream reasoning text still need their encrypted
+    // state carried across tool calls.
+    let sse = openai_sse::body(vec![
+        openai_sse::reasoning_details_chunk(None, vec![serde_json::json!({
+            "type": "reasoning.encrypted", "data": "ENC", "id": "rs_1"
+        })]),
+        openai_sse::text_chunk("done", None),
+        openai_sse::finish_with_usage("stop", 50, 10),
+        openai_sse::done(),
+    ]);
+
+    let (message, events) = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .unwrap();
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StreamEvent::ThinkingDelta { .. })));
+
+    let Message::Assistant { content, .. } = message else {
+        panic!("expected assistant");
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [
+            Content::Thinking {
+                thinking,
+                metadata: Some(ThinkingMetadata::OpenAiCompletions { details: Some(details), .. }),
+            },
+            Content::Text { text },
+        ] if thinking.is_empty() && details.len() == 1 && text == "done"
+    ));
+}
+
+#[tokio::test]
+async fn openai_sse_malformed_reasoning_details_are_ignored() {
+    let sse = openai_sse::body(vec![
+        openai_sse::reasoning_details_chunk(None, vec![
+            serde_json::json!({"type": "reasoning.encrypted"}),
+            serde_json::json!({"type": "something.else", "data": "x"}),
+            serde_json::json!("not an object"),
+        ]),
+        openai_sse::text_chunk("done", None),
+        openai_sse::finish_with_usage("stop", 50, 10),
+        openai_sse::done(),
+    ]);
+
+    let (message, _) = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .unwrap();
+    let Message::Assistant { content, .. } = message else {
+        panic!("expected assistant");
+    };
+    assert!(matches!(content.as_slice(), [Content::Text { text }] if text == "done"));
+}
+
+#[tokio::test]
 async fn xai_sse_prefers_reasoning_alias_when_multiple_are_present() {
     let sse = openai_sse::body(vec![
         openai_sse::reasoning_chunk(Some("duplicate"), Some("xai"), None),
@@ -253,7 +368,7 @@ async fn xai_sse_prefers_reasoning_alias_when_multiple_are_present() {
     assert!(matches!(
         message,
         Message::Assistant { content, .. }
-            if matches!(&content[0], Content::Thinking { thinking, metadata: Some(ThinkingMetadata::OpenAiCompletions { field: ReasoningField::Reasoning }) }
+            if matches!(&content[0], Content::Thinking { thinking, metadata: Some(ThinkingMetadata::OpenAiCompletions { field: ReasoningField::Reasoning, .. }) }
                 if thinking == "xai")
     ));
 }
@@ -649,6 +764,92 @@ async fn openai_json_fallback_cache_tokens_are_not_double_counted_as_input() {
         }
         _ => panic!("Expected Assistant message"),
     }
+}
+
+#[tokio::test]
+async fn openai_json_fallback_keeps_reasoning_details() {
+    let json = serde_json::json!({
+        "id": "chatcmpl-1",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "done",
+                "reasoning_content": "plan",
+                "reasoning_details": [
+                    {"type": "reasoning.summary", "summary": "plan", "id": "rs_1"},
+                    {"type": "reasoning.encrypted", "data": "ENC", "id": "rs_1"},
+                    {"type": "bogus"}
+                ]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+    });
+
+    let (msg, _) = run_provider_json(
+        &OpenAiCompatProvider,
+        openai_config(),
+        &json.to_string(),
+        200,
+    )
+    .await
+    .unwrap();
+
+    let Message::Assistant { content, .. } = msg else {
+        panic!("expected assistant");
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [
+            Content::Thinking {
+                thinking,
+                metadata: Some(ThinkingMetadata::OpenAiCompletions { details: Some(details), .. }),
+            },
+            Content::Text { text },
+        ] if thinking == "plan" && details.len() == 2 && text == "done"
+    ));
+}
+
+#[tokio::test]
+async fn openai_json_fallback_encrypted_only_reasoning_keeps_block() {
+    let json = serde_json::json!({
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "done",
+                "reasoning_details": [
+                    {"type": "reasoning.encrypted", "data": "ENC", "id": "rs_1"}
+                ]
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+    });
+
+    let (msg, events) = run_provider_json(
+        &OpenAiCompatProvider,
+        openai_config(),
+        &json.to_string(),
+        200,
+    )
+    .await
+    .unwrap();
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StreamEvent::ThinkingDelta { .. })));
+
+    let Message::Assistant { content, .. } = msg else {
+        panic!("expected assistant");
+    };
+    assert!(matches!(
+        content.as_slice(),
+        [
+            Content::Thinking { thinking, metadata: Some(ThinkingMetadata::OpenAiCompletions { details: Some(details), .. }) },
+            Content::Text { text },
+        ] if thinking.is_empty() && details.len() == 1 && text == "done"
+    ));
 }
 
 // ---------------------------------------------------------------------------

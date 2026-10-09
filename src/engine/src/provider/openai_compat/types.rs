@@ -51,6 +51,11 @@ pub(crate) struct OpenAiDelta {
     pub reasoning: Option<String>,
     #[serde(default)]
     pub reasoning_text: Option<String>,
+    /// OpenRouter-style structured reasoning replay entries. Streamed as
+    /// deltas; text/summary entries are coalesced, encrypted entries kept
+    /// discrete. See [`super::reasoning_details`].
+    #[serde(default)]
+    pub reasoning_details: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     pub tool_calls: Option<Vec<OpenAiToolCallDelta>>,
 }
@@ -132,6 +137,8 @@ pub(crate) struct OpenAiResponseMessage {
     pub reasoning: Option<String>,
     #[serde(default)]
     pub reasoning_text: Option<String>,
+    #[serde(default)]
+    pub reasoning_details: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     pub tool_calls: Option<Vec<OpenAiResponseToolCall>>,
 }

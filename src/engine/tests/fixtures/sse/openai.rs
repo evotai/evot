@@ -77,6 +77,32 @@ pub fn reasoning_chunk(
     )
 }
 
+/// A delta carrying OpenRouter-style `reasoning_details` entries, optionally
+/// alongside plain `reasoning_content` text.
+pub fn reasoning_details_chunk(
+    reasoning_content: Option<&str>,
+    details: Vec<serde_json::Value>,
+) -> String {
+    let mut delta = serde_json::Map::new();
+    if let Some(value) = reasoning_content {
+        delta.insert("reasoning_content".into(), serde_json::json!(value));
+    }
+    delta.insert(
+        "reasoning_details".into(),
+        serde_json::Value::Array(details),
+    );
+    format!(
+        "data: {}",
+        serde_json::json!({
+            "choices": [{
+                "index": 0,
+                "delta": delta,
+                "finish_reason": null
+            }]
+        })
+    )
+}
+
 pub fn tool_call_chunk(
     index: u32,
     id: Option<&str>,

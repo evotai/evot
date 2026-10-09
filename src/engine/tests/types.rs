@@ -1,5 +1,6 @@
 //! Serde round-trip tests for core types.
 
+use evotengine::types::ReasoningField;
 use evotengine::*;
 
 fn roundtrip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std::fmt::Debug>(
@@ -118,6 +119,96 @@ fn test_content_variants_roundtrip() {
         arguments: serde_json::json!({"command": "ls"}),
         metadata: None,
     });
+}
+
+// ---------------------------------------------------------------------------
+// ThinkingMetadata::OpenAiCompletions schema compatibility
+// ---------------------------------------------------------------------------
+
+/// Legacy sessions wrote `{"type":"open_ai_completions","field":...}` with no
+/// `details`; the current reader must accept them unchanged.
+#[test]
+fn legacy_openai_completions_thinking_metadata_reads_without_details() {
+    let legacy = r#"{"type":"thinking","thinking":"plan","metadata":{"type":"open_ai_completions","field":"reasoning_content"}}"#;
+    let block: Content = serde_json::from_str(legacy).expect("legacy fixture parses");
+    assert_eq!(block, Content::Thinking {
+        thinking: "plan".into(),
+        metadata: Some(ThinkingMetadata::OpenAiCompletions {
+            field: ReasoningField::ReasoningContent,
+            details: None,
+        }),
+    });
+}
+
+/// The current writer must not emit `details` when there is none, so a strict
+/// legacy reader (which only knows `type` + `field`) still accepts the output.
+#[test]
+fn current_openai_completions_thinking_metadata_without_details_matches_legacy_shape() {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyMetadata {
+        #[serde(rename = "type")]
+        kind: String,
+        field: String,
+    }
+
+    let block = Content::Thinking {
+        thinking: "plan".into(),
+        metadata: Some(ThinkingMetadata::completions_text_only(
+            ReasoningField::Reasoning,
+        )),
+    };
+    let json = serde_json::to_value(&block).expect("serialize");
+    let legacy: LegacyMetadata =
+        serde_json::from_value(json["metadata"].clone()).expect("strict legacy reader accepts");
+    assert_eq!(legacy.kind, "open_ai_completions");
+    assert_eq!(legacy.field, "reasoning");
+}
+
+#[test]
+fn openai_completions_thinking_metadata_with_details_roundtrips() {
+    roundtrip(&Content::Thinking {
+        thinking: String::new(),
+        metadata: Some(ThinkingMetadata::OpenAiCompletions {
+            field: ReasoningField::ReasoningContent,
+            details: Some(vec![
+                serde_json::json!({"type": "reasoning.summary", "summary": "plan", "id": "rs_1"}),
+                serde_json::json!({"type": "reasoning.encrypted", "data": "ENC", "id": "rs_1", "format": "openai-responses-v1"}),
+            ]),
+        }),
+    });
+}
+
+#[test]
+fn thinking_metadata_replay_payload_detection() {
+    assert!(
+        !ThinkingMetadata::completions_text_only(ReasoningField::ReasoningContent)
+            .has_replay_payload()
+    );
+    assert!(!ThinkingMetadata::OpenAiCompletions {
+        field: ReasoningField::ReasoningContent,
+        details: Some(vec![]),
+    }
+    .has_replay_payload());
+    assert!(ThinkingMetadata::OpenAiCompletions {
+        field: ReasoningField::ReasoningContent,
+        details: Some(vec![
+            serde_json::json!({"type": "reasoning.encrypted", "data": "x"})
+        ]),
+    }
+    .has_replay_payload());
+    assert!(ThinkingMetadata::Anthropic {
+        signature: "sig".into()
+    }
+    .has_replay_payload());
+    assert!(!ThinkingMetadata::Anthropic {
+        signature: String::new()
+    }
+    .has_replay_payload());
+    assert!(ThinkingMetadata::OpenAiResponses {
+        item: serde_json::json!({"type": "reasoning"})
+    }
+    .has_replay_payload());
 }
 
 // ---------------------------------------------------------------------------

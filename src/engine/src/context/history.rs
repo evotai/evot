@@ -55,11 +55,18 @@ fn transform_message(
     let content = content
         .into_iter()
         .filter_map(|block| match block {
+            // Same model and API: keep the block with its metadata even when
+            // the visible text is empty, because an opaque replay payload
+            // (encrypted reasoning) is what the provider needs back.
             Content::Thinking { thinking, metadata }
                 if same_model
                     && metadata
                         .as_ref()
-                        .is_some_and(|value| value.supports_api(target_api)) =>
+                        .is_some_and(|value| value.supports_api(target_api))
+                    && (!thinking.trim().is_empty()
+                        || metadata
+                            .as_ref()
+                            .is_some_and(|value| value.has_replay_payload())) =>
             {
                 Some(Content::Thinking { thinking, metadata })
             }

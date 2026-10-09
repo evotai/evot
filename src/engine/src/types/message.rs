@@ -37,9 +37,21 @@ pub enum ImageSource {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ThinkingMetadata {
-    Anthropic { signature: String },
-    OpenAiResponses { item: serde_json::Value },
-    OpenAiCompletions { field: ReasoningField },
+    Anthropic {
+        signature: String,
+    },
+    OpenAiResponses {
+        item: serde_json::Value,
+    },
+    OpenAiCompletions {
+        field: ReasoningField,
+        /// Opaque `reasoning_details` entries (OpenRouter wire shape) that the
+        /// endpoint needs replayed verbatim to continue its reasoning state,
+        /// e.g. `reasoning.encrypted` payloads. Absent for endpoints that only
+        /// stream reasoning text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<Vec<serde_json::Value>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,6 +69,27 @@ pub enum ReasoningField {
 }
 
 impl ThinkingMetadata {
+    /// Reasoning text that only came from a plain reasoning field, without
+    /// any opaque replay payload attached.
+    pub fn completions_text_only(field: ReasoningField) -> Self {
+        Self::OpenAiCompletions {
+            field,
+            details: None,
+        }
+    }
+
+    /// Whether this metadata carries opaque provider state that must be
+    /// replayed even when the visible thinking text is empty.
+    pub fn has_replay_payload(&self) -> bool {
+        match self {
+            Self::Anthropic { signature } => !signature.is_empty(),
+            Self::OpenAiResponses { .. } => true,
+            Self::OpenAiCompletions { details, .. } => {
+                details.as_ref().is_some_and(|items| !items.is_empty())
+            }
+        }
+    }
+
     pub fn supports_api(&self, api: crate::provider::ApiProtocol) -> bool {
         matches!(
             (self, api),

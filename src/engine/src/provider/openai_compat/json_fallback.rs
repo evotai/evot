@@ -7,6 +7,7 @@
 use tokio::sync::mpsc;
 use tracing::debug;
 
+use super::reasoning_details;
 use super::types::*;
 use crate::provider::error::ProviderError;
 use crate::provider::route::OpenAiCompat;
@@ -69,11 +70,26 @@ fn parse_success_response(
                 .filter(|value| !value.is_empty())
                 .map(|value| (field, value))
         });
-        if let Some((field, thinking)) = reasoning {
-            emitter.emit_thinking(
-                thinking,
-                Some(ThinkingMetadata::OpenAiCompletions { field }),
-            );
+        let details = msg
+            .reasoning_details
+            .clone()
+            .and_then(reasoning_details::sanitize);
+        match (reasoning, details) {
+            (Some((field, thinking)), details) => {
+                emitter.emit_thinking(
+                    thinking,
+                    Some(ThinkingMetadata::OpenAiCompletions { field, details }),
+                );
+            }
+            // Encrypted-only reasoning: no visible text, but the opaque state
+            // still has to be replayed on the next turn.
+            (None, Some(details)) => {
+                emitter.emit_replay_only_thinking(ThinkingMetadata::OpenAiCompletions {
+                    field: ReasoningField::ReasoningContent,
+                    details: Some(details),
+                });
+            }
+            (None, None) => {}
         }
 
         // Text content

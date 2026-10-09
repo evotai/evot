@@ -757,6 +757,7 @@ fn test_content_to_anthropic_keeps_native_signature_but_downgrades_openai_field_
             thinking: "cross-provider".into(),
             metadata: Some(ThinkingMetadata::OpenAiCompletions {
                 field: ReasoningField::ReasoningContent,
+                details: None,
             }),
         },
         Content::Thinking {

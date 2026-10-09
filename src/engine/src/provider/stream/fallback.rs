@@ -62,6 +62,19 @@ impl FallbackEmitter {
         });
     }
 
+    /// Record a thinking block that has no visible text but carries opaque
+    /// provider state (encrypted reasoning) which must be replayed later.
+    /// Nothing is streamed to the UI.
+    pub fn emit_replay_only_thinking(&mut self, metadata: ThinkingMetadata) {
+        if !metadata.has_replay_payload() {
+            return;
+        }
+        self.content.push(Content::Thinking {
+            thinking: String::new(),
+            metadata: Some(metadata),
+        });
+    }
+
     /// Emit a complete tool call content block.
     pub fn emit_tool_call(&mut self, id: &str, name: &str, arguments: serde_json::Value) {
         let idx = self.content.len();

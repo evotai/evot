@@ -6,6 +6,7 @@
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
+use super::reasoning_details;
 use super::request::ToolCallBuffer;
 use super::types::*;
 use crate::context::now_ms;
@@ -255,17 +256,7 @@ async fn process_sse_chunk(
             // interleave reasoning and visible text; appending later reasoning
             // to the first block makes the UI rewrite content above an answer
             // that is already streaming below it.
-            let idx = if matches!(content.last(), Some(Content::Thinking { .. })) {
-                content.len() - 1
-            } else {
-                content.push(Content::Thinking {
-                    thinking: String::new(),
-                    metadata: Some(ThinkingMetadata::OpenAiCompletions {
-                        field: reasoning_field,
-                    }),
-                });
-                content.len() - 1
-            };
+            let idx = ensure_thinking_block(content, reasoning_field);
             if let Some(Content::Thinking { thinking, .. }) = content.get_mut(idx) {
                 thinking.push_str(reasoning_text);
             }
@@ -275,6 +266,33 @@ async fn process_sse_chunk(
                     delta: reasoning_text.to_string(),
                 })
                 .await;
+        }
+
+        // `reasoning_details` are replay metadata rather than user-visible
+        // deltas: accumulate them on the current thinking block so the
+        // opaque state is sent back with the next request. A block is kept
+        // even when no reasoning text ever arrives (encrypted-only models).
+        if let Some(details) = &delta.reasoning_details {
+            let valid: Vec<&serde_json::Value> = details
+                .iter()
+                .filter(|detail| reasoning_details::is_reasoning_detail(detail))
+                .collect();
+            if !valid.is_empty() {
+                let idx = ensure_thinking_block(content, ReasoningField::ReasoningContent);
+                if let Some(Content::Thinking {
+                    metadata:
+                        Some(ThinkingMetadata::OpenAiCompletions {
+                            details: stored, ..
+                        }),
+                    ..
+                }) = content.get_mut(idx)
+                {
+                    let items = stored.get_or_insert_with(Vec::new);
+                    for detail in valid {
+                        reasoning_details::append_reasoning_detail(items, detail.clone());
+                    }
+                }
+            }
         }
 
         // Handle text content. As with reasoning, preserve type transitions so
@@ -383,6 +401,20 @@ async fn process_sse_chunk(
     }
 
     Ok(())
+}
+
+/// Index of the trailing thinking block, creating one when the last block
+/// is not thinking so reasoning never rewrites content already streamed
+/// below it.
+fn ensure_thinking_block(content: &mut Vec<Content>, field: ReasoningField) -> usize {
+    if matches!(content.last(), Some(Content::Thinking { .. })) {
+        return content.len() - 1;
+    }
+    content.push(Content::Thinking {
+        thinking: String::new(),
+        metadata: Some(ThinkingMetadata::completions_text_only(field)),
+    });
+    content.len() - 1
 }
 
 async fn finalize_tool_calls(

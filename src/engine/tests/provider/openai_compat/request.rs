@@ -734,18 +734,21 @@ fn test_reasoning_signature_selects_replay_field() {
                     thinking: "content".into(),
                     metadata: Some(ThinkingMetadata::OpenAiCompletions {
                         field: ReasoningField::ReasoningContent,
+                        details: None,
                     }),
                 },
                 Content::Thinking {
                     thinking: "reasoning".into(),
                     metadata: Some(ThinkingMetadata::OpenAiCompletions {
                         field: ReasoningField::Reasoning,
+                        details: None,
                     }),
                 },
                 Content::Thinking {
                     thinking: "text".into(),
                     metadata: Some(ThinkingMetadata::OpenAiCompletions {
                         field: ReasoningField::ReasoningText,
+                        details: None,
                     }),
                 },
             ],
@@ -797,6 +800,114 @@ fn test_thinking_only_assistant_not_skipped() {
     assert_eq!(asst["role"], "assistant");
     assert_eq!(asst["reasoning_content"], "internal reasoning only");
     assert!(asst.get("content").is_none());
+}
+
+#[test]
+fn test_reasoning_details_replayed_verbatim_without_duplicating_text() {
+    let details = vec![
+        serde_json::json!({"type": "reasoning.summary", "summary": "plan it", "id": "rs_1", "format": "openai-responses-v1", "index": 0, "extra": "kept"}),
+        serde_json::json!({"type": "reasoning.encrypted", "data": "ENC", "id": "rs_1", "format": "openai-responses-v1", "index": 0}),
+    ];
+    let config = StreamConfigBuilder::openai()
+        .messages(vec![Message::user("test"), Message::Assistant {
+            content: vec![
+                Content::Thinking {
+                    thinking: "plan it".into(),
+                    metadata: Some(ThinkingMetadata::OpenAiCompletions {
+                        field: ReasoningField::ReasoningContent,
+                        details: Some(details.clone()),
+                    }),
+                },
+                Content::ToolCall {
+                    id: "call_1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({}),
+                    metadata: None,
+                },
+            ],
+            stop_reason: StopReason::ToolUse,
+            model: "gpt-6.1-sol".into(),
+            provider: "evot-pro-openai".into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        }])
+        .build();
+
+    let body = build_request_body(&config, &OpenAiCompat::openai());
+    let asst = &body["messages"][1];
+    assert_eq!(asst["role"], "assistant");
+    assert_eq!(asst["reasoning_details"], serde_json::Value::Array(details));
+    // The summary already travels inside reasoning_details.
+    assert!(asst.get("reasoning_content").is_none());
+    assert!(asst["tool_calls"].is_array());
+}
+
+#[test]
+fn test_encrypted_only_reasoning_details_keep_summary_in_reasoning_content() {
+    let details =
+        vec![serde_json::json!({"type": "reasoning.encrypted", "data": "ENC", "id": "rs_1"})];
+    let config = StreamConfigBuilder::openai()
+        .messages(vec![Message::user("test"), Message::Assistant {
+            content: vec![Content::Thinking {
+                thinking: "visible summary".into(),
+                metadata: Some(ThinkingMetadata::OpenAiCompletions {
+                    field: ReasoningField::ReasoningContent,
+                    details: Some(details.clone()),
+                }),
+            }],
+            stop_reason: StopReason::Stop,
+            model: "m".into(),
+            provider: "p".into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        }])
+        .build();
+
+    let body = build_request_body(&config, &OpenAiCompat::openai());
+    let asst = &body["messages"][1];
+    assert_eq!(asst["reasoning_details"], serde_json::Value::Array(details));
+    assert_eq!(asst["reasoning_content"], "visible summary");
+}
+
+#[test]
+fn test_encrypted_only_thinking_without_text_is_not_skipped() {
+    let config = StreamConfigBuilder::openai()
+        .messages(vec![Message::user("test"), Message::Assistant {
+            content: vec![
+                Content::Thinking {
+                    thinking: String::new(),
+                    metadata: Some(ThinkingMetadata::OpenAiCompletions {
+                        field: ReasoningField::ReasoningContent,
+                        details: Some(vec![
+                            serde_json::json!({"type": "reasoning.encrypted", "data": "ENC"}),
+                        ]),
+                    }),
+                },
+                Content::ToolCall {
+                    id: "call_1".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({}),
+                    metadata: None,
+                },
+            ],
+            stop_reason: StopReason::ToolUse,
+            model: "m".into(),
+            provider: "p".into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        }])
+        .build();
+
+    let body = build_request_body(&config, &OpenAiCompat::openai());
+    let asst = &body["messages"][1];
+    assert_eq!(asst["reasoning_details"][0]["data"], "ENC");
+    assert!(asst.get("reasoning_content").is_none());
 }
 
 #[test]
