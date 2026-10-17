@@ -248,6 +248,13 @@ export class BackgroundTerminals {
     return this.visibleSession === this.deps.sessionId() ? runningBackgroundCount(this.processes) : 0
   }
 
+  /** The backgrounded shells of the visible session, for prompts that must
+   *  state what is actually still running. Same filter as `runningCount`. */
+  runningProcesses(): BackgroundProcess[] {
+    if (this.visibleSession !== this.deps.sessionId()) return []
+    return this.processes.filter(process => process.status === 'running')
+  }
+
   /** Shells still being waited on in the foreground. */
   foregroundCount(): number {
     return this.processes.filter(process => process.status === 'running_foreground').length

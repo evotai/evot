@@ -350,6 +350,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       && overlay.kind !== 'ask-user',
     notify: text => commitSystem('sys-loop', `  ${text}`),
     requestRender: () => renderer.requestRender(),
+    // Read at wakeup time; `backgroundTerminals` is initialised further down
+    // in this scope, long before the first wakeup can fire.
+    backgroundTasks: () => backgroundTerminals.runningProcesses().map(process => ({
+      taskId: process.task_id,
+      command: process.command,
+      elapsedMs: process.elapsed_ms,
+    })),
     waitingChanged: waiting => {
       suggestions.cancel()
       if (isLoading) return

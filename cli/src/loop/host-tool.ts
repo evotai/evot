@@ -14,7 +14,14 @@ import { formatWallClock } from '../render/format.js'
 export const SCHEDULE_WAKEUP_SPEC = {
   name: 'schedule_wakeup',
   label: 'Schedule Wakeup',
-  description: `Schedule the next wakeup of the current /loop, or stop it. Write your status summary first, then call this exactly once as the final action of the turn; the turn ends when it returns. Prefer a long heartbeat (1200-1800s) whenever a background watcher is running; it will wake you the moment it exits. Pass stop: true when the loop's goal is reached or cannot progress. Outside a loop wakeup, in a turn the user started, call it only when they ask to change the loop's pace or stop it; otherwise leave the schedule alone.`,
+  description: [
+    'Schedule when the current /loop resumes, or stop it. Write your status line first, then call this exactly once as the final action of the turn; the turn ends when it returns.',
+    'Do NOT schedule a short-interval wakeup to poll for background work you started: when a background shell exits you are re-invoked automatically, so polling is wasted. Schedule a long fallback (1200s or more) in case the work hangs. The exception is external state the host cannot see (CI, a review, a deploy, a remote queue) with no watcher on it: pick a delay matched to how fast that state actually changes.',
+    'To end the loop, pass stop: true and omit the other fields; the loop stops immediately and does not fire again. Do this when the goal is reached, or when the loop cannot move further without the user.',
+    'noop is required unless stop is true: true when you checked and nothing changed, false when you edited files, pushed, commented, advanced state, or surfaced a finding. Consecutive noop ticks are tracked as a streak and shown to you at the next wakeup, so a long quiet wait stays legible without re-reading the transcript.',
+    'reason is required: one specific sentence ("watching CI run 39", not "waiting"). It is shown to the user.',
+    'In a turn the user started while the loop is parked, call this only when they ask to change the pace or stop; otherwise leave the schedule alone.',
+  ].join(' '),
   parameters_schema: {
     type: 'object',
     additionalProperties: false,
@@ -31,7 +38,7 @@ export const SCHEDULE_WAKEUP_SPEC = {
       },
       noop: {
         type: 'boolean',
-        description: 'true when this turn changed nothing and found nothing new.',
+        description: 'true when this turn checked and found nothing changed; false when it edited, pushed, commented, advanced state, or found something. Required unless stop is true.',
       },
       stop: {
         type: 'boolean',
@@ -68,11 +75,13 @@ function dispatchScheduleWakeup(call: HostToolCall, controller: LoopController):
     return textResponse(call, `Loop stopped${reason ? `: ${reason}` : '.'}`)
   }
   const delay = typeof args.delay_seconds === 'number' ? args.delay_seconds : NaN
-  if (!Number.isFinite(delay)) {
-    return errorResponse(call, 'delay_seconds is required unless stop is true.')
+  if (!Number.isFinite(delay) || !reason) {
+    return errorResponse(call, 'delay_seconds and reason are required when stop is not true.')
   }
-  if (!reason) return errorResponse(call, 'reason is required.')
-  const applied = controller.schedule({ delaySeconds: delay, reason, noop: args.noop === true })
+  if (typeof args.noop !== 'boolean') {
+    return errorResponse(call, 'noop is required when stop is not true: true if this turn changed nothing, false if it did.')
+  }
+  const applied = controller.schedule({ delaySeconds: delay, reason, noop: args.noop })
   const at = formatWallClock(Date.now() + applied * 1000)
   const clamped = applied !== Math.round(delay) ? ` (adjusted from ${Math.round(delay)}s)` : ''
   return textResponse(call, `Next wakeup in ${formatDuration(applied * 1000)} at ${at}${clamped}.`)

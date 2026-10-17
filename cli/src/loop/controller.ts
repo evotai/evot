@@ -6,7 +6,8 @@ export const CACHE_WINDOW_SECONDS = 300
 export const CACHE_LEAD_SECONDS = 30
 export const KEEPALIVE_SECONDS = 1200
 export const MAX_KEEPALIVES = 1
-export const MAX_AGE_MS = 72 * 3_600_000
+/** A loop expires after a week, as Claude Code's recurring tasks do. */
+export const MAX_AGE_MS = 7 * 24 * 3_600_000
 export const MAX_CONSECUTIVE_ERRORS = 3
 
 export interface LoopSnapshot {
@@ -17,7 +18,10 @@ export interface LoopSnapshot {
   nextFireAt: number | null
   reason: string | null
   tick: number
+  /** Consecutive ticks the agent reported as `noop: true`. */
   noopStreak: number
+  /** When the current quiet streak began; null while it is zero. */
+  streakStartedAt: number | null
 }
 
 export interface ScheduleInput {
@@ -81,6 +85,7 @@ export class LoopController {
       reason: null,
       tick: 0,
       noopStreak: 0,
+      streakStartedAt: null,
     }
     this.#keepalivesUsed = 0
     this.#rescheduledThisRun = false
@@ -115,7 +120,13 @@ export class LoopController {
     state.nextFireAt = now + delay * 1000
     if (state.mode.kind === 'fixed') state.mode = { kind: 'fixed', intervalMs: delay * 1000 }
     state.reason = input.reason
-    state.noopStreak = input.noop ? state.noopStreak + 1 : 0
+    if (input.noop) {
+      state.noopStreak += 1
+      state.streakStartedAt ??= now
+    } else {
+      state.noopStreak = 0
+      state.streakStartedAt = null
+    }
     this.#rescheduledThisRun = true
     return delay
   }

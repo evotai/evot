@@ -292,5 +292,100 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
             "No API key set"
         }));
     }
+
+    // A transcript resumed from an earlier evot process still announces a
+    // watcher that process was running. This process never saw it, so the
+    // model is told once; later turns and this process's own finished task
+    // (`id` above) do not trigger it again.
+    let old_watcher = "96e7d776-111d-49b0-a11f-8e112f3759ce";
+    session
+        .write_items(vec![
+            evot::types::TranscriptItem::Assistant {
+                content: vec![evot::types::AssistantBlock::ToolCall {
+                    id: "old-call".into(),
+                    name: "Bash".into(),
+                    input: serde_json::json!({ "command": "gh pr checks --watch" }),
+                    metadata: None,
+                }],
+                stop_reason: "tool_use".into(),
+                usage: Default::default(),
+                model: String::new(),
+                provider: String::new(),
+                timestamp: 0,
+                error_message: None,
+            },
+            evot::types::TranscriptItem::ToolResult {
+                tool_call_id: "old-call".into(),
+                tool_name: "Bash".into(),
+                content: format!(
+                    "Command is running in the background.\nTask: PR watcher\nTask ID: {old_watcher}\nOutput: /tmp/{old_watcher}.log\nYou will be notified when it completes."
+                ),
+                is_error: false,
+                details: serde_json::Value::Null,
+            },
+        ])
+        .await?;
+    let resumed = assembler
+        .build_turn(
+            &llm,
+            ToolMode::Interactive,
+            session.clone(),
+            &locator.session_id(),
+            TurnBuildRequest {
+                input: vec![evot_engine::Content::Text {
+                    text: "status?".into(),
+                }],
+                host_tools: None,
+                extra_tools: Vec::new(),
+                consume_process_notifications: true,
+                previous_llm: None,
+            },
+        )
+        .await?;
+    assert_eq!(resumed.input.len(), 2);
+    assert!(
+        matches!(&resumed.input[1], evot_engine::Content::Text { text }
+        if text.contains("Background task from a previous evot process: 96e7d776 (PR watcher).")
+        && text.contains("Do not report it as a running watcher."))
+    );
+    let again = assembler
+        .build_turn(
+            &llm,
+            ToolMode::Interactive,
+            session.clone(),
+            &locator.session_id(),
+            TurnBuildRequest {
+                input: vec![evot_engine::Content::Text {
+                    text: "and now?".into(),
+                }],
+                host_tools: None,
+                extra_tools: Vec::new(),
+                consume_process_notifications: true,
+                previous_llm: None,
+            },
+        )
+        .await?;
+    assert_eq!(
+        again.input.len(),
+        1,
+        "the orphan notice is delivered once per session"
+    );
+    // Dump/inspection turns never drain notices, and never announce orphans.
+    let inspected = assembler
+        .build_turn(
+            &llm,
+            ToolMode::Interactive,
+            session.clone(),
+            &locator.session_id(),
+            TurnBuildRequest {
+                input: Vec::new(),
+                host_tools: None,
+                extra_tools: Vec::new(),
+                consume_process_notifications: false,
+                previous_llm: None,
+            },
+        )
+        .await?;
+    assert!(inspected.input.is_empty());
     Ok(())
 }

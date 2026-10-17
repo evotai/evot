@@ -221,6 +221,18 @@ impl TurnAssembler {
         // Replay normalization belongs at the engine LLM boundary, not here.
         if consume_process_notifications {
             if let Some(process_manager) = &process_manager {
+                // Tasks the transcript announced but this process never ran
+                // died with an earlier evot; say so once before the model
+                // treats them as live watchers. Checked before the drain so
+                // a task that finished in this process is never mistaken
+                // for one.
+                let orphans =
+                    super::orphaned_tasks::orphaned_tasks(&prior_messages, process_manager);
+                if let Some(notice) = super::orphaned_tasks::orphan_notice(&orphans) {
+                    if self.processes.mark_orphans_announced(session_id) {
+                        input.push(evot_engine::Content::Text { text: notice });
+                    }
+                }
                 input.extend(
                     process_manager
                         .take_notifications()

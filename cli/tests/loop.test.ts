@@ -108,10 +108,21 @@ describe('LoopController', () => {
     expect(c.schedule({ delaySeconds: 120, reason: 'a', noop: true }, 0)).toBe(120)
     c.endRun('ok', 1)
     expect(c.snapshot?.noopStreak).toBe(1)
+    expect(c.snapshot?.streakStartedAt).toBe(0)
     expect(c.remainingMs(1)).toBe(119_999)
+    // A second quiet tick extends the streak but keeps its original start.
     c.beginRun(120_000)
-    c.schedule({ delaySeconds: 60, reason: 'b', noop: false }, 120_000)
+    c.schedule({ delaySeconds: 120, reason: 'a', noop: true }, 120_000)
+    expect(c.snapshot?.noopStreak).toBe(2)
+    expect(c.snapshot?.streakStartedAt).toBe(0)
+    c.beginRun(240_000)
+    c.schedule({ delaySeconds: 60, reason: 'b', noop: false }, 240_000)
     expect(c.snapshot?.noopStreak).toBe(0)
+    expect(c.snapshot?.streakStartedAt).toBeNull()
+  })
+
+  test('a loop lives for a week, matching Claude Code recurring tasks', () => {
+    expect(MAX_AGE_MS).toBe(7 * 24 * 3_600_000)
   })
 
   test('keepalive once, then stop', () => {
@@ -226,12 +237,21 @@ describe('schedule_wakeup host tool', () => {
     expect(ext.handles('ask_user')).toBe(false)
   })
 
-  test('requires delay unless stop', async () => {
+  test('requires delay, reason and noop unless stop', async () => {
     const { c } = controller()
     c.start({ kind: 'dynamic' }, userTask('p'), 0)
     const ext = createLoopExtension(c)
-    const missing = await ext.dispatch(call({ reason: 'x' }))
-    expect(missing.is_error).toBe(true)
+    const missingDelay = await ext.dispatch(call({ reason: 'x', noop: true }))
+    expect(missingDelay.is_error).toBe(true)
+    expect(missingDelay.content[0]?.text).toContain('delay_seconds and reason are required')
+    const missingReason = await ext.dispatch(call({ delay_seconds: 600, noop: true }))
+    expect(missingReason.is_error).toBe(true)
+    // Claude Code makes noop mandatory so quiet ticks can be tracked; a
+    // forgotten flag must not be silently read as "did work".
+    const missingNoop = await ext.dispatch(call({ delay_seconds: 600, reason: 'waiting on CI' }))
+    expect(missingNoop.is_error).toBe(true)
+    expect(missingNoop.content[0]?.text).toContain('noop is required')
+    expect(c.snapshot?.nextFireAt).toBeNull()
     const ok = await ext.dispatch(call({ delay_seconds: 600, reason: 'waiting on CI', noop: false }))
     expect(ok.is_error).toBe(false)
     expect(ok.content[0]?.text).toContain('10m')
@@ -250,8 +270,17 @@ describe('schedule_wakeup host tool', () => {
 
   test('errors when no loop is active', async () => {
     const { c } = controller()
-    const res = await createLoopExtension(c).dispatch(call({ delay_seconds: 60, reason: 'x' }))
+    const res = await createLoopExtension(c).dispatch(call({ delay_seconds: 60, reason: 'x', noop: true }))
     expect(res.is_error).toBe(true)
+  })
+
+  test('stop needs nothing else and works on a fixed loop too', async () => {
+    const { c, stops } = controller()
+    c.start({ kind: 'fixed', intervalMs: 300_000 }, userTask('p'), 0)
+    const res = await createLoopExtension(c).dispatch(call({ stop: true }))
+    expect(res.is_error).toBe(false)
+    expect(c.active).toBe(false)
+    expect(stops).toEqual(['model'])
   })
 })
 
@@ -284,23 +313,81 @@ describe('composeExtensions', () => {
 })
 
 describe('prompts', () => {
-  test('dynamic start mentions schedule_wakeup, fixed does not', () => {
-    expect(buildLoopStartPrompt({ kind: 'dynamic' }, 'watch')).toContain('schedule_wakeup')
-    expect(buildLoopStartPrompt({ kind: 'fixed', intervalMs: 300_000 }, 'watch')).not.toContain('schedule_wakeup')
-    expect(buildLoopStartPrompt({ kind: 'fixed', intervalMs: 300_000 }, 'watch')).toContain('every 5m')
+  test('dynamic start self-paces; fixed start is host-paced but can still stop', () => {
+    const dynamic = buildLoopStartPrompt({ kind: 'dynamic' }, 'watch')
+    expect(dynamic).toContain('`schedule_wakeup` exactly once')
+    expect(dynamic).toContain('third straight tick')
+    expect(dynamic).toContain('`noop` is required')
+    // The 5-minute cache boundary: stay under it or go long, never land on it.
+    expect(dynamic).toContain('Do not choose 300s exactly')
+    const fixed = buildLoopStartPrompt({ kind: 'fixed', intervalMs: 300_000 }, 'watch')
+    expect(fixed).toContain('every 5m')
+    expect(fixed).toContain('you do not schedule the next wakeup yourself')
+    // Claude Code's cron loops tell the model how to end them (CronDelete);
+    // ours must say the same for stop: true or a done task fires for a week.
+    expect(fixed).toContain('`stop: true`')
+    expect(fixed).not.toContain('`noop` is required')
   })
 
-  test('wakeup prompt is short and tick-numbered', () => {
-    const text = buildLoopWakeupPrompt({
-      active: true, mode: { kind: 'dynamic' }, task: userTask('x'.repeat(200)), startedAt: 0,
-      nextFireAt: null, reason: null, tick: 7, noopStreak: 0,
-    })
+  test('both modes tell the agent to trust the host\'s watcher list over memory', () => {
+    for (const mode of [{ kind: 'dynamic' } as const, { kind: 'fixed', intervalMs: 60_000 } as const]) {
+      const text = buildLoopStartPrompt(mode, 'watch')
+      expect(text).toContain('Never report a watcher as running unless it appears there')
+      expect(text).toContain('handle that event first')
+    }
+  })
+
+  test('the start prompt states the live background list too', () => {
+    // A loop started right after a restart must not inherit the old
+    // process's watchers from the transcript; the first turn already says
+    // what is really running.
+    const idle = buildLoopStartPrompt({ kind: 'dynamic' }, 'watch')
+    expect(idle).toContain('No background shell is running. Start now:')
+    const busy = buildLoopStartPrompt({ kind: 'fixed', intervalMs: 60_000 }, 'watch', '/loop 1m watch', [
+      { taskId: '4d2de14b9999', command: 'gh pr checks --watch', elapsedMs: 67_000 },
+    ])
+    expect(busy).toContain('Background shell still running: 4d2de14b (1m7s) gh pr checks --watch. Start now:')
+    expect(busy).not.toContain('No background shell')
+  })
+
+  const snapshot = (over: Partial<Parameters<typeof buildLoopWakeupPrompt>[0]> = {}) => ({
+    active: true, mode: { kind: 'dynamic' } as const, task: userTask('x'.repeat(200)), startedAt: 0,
+    nextFireAt: null, reason: null, tick: 7, noopStreak: 0, streakStartedAt: null, ...over,
+  })
+
+  test('wakeup prompt is short, tick-numbered, and states no watcher is running', () => {
+    const text = buildLoopWakeupPrompt(snapshot())
     expect(text).toContain('#7')
     expect(text).toContain('…')
     expect(text).toContain('schedule_wakeup')
+    expect(text).toContain('No background shell is running.')
+    expect(text).not.toContain('no-op tick')
     // One envelope header plus one instruction line: still a reminder, not a prompt.
     expect(text.split('\n')).toHaveLength(3)
-    expect(text.length).toBeLessThan(300)
+    expect(text.length).toBeLessThan(400)
+  })
+
+  test('wakeup prompt lists the running background shells the host knows about', () => {
+    const text = buildLoopWakeupPrompt(snapshot(), 0, [
+      { taskId: '7a0598731234', command: 'cd /repo &&   gh pr checks 1 --watch\n  && echo done', elapsedMs: 9 * 60_000 },
+      { taskId: 'c19e3a65', command: 'sleep 60', elapsedMs: 5_000 },
+    ])
+    expect(text).toContain('Background shells still running: 7a059873 (9m) cd /repo && gh pr checks 1 --watch && echo done; c19e3a65 (5s) sleep 60.')
+    expect(text).not.toContain('No background shell')
+  })
+
+  test('wakeup prompt carries the quiet streak and when it began', () => {
+    const since = new Date(2026, 9, 17, 19, 7).getTime()
+    const text = buildLoopWakeupPrompt(snapshot({ noopStreak: 5, streakStartedAt: since }), since + 25 * 60_000)
+    expect(text).toContain('5 no-op ticks since 19:07')
+    const one = buildLoopWakeupPrompt(snapshot({ noopStreak: 1, streakStartedAt: since }), since + 60_000)
+    expect(one).toContain('1 no-op tick since')
+  })
+
+  test('a fixed wakeup still gets the background list but no schedule reminder', () => {
+    const text = buildLoopWakeupPrompt(snapshot({ mode: { kind: 'fixed', intervalMs: 300_000 } }))
+    expect(text).toContain('No background shell is running.')
+    expect(text).not.toContain('End with schedule_wakeup')
   })
 })
 
@@ -450,6 +537,52 @@ describe('LoopSession', () => {
     expect(s.waitRemaining()?.remainingMs).toBe(before?.remainingMs)
     s.dispose()
   })
+
+  test('a wakeup reads the live background list from the host, not from memory', async () => {
+    // The watcher the agent started earlier was stopped before this wakeup.
+    // What the prompt says must track the host's list at fire time, so the
+    // agent cannot keep reporting "watcher still running" from old context.
+    let running: Array<{ taskId: string; command: string; elapsedMs: number }> = [
+      { taskId: 'abcd1234ffff', command: 'gh pr checks --watch', elapsedMs: 120_000 },
+    ]
+    const turns: string[] = []
+    let extension: HostToolExtension | undefined
+    const s = new LoopSession({
+      runTurn: (_line, prompt, ext) => { turns.push(prompt); extension = ext },
+      canWake: () => true,
+      notify: () => {},
+      requestRender: () => {},
+      backgroundTasks: () => running,
+    })
+    const realNow = Date.now
+    try {
+      let now = 1_000_000
+      Date.now = () => now
+      s.handleCommand('/loop watch', 'watch')
+      if (!extension) throw new Error('no extension')
+      expect(turns[0]).toContain('Background shell still running: abcd1234 (2m) gh pr checks --watch.')
+      await extension.dispatch(call({ delay_seconds: 60, reason: 'watching checks', noop: true }))
+      s.endRun('ok')
+      // Fire the wakeup via the 1s timer once the delay has elapsed.
+      now += 61_000
+      await new Promise(resolve => setTimeout(resolve, 1_100))
+      expect(turns).toHaveLength(2)
+      expect(turns[1]).toContain('Background shell still running: abcd1234 (2m) gh pr checks --watch.')
+      expect(turns[1]).toContain('1 no-op tick since')
+
+      running = []
+      await extension.dispatch(call({ delay_seconds: 60, reason: 'watching checks', noop: true }))
+      s.endRun('ok')
+      now += 61_000
+      await new Promise(resolve => setTimeout(resolve, 1_100))
+      expect(turns).toHaveLength(3)
+      expect(turns[2]).toContain('No background shell is running.')
+      expect(turns[2]).toContain('2 no-op ticks since')
+    } finally {
+      Date.now = realNow
+      s.dispose()
+    }
+  }, 10_000)
 })
 
 describe('loop tool card', () => {
@@ -535,7 +668,7 @@ describe('LoopSession waiting state', () => {
     session.handleCommand('/loop watch', 'watch')
     expect(session.waiting).toBe(false)
     if (!extension) throw new Error('no extension')
-    await extension.dispatch({ tool_call_id: '1', tool_name: 'schedule_wakeup', arguments: { delay_seconds: 600, reason: 'r' } })
+    await extension.dispatch({ tool_call_id: '1', tool_name: 'schedule_wakeup', arguments: { delay_seconds: 600, reason: 'r', noop: true } })
     expect(transitions).toEqual([])
     session.endRun('ok')
     expect(session.waiting).toBe(true)
@@ -560,7 +693,7 @@ describe('LoopSession waiting state', () => {
     session.handleCommand('/loop watch', 'watch')
     expect(session.cancelWait()).toBe(false) // a run is in flight; Esc belongs to it
     if (!extension) throw new Error('no extension')
-    await extension.dispatch({ tool_call_id: '1', tool_name: 'schedule_wakeup', arguments: { delay_seconds: 600, reason: 'r' } })
+    await extension.dispatch({ tool_call_id: '1', tool_name: 'schedule_wakeup', arguments: { delay_seconds: 600, reason: 'r', noop: true } })
     session.endRun('ok')
     expect(session.waiting).toBe(true)
     expect(session.cancelWait()).toBe(true)

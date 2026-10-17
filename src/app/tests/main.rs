@@ -68,6 +68,7 @@ mod model_settings_test;
 mod model_spec_test;
 #[path = "orchestrator_compact_test.rs"]
 mod orchestrator_compact_test;
+mod orphaned_tasks_test;
 mod process_registry_test;
 mod resume_context_anchor_test;
 #[path = "run_ask_channel_test.rs"]

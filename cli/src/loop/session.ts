@@ -2,7 +2,7 @@ import type { HostToolExtension } from '../term/host-tools.js'
 import { LoopController, type LoopSnapshot, type RunOutcome, type StopCause } from './controller.js'
 import { createLoopExtension } from './host-tool.js'
 import { formatDuration, parseLoopArgs, type LoopCommand } from './parser.js'
-import { buildLoopStartPrompt, buildLoopWakeupPrompt } from './prompt.js'
+import { buildLoopStartPrompt, buildLoopWakeupPrompt, type RunningBackgroundTask } from './prompt.js'
 import { formatWallClock as clock } from '../render/format.js'
 
 export interface LoopSessionDeps {
@@ -11,6 +11,9 @@ export interface LoopSessionDeps {
   notify: (text: string) => void
   requestRender: () => void
   waitingChanged?: (waiting: boolean) => void
+  /** Background shells still running, read at each wakeup so the prompt
+   *  states what is actually alive instead of what the agent remembers. */
+  backgroundTasks?: () => readonly RunningBackgroundTask[]
 }
 
 const TICK_MS = 1000
@@ -18,7 +21,7 @@ const TICK_MS = 1000
 const STOP_TEXT: Record<StopCause, string> = {
   user: 'stopped by you',
   model: 'done · agent reported the goal reached',
-  max_age: 'stopped · 72h limit reached',
+  max_age: 'stopped · 7-day limit reached',
   errors: 'stopped · 3 consecutive run errors',
   no_reschedule: 'stopped · agent did not schedule a wakeup twice',
   session_switch: 'stopped · session changed',
@@ -78,7 +81,8 @@ export class LoopSession {
         this.#controller.start(command.mode, command.task)
         this.#ensureTimer()
         this.#startRun()
-        this.#deps.runTurn(rawInput, buildLoopStartPrompt(command.mode, command.task.prompt, rawInput), this.#extension)
+        const background = this.#deps.backgroundTasks?.() ?? []
+        this.#deps.runTurn(rawInput, buildLoopStartPrompt(command.mode, command.task.prompt, rawInput, background), this.#extension)
         return
       }
     }
@@ -173,7 +177,8 @@ export class LoopSession {
     const now = Date.now()
     const quiet = snapshot.noopStreak > 0 ? ` · ${snapshot.noopStreak} quiet tick${snapshot.noopStreak === 1 ? '' : 's'} so far` : ''
     this.#deps.notify(`◌ loop wakeup #${snapshot.tick} (${clock(now)})${quiet}`)
-    this.#deps.runTurn(null, buildLoopWakeupPrompt(snapshot, now), this.#extension)
+    const background = this.#deps.backgroundTasks?.() ?? []
+    this.#deps.runTurn(null, buildLoopWakeupPrompt(snapshot, now, background), this.#extension)
   }
 
   #startRun(): void {

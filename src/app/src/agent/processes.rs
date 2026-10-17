@@ -6,6 +6,7 @@
 //! product exposes for background tasks. It never awaits while locked.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,6 +25,10 @@ const MAX_SESSION_PROCESS_MANAGERS: usize = 256;
 #[derive(Default)]
 pub struct ProcessRegistry {
     managers: Mutex<HashMap<String, Arc<ProcessManager>>>,
+    /// Sessions already told which transcript-announced tasks died with a
+    /// previous process. Announcing once is enough; the notice stays in the
+    /// context the model reads.
+    orphans_announced: Mutex<HashSet<String>>,
 }
 
 impl Drop for ProcessRegistry {
@@ -76,10 +81,17 @@ impl ProcessRegistry {
         Ok(manager)
     }
 
+    /// Record that `session_id` has been told about its orphaned tasks.
+    /// Returns false when it already had been, so a notice is worded once.
+    pub fn mark_orphans_announced(&self, session_id: &str) -> bool {
+        self.orphans_announced.lock().insert(session_id.to_string())
+    }
+
     /// Forget the session's manager and terminate everything it still runs.
     /// The caller holds the session lifecycle gate through this operation and
     /// any clear/delete that follows, so no new turn acquires a replacement.
     pub async fn retire(&self, session_id: &str) {
+        self.orphans_announced.lock().remove(session_id);
         let manager = self.managers.lock().remove(session_id);
         if let Some(manager) = manager {
             manager

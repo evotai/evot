@@ -1,6 +1,7 @@
 mod agent;
 mod dump;
 mod fork;
+pub mod orphaned_tasks;
 pub mod processes;
 pub mod prompt;
 mod request;

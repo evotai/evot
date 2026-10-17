@@ -53,7 +53,7 @@ describe('loop prompts hide instructions from replay', () => {
     const start = buildLoopStartPrompt({ kind: 'fixed', intervalMs: 300_000 }, 'watch ci', '/loop 5m watch ci')
     const wakeup = buildLoopWakeupPrompt({
       active: true, mode: { kind: 'fixed', intervalMs: 300_000 }, task: { prompt: 'watch ci', label: 'watch ci' },
-      startedAt: 0, nextFireAt: null, reason: null, tick: 2, noopStreak: 0,
+      startedAt: 0, nextFireAt: null, reason: null, tick: 2, noopStreak: 0, streakStartedAt: null,
     }, Date.UTC(2026, 0, 1, 1, 15))
     expect(replayUserText(start)).toEqual([{ kind: 'user', text: '/loop 5m watch ci' }])
     const [notice] = replayUserText(wakeup)
