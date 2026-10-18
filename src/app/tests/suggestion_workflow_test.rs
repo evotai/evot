@@ -43,6 +43,7 @@ fn workflow_groups_depend_on_progress_not_the_resume_command() -> TestResult {
     assert_eq!(state.intent_groups()[0], "resume_recover");
     state.last_turn = "answered".into();
     assert_eq!(state.intent_groups(), vec![
+        "assess_next",
         "respond",
         "advance_tasks",
         "review_follow_up",
@@ -176,7 +177,7 @@ fn execution_after_prose_outweighs_an_old_proposal_but_not_a_new_question() -> T
     progress.since_last_reply = 0;
     state.last_turn = "answered".into();
     assert_eq!(state.intent_groups(), vec![
-        "close",
+        "assess_next",
         "respond",
         "review_follow_up",
         "start_redirect"
@@ -261,7 +262,7 @@ fn active_work_targets_live_tasks_not_restart_or_unrelated_followups() -> TestRe
     assert_eq!(state.intent_groups()[0], "steer_wait"); // structured activities override legacy counters
     state.runtime.activities.clear();
     assert_eq!(state.intent_groups(), vec![
-        "close",
+        "assess_next",
         "respond",
         "review_follow_up",
         "start_redirect"
@@ -307,21 +308,20 @@ fn active_work_is_an_optional_addition_to_the_existing_workflow_schema() -> Test
 }
 
 #[test]
-fn closing_intent_checks_for_real_open_work_without_reasking_completed_requirements() -> TestResult
-{
+fn answered_turns_require_semantic_assessment_not_a_completion_assumption() -> TestResult {
     let request: SuggestionRequest = serde_json::from_str(include_str!(
         "fixtures/schema/suggestion-request-closed.json"
     ))?;
     let (messages, mut hints) = request.into_parts();
     let state = hints.workflow.as_ref().ok_or("no workflow")?;
-    assert_eq!(state.intent_groups()[0], "close");
+    assert_eq!(state.intent_groups()[0], "assess_next");
     let instruction = state.instruction().ok_or("no instruction")?;
     assert!(instruction.contains("return no candidates"));
     assert!(instruction.contains("Never ask the assistant to reconfirm"));
     assert!(messages
         .last()
         .is_some_and(|message| message.text.contains("227 tests passed")));
-    assert!(prompt_config(&endpoint(), &messages, &hints).is_none());
+    assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
     for (turn, execution, pending, input) in [
         ("interrupted", "idle", 0, false),
         ("answered", "running", 0, false),
@@ -333,13 +333,16 @@ fn closing_intent_checks_for_real_open_work_without_reasking_completed_requireme
         state.runtime.execution = execution.into();
         state.pending_tools = pending;
         state.progress.as_mut().ok_or("no progress")?.awaiting_input = input;
-        assert!(!state.intent_groups().contains(&"close"));
+        assert_eq!(
+            state.intent_groups().contains(&"assess_next"),
+            turn == "answered" && execution == "idle"
+        );
     }
     Ok(())
 }
 
 #[test]
-fn closure_is_conservative_but_keeps_real_questions_drafts_and_unfinished_work() -> TestResult {
+fn punctuation_is_not_an_eligibility_rule_for_contextual_suggestions() -> TestResult {
     let request: SuggestionRequest = serde_json::from_str(include_str!(
         "fixtures/schema/suggestion-request-closed.json"
     ))?;
@@ -349,12 +352,14 @@ fn closure_is_conservative_but_keeps_real_questions_drafts_and_unfinished_work()
         "All tests pass. Usage: `canStartImmediately()?`.",
         "Example:\n```text\nCan it update immediately?\n```\nThe fix is complete.",
         "> Can it update immediately?\nYes, that behavior is implemented and tested.",
+        "The image build has started. Its tag will be posted when it completes.",
+        "The report identifies two remaining changes before the rollout can proceed.",
     ] {
         if let Some(last) = messages.last_mut() {
             last.text = answer.into();
         }
         assert!(
-            prompt_config(&endpoint(), &messages, &hints).is_none(),
+            prompt_config(&endpoint(), &messages, &hints).is_some(),
             "{answer}"
         );
     }
@@ -384,6 +389,69 @@ fn closure_is_conservative_but_keeps_real_questions_drafts_and_unfinished_work()
     state.pending_tools = 0;
     state.last_turn = "interrupted".into();
     assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn remote_work_can_generate_while_completed_work_can_abstain() -> TestResult {
+    use std::sync::Arc;
+
+    use evot::suggestion::sample_outcome;
+    use evot::suggestion::SuggestionStatus;
+    use evot_engine::provider::MockProvider;
+    use tokio_util::sync::CancellationToken;
+    let pending: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-external-work.json"
+    ))?;
+    let (messages, hints) = pending.into_parts();
+    let state = hints.workflow.as_ref().ok_or("no workflow")?;
+    assert_eq!(state.runtime.execution, "idle");
+    assert_eq!(state.pending_tools, 0);
+    let config =
+        prompt_config(&endpoint(), &messages, &hints).ok_or("remote work was suppressed")?;
+    let instructions = match config.messages.last() {
+        Some(Message::User { content, .. }) => content.iter().find_map(|part| match part {
+            Content::Text { text } => Some(text),
+            _ => None,
+        }),
+        _ => None,
+    }
+    .ok_or("no instructions")?;
+    assert!(instructions.contains("Idle runtime does not prove the overall task is done"));
+    assert!(instructions.contains("No question mark is required"));
+    let outcome = sample_outcome(
+        &endpoint(),
+        &messages,
+        &hints,
+        Arc::new(MockProvider::text(
+            r#"["Check the image build progress","Show the resulting image tag"]"#,
+        )),
+        CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(outcome.status, SuggestionStatus::Ready);
+    assert_eq!(outcome.candidates, vec![
+        "Check the image build progress",
+        "Show the resulting image tag"
+    ]);
+    let closed: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-closed.json"
+    ))?;
+    let (messages, mut hints) = closed.into_parts();
+    for explicit in [true, false] {
+        hints.explicit = explicit;
+        hints.suffix = explicit.then(String::new);
+        let outcome = sample_outcome(
+            &endpoint(),
+            &messages,
+            &hints,
+            Arc::new(MockProvider::text("[]")),
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(outcome.status, SuggestionStatus::Empty);
+        assert!(outcome.candidates.is_empty());
+    }
     Ok(())
 }
 

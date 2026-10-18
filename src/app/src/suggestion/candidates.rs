@@ -191,6 +191,7 @@ fn filter(text: &str, completing: bool) -> Option<String> {
         .map_or(text, str::trim);
     if text.is_empty()
         || text.eq_ignore_ascii_case("NONE")
+        || text == "[]"
         || text.chars().count() > if completing { 560 } else { 160 }
         || text.starts_with(['`', '"', '“', '<'])
         || text.chars().any(|ch| ch.is_control())

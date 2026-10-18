@@ -23,7 +23,7 @@ THE TEST: Would they think "I was just about to type that"?
 1. A DRAFT IN PROGRESS is the strongest evidence of intent. Keep its prefix exact, even when the user changes direction.
 2. Otherwise, THE LATEST ASSISTANT MESSAGE MATTERS MOST when it asks a question that is still unanswered, offers choices or requests confirmation: suggest direct replies covering different options. Later tool execution may have overtaken that message; use workflow chronology, not the last prose alone.
 3. Use the current workflow stage to select the next intention, not merely the last task detail. Follow recent user goals, not unrelated new tasks.
-4. A completed request need not have a next message. Before suggesting, identify a real unresolved decision, requirement or new intent. Do not turn the user's original request back into a question about whether the delivered feature works, repeat facts just answered, or ask for tests/review already reported complete. Delivery notes are not a request for approval. Without clear remaining intent, return no candidates; an empty composer is not an invitation to invent follow-up work. An explicit draft or attached image can establish a new intent and still takes priority.
+4. An answered turn is not proof that the overall goal is complete. Reports about remote work in progress, pending results or concrete next steps can support a next intention without a question mark. A completed request need not have a next message. Before suggesting, identify a real unresolved decision, requirement or new intent. Do not turn the user's original request back into a question about whether the delivered feature works, repeat facts just answered, or ask for tests/review already reported complete. Delivery notes are not a request for approval. Without clear remaining intent, return no candidates; an empty composer is not an invitation to invent follow-up work. An explicit draft or attached image can establish a new intent and still takes priority.
 
 Do not invent missing personal details, paths, credentials, facts or preferences. Questions and clarification requests must address genuine unknowns; discard any candidate whose answer is already in the recent conversation. Avoid generic praise, assistant-voice and explanations. Give up to 3 distinct, concise intentions, most likely first; fewer is fine. Usually 2-12 words each, without a word minimum for short answers or CJK. Differences must change the action, scope or constraint, not just politeness or word order. Keep fewer strong options rather than padding near-duplicates; do not force a stop/cancel option without context.
 
@@ -62,24 +62,6 @@ pub fn prompt_config(
         (draft.trim_start().starts_with('/') && hints.command.is_none())
             || (!rewriting && (draft.chars().count() > 400 || draft.contains('\n')))
     }) {
-        return None;
-    }
-    let new_input = hints.draft().is_some()
-        || hints
-            .suffix
-            .as_ref()
-            .is_some_and(|text| !text.trim().is_empty())
-        || !hints.images.is_empty();
-    // Precision-first: an idle answered exchange with no pending work is not
-    // a reason to invent a follow-up. A structural question cue only permits
-    // model evaluation; the model must still establish it is unanswered.
-    if !new_input
-        && hints
-            .workflow
-            .as_ref()
-            .is_some_and(|workflow| workflow.closing())
-        && !has_question_cue(messages.last())
-    {
         return None;
     }
     let recovering = hints
@@ -222,38 +204,6 @@ pub fn prompt_config(
         prompt_cache_key: None,
         client: None,
     })
-}
-
-fn has_question_cue(message: Option<&SuggestionMessage>) -> bool {
-    let Some(message) = message.filter(|message| message.role == "assistant") else {
-        return false;
-    };
-    let mut fence: Option<(char, usize)> = None;
-    for line in message.text.lines() {
-        let text = line.trim_start();
-        if let Some(marker @ ('`' | '~')) = text.chars().next() {
-            let count = text.chars().take_while(|ch| *ch == marker).count();
-            if count >= 3 {
-                match fence {
-                    Some((kind, size)) if kind == marker && count >= size => fence = None,
-                    None => fence = Some((marker, count)),
-                    _ => {}
-                }
-                continue;
-            }
-        }
-        if fence.is_some() || text.starts_with(['>', '#']) || line.starts_with("    ") {
-            continue;
-        }
-        let prose = text.split('`').step_by(2).collect::<String>();
-        if prose
-            .trim_end_matches([' ', '*', '_', '"', '\'', '”', '’'])
-            .ends_with(['?', '？'])
-        {
-            return true;
-        }
-    }
-    false
 }
 
 fn message_tokens(message: &SuggestionMessage) -> Option<usize> {

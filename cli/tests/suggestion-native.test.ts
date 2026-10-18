@@ -17,7 +17,11 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     requests.push(body)
     const prompt = suggestionInstructions(body)
     if (requests.length === 3) return new Response(JSON.stringify({ error: { message: 'temporary fixture error' } }), { status: 503 })
-    const text = prompt.includes('CURSOR REWRITE MODE')
+    // The fixture model may abstain; the client must not replace that semantic
+    // decision with a punctuation-based gate before sending the conversation.
+    const text = requests.length === 11 ? '[]'
+      : requests.length === 13 ? JSON.stringify(['Check the image build progress', 'Show the resulting image tag'])
+      : prompt.includes('CURSOR REWRITE MODE')
       ? JSON.stringify(prompt.includes('COMMAND ARGUMENT ASSISTANCE') ? [' 5m check CI', ' status', ' 10m run tests'] : ['unit tests', 'integration tests\nThen review', 'smoke tests'])
       : prompt.includes('\nCommit\n') ? 'Commit current changes\nCommit after reviewing the diff\nCommit and push the branch'
       : requests.length === 1 ? 'Run the tests' : 'Run the full suite\nRun the unit tests\nRun the integration tests\nRun the smoke tests\nRun the lint checks\nRun the extra checks'
@@ -90,6 +94,8 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       if ((await agent.suggestNextPrompt(JSON.stringify(closed)).outcome()).status !== 'empty') throw new Error('completed request should abstain');
       closed.messages.at(-1).text = 'Deploy to staging or production?';
       if ((await agent.suggestNextPrompt(JSON.stringify(closed)).outcome()).status !== 'ready') throw new Error('unanswered question was suppressed');
+      const external = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-external-work.json', import.meta.url).pathname)}).json();
+      if ((await agent.suggestNextPrompt(JSON.stringify(external)).outcome()).status !== 'ready') throw new Error('remote work was suppressed');
       const fs = await import('node:fs/promises');
       await fs.writeFile(${JSON.stringify(join(root, 'models.cache.json'))}, JSON.stringify({schema_version:1,synced_at:2,response:{services:{}}}));
       if ((await agent.suggestNextPrompt(context).outcome()).status !== 'unavailable') throw new Error('unexpected fallback');
@@ -106,9 +112,11 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     expect(code, stderr).toBe(0)
     expect(stdout.trim()).toBe('suggestion contract passed')
     expect(stdout + stderr).not.toContain('service-test-key')
-    expect(requests).toHaveLength(11)
-    expect(suggestionInstructions(requests[10]!)).toContain('INTENT GROUPS, most relevant first: close, respond')
-    expect(JSON.stringify(requests)).not.toContain('All 227 tests passed')
+    expect(requests).toHaveLength(13)
+    expect(suggestionInstructions(requests[10]!)).toContain('INTENT GROUPS, most relevant first: assess_next, respond')
+    expect(JSON.stringify(requests[10])).toContain('All 227 tests passed')
+    expect(JSON.stringify(requests[12])).toContain('The image build has started')
+    expect(suggestionInstructions(requests[12]!)).toContain('Idle runtime does not prove the overall task is done')
     const imageRequest = requests[9] as { messages: { content: { type: string; source?: { type: string; data: string }; image_url?: { url: string } }[] }[] }
     const imageContent = imageRequest.messages.at(-1)?.content
     expect(Array.isArray(imageContent)).toBe(true)

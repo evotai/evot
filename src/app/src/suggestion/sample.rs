@@ -135,7 +135,7 @@ pub async fn sample_with_updates(
     }
     let hints = prepared.as_ref().unwrap_or(hints);
     let Some(config) = prompt_config(endpoint, messages, hints) else {
-        tracing::debug!(target: "evot::suggestion", outcome = "insufficient_context");
+        tracing::info!(target: "evot::suggestion", outcome = "insufficient_context");
         return if hints.images.is_empty() {
             SuggestionOutcome::default()
         } else {
@@ -210,7 +210,10 @@ pub async fn sample_with_updates(
     progress.finish(&candidates);
     let outcome = if !candidates.is_empty() {
         "suggested"
-    } else if text.trim().is_empty() || text.trim().eq_ignore_ascii_case("NONE") {
+    } else if text.trim().is_empty()
+        || text.trim() == "[]"
+        || text.trim().eq_ignore_ascii_case("NONE")
+    {
         "no_obvious_next_step"
     } else {
         "filtered"

@@ -8,6 +8,7 @@ import { suggestionInstructions } from '../helpers/suggestion-request.js'
 import { fixtureClipboard } from '../helpers/clipboard.js'
 import imageFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-images.json'
 import closedFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-closed.json'
+import externalWorkFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-external-work.json'
 import { getTheme } from '../../src/render/theme/index.js'
 import { ScreenHarness } from '../helpers/screen.js'
 
@@ -185,6 +186,16 @@ function seedCompletedSuggestionHistory(home: string): void {
   for (const [index, item] of items.entries()) entries.push({ session_id: SEEDED_SESSION_ID, run_id: null,
     seq: index + 2, turn: index + 2, item, created_at: new Date().toISOString() })
   writeFileSync(path, `${JSON.stringify(entries)}\n`)
+}
+
+function seedSuggestionConversation(home: string, messages: readonly { role: string; text: string }[]): void {
+  const entries = messages.map((message, index) => ({
+    session_id: SEEDED_SESSION_ID, run_id: null, seq: index + 1, turn: 1, created_at: new Date().toISOString(),
+    item: message.role === 'user' ? { type: 'user', text: message.text, content: [] }
+      : { type: 'assistant', content: [{ type: 'text', text: message.text }], stop_reason: 'stop',
+        usage: { input: 0, output: 0 }, model: 'smoke-model', provider: 'smoke', timestamp: 0 },
+  }))
+  writeFileSync(join(home, 'sessions', SEEDED_SESSION_ID, 'transcript.jsonl'), `${JSON.stringify(entries)}\n`)
 }
 
 async function startEvot(
@@ -1198,7 +1209,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   for (const scenario of [
     { name: 'interrupted work', reason: 'aborted', text: '- [x] Implement changes\n- [ ] Run validation', group: 'resume_recover', candidate: 'Resume remaining validation' },
-    { name: 'pending question', reason: 'stop', text: 'Unit tests or integration tests?', group: 'close, respond, review_follow_up', candidate: 'Run the unit tests' },
+    { name: 'pending question', reason: 'stop', text: 'Unit tests or integration tests?', group: 'assess_next, respond, review_follow_up', candidate: 'Run the unit tests' },
     { name: 'tool-only interrupted work', reason: 'aborted', text: '', group: 'resume_recover, start_redirect', candidate: 'Continue the remaining validation', execution: true },
   ]) test(`workflow-aware resume distinguishes ${scenario.name} without executing input`, async () => {
     const requests: Record<string, unknown>[] = []
@@ -1258,9 +1269,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       requests++
       const body = await request.json() as Record<string, unknown>
-      expect(suggestionInstructions(body)).toContain('"prefix":"Explain "')
+      const instruction = suggestionInstructions(body)
+      const explicit = instruction.includes('"prefix":"Explain "')
+      const text = explicit ? JSON.stringify(['why catalog synchronization delayed the UI'])
+        : instruction.includes('CURSOR REWRITE MODE') ? '[]' : ''
       const chunk = { id: 'explicit-followup', model: body.model, choices: [{ index: 0,
-        delta: { role: 'assistant', content: JSON.stringify(['why catalog synchronization delayed the UI']) }, finish_reason: 'stop' }] }
+        delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
     let session: Session | undefined
@@ -1268,23 +1282,52 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const base = `http://127.0.0.1:${server.port}/v1`
       session = await startEvot(true, false, false, base, home => {
         seedSuggestionService(home, base)
-        const entries = closedFixture.messages.map((message, index) => ({
-          session_id: SEEDED_SESSION_ID, run_id: null, seq: index + 1, turn: 1, created_at: new Date().toISOString(),
-          item: message.role === 'user' ? { type: 'user', text: message.text, content: [] }
-            : { type: 'assistant', content: [{ type: 'text', text: message.text }], stop_reason: 'stop',
-              usage: { input: 0, output: 0 }, model: 'smoke-model', provider: 'smoke', timestamp: 0 },
-        }))
-        writeFileSync(join(home, 'sessions', SEEDED_SESSION_ID, 'transcript.jsonl'), `${JSON.stringify(entries)}\n`)
+        seedSuggestionConversation(home, closedFixture.messages)
       }, ['--resume', SEEDED_SESSION_ID])
-      expect(requests).toBe(0)
       session.write('\t')
       await session.waitForScreen(/nothing to suggest/)
-      session.write('\t')
-      await session.waitForScreen(/nothing to suggest/)
-      expect(requests).toBe(0)
+      expect(requests).toBeGreaterThan(0) // abstention comes from the model, not a local question-mark gate
+      const beforeDraft = requests
       session.write('Explain \t')
       await session.waitForScreen(/why catalog synchronization delayed the UI/)
-      expect(requests).toBe(1)
+      expect(requests).toBe(beforeDraft + 1)
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('remote work reported without a question still gets grounded suggestions on resume and Tab', async () => {
+    let requests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      requests++
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('suggestion-fixture')
+      const instruction = suggestionInstructions(body)
+      expect(JSON.stringify(body.messages)).toContain('The image build has started')
+      expect(instruction).toContain('"execution":"idle"')
+      expect(instruction).toContain('Idle runtime does not prove the overall task is done')
+      const candidates = ['Check the image build progress', 'Show the resulting image tag']
+      const text = instruction.includes('CURSOR REWRITE MODE') ? JSON.stringify(candidates) : candidates.join('\n')
+      const chunk = { id: 'remote-work', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(true, false, false, base, home => {
+        seedSuggestionService(home, base)
+        seedSuggestionConversation(home, externalWorkFixture.messages)
+      }, ['--resume', SEEDED_SESSION_ID])
+      await session.waitForScreen(/Check the image build progress\s+1\/2 ⇥/)
+      session.write('\x1b')
+      await session.waitForScreen(/Enter a coding task/)
+      session.write('\t')
+      await session.waitForScreen(/Check the image build progress\s+1\/2 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Show the resulting image tag\s+2\/2 ⇥/)
+      expect(requests).toBe(2)
       expect(session.historyEntries()).toEqual([])
     } finally {
       if (session) await session.kill()

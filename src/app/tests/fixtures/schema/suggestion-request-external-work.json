@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {"role": "user", "text": "Build the cloud image for the current pull request; do not deploy it"},
+    {"role": "assistant", "text": "The image build has started for the current pull request head and is running on both target architectures. Track it using the build run link. The resulting image tag will be posted to the pull request when the job completes. No deployment was performed."}
+  ],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "active",
+    "last_turn": "answered",
+    "pending_tools": 0,
+    "progress": {"calls": 3, "executed": 3, "completed": 3, "failed": 0, "since_last_reply": 0, "awaiting_input": false, "recent": []},
+    "runtime": {"execution": "idle", "mode": "normal", "queued_inputs": 0, "background_tasks": 0}
+  }
+}
