@@ -6,7 +6,23 @@ use evot_engine::ImageSource;
 use super::SuggestionHints;
 use super::SuggestionImage;
 
-const MAX_IMAGE_DATA: usize = 20 * 1024 * 1024 / 3 * 4 + 4;
+pub(super) const MAX_IMAGE_DATA: usize = 20 * 1024 * 1024 / 3 * 4 + 4;
+pub(super) const MAX_IMAGES: usize = 16;
+
+/// Encoded attachment bytes have their own bounded allowance. Keep transport
+/// admission and runtime validation on the same count and per-image limits.
+pub(super) fn data_bytes(images: &[SuggestionImage]) -> Option<usize> {
+    if images.len() > MAX_IMAGES {
+        return None;
+    }
+    images.iter().try_fold(0usize, |total, image| {
+        if image.data.len() > MAX_IMAGE_DATA {
+            None
+        } else {
+            total.checked_add(image.data.len())
+        }
+    })
+}
 
 pub(super) fn valid(hints: &SuggestionHints) -> bool {
     let draft = format!(
@@ -15,10 +31,9 @@ pub(super) fn valid(hints: &SuggestionHints) -> bool {
         hints.suffix.as_deref().unwrap_or_default()
     );
     let mut ids = HashSet::new();
-    hints.images.len() <= 16
+    data_bytes(&hints.images).is_some()
         && hints.images.iter().all(|image| {
             !image.data.is_empty()
-                && image.data.len() <= MAX_IMAGE_DATA
                 && image.media_type.starts_with("image/")
                 && draft.contains(&format!("[Image #{}]", image.id))
                 && ids.insert(image.id)

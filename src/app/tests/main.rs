@@ -123,6 +123,7 @@ mod storage_memory_test;
 mod storage_test;
 #[path = "suggestion_progress_test.rs"]
 mod suggestion_progress_test;
+mod suggestion_request_test;
 mod suggestion_test;
 mod suggestion_workflow_test;
 mod sync_test;

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { smokeEnvironment, seedSmokeHome } from '../helpers/smoke-home.js'
 import { suggestionInstructions } from '../helpers/suggestion-request.js'
 import { fixtureClipboard } from '../helpers/clipboard.js'
-import imageFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-images.json'
+import { suggestionImageFixture } from '../helpers/suggestion-image.js'
 import closedFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-closed.json'
 import externalWorkFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-external-work.json'
 import { getTheme } from '../../src/render/theme/index.js'
@@ -1371,7 +1371,9 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('pasted images participate in Tab suggestions and survive acceptance and cursor rewrites', async () => {
+  test('pasted images above the old text limit survive Tab cycling, acceptance and cursor rewrites', async () => {
+    const image = suggestionImageFixture()
+    expect(image.length).toBeGreaterThan(100_000)
     const imageCounts: number[] = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as Record<string, unknown>
@@ -1384,7 +1386,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const index = imageCounts.length
       if (index < 3) {
         expect(images).toHaveLength(1)
-        expect(images[0]?.image_url?.url).toBe(`data:image/png;base64,${imageFixture.images[0]!.data}`)
+        expect(images[0]?.image_url?.url).toBe(`data:image/png;base64,${image}`)
         expect(instruction).toContain('Use the visible images')
       }
       const candidates = index === 1 ? [' explain the screenshot', ' inspect the layout']
@@ -1397,7 +1399,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const base = `http://127.0.0.1:${server.port}/v1`
       session = await startEvot(false, false, false, base, home => {
         seedSuggestionService(home, base)
-        fixtureClipboard(home, imageFixture.images[0]!.data)
+        fixtureClipboard(home, image)
       }, [], home => ({ PATH: `${join(home, 'clipboard-bin')}:${process.env.PATH ?? ''}` }))
       session.write('\x16')
       await session.waitForScreen('[Image #1]')

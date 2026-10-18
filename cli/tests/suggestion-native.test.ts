@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedSmokeHome, smokeEnvironment } from './helpers/smoke-home.js'
 import { suggestionInstructions, suggestionMessageText } from './helpers/suggestion-request.js'
+import { suggestionImageFixture } from './helpers/suggestion-image.js'
 
 // Explicit opt-in to a freshly built addon; never use the developer's HOME.
 const integration = process.env.EVOT_TEST_SUGGESTION_ADDON ? test : test.skip
@@ -21,6 +22,7 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     // decision with a punctuation-based gate before sending the conversation.
     const text = requests.length === 11 ? '[]'
       : requests.length === 13 ? JSON.stringify(['Check the image build progress', 'Show the resulting image tag'])
+      : requests.length === 14 ? JSON.stringify([' Explain the post', ' Draft a reply'])
       : prompt.includes('CURSOR REWRITE MODE')
       ? JSON.stringify(prompt.includes('COMMAND ARGUMENT ASSISTANCE') ? [' 5m check CI', ' status', ' 10m run tests'] : ['unit tests', 'integration tests\nThen review', 'smoke tests'])
       : prompt.includes('\nCommit\n') ? 'Commit current changes\nCommit after reviewing the diff\nCommit and push the branch'
@@ -56,6 +58,11 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       base_url: `http://127.0.0.1:${server.port}${protocol === 'openai' ? '/v1' : ''}`, api_key: 'service-test-key', context_window: 8192 }
     await Bun.write(join(root, 'models.cache.json'), JSON.stringify({ schema_version: 1,
       synced_at: 1, response: { providers: [], models: [], services: { suggestion: endpoint } } }))
+    const largeImage = suggestionImageFixture()
+    expect(largeImage.length).toBeGreaterThan(100_000)
+    const imageRequestPath = join(root, 'suggestion-image.json')
+    await Bun.write(imageRequestPath, JSON.stringify({ messages: [], explicit: true, draft: '[Image #19]', suffix: '',
+      images: [{ id: 19, media_type: 'image/png', data: largeImage }] }))
     child = Bun.spawn([process.execPath, '--eval', `
       const { NapiAgent } = require(${JSON.stringify(process.env.EVOT_TEST_SUGGESTION_ADDON)});
       const agent = await NapiAgent.create(null, null);
@@ -96,6 +103,18 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       if ((await agent.suggestNextPrompt(JSON.stringify(closed)).outcome()).status !== 'ready') throw new Error('unanswered question was suppressed');
       const external = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-external-work.json', import.meta.url).pathname)}).json();
       if ((await agent.suggestNextPrompt(JSON.stringify(external)).outcome()).status !== 'ready') throw new Error('remote work was suppressed');
+      const largeImage = await Bun.file(${JSON.stringify(imageRequestPath)}).json();
+      const imageOutcome = await agent.suggestNextPrompt(JSON.stringify(largeImage)).outcome();
+      if (imageOutcome.status !== 'ready' || imageOutcome.candidates[0] !== ' Explain the post') throw new Error('ordinary image exceeded the text-only admission limit');
+      for (const request of [
+        {messages:[{role:'user',text:'x'.repeat(100001)}]},
+        {...largeImage,messages:[{role:'user',text:'x'.repeat(100001)}]},
+        {...largeImage,images:Array.from({length:17},(_,index)=>({...image.images[0],id:index+1}))},
+      ]) {
+        let rejected = false;
+        try { agent.suggestNextPrompt(JSON.stringify(request)); } catch { rejected = true; }
+        if (!rejected) throw new Error('text or attachment admission limit was bypassed');
+      }
       const fs = await import('node:fs/promises');
       await fs.writeFile(${JSON.stringify(join(root, 'models.cache.json'))}, JSON.stringify({schema_version:1,synced_at:2,response:{services:{}}}));
       if ((await agent.suggestNextPrompt(context).outcome()).status !== 'unavailable') throw new Error('unexpected fallback');
@@ -112,7 +131,10 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     expect(code, stderr).toBe(0)
     expect(stdout.trim()).toBe('suggestion contract passed')
     expect(stdout + stderr).not.toContain('service-test-key')
-    expect(requests).toHaveLength(13)
+    expect(requests).toHaveLength(14)
+    const largeImageContent = (requests[13]!.messages as { content: { type: string; source?: { data: string }; image_url?: { url: string } }[] }[]).at(-1)?.content
+    if (protocol === 'anthropic') expect(largeImageContent?.find(block => block.type === 'image')?.source?.data).toBe(largeImage)
+    else expect(largeImageContent?.find(block => block.type === 'image_url')?.image_url?.url).toBe(`data:image/png;base64,${largeImage}`)
     expect(suggestionInstructions(requests[10]!)).toContain('INTENT GROUPS, most relevant first: assess_next, respond')
     expect(JSON.stringify(requests[10])).toContain('All 227 tests passed')
     expect(JSON.stringify(requests[12])).toContain('The image build has started')

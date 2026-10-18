@@ -684,11 +684,7 @@ impl NapiAgent {
         &self,
         context_json: String,
     ) -> Result<crate::suggestion::NapiSuggestion> {
-        if context_json.len() > 100_000 {
-            return Err(Error::from_reason("suggestion context too large"));
-        }
-        let request = serde_json::from_str(&context_json)
-            .map_err(|_| Error::from_reason("invalid suggestion context"))?;
+        let request = evot::suggestion::parse_request(&context_json).map_err(Error::from_reason)?;
         Ok(crate::suggestion::NapiSuggestion::start(request))
     }
 

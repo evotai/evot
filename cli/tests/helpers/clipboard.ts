@@ -9,7 +9,7 @@ export function fixtureClipboard(home: string, imageBase64: string): string {
 import base64, pathlib, re, sys, time
 args = ' '.join(sys.argv[1:])
 if 'clipboard info' in args:
-    print('PNGf, 75')
+    print('PNGf, ${Buffer.from(imageBase64, 'base64').byteLength}')
 elif 'TARGETS' in args or '--list-types' in args:
     print('image/png')
 else:
