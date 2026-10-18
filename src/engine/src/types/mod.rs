@@ -1,5 +1,6 @@
 mod agent_context;
 mod event;
+mod input;
 mod llm;
 mod message;
 mod tool;
@@ -12,6 +13,9 @@ pub use event::LlmCallRequest;
 pub use event::LlmCallStats;
 pub use event::ReviewedCall;
 pub use event::StreamDelta;
+pub use input::InputProvenance;
+pub use input::InputSource;
+pub use input::INPUT_SCHEMA_VERSION;
 pub use llm::CacheConfig;
 pub use llm::CacheStrategy;
 pub use llm::LlmCallMetrics;

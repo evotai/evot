@@ -297,6 +297,7 @@ impl NapiRun {
         let entry = self
             .handle
             .steer(evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance: None,
                 content,
                 timestamp: evot_engine::now_ms(),
             }));
@@ -318,6 +319,7 @@ impl NapiRun {
         let entry =
             self.handle
                 .follow_up(evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                    provenance: None,
                     content,
                     timestamp: evot_engine::now_ms(),
                 }));

@@ -1425,6 +1425,7 @@ async fn sessions_api_pages_lightweight_rows() -> TestResult {
     .await?;
     session
         .write_items(vec![evot::types::TranscriptItem::User {
+            provenance: None,
             text: "seed the listing".into(),
             content: vec![],
         }])
@@ -1510,6 +1511,7 @@ async fn session_detail_replays_transcript_nodes() -> TestResult {
     loaded
         .write_items(vec![
             evot::types::TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },

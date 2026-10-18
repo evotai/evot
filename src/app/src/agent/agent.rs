@@ -340,9 +340,11 @@ impl Agent {
     }
 
     pub fn try_steer(&self, session_id: &str, input: Vec<evot_engine::Content>) -> bool {
+        let (input, provenance) = crate::conversation::input::PreparedInput::user(input).finish();
         self.active_runs.try_steer(
             session_id,
             evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance,
                 content: input,
                 timestamp: evot_engine::now_ms(),
             }),
@@ -351,9 +353,18 @@ impl Agent {
 
     /// Send a follow-up message to the active run for a session.
     pub fn follow_up(&self, session_id: &str, text: impl Into<String>) {
+        let (content, provenance) =
+            crate::conversation::input::PreparedInput::user(vec![evot_engine::Content::Text {
+                text: text.into(),
+            }])
+            .finish();
         self.active_runs.follow_up(
             session_id,
-            evot_engine::AgentMessage::Llm(evot_engine::Message::user(text)),
+            evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                content,
+                provenance,
+                timestamp: evot_engine::now_ms(),
+            }),
         );
     }
 

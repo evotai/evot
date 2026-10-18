@@ -1,0 +1,8 @@
+{
+  "messages": [{"role":"user","text":"Run the tests"}],
+  "explicit": true,
+  "activity": "running",
+  "draft": "Change the ",
+  "suffix": "target",
+  "rejected": []
+}

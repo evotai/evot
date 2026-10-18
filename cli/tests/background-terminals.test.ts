@@ -158,6 +158,18 @@ function harness(options: {
   }
 }
 
+test('suggestion task metadata comes only from the current polled session without reading output', () => {
+  let session = 'first'
+  const running = proc({ description: 'Validate authentication', quiet_for_ms: 1200 })
+  const h = harness({ sessionId: () => session, processes: [running, proc({ task_id: 'done', status: 'completed' })] })
+  h.controller.refresh()
+  expect(h.controller.runningProcesses()).toEqual([running])
+  expect(h.outputReads()).toBe(0)
+  session = 'second'
+  expect(h.controller.runningProcesses()).toEqual([])
+  expect(h.outputReads()).toBe(0)
+})
+
 describe('BackgroundTerminals.handlePromptDown', () => {
   test('renamed background views still refresh and route back to the list', () => {
     const h = harness({ processes: [proc(), proc({ task_id: 'second' })], output: 'latest output' })

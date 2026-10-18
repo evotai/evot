@@ -36,8 +36,19 @@ pub fn into_agent_messages(items: &[TranscriptItem]) -> Vec<evot_engine::AgentMe
 /// Convert a single engine AgentMessage to a TranscriptItem.
 pub fn transcript_from_agent_message(message: &evot_engine::AgentMessage) -> TranscriptItem {
     match message {
-        evot_engine::AgentMessage::Llm(evot_engine::Message::User { content, .. }) => {
-            TranscriptItem::user_from_content(content)
+        evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+            content,
+            provenance,
+            ..
+        }) => {
+            let mut item = TranscriptItem::user_from_content(content);
+            if let TranscriptItem::User {
+                provenance: saved, ..
+            } = &mut item
+            {
+                *saved = provenance.clone();
+            }
+            item
         }
         evot_engine::AgentMessage::Llm(evot_engine::Message::Assistant {
             content,
@@ -97,7 +108,11 @@ const HISTORY_TIMESTAMP_UNKNOWN: u64 = 0;
 /// Convert a single TranscriptItem to an engine AgentMessage.
 pub fn agent_message_from_transcript(item: &TranscriptItem) -> evot_engine::AgentMessage {
     match item {
-        TranscriptItem::User { text, content } => {
+        TranscriptItem::User {
+            text,
+            content,
+            provenance,
+        } => {
             let content = if content.is_empty() {
                 vec![evot_engine::Content::Text { text: text.clone() }]
             } else {
@@ -125,6 +140,7 @@ pub fn agent_message_from_transcript(item: &TranscriptItem) -> evot_engine::Agen
                     .collect()
             };
             evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance: provenance.clone(),
                 content,
                 timestamp: HISTORY_TIMESTAMP_UNKNOWN,
             })
@@ -171,6 +187,7 @@ pub fn agent_message_from_transcript(item: &TranscriptItem) -> evot_engine::Agen
         ),
         TranscriptItem::Compact { summary, .. } => {
             evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance: None,
                 content: vec![evot_engine::Content::Text {
                     text: crate::compact::context_view::compact_summary_item(summary)
                         .as_user_text()

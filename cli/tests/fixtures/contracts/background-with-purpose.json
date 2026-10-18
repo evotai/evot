@@ -1,0 +1,13 @@
+{
+  "task_id": "background-contract-task",
+  "command": "sleep 30",
+  "description": "Run focused authentication tests",
+  "quiet_for_ms": 60000,
+  "cwd": "/tmp/contract",
+  "output_path": "/tmp/contract/output.txt",
+  "status": "running",
+  "exit_code": null,
+  "elapsed_ms": 120000,
+  "output_file_truncated": false,
+  "stopped_by_user": false
+}

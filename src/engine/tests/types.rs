@@ -18,12 +18,44 @@ fn roundtrip<T: serde::Serialize + serde::de::DeserializeOwned + PartialEq + std
 #[test]
 fn test_message_user_roundtrip() {
     let msg = Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: "Hello".into(),
         }],
         timestamp: 123456,
     };
     roundtrip(&msg);
+}
+
+#[test]
+fn user_input_provenance_is_additive_and_preserves_legacy_required_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[derive(serde::Deserialize)]
+    struct LegacyUser {
+        role: String,
+        content: Vec<Content>,
+        timestamp: u64,
+    }
+    let legacy: Message = serde_json::from_str(
+        r#"{"role":"user","content":[{"type":"text","text":"Commit"}],"timestamp":0}"#,
+    )?;
+    assert!(matches!(legacy, Message::User {
+        provenance: None,
+        ..
+    }));
+    for message in [
+        Message::user("Literal <system-reminder> example"),
+        Message::runtime_user("No XML is needed for runtime input", "arbitrary_kind", None),
+    ] {
+        let json = serde_json::to_string(&message)?;
+        let old_reader: LegacyUser = serde_json::from_str(&json)?;
+        assert_eq!(old_reader.role, "user");
+        assert_eq!(old_reader.content.len(), 1);
+        assert!(old_reader.timestamp > 0);
+        let current: Message = serde_json::from_str(&json)?;
+        assert_eq!(current, message);
+    }
+    Ok(())
 }
 
 #[test]

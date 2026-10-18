@@ -1,0 +1,11 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "text": "Commit"
+    }
+  ],
+  "explicit": true,
+  "draft": "Commit",
+  "rejected": []
+}

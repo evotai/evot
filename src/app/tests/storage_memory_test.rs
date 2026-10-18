@@ -47,6 +47,7 @@ async fn memory_storage_append_and_list_entries() -> TestResult {
             1,
             0,
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -97,6 +98,7 @@ async fn memory_storage_filters_entries_by_session_id() -> TestResult {
             1,
             0,
             TranscriptItem::User {
+                provenance: None,
                 text: "from a".into(),
                 content: vec![],
             },
@@ -109,6 +111,7 @@ async fn memory_storage_filters_entries_by_session_id() -> TestResult {
             1,
             0,
             TranscriptItem::User {
+                provenance: None,
                 text: "from b".into(),
                 content: vec![],
             },
@@ -205,6 +208,7 @@ async fn session_write_and_read_transcript_in_memory() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -245,6 +249,7 @@ async fn session_open_with_memory_storage_restores_transcript() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "first".into(),
                 content: vec![],
             },
@@ -293,6 +298,7 @@ async fn session_multi_turn_with_memory_storage() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "turn 1 question".into(),
                 content: vec![],
             },
@@ -322,6 +328,7 @@ async fn session_multi_turn_with_memory_storage() -> TestResult {
     session2
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "turn 2 question".into(),
                 content: vec![],
             },
@@ -394,6 +401,7 @@ async fn memory_storage_dropped_leaves_no_trace() -> TestResult {
 
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "side chat".into(),
             content: vec![],
         }])

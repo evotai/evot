@@ -316,6 +316,7 @@ async fn run_loop(
         if let Some(ref tracker) = tracker {
             if let Some(reason) = tracker.check_limits() {
                 let limit_msg = AgentMessage::Llm(Message::User {
+                    provenance: Some(crate::InputProvenance::runtime(1, "execution_limit", None)),
                     content: vec![Content::Text {
                         text: format!("[Agent stopped: {}]", reason),
                     }],

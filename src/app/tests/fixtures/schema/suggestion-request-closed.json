@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {"role": "user", "text": "Option+A feels slow; the refresh translation button only appears after a delay"},
+    {"role": "assistant", "text": "Fixed. Enabling translation previously waited for cloud model catalog synchronization, which delayed the button on slow networks.\n\nNow:\n- Saved settings are validated locally, and the floating button updates immediately.\n- The model catalog synchronizes in the background without blocking enable or disable actions.\n\nAll 227 tests passed and the extension was rebuilt. Reload the extension and refresh the page to use the update. Translation itself still waits for the judge and model, but the interaction no longer waits for catalog synchronization."}
+  ],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "active",
+    "last_turn": "answered",
+    "pending_tools": 0,
+    "progress": {"calls": 3, "executed": 3, "completed": 3, "failed": 0, "since_last_reply": 0, "awaiting_input": false, "recent": []},
+    "runtime": {"execution": "idle", "mode": "normal", "queued_inputs": 0, "background_tasks": 0}
+  }
+}

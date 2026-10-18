@@ -32,6 +32,7 @@ fn context(model: &str, provider: Arc<RecordingProvider>) -> SummarizerContext {
 
 fn user(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text { text: text.into() }],
         timestamp: 0,
     })

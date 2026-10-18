@@ -15,8 +15,12 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     expect(new URL(request.url).pathname).toBe(protocol === 'openai' ? '/v1/chat/completions' : '/v1/messages')
     const body = await request.json() as Record<string, unknown>
     requests.push(body)
-    suggestionInstructions(body)
-    const text = 'Run the tests'
+    const prompt = suggestionInstructions(body)
+    if (requests.length === 3) return new Response(JSON.stringify({ error: { message: 'temporary fixture error' } }), { status: 503 })
+    const text = prompt.includes('CURSOR REWRITE MODE')
+      ? JSON.stringify(prompt.includes('COMMAND ARGUMENT ASSISTANCE') ? [' 5m check CI', ' status', ' 10m run tests'] : ['unit tests', 'integration tests\nThen review', 'smoke tests'])
+      : prompt.includes('\nCommit\n') ? 'Commit current changes\nCommit after reviewing the diff\nCommit and push the branch'
+      : requests.length === 1 ? 'Run the tests' : 'Run the full suite\nRun the unit tests\nRun the integration tests\nRun the smoke tests\nRun the lint checks\nRun the extra checks'
     if (protocol === 'anthropic') {
       const events = [
         { type: 'message_start', message: { id: 'fixture', role: 'assistant', content: [], model: 'service-model', usage: { input_tokens: 10, output_tokens: 0 } } },
@@ -53,10 +57,42 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       const agent = await NapiAgent.create(null, null);
       const context = JSON.stringify([{role:'user',text:'Implement the tests'},{role:'assistant',text:'Implementation is ready.'},{role:'user',text:'Add the tests'}, {role:'assistant',text:'Tests are ready.'}]);
       const request = agent.suggestNextPrompt(context);
-      if (await request.result() !== 'Run the tests') throw new Error('missing native suggestion');
+      const progress = request.nextCandidates();
+      if (await request.result() !== 'Run the tests') throw new Error('legacy string result changed');
+      if (JSON.stringify(await progress) !== JSON.stringify(['Run the tests'])) throw new Error('candidate updates lost');
+      if (await request.nextCandidates() !== null) throw new Error('candidate stream did not close');
+      const detailed = JSON.stringify({messages: JSON.parse(context), draft: 'Run the', rejected: ['Run the tests']});
+      const expected = JSON.stringify({candidates:[' full suite',' unit tests',' integration tests'],status:'ready'});
+      if (JSON.stringify(await agent.suggestNextPrompt(detailed).outcome()) !== expected) throw new Error('missing draft continuation');
+      const failed = await agent.suggestNextPrompt(detailed).outcome();
+      if (failed.status !== 'failed' || failed.candidates.length) throw new Error('error mistaken for empty prediction');
+      if (JSON.stringify(await agent.suggestNextPrompt(detailed).outcome()) !== expected) throw new Error('retry failed');
+      const interrupted = JSON.stringify({messages:[{role:'user',text:'Commit'}],explicit:true,draft:'Commit'});
+      const continuation = await agent.suggestNextPrompt(interrupted).outcome();
+      if (continuation.status !== 'ready' || JSON.stringify(continuation.candidates) !== JSON.stringify([' current changes',' after reviewing the diff',' and push the branch'])) throw new Error('interrupted Tab blocked');
+      const rewrite = JSON.stringify({messages:JSON.parse(context),explicit:true,draft:'Run the ',suffix:'old suite'});
+      const rewritten = await agent.suggestNextPrompt(rewrite).outcome();
+      if (rewritten.status !== 'ready' || rewritten.candidates[0] !== 'unit tests' || !rewritten.candidates[1].includes(String.fromCharCode(10))) throw new Error('replacement contract broken');
+      const command = JSON.stringify({messages:JSON.parse(context),explicit:true,draft:'/loop',suffix:'',command:{name:'/loop',description:'Repeat a task',usage:'/loop [interval] [prompt] | stop | status'}});
+      const arguments_ = await agent.suggestNextPrompt(command).outcome();
+      if (arguments_.status !== 'ready' || arguments_.candidates[0] !== ' 5m check CI') throw new Error('command argument contract broken');
+      const workflow = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-workflow.json', import.meta.url).pathname)}).json();
+      workflow.explicit = false;
+      delete workflow.suffix;
+      if ((await agent.suggestNextPrompt(JSON.stringify(workflow)).outcome()).status !== 'ready') throw new Error('workflow recovery without assistant text blocked');
+      const execution = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-execution.json', import.meta.url).pathname)}).json();
+      execution.explicit = false;
+      delete execution.suffix;
+      if ((await agent.suggestNextPrompt(JSON.stringify(execution)).outcome()).status !== 'ready') throw new Error('execution chronology blocked');
+      const image = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-images.json', import.meta.url).pathname)}).json();
+      if ((await agent.suggestNextPrompt(JSON.stringify(image)).outcome()).status !== 'ready') throw new Error('image suggestion blocked');
+      const closed = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-closed.json', import.meta.url).pathname)}).json();
+      if ((await agent.suggestNextPrompt(JSON.stringify(closed)).outcome()).status !== 'empty') throw new Error('completed request should abstain');
+      closed.messages.at(-1).text = 'Deploy to staging or production?';
+      if ((await agent.suggestNextPrompt(JSON.stringify(closed)).outcome()).status !== 'ready') throw new Error('unanswered question was suppressed');
       const fs = await import('node:fs/promises');
       await fs.writeFile(${JSON.stringify(join(root, 'models.cache.json'))}, JSON.stringify({schema_version:1,synced_at:2,response:{services:{}}}));
-      if (await agent.suggestNextPrompt(context).result() !== null) throw new Error('unexpected fallback');
+      if ((await agent.suggestNextPrompt(context).outcome()).status !== 'unavailable') throw new Error('unexpected fallback');
       const cancelled = agent.suggestNextPrompt(context);
       cancelled.abort();
       if (await cancelled.result() !== null) throw new Error('cancelled request returned text');
@@ -70,14 +106,34 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     expect(code, stderr).toBe(0)
     expect(stdout.trim()).toBe('suggestion contract passed')
     expect(stdout + stderr).not.toContain('service-test-key')
-    expect(requests).toHaveLength(1)
+    expect(requests).toHaveLength(11)
+    expect(suggestionInstructions(requests[10]!)).toContain('INTENT GROUPS, most relevant first: close, respond')
+    expect(JSON.stringify(requests)).not.toContain('All 227 tests passed')
+    const imageRequest = requests[9] as { messages: { content: { type: string; source?: { type: string; data: string }; image_url?: { url: string } }[] }[] }
+    const imageContent = imageRequest.messages.at(-1)?.content
+    expect(Array.isArray(imageContent)).toBe(true)
+    if (protocol === 'anthropic') expect(imageContent?.find(block => block.type === 'image')?.source?.data).toBeTruthy()
+    else expect(imageContent?.find(block => block.type === 'image_url')?.image_url?.url).toStartWith('data:image/png;base64,')
+    expect(suggestionInstructions(requests[9]!)).toContain('Use the visible images')
+    expect(suggestionInstructions(requests[8]!)).toContain('EXECUTION CHRONOLOGY')
+    expect(suggestionInstructions(requests[8]!)).toContain('"since_last_reply":3')
+    expect(suggestionInstructions(requests[8]!)).not.toContain('first: resume_recover, respond')
+    expect(suggestionInstructions(requests[7]!)).toContain('resume_recover, respond, advance_tasks')
+    expect(suggestionInstructions(requests[7]!)).toContain('"session":"resumed"')
+    expect(suggestionInstructions(requests[7]!)).toContain('"last_turn":"interrupted"')
+    expect(requests[5]!.max_tokens).toBe(320)
+    expect(suggestionInstructions(requests[6]!)).toContain('COMMAND ARGUMENT ASSISTANCE')
+    const detailedPrompt = suggestionInstructions(requests[1]!)
+    expect(detailedPrompt).toContain('DRAFT IN PROGRESS')
+    expect(detailedPrompt).toContain('3 distinct suggestions')
+    expect(detailedPrompt).not.toContain('ALREADY REJECTED')
     const messages = requests[0]!.messages as { role: string; content: unknown }[]
     expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user'])
     expect(suggestionMessageText(messages[2]!.content)).toBe('Add the tests')
     expect(suggestionMessageText(messages[3]!.content)).toBe('Tests are ready.')
     expect(suggestionMessageText(messages[4]!.content)).toContain('<next_prompt_suggestion>')
     expect(requests[0]!.model).toBe('service-model')
-    expect(requests[0]!.max_tokens).toBe(32)
+    expect(requests[0]!.max_tokens).toBe(192)
     expect(requests[0]!.tools ?? []).toEqual([])
     expect(JSON.stringify(requests[0]!.messages)).not.toContain('language_reference')
   } finally {

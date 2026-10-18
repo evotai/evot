@@ -19,8 +19,9 @@ export interface ComposerGuidance {
   allowedCommands: string[]
 }
 
-/** One policy for rendering, sampling and Tab acceptance. State outranks mode;
- * menus/drafts/attachments are host-owned eligibility, not a second run state. */
+/** Product guidance and automatic suggestions follow run state. Explicit Tab
+ * assists composer input independently of task progress; menus/attachments
+ * remain host-owned eligibility, not a second run state. */
 export function resolveComposerGuidance(input: {
   interaction: RunInteractionState
   mode: ComposerMode

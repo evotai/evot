@@ -11,6 +11,8 @@
 import stringWidth from 'string-width'
 import { confirmationHint } from './confirmation-hint.js'
 import { resolveComposerGuidance, type ComposerGuidance } from '../app/composer-guidance.js'
+import type { SuggestionFeedback } from '../app/suggestion.js'
+import { suggestionStatusText, suggestionAcceptHint, appendCompletionLines } from './suggestion.js'
 import { resolveRunInteraction } from '../app/run-interaction.js'
 import { COMMANDS, HIDDEN_COMMANDS } from '../../commands/index.js'
 import { getTheme } from '../../render/theme/index.js'
@@ -32,6 +34,12 @@ export interface PromptVMInput extends PromptFooterVM {
   completion: CompletionMenu | null
   ghostHint: string
   suggestion?: string
+  suggestionPosition?: { current: number; total: number }
+  suggestionCompletion?: string
+  suggestionReplacing?: boolean
+  suggestionStatus?: SuggestionFeedback
+  suggestionExplicit?: boolean
+  suggestionFrame?: number
   guidance?: ComposerGuidance
   rows: number
   placeholder: boolean
@@ -115,8 +123,28 @@ function composerGuidance(input: PromptVMInput): ComposerGuidance {
   })
 }
 
+function suggestionVisible(input: PromptVMInput): boolean {
+  return input.active && !input.completion && (input.suggestionExplicit === true || composerGuidance(input).allowSuggestion)
+}
+
 function visibleSuggestion(input: PromptVMInput): string {
-  return input.active && input.placeholder && !input.completion && composerGuidance(input).allowSuggestion ? input.suggestion ?? '' : ''
+  return input.placeholder && suggestionVisible(input) ? input.suggestion ?? '' : ''
+}
+
+/** Explicit draft completion remains available while foreground work runs. */
+function visibleCompletion(input: PromptVMInput): string {
+  return !input.placeholder && suggestionVisible(input)
+    ? input.suggestionCompletion ?? '' : ''
+}
+
+/** Feedback for an explicit Tab while nothing is showing yet. */
+function statusGhost(input: PromptVMInput): string {
+  if (!suggestionVisible(input)) return ''
+  return suggestionStatusText(input)
+}
+
+function completionGhost(input: PromptVMInput, completion: string): string {
+  return `${completion}${suggestionAcceptHint(input)}`
 }
 
 export function buildPromptBlocks(input: PromptVMInput, options: PromptLayoutOptions = {}): ViewBlock[] {
@@ -206,19 +234,26 @@ function buildInputLines(
   // rather than stealing a column from every line.
   const width = Math.max(1, contentWidth)
   let cursorIndex = 0
+  const completion = visibleCompletion(input)
+  // Ghost replacement never mutates the editor. The saved suffix returns as
+  // soon as the preview is dismissed or the caret/draft changes.
+  const replacing = Boolean(completion) && input.suggestionReplacing
+  const displayedLines = replacing
+    ? [...input.lines.slice(0, input.cursorLine), (input.lines[input.cursorLine] ?? '').slice(0, input.cursorCol)]
+    : input.lines
 
-  for (let lineIndex = 0; lineIndex < input.lines.length; lineIndex++) {
-    const text = input.lines[lineIndex]!
+  for (let lineIndex = 0; lineIndex < displayedLines.length; lineIndex++) {
+    const text = displayedLines[lineIndex]!
     const active = input.active && lineIndex === input.cursorLine
-    if (active && text === '' && input.lines.length === 1 && input.placeholder) {
+    if (active && text === '' && input.lines.length === 1 && input.placeholder && !replacing) {
       cursorIndex = lines.length
       // The native cursor sits on the first hint cell without inserting text.
       const guidance = composerGuidance(input)
       const suggestion = visibleSuggestion(input)
-      const acceptHint = '  ⇥ / →'
+      const acceptHint = suggestionAcceptHint(input)
       const full = suggestion
         ? `${truncateToWidth(suggestion, Math.max(0, contentWidth - stringWidth(acceptHint)))}${acceptHint}`
-        : atLeastWidth(widthTier(columns), 'md') ? guidance.placeholder : guidance.shortPlaceholder
+        : statusGhost(input).trimStart() || (atLeastWidth(widthTier(columns), 'md') ? guidance.placeholder : guidance.shortPlaceholder)
       const hint = truncateToWidth(full, contentWidth)
       lines.push(line(plain(CURSOR_MARKER), ...(hint ? [dim(hint)] : [])))
       continue
@@ -250,13 +285,18 @@ function buildInputLines(
 
       cursorIndex = lines.length
       const cursorCol = Math.max(0, input.cursorCol - chunk.start)
-      const rawGhost = !input.completion && chunk.end === text.length ? input.ghostHint : ''
+      const rawGhost = !input.completion && chunk.end === text.length
+        ? (completion ? completionGhost(input, completion) : statusGhost(input) || input.ghostHint) : ''
       // Style the whole chunk before splitting, otherwise a command straddling
       // the cursor is scored as two fragments and loses its brand hue.
       const styled = styleInputText(textChunk)
       const [before, rest] = splitSpansAt(styled, cursorCol)
       // Position only: the terminal owns shape, color, blink and wide-cell fill.
       const spans: StyledSpan[] = [...before, plain(CURSOR_MARKER), ...rest]
+      if (completion && (replacing || completion.includes('\n'))) {
+        appendCompletionLines(lines, spans, textChunk, rawGhost, width)
+        continue
+      }
       const ghostBudget = contentWidth - stringWidth(textChunk)
       const ghost = rawGhost ? truncateToWidth(rawGhost, Math.max(0, ghostBudget)) : ''
       if (ghost) spans.push(dim(ghost))

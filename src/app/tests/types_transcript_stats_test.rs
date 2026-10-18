@@ -215,6 +215,7 @@ fn stats_run_finished_round_trip() {
 #[test]
 fn try_from_item_returns_none_for_non_stats() {
     let item = TranscriptItem::User {
+        provenance: None,
         text: "hello".into(),
         content: vec![],
     };
@@ -258,6 +259,7 @@ fn stats_item_is_not_context() {
 #[test]
 fn user_item_is_context() {
     let item = TranscriptItem::User {
+        provenance: None,
         text: "hello".into(),
         content: vec![],
     };
@@ -378,7 +380,7 @@ fn user_content_round_trip_preserves_multimodal_order() {
         },
     ]);
 
-    let TranscriptItem::User { text, content } = item else {
+    let TranscriptItem::User { text, content, .. } = item else {
         panic!("expected user item");
     };
     assert_eq!(text, "before\nbetween");
@@ -416,7 +418,7 @@ fn user_item_without_content_deserializes_for_backward_compatibility() {
     let json = r#"{"type":"user","text":"hello"}"#;
     let item: TranscriptItem = serde_json::from_str(json).expect("deserialize");
     match item {
-        TranscriptItem::User { text, content } => {
+        TranscriptItem::User { text, content, .. } => {
             assert_eq!(text, "hello");
             assert!(content.is_empty());
         }
@@ -487,6 +489,7 @@ fn tool_result_null_details_omitted_from_serialization() {
 #[test]
 fn entry_preview_short_text() {
     let item = TranscriptItem::User {
+        provenance: None,
         text: "hello world".into(),
         content: vec![],
     };
@@ -497,6 +500,7 @@ fn entry_preview_short_text() {
 fn entry_preview_truncates_long_text() {
     let long = "a".repeat(100);
     let item = TranscriptItem::User {
+        provenance: None,
         text: long,
         content: vec![],
     };
@@ -511,6 +515,7 @@ fn entry_preview_chinese_does_not_panic() {
     // 80 Chinese characters — would panic on byte slicing
     let chinese = "你好世界".repeat(20);
     let item = TranscriptItem::User {
+        provenance: None,
         text: chinese,
         content: vec![],
     };

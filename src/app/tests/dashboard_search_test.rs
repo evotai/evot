@@ -33,6 +33,7 @@ fn assistant(text: &str) -> TranscriptItem {
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }
@@ -53,6 +54,7 @@ async fn search_text_includes_transcript_content() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "how do I configure the retry budget".into(),
                 content: vec![],
             },

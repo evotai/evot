@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { complete, getGhostHint } from '../src/commands/completion.js'
+import { complete, fileCompletionTarget, getGhostHint } from '../src/commands/completion.js'
 
 describe('slash command completion', () => {
   test('completes single match with trailing space', () => {
@@ -72,6 +72,26 @@ describe('slash command completion', () => {
 })
 
 describe('file path completion', () => {
+  test('path routing is independent of filesystem matches and shared with suggestion routing', () => {
+    for (const word of ['../evot/xx', './src/missing', '~/projects/none', '/tmp/missing', '/etc', 'nested/file.ts']) {
+      const text = `inspect ${word}`
+      expect(fileCompletionTarget(text, text.length)).toMatchObject({ word, wordStart: 'inspect '.length })
+    }
+    const text = '/loop check ../evot/xx then report'
+    const cursor = '/loop check ../evot/xx'.length
+    expect(fileCompletionTarget(text, cursor)).toMatchObject({ word: '../evot/xx', wordStart: '/loop check '.length })
+    for (const text of ['plain prose', '/lo', '/loop', '/model', '/_dump', '/loop 5m run tests']) {
+      expect(fileCompletionTarget(text, text.length)).toBeNull()
+    }
+  })
+
+  test('paths also complete inside slash-command arguments', () => {
+    const text = '/loop inspect ./tests'
+    const result = complete(text, text.length)
+    expect(result).not.toBeNull()
+    expect(result!.wordStart).toBe('/loop inspect '.length)
+    expect(result!.replacement).toBe('./tests/')
+  })
   test('completes paths starting with ./', () => {
     const result = complete('./', 2)
     expect(result).not.toBeNull()
@@ -115,9 +135,8 @@ describe('file path completion', () => {
   })
 
   test('extracts path glued to CJK text without space', () => {
-    // "看下./tests" — a path appended directly to CJK characters with no
-    // separating whitespace. Tab should still recognise the path segment.
-    const line = '看下./tests'
+    // A path appended directly to non-Latin text still has its own start.
+    const line = '\u770b\u4e0b./tests'
     const result = complete(line, line.length)
     expect(result).not.toBeNull()
     expect(result!.replacement.startsWith('./tests')).toBe(true)

@@ -70,6 +70,11 @@ fn build_nudge() -> AgentMessage {
         .to_string();
 
     AgentMessage::Llm(Message::User {
+        provenance: Some(crate::InputProvenance::runtime(
+            1,
+            "thinking_only_guard",
+            None,
+        )),
         content: vec![Content::Text { text }],
         timestamp: now_ms(),
     })

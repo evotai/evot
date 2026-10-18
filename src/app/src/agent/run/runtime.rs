@@ -40,6 +40,7 @@ pub struct TurnInput {
     pub options: EngineOptions,
     pub history: Vec<evot_engine::AgentMessage>,
     pub input: Vec<evot_engine::Content>,
+    pub provenance: Option<evot_engine::InputProvenance>,
     pub session: Arc<Session>,
     /// Persisted transcript generation used to build `history`.
     pub transcript_seq: u64,
@@ -230,6 +231,7 @@ async fn drive_one_turn(
         options,
         history,
         input,
+        provenance,
         session,
         transcript_seq,
     } = turn;
@@ -237,6 +239,7 @@ async fn drive_one_turn(
     let mut engine = build_engine(options, history)
         .with_prompt_queues(control.queues().steering(), control.queues().follow_up());
     let user_msg = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+        provenance,
         content: input.clone(),
         timestamp: evot_engine::now_ms(),
     });

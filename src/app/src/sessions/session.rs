@@ -657,7 +657,7 @@ fn build_title(items: &[TranscriptItem]) -> Option<String> {
                 }
                 // A host-expanded command titles the session by what the
                 // user typed, not by the attached instructions.
-                let text = crate::command::user_facing_text(text)?;
+                let text = crate::conversation::input::authored_text(item)?;
                 let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
                 if !normalized.is_empty() {
                     return Some(normalized);

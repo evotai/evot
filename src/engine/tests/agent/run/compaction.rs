@@ -1776,6 +1776,7 @@ async fn test_llm_call_stats_image_tokens_separate_from_user() {
 
     let messages = vec![
         Message::User {
+            provenance: None,
             content: vec![
                 Content::Text {
                     text: "describe this image".into(),
@@ -1823,6 +1824,7 @@ async fn test_llm_call_stats_no_images() {
     use evotengine::types::Message;
 
     let messages = vec![Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: "hello".into(),
         }],

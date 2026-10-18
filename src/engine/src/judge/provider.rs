@@ -73,6 +73,7 @@ impl ProviderJudge {
             model: self.model.clone(),
             system_prompt: String::new(),
             messages: vec![Message::User {
+                provenance: None,
                 content: vec![Content::Text {
                     text: state.to_string(),
                 }],

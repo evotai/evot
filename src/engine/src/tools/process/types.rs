@@ -106,6 +106,9 @@ pub struct ProcessSnapshot {
 pub struct ProcessSummary {
     pub task_id: String,
     pub command: String,
+    /// Launch purpose, without needing to read captured output.
+    pub description: Option<String>,
+    pub quiet_for: Duration,
     pub cwd: PathBuf,
     pub output_path: PathBuf,
     pub status: ProcessStatus,

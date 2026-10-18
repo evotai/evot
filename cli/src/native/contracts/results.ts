@@ -47,6 +47,8 @@ export interface QueuedPrompt { id: string; version: number; message: Record<str
 export interface BackgroundProcess {
   task_id: string
   command: string
+  description?: string | null
+  quiet_for_ms?: number
   cwd: string
   output_path: string
   status: 'running_foreground' | 'running' | 'completed' | 'failed' | 'killed'
@@ -107,6 +109,7 @@ export const queuedPrompt: Schema<QueuedPrompt> = object({ id: text, version: ui
 export const queuedPrompts = array(queuedPrompt)
 export const backgroundProcess: Schema<BackgroundProcess> = object({
   task_id: text, command: text, cwd: text, output_path: text,
+  description: optional(nullable(text)), quiet_for_ms: optional(uint),
   status: oneOf('running_foreground', 'running', 'completed', 'failed', 'killed'),
   exit_code: nullable(integer), elapsed_ms: uint, output_file_truncated: boolean, stopped_by_user: boolean,
 })

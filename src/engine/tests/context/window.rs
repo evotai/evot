@@ -6,6 +6,7 @@ use evotengine::types::*;
 
 fn user_msg(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: text.to_string(),
         }],
@@ -200,6 +201,7 @@ fn nonzero_aborted_usage_is_not_a_context_anchor() {
 fn usage_older_than_its_prefix_is_not_a_context_anchor() {
     let tracker = ContextTracker::new();
     let large_history = AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: "x".repeat(40_000),
         }],

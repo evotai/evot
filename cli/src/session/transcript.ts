@@ -3,7 +3,7 @@
  * with ordered assistant content and completed tool results.
  */
 
-import { replayUserText } from './task-notification.js'
+import { replayUserInput } from './user-input.js'
 import { toolArgsRecord } from '../term/app/tool-args.js'
 import type { TranscriptItem } from '../native/index.js'
 import type { UIAssistantBlock, UIMessage } from '../term/app/types.js'
@@ -21,6 +21,7 @@ interface RawItem {
   type: string
   // User
   text?: string
+  display_parts?: unknown
   // Assistant content uses an array; tool results use a string.
   content?: RawAssistantBlock[] | string
   // Transcripts written before the canonical content migration.
@@ -56,7 +57,7 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
   for (const item of rawItems) {
     const t = item.type
     if (t === 'user') {
-      for (const part of replayUserText(item.text ?? '')) {
+      for (const part of replayUserInput(item)) {
         messages.push({
           id: `transcript-${part.kind}-${idx++}`,
           role: part.kind === 'user' ? 'user' : 'system',

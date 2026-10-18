@@ -22,6 +22,7 @@ pub fn is_compact_summary_text(text: &str) -> bool {
 
 pub fn compact_summary_item(summary: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: compact_summary_text(summary),
         content: vec![],
     }
@@ -156,7 +157,7 @@ pub(crate) fn normalize_compact_item(
 }
 
 fn normalize_transcript_summary_boundary(summary: &str, messages: &mut [TranscriptItem]) {
-    let Some(TranscriptItem::User { text, content }) = messages.first_mut() else {
+    let Some(TranscriptItem::User { text, content, .. }) = messages.first_mut() else {
         return;
     };
     if !is_summary_boundary_text(text, summary) {

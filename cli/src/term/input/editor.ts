@@ -68,6 +68,21 @@ export function getEditorText(state: EditorState): string {
   return state.lines.join('\n')
 }
 
+/** UTF-16 offset in the complete draft, snapped to a user-perceived boundary. */
+export function editorCursorOffset(state: EditorState): number {
+  const line = state.lines[state.cursorLine] ?? ''
+  const col = snapToSegmentBoundary(line, state.cursorCol)
+  return state.lines.slice(0, state.cursorLine).reduce((offset, text) => offset + text.length + 1, 0) + col
+}
+
+/** Replace the entire suffix without changing anything before the cursor. */
+export function replaceAfterCursor(state: EditorState, text: string): EditorState {
+  const line = state.lines[state.cursorLine] ?? ''
+  const col = snapToSegmentBoundary(line, state.cursorCol)
+  const lines = [...state.lines.slice(0, state.cursorLine), line.slice(0, col)]
+  return insertText({ ...state, lines, cursorCol: col }, text)
+}
+
 export function isEditorEmpty(state: EditorState): boolean {
   return state.lines.length === 1 && state.lines[0] === ''
 }
@@ -213,7 +228,8 @@ export function applyCompletion(state: EditorState): CompletionApplyResult {
   if (!result) return { state, applied: false }
 
   const before = currentLine.slice(0, result.wordStart)
-  const after = currentLine.slice(state.cursorCol)
+  const suffix = currentLine.slice(result.wordEnd ?? state.cursorCol)
+  const after = result.replacement.endsWith('/') && suffix.startsWith('/') ? suffix.slice(1) : suffix
   const newLines = [...state.lines]
   newLines[state.cursorLine] = before + result.replacement + after
   const cursorCol = before.length + result.replacement.length
@@ -263,7 +279,9 @@ export function acceptCompletion(state: EditorState): EditorState {
   if (!menu || !item) return state
   const currentLine = state.lines[state.cursorLine]!
   const newLines = [...state.lines]
-  newLines[state.cursorLine] = currentLine.slice(0, menu.replaceStart) + item.value + currentLine.slice(menu.replaceEnd)
+  const suffix = currentLine.slice(menu.replaceEnd)
+  const after = item.value.endsWith('/') && suffix.startsWith('/') ? suffix.slice(1) : suffix
+  newLines[state.cursorLine] = currentLine.slice(0, menu.replaceStart) + item.value + after
   return {
     ...state,
     lines: newLines,

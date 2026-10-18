@@ -4,6 +4,7 @@ import { PREVIEW_SECTION_PREFIX, type SelectorItem } from '../selector.js'
 import { recognitionSections, type SessionRecognition } from './session-recognition.js'
 import { orderAsForkTree } from './fork-tree.js'
 import { shareAccess } from '../../session/cloud-sessions.js'
+import { COMPACT_SUMMARY_PREFIX } from '../../session/user-input.js'
 
 export const RESUME_SELECTOR_TITLE = 'Sessions'
 
@@ -13,7 +14,7 @@ export const RESUME_SELECTOR_TITLE = 'Sessions'
  * matches titles an earlier release derived from that message before the
  * backend stopped doing so.
  */
-export const COMPACT_SUMMARY_PREFIX = 'The conversation history before this'
+export { COMPACT_SUMMARY_PREFIX } from '../../session/user-input.js'
 
 /**
  * Display title for a session. Sessions compacted by an earlier release carry a

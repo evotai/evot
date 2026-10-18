@@ -65,7 +65,7 @@ fn collect_user_prompts(entries: &[TranscriptEntry]) -> Vec<String> {
         if crate::compact::context_view::is_compact_summary_text(text) {
             continue;
         }
-        let Some(text) = crate::command::user_facing_text(text) else {
+        let Some(text) = crate::conversation::input::authored_text(&entry.item) else {
             continue;
         };
         let text = normalize_ws(&text);
@@ -91,7 +91,7 @@ fn collect_first_prompt(entries: &[TranscriptEntry]) -> Option<String> {
         if crate::compact::context_view::is_compact_summary_text(text) {
             return None;
         }
-        let text = normalize_ws(&crate::command::user_facing_text(text)?);
+        let text = normalize_ws(&crate::conversation::input::authored_text(&entry.item)?);
         (!text.is_empty()).then(|| clip_head(&text, USER_PROMPT_MAX_CHARS))
     })
 }

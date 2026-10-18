@@ -20,6 +20,7 @@ const LEGACY: &str = include_str!("fixtures/schema/session-meta-v0.json");
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

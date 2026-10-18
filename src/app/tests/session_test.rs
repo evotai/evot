@@ -201,6 +201,7 @@ async fn agent_create_session_keeps_empty_draft_out_of_lists() -> TestResult {
         .ok_or_else(|| missing_error("missing created session"))?;
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "first prompt".into(),
             content: vec![],
         }])
@@ -313,10 +314,12 @@ async fn resume_transcript_replays_retained_messages_with_lightweight_compact_ca
     let context = vec![
         evot::compact::context_view::compact_summary_item("summary"),
         TranscriptItem::User {
+            provenance: None,
             text: legitimate_user.into(),
             content: vec![],
         },
         TranscriptItem::User {
+            provenance: None,
             text: "retained".into(),
             content: vec![],
         },
@@ -498,6 +501,7 @@ async fn round_trip_session_with_transcript() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -536,6 +540,7 @@ async fn resume_session_appends_transcript() -> TestResult {
 
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "first".into(),
             content: vec![],
         }])
@@ -548,6 +553,7 @@ async fn resume_session_appends_transcript() -> TestResult {
     resumed
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "second".into(),
                 content: vec![],
             },
@@ -589,6 +595,7 @@ async fn session_title_comes_from_first_user_message() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "summarize the quarterly numbers for the infra team".into(),
                 content: vec![],
             },
@@ -636,6 +643,7 @@ async fn session_title_skips_compact_summary_user_message() -> TestResult {
     // Seed a real first turn so the session already has a good title.
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "debug the flaky auth integration test".into(),
             content: vec![],
         }])
@@ -647,6 +655,7 @@ async fn session_title_skips_compact_summary_user_message() -> TestResult {
     let summary_item =
         evot::compact::context_view::compact_summary_item("auth suite was flaky on CI");
     let real_user = TranscriptItem::User {
+        provenance: None,
         text: "re-run the suite after the fix".into(),
         content: vec![],
     };
@@ -790,6 +799,7 @@ async fn save_and_load_transcript() -> TestResult {
             1,
             0,
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -847,6 +857,7 @@ async fn open_resumes_from_last_compact_entry() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "old message 1".into(),
                 content: vec![],
             },
@@ -862,6 +873,7 @@ async fn open_resumes_from_last_compact_entry() -> TestResult {
                 error_message: None,
             },
             TranscriptItem::User {
+                provenance: None,
                 text: "old message 2".into(),
                 content: vec![],
             },
@@ -883,6 +895,7 @@ async fn open_resumes_from_last_compact_entry() -> TestResult {
     write_test_compact(&session, "summary of prior context", vec![
         evot::compact::context_view::compact_summary_item("summary of prior context"),
         TranscriptItem::User {
+            provenance: None,
             text: "old message 2".into(),
             content: vec![],
         },
@@ -904,6 +917,7 @@ async fn open_resumes_from_last_compact_entry() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "new message after compact".into(),
                 content: vec![],
             },
@@ -962,6 +976,7 @@ async fn write_compact_bounds_summary_without_touching_retained_user() -> TestRe
     let replacement = vec![
         evot::compact::context_view::compact_summary_item(&summary),
         TranscriptItem::User {
+            provenance: None,
             text: retained_user.clone(),
             content: vec![],
         },
@@ -1071,6 +1086,7 @@ async fn open_bounds_legacy_poisoned_summary_without_touching_live_user() -> Tes
         .append_entries(vec![
             TranscriptEntry::new(session_id.into(), None, 1, 0, item),
             TranscriptEntry::new(session_id.into(), None, 2, 0, TranscriptItem::User {
+                provenance: None,
                 text: live_user.clone(),
                 content: vec![],
             }),
@@ -1313,6 +1329,7 @@ async fn open_without_compact_returns_all_entries() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -1355,6 +1372,7 @@ async fn write_items_is_append_only() -> TestResult {
 
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "first".into(),
             content: vec![],
         }])
@@ -1409,6 +1427,7 @@ async fn failed_batch_does_not_publish_session_state_or_advance_sequence() -> Te
     std::fs::remove_dir(&transcript_path)?;
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "first durable item".into(),
             content: vec![],
         }])
@@ -1442,10 +1461,12 @@ async fn concurrent_batches_receive_contiguous_non_interleaved_sequences() -> Te
             session
                 .write_items(vec![
                     TranscriptItem::User {
+                        provenance: None,
                         text: "left-1".into(),
                         content: vec![],
                     },
                     TranscriptItem::User {
+                        provenance: None,
                         text: "left-2".into(),
                         content: vec![],
                     },
@@ -1459,10 +1480,12 @@ async fn concurrent_batches_receive_contiguous_non_interleaved_sequences() -> Te
             session
                 .write_items(vec![
                     TranscriptItem::User {
+                        provenance: None,
                         text: "right-1".into(),
                         content: vec![],
                     },
                     TranscriptItem::User {
+                        provenance: None,
                         text: "right-2".into(),
                         content: vec![],
                     },
@@ -1512,6 +1535,7 @@ async fn independent_storage_handles_cannot_duplicate_sequences() -> TestResult 
     let first = tokio::spawn(async move {
         created
             .write_items(vec![TranscriptItem::User {
+                provenance: None,
                 text: "first writer".into(),
                 content: vec![],
             }])
@@ -1520,6 +1544,7 @@ async fn independent_storage_handles_cannot_duplicate_sequences() -> TestResult 
     let second = tokio::spawn(async move {
         reopened
             .write_items(vec![TranscriptItem::User {
+                provenance: None,
                 text: "second writer".into(),
                 content: vec![],
             }])
@@ -1563,6 +1588,7 @@ async fn turn_write_rebases_after_external_advancement_without_losing_messages()
 
     second
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "external".into(),
             content: vec![],
         }])
@@ -1570,6 +1596,7 @@ async fn turn_write_rebases_after_external_advancement_without_losing_messages()
     let append = first
         .write_items_at(
             vec![TranscriptItem::User {
+                provenance: None,
                 text: "stale run".into(),
                 content: vec![],
             }],
@@ -1633,6 +1660,7 @@ async fn turn_write_after_stats_notice_reports_no_interleaved_context() -> TestR
     let append = session
         .write_items_at(
             vec![TranscriptItem::User {
+                provenance: None,
                 text: "turn prompt".into(),
                 content: vec![],
             }],
@@ -1647,6 +1675,7 @@ async fn turn_write_after_stats_notice_reports_no_interleaved_context() -> TestR
         .write_compact(
             compact_item("summary", 1),
             vec![TranscriptItem::User {
+                provenance: None,
                 text: "summary".into(),
                 content: vec![],
             }],
@@ -1694,6 +1723,7 @@ async fn turn_write_counts_only_context_items_among_interleaved_writes() -> Test
                 data: serde_json::json!({}),
             },
             TranscriptItem::User {
+                provenance: None,
                 text: "external".into(),
                 content: vec![],
             },
@@ -1706,6 +1736,7 @@ async fn turn_write_counts_only_context_items_among_interleaved_writes() -> Test
     let append = first
         .write_items_at(
             vec![TranscriptItem::User {
+                provenance: None,
                 text: "run prompt".into(),
                 content: vec![],
             }],
@@ -1731,6 +1762,7 @@ async fn stale_compaction_plan_is_rejected_before_persistence() -> TestResult {
 
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "planned history".into(),
             content: vec![],
         }])
@@ -1738,6 +1770,7 @@ async fn stale_compaction_plan_is_rejected_before_persistence() -> TestResult {
     let expected_seq = 1;
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "concurrent write".into(),
             content: vec![],
         }])
@@ -1747,6 +1780,7 @@ async fn stale_compaction_plan_is_rejected_before_persistence() -> TestResult {
         .write_compact(
             compact_item("stale summary", 1),
             vec![TranscriptItem::User {
+                provenance: None,
                 text: "stale replacement".into(),
                 content: vec![],
             }],
@@ -1785,6 +1819,7 @@ async fn multiple_compactions_uses_last() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "msg1".into(),
                 content: vec![],
             },
@@ -1806,6 +1841,7 @@ async fn multiple_compactions_uses_last() -> TestResult {
     write_test_compact(&session, "compact-v1", vec![
         evot::compact::context_view::compact_summary_item("compact-v1"),
         TranscriptItem::User {
+            provenance: None,
             text: "msg1".into(),
             content: vec![],
         },
@@ -1815,6 +1851,7 @@ async fn multiple_compactions_uses_last() -> TestResult {
     // More messages
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "msg2".into(),
             content: vec![],
         }])
@@ -1824,6 +1861,7 @@ async fn multiple_compactions_uses_last() -> TestResult {
     write_test_compact(&session, "compact-v2", vec![
         evot::compact::context_view::compact_summary_item("compact-v2"),
         TranscriptItem::User {
+            provenance: None,
             text: "msg2".into(),
             content: vec![],
         },
@@ -1833,6 +1871,7 @@ async fn multiple_compactions_uses_last() -> TestResult {
     // One more message after second compaction
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "msg3".into(),
             content: vec![],
         }])
@@ -1892,6 +1931,7 @@ async fn stats_items_persisted_but_filtered_on_resume() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "hello".into(),
                 content: vec![],
             },
@@ -1952,6 +1992,7 @@ async fn stats_after_compact_filtered_on_resume() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "old msg".into(),
                 content: vec![],
             },
@@ -1996,6 +2037,7 @@ async fn stats_after_compact_filtered_on_resume() -> TestResult {
     .await?;
     session
         .write_items(vec![compact_stats, TranscriptItem::User {
+            provenance: None,
             text: "new msg".into(),
             content: vec![],
         }])
@@ -2043,6 +2085,7 @@ async fn title_is_wrong_when_planning_prompt_pollutes_user_message() -> TestResu
     );
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: polluted,
             content: vec![],
         }])
@@ -2084,6 +2127,7 @@ async fn title_is_correct_when_user_message_is_clean() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "refactor the auth module to use JWT".into(),
                 content: vec![],
             },
@@ -2135,6 +2179,7 @@ async fn clear_marker_resets_context() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "msg1".into(),
                 content: vec![],
             },
@@ -2160,6 +2205,7 @@ async fn clear_marker_resets_context() -> TestResult {
     // New messages after clear
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "fresh start".into(),
             content: vec![],
         }])
@@ -2191,6 +2237,7 @@ async fn structured_compact_entry_rebuilds_context() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: "old".into(),
                 content: vec![],
             },
@@ -2209,6 +2256,7 @@ async fn structured_compact_entry_rebuilds_context() -> TestResult {
         .await?;
 
     let replacement = vec![TranscriptItem::User {
+        provenance: None,
         text: "compacted summary".into(),
         content: vec![],
     }];
@@ -2226,6 +2274,7 @@ async fn structured_compact_entry_rebuilds_context() -> TestResult {
 
     session
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "after compact".into(),
             content: vec![],
         }])
@@ -2339,6 +2388,7 @@ async fn session_title_uses_typed_line_of_expanded_command() -> TestResult {
     session
         .write_items(vec![
             TranscriptItem::User {
+                provenance: None,
                 text: evot::command::command_prompt(
                     "loop",
                     "/loop 5m watch the CI run",
@@ -2347,6 +2397,7 @@ async fn session_title_uses_typed_line_of_expanded_command() -> TestResult {
                 content: vec![],
             },
             TranscriptItem::User {
+                provenance: None,
                 text: evot::command::command_prompt("loop-wakeup", "loop wakeup #1", "Continue"),
                 content: vec![],
             },

@@ -154,8 +154,10 @@ export class Agent {
   }
 
   /** Best-effort side request: never falls back to this agent's chat model. */
-  suggestNextPrompt(messages: { role: 'user' | 'assistant'; text: string }[]) {
-    return this.raw.suggestNextPrompt(JSON.stringify(messages))
+  suggestNextPrompt(messages: import('./contracts/suggestion.js').SuggestionMessage[], hints?: import('./contracts/suggestion.js').SuggestionHints) {
+    // The bare array is the legacy addon contract; hints need the object shape.
+    const detailed = hints && (hints.explicit || hints.activity || hints.workflow || hints.draft || hints.suffix !== undefined || hints.command || hints.images?.length || hints.rejected?.length)
+    return this.raw.suggestNextPrompt(JSON.stringify(detailed ? { messages, ...hints } : messages))
   }
 
   async createSession(): Promise<SessionMeta> {

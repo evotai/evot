@@ -107,6 +107,7 @@ fn state(server: &MockServer) -> Result<AuthState, serde_json::Error> {
 
 fn user(session: &str, seq: u64, text: &str) -> TranscriptEntry {
     TranscriptEntry::new(session.into(), None, seq, 0, TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     })
@@ -281,6 +282,7 @@ async fn share_embeds_path_images_in_viewer_and_raw_transcript() -> TestResult {
         .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
         .await?;
     let entry = TranscriptEntry::new("s1".into(), None, 1, 1, TranscriptItem::User {
+        provenance: None,
         text: "look at this".into(),
         content: vec![
             TranscriptUserContent::Text {
@@ -435,6 +437,7 @@ async fn share_replaces_missing_path_image_with_placeholder_text() -> TestResult
             1,
             1,
             TranscriptItem::User {
+                provenance: None,
                 text: "photos".into(),
                 content: vec![
                     TranscriptUserContent::Image {
@@ -519,6 +522,7 @@ async fn share_embeds_images_in_compacted_engine_context_without_changing_tool_i
         messages_before: 2,
         messages_after: 2,
         messages: vec![TranscriptItem::User {
+            provenance: None,
             text: "image".into(),
             content: vec![TranscriptUserContent::Image {
                 mime_type: "image/png".into(),
@@ -529,6 +533,7 @@ async fn share_embeds_images_in_compacted_engine_context_without_changing_tool_i
         }],
         engine_messages: vec![
             evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance: None,
                 content: vec![evot_engine::Content::Image {
                     mime_type: "image/png".into(),
                     source: evot_engine::ImageSource::Path {
@@ -613,6 +618,7 @@ async fn widening_access_over_a_synced_path_image_replaces_the_cloud_copy() -> T
             1,
             1,
             TranscriptItem::User {
+                provenance: None,
                 text: "photo".into(),
                 content: vec![TranscriptUserContent::Image {
                     mime_type: "image/png".into(),

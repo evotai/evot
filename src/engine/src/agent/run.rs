@@ -234,12 +234,9 @@ impl Agent {
                 Some(Box::new(move || {
                     let mut messages = follow_up_queue.drain_messages(follow_up_mode);
                     if let Some(manager) = &process_manager {
-                        messages.extend(
-                            manager
-                                .take_notifications()
-                                .into_iter()
-                                .map(|text| AgentMessage::Llm(Message::user(text))),
-                        );
+                        messages.extend(manager.take_notifications().into_iter().map(|text| {
+                            AgentMessage::Llm(Message::runtime_user(text, "background_task", None))
+                        }));
                     }
                     messages
                 }))

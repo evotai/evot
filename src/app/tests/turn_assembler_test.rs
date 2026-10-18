@@ -343,6 +343,22 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
         )
         .await?;
     assert_eq!(resumed.input.len(), 2);
+    let provenance = resumed.provenance.as_ref().ok_or("missing input sources")?;
+    assert!(
+        matches!(provenance.sources.as_slice(), [evot_engine::InputSource::User, evot_engine::InputSource::Runtime { kind, .. }] if kind == "previous_process_tasks")
+    );
+    let model_input = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+        content: resumed.input.clone(),
+        provenance: resumed.provenance.clone(),
+        timestamp: 0,
+    });
+    let item = evot::conversation::convert::transcript_from_agent_message(&model_input);
+    assert_eq!(
+        evot::conversation::input::authored_text(&item).as_deref(),
+        Some("status?")
+    );
+    let replay = evot::conversation::convert::agent_message_from_transcript(&item);
+    assert_eq!(replay, model_input);
     assert!(
         matches!(&resumed.input[1], evot_engine::Content::Text { text }
         if text.contains("Background task from a previous evot process: 96e7d776 (PR watcher).")

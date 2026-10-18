@@ -165,6 +165,7 @@ fn replacement_message(
         }
     }
     AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: result.text.clone(),
         }],

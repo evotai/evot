@@ -361,7 +361,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load transcript: {e}")))?;
 
-        serde_json::to_string(&items).map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::conversation::input::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Load the effective context transcript for a session, after control markers.
@@ -374,7 +375,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load context transcript: {e}")))?;
 
-        serde_json::to_string(&items).map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::conversation::input::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Load a bounded resume view without superseded history or Engine-only
@@ -388,7 +390,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load resume transcript: {e}")))?;
 
-        serde_json::to_string(&items).map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::conversation::input::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Find a single session by ID.
@@ -684,9 +687,9 @@ impl NapiAgent {
         if context_json.len() > 100_000 {
             return Err(Error::from_reason("suggestion context too large"));
         }
-        let messages = serde_json::from_str(&context_json)
+        let request = serde_json::from_str(&context_json)
             .map_err(|_| Error::from_reason("invalid suggestion context"))?;
-        Ok(crate::suggestion::NapiSuggestion::start(messages))
+        Ok(crate::suggestion::NapiSuggestion::start(request))
     }
 
     /// Send a steering message into a running session.
@@ -725,6 +728,8 @@ fn process_summary_json(summary: &evot_engine::tools::ProcessSummary) -> serde_j
     serde_json::json!({
         "task_id": summary.task_id,
         "command": summary.command,
+        "description": summary.description,
+        "quiet_for_ms": summary.quiet_for.as_millis(),
         "cwd": summary.cwd,
         "output_path": summary.output_path,
         "status": summary.status.as_str(),

@@ -13,8 +13,17 @@ export interface NativeCompaction {
   result(): Promise<string>
   abort(): void
 }
+export interface SuggestionOutcome {
+  candidates: string[]
+  status: 'ready' | 'empty' | 'failed' | 'unavailable' | 'timed_out'
+}
 export interface NativeSuggestion {
+  /** Legacy single-candidate API. */
   result(): Promise<string | null>
+  /** Additive API; old addons can still provide a single candidate. */
+  outcome?(): Promise<SuggestionOutcome>
+  /** Next cumulative batch of complete candidates; null closes the stream. */
+  nextCandidates?(): Promise<string[] | null>
   abort(): void
 }
 export interface NativeForkedAgent { query(prompt: string): Promise<NativeRun> }

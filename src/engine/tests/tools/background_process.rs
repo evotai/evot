@@ -202,6 +202,9 @@ async fn background_descriptions_survive_detach_and_distinguish_completion_notic
                 .as_deref(),
             Some(purpose.as_str())
         );
+        let summary = manager.summary(&id).ok_or("missing listing")?;
+        assert_eq!(summary.description.as_deref(), Some(purpose.as_str()));
+        assert!(summary.quiet_for <= summary.elapsed);
         tasks.push((id, description));
     }
     for (id, _) in &tasks {

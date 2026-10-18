@@ -1,0 +1,37 @@
+{
+  "type": "user",
+  "text": "Commit\nArbitrary runtime content with no XML or fixed wording.",
+  "content": [
+    {
+      "type": "text",
+      "text": "Commit"
+    },
+    {
+      "type": "text",
+      "text": "Arbitrary runtime content with no XML or fixed wording."
+    }
+  ],
+  "provenance": {
+    "schema_version": 1,
+    "sources": [
+      {
+        "source": "user"
+      },
+      {
+        "source": "runtime",
+        "kind": "example_context",
+        "display": "Runtime context restored"
+      }
+    ]
+  },
+  "display_parts": [
+    {
+      "kind": "user",
+      "text": "Commit"
+    },
+    {
+      "kind": "notice",
+      "text": "Runtime context restored"
+    }
+  ]
+}

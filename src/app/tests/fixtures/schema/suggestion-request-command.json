@@ -1,0 +1,12 @@
+{
+  "messages": [{"role":"user","text":"Watch the test job until it succeeds"}],
+  "explicit": true,
+  "draft": "/loop",
+  "suffix": "",
+  "command": {
+    "name": "/loop",
+    "description": "Repeat a task until it finishes",
+    "usage": "/loop [interval] [prompt] | stop | status"
+  },
+  "rejected": []
+}

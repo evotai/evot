@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { smokeEnvironment, seedSmokeHome } from '../helpers/smoke-home.js'
 import { suggestionInstructions } from '../helpers/suggestion-request.js'
+import { fixtureClipboard } from '../helpers/clipboard.js'
+import imageFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-images.json'
+import closedFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-closed.json'
 import { getTheme } from '../../src/render/theme/index.js'
 import { ScreenHarness } from '../helpers/screen.js'
 
@@ -177,7 +180,7 @@ function seedCompletedSuggestionHistory(home: string): void {
   const items = [
     { type: 'assistant', content: [{ type: 'text', text: 'Implementation is ready.' }], model: 'test-model', provider: 'test-provider', usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0 },  stop_reason: 'stop' },
     { type: 'user', text: 'Add the login tests', content: [] },
-    { type: 'assistant', content: [{ type: 'text', text: 'The login tests are ready.' }], model: 'test-model', provider: 'test-provider', usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0 },  stop_reason: 'stop' },
+    { type: 'assistant', content: [{ type: 'text', text: 'The login tests are ready. Should I commit the changes or leave them uncommitted?' }], model: 'test-model', provider: 'test-provider', usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0 },  stop_reason: 'stop' },
   ]
   for (const [index, item] of items.entries()) entries.push({ session_id: SEEDED_SESSION_ID, run_id: null,
     seq: index + 2, turn: index + 2, item, created_at: new Date().toISOString() })
@@ -191,6 +194,7 @@ async function startEvot(
   providerUrl?: string,
   setup?: (stateHome: string) => void,
   startupArgs: string[] = [],
+  environment?: (stateHome: string) => Record<string, string>,
 ): Promise<Session> {
   // Isolate HOME as well as EVOT_HOME: some TS and Rust stores use ~/.evotai.
   // This must also protect developer state when testing an older compiled binary.
@@ -212,7 +216,7 @@ async function startEvot(
   setup?.(stateHome)
   const child = spawn('python3', ['-c', PTY_RELAY, EVOT_BIN, ...startupArgs], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: smokeEnvironment(isolatedHome),
+    env: { ...smokeEnvironment(isolatedHome), ...environment?.(stateHome) },
   })
   let all = ''
   let seen = 0
@@ -260,7 +264,9 @@ async function startEvot(
   }
   // Readiness failures must not leave a subprocess or its temporary home behind.
   try {
-    await waitFor('Enter a coding task')
+    // A resumed answer may already have a valid suggestion in the input
+    // slot. Readiness is not tied to the empty-placeholder wording.
+    await waitFor(/Enter a coding task|⇥ next · → accept/)
   } catch (err) {
     await kill()
     throw err
@@ -684,22 +690,26 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test.each([['Tab', '\t'], ['Right Arrow', '\x1b[C']] as const)(
-    'published suggestion survives gateway latency, renders, and %s only fills the editor', async (_key, input) => {
+  test('published suggestion returns three cached candidates and Tab wraps without more requests', async () => {
+    const input = '\x1b[C'
     let chatRequests = 0
     let suggestionRequests = 0
+    const suggestionBodies: string[] = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
-      const body = await request.json() as { model: string; max_tokens: number }
+      const body = await request.json() as { model: string; max_tokens: number; messages: { content: string }[] }
       const suggesting = body.model === 'suggestion-fixture'
+      let content = 'The implementation is ready. Should I run the targeted tests, review the diff, or commit the change?'
       if (suggesting) {
         suggestionRequests++
-        expect(body.max_tokens).toBe(32)
+        suggestionBodies.push(body.messages.at(-1)?.content ?? '')
+        expect(body.max_tokens).toBe(192)
         await Bun.sleep(1600)
+        content = 'Run the targeted tests\nReview the diff\nCommit the change'
       } else {
         chatRequests++
       }
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
-        delta: { role: 'assistant', content: suggesting ? 'Run the targeted tests' : 'The implementation is ready.' },
+        delta: { role: 'assistant', content },
         finish_reason: 'stop',
       }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
@@ -712,22 +722,437 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session = await startEvot(false, false, false, baseUrl, stateHome => seedSuggestionService(stateHome, baseUrl))
       session.write('Implement the requested change\x0d')
       await session.waitFor('The implementation is ready.')
-      await session.waitForScreen(/Enter a coding task/)
-      expect(suggestionRequests).toBe(0)
-      session.write('Add the targeted tests\x0d')
-      await session.waitForScreen(/Run the targeted tests\s+⇥/)
+      // The very first final answer may already contain a pending decision.
+      await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
+      expect(suggestionRequests).toBe(1)
+      expect(suggestionBodies[0]).not.toContain('ALREADY REJECTED')
+      session.write('\t')
+      await session.waitForScreen(/Review the diff\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Commit the change\s+3\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
+      session.write('\t\t')
+      await session.waitForScreen(/Commit the change\s+3\/3 ⇥/)
       expect(suggestionRequests).toBe(1)
       const beforeAccept = chatRequests
       session.write(input)
-      const screen = await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Run the targeted tests/)
+      const screen = await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Commit the change/)
       expect(screen).not.toContain('⇥')
       expect(chatRequests).toBe(beforeAccept)
       // Once accepted, Right is ordinary cursor motion again, not a second
       // acceptance or submission; typing continues to edit the same draft.
       session.write('\x1b[D\x1b[C!')
-      await session.waitForScreen(/Run the targeted tests!/)
+      await session.waitForScreen(/Commit the change!/)
       expect(chatRequests).toBe(beforeAccept)
-      expect(session.historyEntries()).toEqual(['Implement the requested change', 'Add the targeted tests'])
+      expect(session.historyEntries()).toEqual(['Implement the requested change'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('draft Tab retries an initial failure then cycles the same three completions locally', async () => {
+    let chats = 0
+    const drafts: string[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { model: string; messages: { content: string }[] }
+      let content = 'What can I help you with?'
+      if (body.model === 'suggestion-fixture') {
+        const prompt = suggestionInstructions(body)
+        content = '' // No unprompted suggestion for the greeting.
+        if (prompt.includes('CURSOR REWRITE MODE') && prompt.includes('"prefix":"hi --"')) {
+          drafts.push(prompt)
+          await Bun.sleep(700)
+          if (drafts.length === 1) return new Response(JSON.stringify({ error: { message: 'temporary failure' } }), { status: 503 })
+          content = JSON.stringify([' help me debug this?', ' explain this code', ' review this change'])
+        }
+      } else chats++
+      const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('hi\x0d')
+      await session.waitForScreen(/What can I help you with/)
+      await session.waitForScreen(/Enter a coding task/)
+      session.write('hi --\t')
+      await session.waitForScreen(/suggesting…/)
+      await session.waitForScreen(/suggestion failed · ⇥ retry/)
+      session.write('\t')
+      await session.waitForScreen(/help me debug this\?\s+1\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/explain this code\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/review this change\s+3\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/help me debug this\?\s+1\/3 ⇥/)
+      expect(drafts).toHaveLength(2)
+      expect(drafts[1]).not.toContain('ALREADY REJECTED')
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*hi -- help me debug this\?/)
+      expect(chats).toBe(1)
+      expect(session.historyEntries()).toEqual(['hi'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('Tab assists input during foreground work and keeps the cached batch after completion', async () => {
+    let foreground = 0
+    let suggestions = 0
+    let finishForeground: (() => void) | undefined
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { model: string; messages: { content: string }[] }
+      if (body.model !== 'suggestion-fixture') {
+        foreground++
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(': waiting\n\n'))
+            finishForeground = () => {
+              const chunk = { id: 'work', model: body.model, choices: [{ index: 0,
+                delta: { role: 'assistant', content: 'Foreground work completed.' }, finish_reason: 'stop' }] }
+              controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`))
+              controller.close()
+            }
+          },
+        }), { headers: { 'content-type': 'text/event-stream' } })
+      }
+      suggestions++
+      const prompt = suggestionInstructions(body)
+      expect(prompt).toContain('CURSOR REWRITE MODE')
+      await Bun.sleep(500)
+      const chunk = { id: 'suggestion', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content: JSON.stringify([' target', ' approach', ' schedule']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Run the long task\x0d')
+      await session.waitForScreen(/Guide.*works/)
+      session.write('Change the\t')
+      await session.waitForScreen(/suggesting…/)
+      await session.waitForScreen(/target\s+1\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/approach\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/schedule\s+3\/3 ⇥/)
+      expect(foreground).toBe(1)
+      expect(suggestions).toBe(1)
+      if (!finishForeground) throw new Error('foreground stream did not start')
+      finishForeground()
+      await session.waitForScreen(/Foreground work completed/)
+      await session.waitForScreen(/schedule\s+3\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/target\s+1\/3 ⇥/)
+      expect(suggestions).toBe(1)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Change the target/)
+      expect(foreground).toBe(1)
+      expect(session.historyEntries()).toEqual(['Run the long task'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('Tab after an interrupted turn can generate from a trailing user and cycle without more requests', async () => {
+    let suggestions = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { model: string; messages: { role: string; content: string }[] }
+      if (body.model !== 'suggestion-fixture') return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode(': waiting\n\n')) },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+      suggestions++
+      suggestionInstructions(body)
+      await Bun.sleep(500)
+      const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content: JSON.stringify([' current changes', ' after reviewing the diff', ' and push the branch']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Commit\x0d')
+      await session.waitFor('┃ Commit')
+      session.write('\x1b')
+      await session.waitFor(/esc\s+again\s+to\s+interrupt/)
+      session.write('\x1b')
+      await session.waitFor('Interrupted.')
+      expect(suggestions).toBe(0)
+      session.write('Commit\t')
+      await session.waitForScreen(/suggesting…/)
+      await session.waitForScreen(/ current changes\s+1\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/ after reviewing the diff\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/ and push the branch\s+3\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/ current changes\s+1\/3 ⇥/)
+      expect(suggestions).toBe(1)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Commit current changes/)
+      expect(session.historyEntries()).toEqual(['Commit'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('Esc only dismisses input assistance, undo restores the suffix, and repeated drafts use cache', async () => {
+    let foreground = 0
+    let predictions = 0
+    let finish: (() => void) | undefined
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      if (body.model !== 'suggestion-fixture') {
+        foreground++
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+          controller.enqueue(new TextEncoder().encode(': waiting\n\n'))
+          finish = () => {
+            const chunk = { id: 'work', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: 'Work completed normally.' }, finish_reason: 'stop' }] }
+            controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`))
+            controller.close()
+          }
+        } }), { headers: { 'content-type': 'text/event-stream' } })
+      }
+      predictions++
+      const instructions = suggestionInstructions(body)
+      expect(instructions).toContain('Current task state: running')
+      const chunk = { id: 'prediction', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['new', 'another', 'later']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Run the task\x0d')
+      await session.waitForScreen(/Guide.*works/)
+      session.write('Run old\x01' + '\x1b[C'.repeat(4) + '\t')
+      await session.waitForScreen(/new\s+1\/3.*replace rest/)
+      session.write('\x1b')
+      const screen = await session.waitForScreen(/Run old/)
+      expect(screen).not.toMatch(/esc\s+again\s+to\s+interrupt/)
+      expect(screen).not.toContain('Interrupted.')
+      session.write('\t')
+      await session.waitForScreen(/new\s+1\/3.*replace rest/)
+      expect(predictions).toBe(1)
+      session.write('\x1b[C')
+      await session.waitForScreen(/Run new/)
+      session.write('\x1f')
+      await session.waitForScreen(/Run old/)
+      expect(foreground).toBe(1)
+      if (!finish) throw new Error('foreground did not start')
+      finish()
+      await session.waitForScreen(/Work completed normally/)
+      expect(session.historyEntries()).toEqual(['Run the task'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('first suggestion is usable before the rest of the streamed batch', async () => {
+    let requests = 0
+    let second: (() => void) | undefined
+    let finish: (() => void) | undefined
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('suggestion-fixture')
+      suggestionInstructions(body)
+      requests++
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (content: string, stop = false) => controller.enqueue(new TextEncoder().encode(
+            `data: ${JSON.stringify({ id: 'progress', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: stop ? 'stop' : null }] })}\n\n`,
+          ))
+          send('["unit tests",')
+          second = () => send('"integration tests",')
+          finish = () => { send('"smoke tests"]', true); controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n')); controller.close() }
+        },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Run \t')
+      // The server deliberately has not finished. Waiting for the full batch
+      // would deadlock this test before either release callback can run.
+      await session.waitForScreen(/unit tests\s+⇥/)
+      expect(requests).toBe(1)
+      session.write('\t')
+      if (!second) throw new Error('stream not started')
+      second()
+      await session.waitForScreen(/integration tests\s+2\/2 ⇥/)
+      if (!finish) throw new Error('stream not started')
+      finish()
+      await session.waitForScreen(/integration tests\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/smoke tests\s+3\/3 ⇥/)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Run smoke tests/)
+      expect(requests).toBe(1)
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('path Tab completion wins in prose and slash arguments without model requests', async () => {
+    const requests: Record<string, unknown>[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      requests.push(body)
+      expect(body.model).toBe('suggestion-fixture')
+      suggestionInstructions(body)
+      const chunk = { id: 'suggestion', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content: JSON.stringify(['and report failures', 'and check logs', 'and summarize findings']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Read ../cli/tests/completion.te\t')
+      let screen = await session.waitForScreen(/Read \.\.\/cli\/tests\/completion\.test\.ts/)
+      expect(screen).not.toContain('suggesting…')
+      expect(requests).toHaveLength(0)
+      session.write('\x15/loop inspect ../cli/tests/completion.te\t')
+      screen = await session.waitForScreen(/\/loop inspect \.\.\/cli\/tests\/completion\.test\.ts/)
+      expect(screen).not.toContain('suggesting…')
+      expect(requests).toHaveLength(0)
+      // Once the path token is finished, a space returns Tab to intent input.
+      session.write(' \t')
+      await session.waitForScreen(/and report failures/)
+      expect(requests).toHaveLength(1)
+      session.write('\x1b[C')
+      await session.waitForScreen(/completion\.test\.ts and report failures/)
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('caret rewrites and slash arguments share cached input assistance without submitting', async () => {
+    const prompts: string[] = []
+    let foregroundRequests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      if (body.model !== 'suggestion-fixture') foregroundRequests++
+      const prompt = suggestionInstructions(body)
+      prompts.push(prompt)
+      expect(body.max_tokens).toBe(320)
+      const options = prompt.includes('COMMAND ARGUMENT ASSISTANCE')
+        ? prompt.includes('"suffix":"rerun tests"') ? ['watch CI', 'rerun failed tests', 'check status'] : [' 5m watch CI', ' 10m rerun tests', ' status']
+        : ['unit tests', 'integration tests', 'smoke tests']
+      const chunk = { id: 'suggestion', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content: JSON.stringify(options) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Run the old suite\x01' + '\x1b[C'.repeat(8) + '\t')
+      let screen = await session.waitForScreen(/unit tests\s+1\/3.*replace rest/)
+      expect(screen).not.toContain('old suite')
+      expect(prompts[0]).toContain('"prefix":"Run the "')
+      expect(prompts[0]).toContain('"suffix":"old suite"')
+      // Cancelling the preview restores the original suffix unchanged.
+      session.write('\x1b[D')
+      await session.waitForScreen(/old suite/)
+      session.write('\x1b[C\t')
+      await session.waitForScreen(/unit tests\s+1\/3.*replace rest/)
+      session.write('\t')
+      await session.waitForScreen(/integration tests\s+2\/3.*replace rest/)
+      session.write('\x1b[C')
+      screen = await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Run the integration tests/)
+      expect(screen).not.toContain('old suite')
+      expect(prompts).toHaveLength(1)
+      // Partial names keep local completion and cannot issue a model request.
+      session.write('\x15/lo\t')
+      await session.waitForScreen(/\/loop/)
+      expect(prompts).toHaveLength(1)
+      session.write('\x15/loop\t')
+      await session.waitForScreen(/5m watch CI\s+1\/3 ⇥/)
+      expect(prompts[1]).toContain('COMMAND ARGUMENT ASSISTANCE')
+      expect(prompts[1]).toContain('/loop [interval] [prompt] | stop | status')
+      session.write('\t')
+      await session.waitForScreen(/10m rerun tests\s+2\/3 ⇥/)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*\/loop 10m rerun tests/)
+      // Command arguments support the same caret rewrite as ordinary prose.
+      session.write('\x01' + '\x1b[C'.repeat(10) + '\t')
+      await session.waitForScreen(/watch CI\s+1\/3.*replace rest/)
+      expect(prompts[2]).toContain('"prefix":"/loop 10m "')
+      expect(prompts[2]).toContain('"suffix":"rerun tests"')
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*\/loop 10m watch CI/)
+      expect(prompts).toHaveLength(3)
+      expect(foregroundRequests).toBe(0)
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test.each([0, 1])('resume input schema v%i keeps runtime context out of user bubbles and Tab requests', async version => {
+    const requests: Record<string, unknown>[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      requests.push(body)
+      expect(body.model).toBe('suggestion-fixture')
+      const instructions = suggestionInstructions(body)
+      const candidates = ['Review the diff', 'Run tests first', 'Commit changes']
+      const content = instructions.includes('CURSOR REWRITE MODE') ? JSON.stringify(candidates) : candidates.join('\n')
+      const chunk = { id: 'suggestion', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    let transcriptPath = ''
+    let original = ''
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => {
+        seedResumeSession(home)
+        seedSuggestionService(home, base)
+        const item = JSON.parse(readFileSync(new URL(`../../../src/app/tests/fixtures/schema/user-input-v${version}.json`, import.meta.url), 'utf8'))
+        transcriptPath = join(home, 'sessions', SEEDED_SESSION_ID, 'transcript.jsonl')
+        original = `${JSON.stringify([{ session_id: SEEDED_SESSION_ID, run_id: null, seq: 1, turn: 1,
+          item, created_at: new Date().toISOString() }])}\n`
+        writeFileSync(transcriptPath, original)
+      }, ['--resume', SEEDED_SESSION_ID])
+      const screen = await session.waitForScreen(/resumed session/)
+      expect(screen).toContain('Commit')
+      expect(screen).not.toContain('<system-reminder>')
+      expect(screen).not.toContain('Context supplied by an earlier runtime')
+      expect(screen).not.toContain('Arbitrary runtime content')
+      // Recovery now also samples an unfinished restored exchange.
+      await session.waitForScreen(/Review the diff\s+1\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Run tests first\s+2\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Commit changes\s+3\/3 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Review the diff\s+1\/3 ⇥/)
+      expect(requests).toHaveLength(1)
+      const modelInput = JSON.stringify(requests[0]!.messages)
+      expect(modelInput).toContain('Commit')
+      expect(modelInput).not.toContain('<system-reminder>')
+      expect(modelInput).not.toContain('Context supplied by an earlier runtime')
+      expect(modelInput).not.toContain('Arbitrary runtime content')
+      expect(readFileSync(transcriptPath, 'utf8')).toBe(original)
     } finally {
       if (session) await session.kill()
       await server.stop(true)
@@ -756,7 +1181,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('/plan\x0d')
       const screen = await session.waitForScreen(/\/done\s+⇥/)
       expect(screen).toContain('no edits')
-      expect(contexts[1]).toBe(contexts[0])
+      expect(contexts[1]).toContain('"mode":"plan"')
+      expect(contexts[0]).toContain('"mode":"normal"')
       session.write('/done\x0d')
       await session.waitForScreen(/Continue the login tests\s+⇥/)
       expect(contexts).toHaveLength(3)
@@ -764,6 +1190,102 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('\x1b')
       await session.waitForScreen(/Enter a coding task/)
       expect(contexts).toHaveLength(3)
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  for (const scenario of [
+    { name: 'interrupted work', reason: 'aborted', text: '- [x] Implement changes\n- [ ] Run validation', group: 'resume_recover', candidate: 'Resume remaining validation' },
+    { name: 'pending question', reason: 'stop', text: 'Unit tests or integration tests?', group: 'close, respond, review_follow_up', candidate: 'Run the unit tests' },
+    { name: 'tool-only interrupted work', reason: 'aborted', text: '', group: 'resume_recover, start_redirect', candidate: 'Continue the remaining validation', execution: true },
+  ]) test(`workflow-aware resume distinguishes ${scenario.name} without executing input`, async () => {
+    const requests: Record<string, unknown>[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('suggestion-fixture')
+      requests.push(body)
+      const instruction = suggestionInstructions(body)
+      expect(instruction).toContain(`INTENT GROUPS, most relevant first: ${scenario.group}`)
+      expect(instruction).toContain('"session":"resumed"')
+      expect(instruction).toContain('"background_tasks":0')
+      if ('execution' in scenario) {
+        expect(instruction).toContain('"since_last_reply":3')
+        expect(instruction).toContain('Inspect the remaining layout mismatch')
+        expect(instruction).toContain('EXECUTION CHRONOLOGY')
+        expect(JSON.stringify(body)).not.toContain('DO_NOT_SEND')
+      }
+      const text = instruction.includes('CURSOR REWRITE MODE') ? JSON.stringify([scenario.candidate]) : scenario.candidate
+      const chunk = { id: 'workflow', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(true, false, false, base, home => {
+        seedSuggestionService(home, base)
+        const path = join(home, 'sessions', SEEDED_SESSION_ID, 'transcript.jsonl')
+        const entries = JSON.parse(readFileSync(path, 'utf8').trim()) as Record<string, unknown>[]
+        const items: Record<string, unknown>[] = 'execution' in scenario
+          ? JSON.parse(readFileSync(new URL('../fixtures/suggestion-interrupted-execution.json', import.meta.url), 'utf8'))
+          : [{ type: 'assistant', content: [{ type: 'text', text: scenario.text }], stop_reason: scenario.reason }]
+        for (const [index, item] of items.entries()) {
+          entries.push({ session_id: SEEDED_SESSION_ID, run_id: null, seq: index + 2, turn: 1, created_at: new Date().toISOString(),
+            item: { usage: { input: 0, output: 0 }, model: 'smoke-model', provider: 'smoke', timestamp: 0, ...item } })
+        }
+        writeFileSync(path, `${JSON.stringify(entries)}\n`)
+      }, ['--resume', SEEDED_SESSION_ID])
+      await session.waitForScreen(scenario.candidate)
+      // Dismiss then explicitly request again; both routes carry workflow.
+      session.write('\x1b')
+      await session.waitForScreen(/Enter a coding task/)
+      session.write('\t')
+      await session.waitForScreen(scenario.candidate)
+      session.write('\x1b[C')
+      await session.waitForScreen(new RegExp(`^(?![\\s\\S]*⇥)[\\s\\S]*${scenario.candidate}`))
+      expect(session.historyEntries()).toEqual([])
+      expect(requests).toHaveLength(2)
+      expect(suggestionInstructions(requests[1]!)).toContain('CURSOR REWRITE MODE')
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('completed work stays quiet on resume and Tab, while an explicit new draft still works', async () => {
+    let requests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      requests++
+      const body = await request.json() as Record<string, unknown>
+      expect(suggestionInstructions(body)).toContain('"prefix":"Explain "')
+      const chunk = { id: 'explicit-followup', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content: JSON.stringify(['why catalog synchronization delayed the UI']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(true, false, false, base, home => {
+        seedSuggestionService(home, base)
+        const entries = closedFixture.messages.map((message, index) => ({
+          session_id: SEEDED_SESSION_ID, run_id: null, seq: index + 1, turn: 1, created_at: new Date().toISOString(),
+          item: message.role === 'user' ? { type: 'user', text: message.text, content: [] }
+            : { type: 'assistant', content: [{ type: 'text', text: message.text }], stop_reason: 'stop',
+              usage: { input: 0, output: 0 }, model: 'smoke-model', provider: 'smoke', timestamp: 0 },
+        }))
+        writeFileSync(join(home, 'sessions', SEEDED_SESSION_ID, 'transcript.jsonl'), `${JSON.stringify(entries)}\n`)
+      }, ['--resume', SEEDED_SESSION_ID])
+      expect(requests).toBe(0)
+      session.write('\t')
+      await session.waitForScreen(/nothing to suggest/)
+      session.write('\t')
+      await session.waitForScreen(/nothing to suggest/)
+      expect(requests).toBe(0)
+      session.write('Explain \t')
+      await session.waitForScreen(/why catalog synchronization delayed the UI/)
+      expect(requests).toBe(1)
+      expect(session.historyEntries()).toEqual([])
     } finally {
       if (session) await session.kill()
       await server.stop(true)
@@ -780,7 +1302,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(body.messages.slice(0, -1).every(message => !message.content.includes('smoke resume prompt'))).toBe(true)
       requests++
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
-        delta: { role: 'assistant', content: 'Continue the login tests' }, finish_reason: 'stop' }] }
+        delta: { role: 'assistant', content: 'Review the most recent refinement' }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
     let session: Session | undefined
@@ -793,12 +1315,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         const followups = Array.from({ length: 100 }, (_, index) => ({
           session_id: SEEDED_SESSION_ID, run_id: null, seq: index + 2, turn: index + 2,
           item: index % 2 === 0 ? { type: 'user', text: `Recent refinement ${index} ${'current task '.repeat(30)}`, content: [] }
-            : { type: 'assistant', content: [{ type: 'text', text: `Completed refinement ${index} ${'current result '.repeat(30)}` }], model: 'test-model', provider: 'test-provider', usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0 },  stop_reason: 'stop' },
+            : { type: 'assistant', content: [{ type: 'text', text: `Completed refinement ${index} ${'current result '.repeat(30)}${index === 99 ? ' Which recent refinement should I check next?' : ''}` }], model: 'test-model', provider: 'test-provider', usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 0 },  stop_reason: 'stop' },
           created_at: new Date().toISOString(),
         }))
         writeFileSync(path, `${JSON.stringify([...original, ...followups])}\n`)
       }, ['--resume', SEEDED_SESSION_ID])
-      await session.waitForScreen(/Continue the login tests\s+⇥/)
+      await session.waitForScreen(/Review the most recent refinement\s+⇥/)
       expect(requests).toBe(1)
     } finally {
       if (session) await session.kill()
@@ -806,7 +1328,139 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('loop waiting with incomplete tool flow keeps local controls without forcing a suggestion', async () => {
+  test('pasted images participate in Tab suggestions and survive acceptance and cursor rewrites', async () => {
+    const imageCounts: number[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('suggestion-fixture')
+      const instruction = suggestionInstructions(body)
+      const messages = body.messages as { content: string | { type: string; image_url?: { url: string } }[] }[]
+      const content = messages.at(-1)?.content
+      const images = Array.isArray(content) ? content.filter(block => block.type === 'image_url') : []
+      imageCounts.push(images.length)
+      const index = imageCounts.length
+      if (index < 3) {
+        expect(images).toHaveLength(1)
+        expect(images[0]?.image_url?.url).toBe(`data:image/png;base64,${imageFixture.images[0]!.data}`)
+        expect(instruction).toContain('Use the visible images')
+      }
+      const candidates = index === 1 ? [' explain the screenshot', ' inspect the layout']
+        : index === 2 ? ['Review this screenshot [Image #1]', 'Compare the layout [Image #1]'] : [' the tests']
+      const chunk = { id: 'image-suggestion', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(candidates) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => {
+        seedSuggestionService(home, base)
+        fixtureClipboard(home, imageFixture.images[0]!.data)
+      }, [], home => ({ PATH: `${join(home, 'clipboard-bin')}:${process.env.PATH ?? ''}` }))
+      session.write('\x16')
+      await session.waitForScreen('[Image #1]')
+      session.write('\t')
+      await session.waitForScreen(/explain the screenshot\s+1\/2 ⇥/)
+      session.write('\t\x1b[C')
+      await session.waitForScreen(/\[Image #1\] inspect the layout/)
+      expect(imageCounts).toEqual([1])
+      session.write('\x01\t')
+      await session.waitForScreen(/Review this screenshot \[Image #1\]\s+1\/2 ⇥/)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Review this screenshot \[Image #1\]/)
+      session.write('\x15Run\t')
+      await session.waitForScreen(/the tests\s+⇥/)
+      expect(imageCounts).toEqual([1, 1, 0])
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('background suggestions follow the live task both during a reply and after interruption', async () => {
+    let mainCalls = 0
+    const states: string[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      if (body.model === 'suggestion-fixture') {
+        const prompt = suggestionInstructions(body)
+        expect(prompt).toContain('WORK IN FLIGHT')
+        expect(prompt).toContain('Run focused authentication tests')
+        expect(prompt).toContain('"kind":"background"')
+        expect(prompt).not.toContain('PRIVATE_SHELL_MARKER')
+        states.push(prompt)
+        const chunk = { id: 'bg-suggestion', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['Check authentication test progress', 'Show the latest test results']) }, finish_reason: 'stop' }] }
+        return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+      }
+      mainCalls++
+      if (mainCalls === 1) {
+        const chunk = { id: 'bg', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'bg-auth', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30 # PRIVATE_SHELL_MARKER', description: 'Run focused authentication tests', run_in_background: true }) } }] }, finish_reason: 'tool_calls' }] }
+        return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+      }
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(': waiting\n\n')) } }), { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Run authentication tests\x0d')
+      await session.waitFor('1 background shell running')
+      session.write('\t')
+      await session.waitForScreen(/Check authentication test progress\s+1\/2 ⇥/)
+      expect(states[0]).toContain('"execution":"running"')
+      session.write('\x1b') // dismiss only
+      await session.waitForScreen(/Guide.*works/)
+      session.write('\x1b')
+      await session.waitForScreen(/esc\s+again\s+to\s+interrupt/)
+      session.write('\x1b')
+      await session.waitFor('Interrupted.')
+      session.write('\t')
+      await session.waitForScreen(/Check authentication test progress\s+1\/2 ⇥/)
+      expect(states[1]).toContain('"execution":"waiting"')
+      expect(mainCalls).toBe(2)
+      expect(session.historyEntries()).toEqual(['Run authentication tests'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('a running loop exposes its current goal and cycle without suggesting a second run', async () => {
+    let mainCalls = 0
+    let suggestions = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      if (body.model !== 'suggestion-fixture') {
+        mainCalls++
+        return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(': waiting\n\n')) } }), { headers: { 'content-type': 'text/event-stream' } })
+      }
+      suggestions++
+      const prompt = suggestionInstructions(body)
+      expect(prompt).toContain('"kind":"loop"')
+      expect(prompt).toContain('"goal":"monitor authentication CI"')
+      expect(prompt).toContain('"phase":"running"')
+      expect(prompt).toContain('"iteration":1')
+      expect(prompt).toContain('WORK IN FLIGHT')
+      const chunk = { id: 'loop-suggestion', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['Check authentication CI progress']) }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('/loop 15m monitor authentication CI\x0d')
+      await session.waitForScreen(/Guide.*works/)
+      session.write('\t')
+      await session.waitForScreen(/Check authentication CI progress\s+⇥/)
+      expect(mainCalls).toBe(1)
+      expect(suggestions).toBe(1)
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('loop waiting does not auto-sample incomplete tool flow, but manual Tab remains available', async () => {
     let suggestions = 0
     let foreground = 0
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
@@ -815,12 +1469,17 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       let delta: Record<string, unknown>
       if (suggesting) {
         suggestions++
-        suggestionInstructions(body)
-        throw new Error('Incomplete loop history must not sample')
+        const prompt = suggestionInstructions(body)
+        expect(prompt).toContain('Current task state: waiting')
+        expect(prompt).toContain('"goal":"check the login tests"')
+        expect(prompt).toContain('"phase":"waiting"')
+        expect(prompt).toContain('"interval_ms":900000')
+        expect(prompt).toContain('"wait_reason":"Wait for the next check."')
+        delta = { role: 'assistant', content: JSON.stringify(['Check latest login test results', 'Which login tests still need attention?', 'Show changes since the last pass']) }
       } else {
         foreground++
         delta = { role: 'assistant', content: 'Waiting for the next check.', tool_calls: [{ index: 0, id: 'schedule-1', type: 'function',
-          function: { name: 'schedule_wakeup', arguments: JSON.stringify({ delay_seconds: 900, reason: 'Wait for the next check.' }) } }] }
+          function: { name: 'schedule_wakeup', arguments: JSON.stringify({ delay_seconds: 900, reason: 'Wait for the next check.', noop: false }) } }] }
       }
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0, delta, finish_reason: suggesting ? 'stop' : 'tool_calls' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
@@ -832,11 +1491,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('/loop 15m check the login tests\x0d')
       const screen = await session.waitForScreen(/Loop waiting/)
       expect(screen).toContain('esc twice to stop')
-      expect(screen).not.toContain('⇥ / →')
+      expect(screen).not.toContain('⇥ next')
       const before = foreground
-      session.write('\t')
-      expect(foreground).toBe(before)
       expect(suggestions).toBe(0)
+      session.write('\t')
+      await session.waitForScreen(/Check latest login test results\s+1\/3 ⇥/)
+      expect(foreground).toBe(before)
+      expect(suggestions).toBe(1)
       expect(session.historyEntries()).toEqual(['/loop 15m check the login tests'])
     } finally {
       if (session) await session.kill()

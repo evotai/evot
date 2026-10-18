@@ -879,6 +879,7 @@ fn empty_text_messages() -> Vec<Message> {
         Message::user("first message"),
         assistant("ok"),
         Message::User {
+            provenance: None,
             content: vec![Content::Text { text: "".into() }],
             timestamp: 0,
         },
@@ -919,6 +920,7 @@ fn test_cache_breakpoint_uses_second_to_last_after_empty_message_removal() {
             Message::user("first message"),
             assistant("ok"),
             Message::User {
+                provenance: None,
                 content: vec![Content::Text { text: "".into() }],
                 timestamp: 0,
             },
@@ -1035,6 +1037,7 @@ fn test_empty_user_and_assistant_messages_are_skipped() {
         .cache_disabled()
         .messages(vec![
             Message::User {
+                provenance: None,
                 content: vec![Content::Text { text: "  ".into() }],
                 timestamp: 0,
             },

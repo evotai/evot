@@ -55,6 +55,8 @@ mod feishu_sink_test;
 mod feishu_state_test;
 #[path = "id_validation_test.rs"]
 mod id_validation_test;
+#[path = "input_provenance_test.rs"]
+mod input_provenance_test;
 #[path = "judge_trace_test.rs"]
 mod judge_trace_test;
 #[path = "manual_compact_llm_test.rs"]
@@ -118,7 +120,10 @@ mod skill_prompt_test;
 mod storage_memory_test;
 #[path = "storage_test.rs"]
 mod storage_test;
+#[path = "suggestion_progress_test.rs"]
+mod suggestion_progress_test;
 mod suggestion_test;
+mod suggestion_workflow_test;
 mod sync_test;
 #[path = "tool_mode_test.rs"]
 mod tool_mode_test;

@@ -140,6 +140,7 @@ async fn rename_survives_live_session_save_and_clear() -> TestResult {
             .await?;
     session
         .write_items(vec![evot::types::TranscriptItem::User {
+            provenance: None,
             text: "Original task".into(),
             content: vec![],
         }])

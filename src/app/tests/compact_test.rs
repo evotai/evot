@@ -293,6 +293,7 @@ async fn compact_context_view_uses_latest_compact_boundary() -> TestResult {
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

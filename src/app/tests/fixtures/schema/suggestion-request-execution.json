@@ -1,0 +1,28 @@
+{
+  "messages": [
+    {"role":"user","text":"Improve cropping without overlay interference"},
+    {"role":"assistant","text":"I will move the controls into the toolbar. Shall I implement that?"}
+  ],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "resumed",
+    "last_turn": "interrupted",
+    "pending_tools": 0,
+    "progress": {
+      "calls": 3,
+      "executed": 3,
+      "completed": 2,
+      "failed": 1,
+      "since_last_reply": 3,
+      "awaiting_input": false,
+      "recent": [
+        {"name":"bash","status":"completed","description":"Apply inline crop controls"},
+        {"name":"bash","status":"failed","description":"Validate crop geometry"},
+        {"name":"bash","status":"completed","description":"Inspect the remaining layout mismatch"}
+      ]
+    },
+    "runtime": {"execution":"idle","mode":"normal","queued_inputs":0,"background_tasks":0}
+  }
+}

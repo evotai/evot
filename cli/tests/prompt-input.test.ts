@@ -13,6 +13,7 @@ import {
 } from '../src/term/input/editor.js'
 import { buildPromptBlocks, type PromptVMInput } from '../src/term/viewmodel/prompt.js'
 import { blocksToLines } from '../src/term/viewmodel/types.js'
+import { visibleWidth } from '../src/render/wrap.js'
 import chalk from 'chalk'
 
 beforeAll(() => { chalk.level = 3 })
@@ -232,7 +233,8 @@ describe('renderPrompt', () => {
       suggestion: '\u8fd0\u884c\u5b9a\u5411\u6d4b\u8bd5', ...extra,
     }))).join('\n')
     expect(render({})).toContain('\u8fd0\u884c\u5b9a\u5411\u6d4b\u8bd5')
-    expect(render({})).toContain('⇥ / →')
+    expect(render({})).toContain('⇥ next · → accept')
+    expect(render({ suggestionPosition: { current: 3, total: 3 } })).toContain('3/3 ⇥ next · → accept')
     expect(render({ busy: true })).not.toContain('\u8fd0\u884c\u5b9a\u5411\u6d4b\u8bd5')
     expect(render({ active: false })).not.toContain('\u8fd0\u884c\u5b9a\u5411\u6d4b\u8bd5')
     expect(render({ logMode: true })).not.toContain('\u8fd0\u884c\u5b9a\u5411\u6d4b\u8bd5')
@@ -243,7 +245,74 @@ describe('renderPrompt', () => {
     const output = blocksToLines(buildPromptBlocks(defaultPromptVM({
       columns: 40, suggestion: 'Run the targeted tests and review the results '.repeat(4),
     }))).join('\n')
-    expect(output).toContain('⇥ / →')
+    expect(output).toContain('⇥ next · → accept')
+  })
+
+  test('draft completion renders as ghost text after the cursor, not as the placeholder', () => {
+    const render = (extra: Partial<PromptVMInput>) => blocksToLines(buildPromptBlocks(defaultPromptVM({
+      lines: ['Run the'], cursorCol: 7, placeholder: false, suggestionCompletion: ' targeted tests',
+      suggestionPosition: { current: 1, total: 2 }, ...extra,
+    }))).join('\n')
+    expect(render({})).toContain('Run the')
+    expect(render({})).toContain(' targeted tests  1/2 ⇥ next · → accept')
+    expect(render({ busy: true })).not.toContain('targeted tests')
+    expect(render({ busy: true, suggestionExplicit: true })).toContain(' targeted tests  1/2 ⇥ next · → accept')
+    expect(render({ active: false })).not.toContain('targeted tests')
+    expect(render({ lines: [''], cursorCol: 0, placeholder: true })).not.toContain('targeted tests')
+  })
+
+  test('cursor rewrites preview only the replacement and preserve the original draft', () => {
+    const input = defaultPromptVM({
+      lines: ['Run the old suite', 'Old follow-up'], cursorCol: 8, cursorLine: 0, placeholder: false,
+      suggestionCompletion: 'new suite\nThen review', suggestionReplacing: true, suggestionExplicit: true,
+      suggestionPosition: { current: 2, total: 3 },
+    })
+    const screen = blocksToLines(buildPromptBlocks(input)).join('\n')
+    expect(screen).toContain('Run the')
+    expect(screen).toContain('new suite')
+    expect(screen).toContain('Then review')
+    expect(screen).toContain('2/3 ⇥ next · → replace rest')
+    expect(screen).not.toContain('old suite')
+    expect(screen).not.toContain('Old follow-up')
+    expect(input.lines).toEqual(['Run the old suite', 'Old follow-up'])
+    const original = blocksToLines(buildPromptBlocks({ ...input, suggestionCompletion: undefined })).join('\n')
+    expect(original).toContain('old suite')
+    expect(original).toContain('Old follow-up')
+  })
+
+  test('replacement previews at the start and across wrapped rows keep frame widths bounded', () => {
+    for (const columns of [18, 35, 80]) {
+      const screen = blocksToLines(buildPromptBlocks(defaultPromptVM({
+        columns, lines: ['discard old text'], cursorCol: 0, placeholder: false,
+        suggestionCompletion: 'A replacement sentence that wraps\nAnd another line',
+        suggestionReplacing: true, suggestionExplicit: true,
+      })))
+      expect(screen.join('\n')).not.toContain('discard old')
+      for (const row of screen) expect(visibleWidth(row)).toBeLessThanOrEqual(columns)
+    }
+  })
+
+  test('Tab feedback renders after the draft: an animated wait, then nothing-to-suggest', () => {
+    const render = (extra: Partial<PromptVMInput>) => blocksToLines(buildPromptBlocks(defaultPromptVM({
+      lines: ['hi --'], cursorCol: 5, placeholder: false, ...extra,
+    }))).join('\n')
+    expect(render({ suggestionStatus: 'pending', suggestionFrame: 0 })).toContain('hi --\x1b_pi:c\x07\x1b[38;2;119;119;119m  · suggesting…')
+    expect(render({ suggestionStatus: 'pending', suggestionFrame: 2 })).toContain('✳ suggesting…')
+    expect(render({ suggestionStatus: 'none' })).toContain('· nothing to suggest · ⇥ retry')
+    expect(render({ suggestionStatus: 'failed' })).toContain('suggestion failed · ⇥ retry')
+    expect(render({ suggestionStatus: 'timed_out' })).toContain('suggestion timed out · ⇥ retry')
+    expect(render({ suggestionStatus: 'unavailable' })).toContain('suggestions unavailable · ⇥ retry')
+    expect(render({ lines: [''], cursorCol: 0, placeholder: true, suggestionStatus: 'failed' })).toContain('suggestion failed · ⇥ retry')
+    expect(render({})).not.toContain('suggesting')
+    expect(render({ suggestionStatus: 'pending', busy: true })).not.toContain('suggesting')
+    expect(render({ suggestionStatus: 'pending', busy: true, suggestionExplicit: true })).toContain('suggesting…')
+    expect(render({ lines: [''], cursorCol: 0, placeholder: true, busy: true, suggestionExplicit: true, suggestion: 'Change the approach' }))
+      .toContain('Change the approach')
+    // Switching a cached batch has no loading indicator or refresh state.
+    const cached = render({ suggestionCompletion: ' targeted tests', suggestionPosition: { current: 3, total: 3 } })
+    expect(cached).toContain('targeted tests  3/3 ⇥ next · → accept')
+    expect(cached).not.toContain('more…')
+    expect(cached).not.toContain('suggesting…')
   })
 
   test('returns array of strings', () => {

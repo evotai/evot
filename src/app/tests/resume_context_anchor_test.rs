@@ -20,6 +20,7 @@ fn history_with_anchor(
     let big = "x".repeat(400_000);
     vec![
         TranscriptItem::User {
+            provenance: None,
             text: big.clone(),
             content: Vec::new(),
         },

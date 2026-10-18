@@ -663,10 +663,31 @@ pub fn replay_nodes(items: &[TranscriptItem]) -> Vec<ChatNode> {
     let mut nodes = Vec::new();
     for item in items {
         match item {
-            TranscriptItem::User { text, .. } => {
-                let mut node = ChatNode::new(ChatNodeKind::User);
-                node.text = Some(text.clone());
-                nodes.push(node);
+            TranscriptItem::User { .. } => {
+                use super::input::display_parts;
+                use super::input::DisplayInputPart;
+                for part in display_parts(item) {
+                    match part {
+                        DisplayInputPart::User { text } => {
+                            let mut node = ChatNode::new(ChatNodeKind::User);
+                            node.text = Some(text);
+                            nodes.push(node);
+                        }
+                        DisplayInputPart::Legacy { text } => {
+                            if let Some(text) = crate::command::user_facing_text(&text) {
+                                let mut node = ChatNode::new(ChatNodeKind::User);
+                                node.text = Some(text.into_owned());
+                                nodes.push(node);
+                            }
+                        }
+                        DisplayInputPart::Notice { text } => {
+                            let mut node = ChatNode::new(ChatNodeKind::Assistant);
+                            node.status = Some("settled".into());
+                            node.blocks = Some(vec![text_block(text)]);
+                            nodes.push(node);
+                        }
+                    }
+                }
             }
             TranscriptItem::Assistant {
                 content,

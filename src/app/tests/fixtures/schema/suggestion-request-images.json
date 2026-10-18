@@ -1,0 +1,12 @@
+{
+  "messages": [{"role":"user","text":"Review the image"}],
+  "explicit": true,
+  "draft": "[Image #1]",
+  "suffix": "",
+  "rejected": [],
+  "images": [{
+    "id": 1,
+    "media_type": "image/png",
+    "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC"
+  }]
+}

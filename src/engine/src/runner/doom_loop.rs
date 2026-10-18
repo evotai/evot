@@ -86,6 +86,7 @@ impl DoomLoopDetector {
 
         DoomLoopIntervention {
             steering_message: AgentMessage::Llm(Message::User {
+                provenance: Some(crate::InputProvenance::runtime(1, "doom_loop_guard", None)),
                 content: vec![Content::Text { text: warning }],
                 timestamp: now_ms(),
             }),

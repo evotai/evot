@@ -112,6 +112,7 @@ async fn call_provider(
     stage: &'static str,
 ) -> Result<String, SummarizerError> {
     let messages = vec![Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: user_prompt.to_string(),
         }],

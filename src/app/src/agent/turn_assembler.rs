@@ -137,12 +137,13 @@ impl TurnAssembler {
         request: TurnBuildRequest,
     ) -> Result<TurnInput> {
         let TurnBuildRequest {
-            mut input,
+            input,
             host_tools,
             extra_tools,
             consume_process_notifications,
             previous_llm,
         } = request;
+        let mut input = crate::conversation::input::PreparedInput::user(input);
         let llm = llm.clone();
         if llm.provider.is_empty() {
             return Err(EvotError::Conf(
@@ -230,21 +231,19 @@ impl TurnAssembler {
                     super::orphaned_tasks::orphaned_tasks(&prior_messages, process_manager);
                 if let Some(notice) = super::orphaned_tasks::orphan_notice(&orphans) {
                     if self.processes.mark_orphans_announced(session_id) {
-                        input.push(evot_engine::Content::Text { text: notice });
+                        input.runtime(
+                            notice,
+                            "previous_process_tasks",
+                            Some("Previous-process background tasks are no longer running".into()),
+                        );
                     }
                 }
-                input.extend(
-                    process_manager
-                        .take_notifications()
-                        .into_iter()
-                        .map(|text| evot_engine::Content::Text { text }),
-                );
+                for notification in process_manager.take_notifications() {
+                    input.runtime(notification, "background_task", None);
+                }
             }
         }
-        input.retain(|content| match content {
-            evot_engine::Content::Text { text } => !text.trim().is_empty(),
-            _ => true,
-        });
+        let (input, provenance) = input.finish();
         Ok(TurnInput {
             options: EngineOptions {
                 provider: llm.provider,
@@ -281,6 +280,7 @@ impl TurnAssembler {
             },
             history: prior_messages,
             input,
+            provenance,
             session,
             transcript_seq,
         })

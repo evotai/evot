@@ -211,6 +211,8 @@ pub enum Message {
     User {
         content: Vec<Content>,
         timestamp: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<super::InputProvenance>,
     },
     #[serde(rename = "assistant")]
     Assistant {
@@ -247,6 +249,19 @@ impl Message {
         Self::User {
             content: vec![Content::Text { text: text.into() }],
             timestamp: now_ms(),
+            provenance: Some(super::InputProvenance::new(vec![super::InputSource::User])),
+        }
+    }
+
+    pub fn runtime_user(
+        text: impl Into<String>,
+        kind: impl Into<String>,
+        display: Option<String>,
+    ) -> Self {
+        Self::User {
+            content: vec![Content::Text { text: text.into() }],
+            timestamp: now_ms(),
+            provenance: Some(super::InputProvenance::runtime(1, kind, display)),
         }
     }
 

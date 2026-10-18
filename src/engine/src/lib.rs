@@ -61,6 +61,8 @@ pub use types::CacheConfig;
 pub use types::Content;
 pub use types::ExtensionMessage;
 pub use types::ImageSource;
+pub use types::InputProvenance;
+pub use types::InputSource;
 pub use types::LlmCallStats;
 pub use types::Message;
 pub use types::Retention;

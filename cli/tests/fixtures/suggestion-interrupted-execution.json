@@ -1,0 +1,19 @@
+[
+  {"type":"user","text":"Improve cropping without overlay interference"},
+  {"type":"assistant","stop_reason":"toolUse","content":[
+    {"type":"text","text":"I will move the controls into the toolbar and hide overlays. Shall I implement that?"},
+    {"type":"tool_call","id":"edit","name":"bash","input":{"description":"Apply inline crop controls","command":"DO_NOT_SEND_SHELL_BODY"}}
+  ]},
+  {"type":"tool_result","tool_call_id":"edit","tool_name":"bash","is_error":false,"content":"DO_NOT_SEND_TOOL_OUTPUT"},
+  {"type":"assistant","stop_reason":"toolUse","content":[
+    {"type":"thinking","text":"DO_NOT_SEND_PRIVATE_REASONING"},
+    {"type":"tool_call","id":"test","name":"bash","input":{"description":"Validate crop geometry","command":"DO_NOT_SEND_SHELL_BODY"}}
+  ]},
+  {"type":"tool_result","tool_call_id":"test","tool_name":"bash","is_error":true,"content":"DO_NOT_SEND_TOOL_OUTPUT"},
+  {"type":"assistant","stop_reason":"toolUse","content":[
+    {"type":"thinking","text":"DO_NOT_SEND_PRIVATE_REASONING"},
+    {"type":"tool_call","id":"inspect","name":"bash","input":{"description":"Inspect the remaining layout mismatch","command":"DO_NOT_SEND_SHELL_BODY"}}
+  ]},
+  {"type":"tool_result","tool_call_id":"inspect","tool_name":"bash","is_error":false,"content":"DO_NOT_SEND_TOOL_OUTPUT"},
+  {"type":"assistant","stop_reason":"aborted","content":[]}
+]

@@ -86,6 +86,7 @@ async fn compact_service_outcome_matches_persisted_marker() -> TestResult {
     let mut items = Vec::new();
     for index in 0..6 {
         items.push(TranscriptItem::User {
+            provenance: None,
             text: format!("request {index} {}", "fixture context ".repeat(100)),
             content: vec![],
         });

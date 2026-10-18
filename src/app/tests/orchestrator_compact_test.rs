@@ -612,6 +612,7 @@ fn first_user_prompt(
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

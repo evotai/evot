@@ -20,6 +20,7 @@ export interface QueueEditDeps {
   setOverlay: (overlay: OverlayState) => void
   commitSystem: (id: string, text: string, kind?: OutputLine['kind']) => void
   commitLines: (lines: OutputLine[]) => void
+  commitUser?: (text: string) => void
   clearAll: () => void
   requestRender: () => void
 }
@@ -162,7 +163,10 @@ export function createQueueEdit(deps: QueueEditDeps) {
       return
     }
     const { ids: remainingIds, remaining, consumed } = reconciliation
-    for (const message of consumed) deps.commitLines(buildUserMessage(message.text))
+    for (const message of consumed) {
+      if (deps.commitUser) deps.commitUser(message.text)
+      else deps.commitLines(buildUserMessage(message.text))
+    }
     deps.setQueued(remaining)
     const overlay = deps.getOverlay()
     if (remaining.length === 0 && overlay.kind === 'selector' && overlay.state.owner === SELECTOR_OWNER.queue) {

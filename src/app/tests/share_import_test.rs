@@ -80,6 +80,7 @@ fn auth(server: &MockServer) -> Result<AuthState, serde_json::Error> {
 
 fn user(session: &str, seq: u64, text: &str) -> TranscriptEntry {
     TranscriptEntry::new(session.into(), None, seq, 0, TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     })
@@ -205,6 +206,7 @@ async fn import_preserves_every_content_block_including_thinking_and_tool_calls(
             1,
             1,
             TranscriptItem::User {
+                provenance: None,
                 text: "explain the screenshot".into(),
                 content: vec![
                     TranscriptUserContent::Text {
@@ -329,6 +331,7 @@ async fn import_refuses_incomplete_or_nonportable_transcripts_without_writing() 
             1,
             0,
             TranscriptItem::User {
+                provenance: None,
                 text: "image".into(),
                 content: vec![TranscriptUserContent::Image {
                     mime_type: "image/png".into(),

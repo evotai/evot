@@ -55,6 +55,8 @@ import { Committer } from './committer.js'
 import {
   createEditorState,
   getEditorText,
+  editorCursorOffset,
+  replaceAfterCursor,
   isEditorEmpty,
   clearEditor,
   insertText,
@@ -67,6 +69,7 @@ import {
   acceptCompletion,
   closeCompletion,
   moveCompletion,
+  showCompletions,
   refreshGhostHint,
   setGhostHintContext,
   createHistoryState,
@@ -89,6 +92,12 @@ import {
   type HistoryState,
 } from './input/editor.js'
 import { UndoStack } from './input/undo-stack.js'
+import { commandIdentity, validCommandInput, type CommandInventory } from './app/suggestion/arguments.js'
+import { SuggestionContext } from './app/suggestion/context.js'
+import { activeWork } from './app/suggestion/activities.js'
+import { suggestionImages } from './app/suggestion/images.js'
+import { prepareSuggestion } from './app/suggestion/request.js'
+import { isLegacyContextSummary } from '../session/user-input.js'
 import {
   createStreamMachineState,
   reduceRunEvent,
@@ -98,7 +107,7 @@ import {
 import { handleSlashCommand } from './app/commands.js'
 import { askStateToResponse, prefixedAskLines } from './app/ask-user.js'
 import { RunOwnership } from './app/run-ownership.js'
-import { PromptSuggestion, isSuggestionBoundary, suggestionHistoryFromLines } from './app/suggestion.js'
+import { PromptSuggestion, SuggestionTicker, createSuggestionInput } from './app/suggestion.js'
 import { resolveComposerGuidance, allowedSuggestionCommand, type SuggestionTrigger } from './app/composer-guidance.js'
 import {
   composeExtensions,
@@ -123,7 +132,6 @@ import { BackgroundScheduler } from '../background/scheduler.js'
 import { inspectConsole } from '../channels/console-client.js'
 import {
   RESUME_SELECTOR_TITLE,
-  COMPACT_SUMMARY_PREFIX,
   applySessionText,
   formatRankedSessionItems,
   formatSessionItems,
@@ -308,12 +316,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   let runTurnCount = 0
   const runThinking = new RunThinking()
   const beginRun = (): number => {
-    suggestions.cancel()
+    suggestionContext.begin()
+    suggestions.cancelAutomatic()
     return runOwnership.begin()
   }
   const ownsRun = (generation: number): boolean => runOwnership.owns(generation)
   const revokeRun = (): void => {
-    suggestions.cancel()
+    suggestions.cancelAutomatic()
     runOwnership.revoke()
     taskSession.cancelSetup()
   }
@@ -342,7 +351,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   let shareSelector: ShareSelector | null = null
   const loopSession = new LoopSession({
     runTurn: (userLine, prompt, extension) => {
-      if (userLine) commitLines(buildUserMessage(userLine))
+      if (userLine) commitUserMessage(userLine)
       void runQuery(prompt, undefined, undefined, extension)
     },
     canWake: () => !isLoading && !destroyed
@@ -358,7 +367,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       elapsedMs: process.elapsed_ms,
     })),
     waitingChanged: waiting => {
-      suggestions.cancel()
+      suggestions.cancelAutomatic()
       if (isLoading) return
       if (waiting) requestProductSuggestion('loop_waiting')
       sessionHook.state(waiting ? 'working' : 'idle')
@@ -421,7 +430,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     collectAnswers: questions => presentAskQuestions(questions, 'idle'),
     presentModelPicker: presentTaskModelPicker,
     runTaskTurn: (userLine, prompt, extension) => {
-      commitLines(buildUserMessage(userLine))
+      commitUserMessage(userLine)
       runQuery(prompt, undefined, undefined, extension)
     },
     primeInput: text => {
@@ -479,6 +488,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   }
   let destroyed = false
   let composerRevision = 0
+  let suggestionContextId = 0
+  const suggestionContext = new SuggestionContext()
   let suggestionsReady = false
   let startupSuggestion: SuggestionTrigger | null = null
   function composerPolicy() {
@@ -487,24 +498,77 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       mode: logMode ? 'log' : planning ? 'plan' : 'normal',
       queuedCount: queuedUserMessages.length + queuedCompactionSubmissions.length })
   }
+  // Explicit Tab can wait for referenced image bytes without blocking input.
+  // A submit already parked on an image load still owns the composer.
   function suggestionInputReady(): boolean {
     return suggestionsReady && !destroyed && overlay.kind === 'none' && !commandWindowPreview
-      && isEditorEmpty(editor) && !editor.completion && pastedImages.size === 0 && pendingImages.size === 0
+      && !editor.completion && !pendingImages.awaiting
+  }
+  function automaticSuggestionEligible(): boolean {
+    return !isLoading && (!loopSession.active || loopSession.waiting) && composerPolicy().allowSuggestion
       && queuedUserMessages.length === 0 && queuedCompactionSubmissions.length === 0
+  }
+  function suggestionInventory(): CommandInventory {
+    return {
+      models: modelOptions(configInfo, agent.model).map(model => ({ value: model.spec, label: formatModelOptionLabel(model) })),
+      sessions: (resumeCache.metadata ?? []).filter(session => session.session_id !== sessionId)
+        .map(session => ({ value: session.session_id, label: session.title || session.session_id })),
+    }
   }
   function requestProductSuggestion(trigger: SuggestionTrigger): void {
     if (!suggestionsReady) { startupSuggestion = trigger; return }
-    suggestions.start(suggestionHistoryFromLines(compactLines), trigger)
+    suggestions.start(trigger)
   }
-  const suggestions = new PromptSuggestion({
-    key: () => `${sessionId ?? ''}:${runOwnership.owner}:${composerRevision}:${planning}:${!!logMode}:${loopSession.snapshot?.startedAt ?? ''}`,
-    eligible: () => suggestionInputReady() && (!loopSession.active || loopSession.waiting)
-      && composerPolicy().allowSuggestion,
-    allowsCommand: text => allowedSuggestionCommand(text, composerPolicy().allowedCommands),
-    start: messages => agent.suggestNextPrompt(messages),
+  const suggestionTicker = new SuggestionTicker({
+    pending: () => suggestions.pending(),
     changed: () => renderer.requestRender(),
   })
-  resources.add(() => suggestions.cancel())
+  const suggestions = new PromptSuggestion({
+    // Only session/mode/composer changes invalidate explicit input assistance;
+    // foreground run ownership and progress are deliberately not part of it.
+    key: () => `${suggestionContextId}:${planning}:${!!logMode}`,
+    eligible: suggestionInputReady,
+    automaticEligible: automaticSuggestionEligible,
+    context: () => {
+      const background = backgroundTerminals.runningProcesses()
+      const loop = loopSession.snapshot
+      return suggestionContext.snapshot({
+        execution: isLoading ? (['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
+          : loop?.active || background.length > 0 ? 'waiting' : 'idle',
+        mode: logMode ? 'log' : planning ? 'plan' : 'normal',
+        queued: queuedUserMessages.length + queuedCompactionSubmissions.length,
+        background: background.length, plan: planModeItems,
+        activities: activeWork(background, loop, loopSession.runInFlight),
+      })
+    },
+    validate: text => validCommandInput(text, suggestionInventory),
+    identity: text => commandIdentity(text, suggestionInventory),
+    allowsCommand: text => allowedSuggestionCommand(text, composerPolicy().allowedCommands),
+    start: (messages, hints) => {
+      const draft = (hints?.draft ?? '') + (hints?.suffix ?? '')
+      if (!parsePasteRefs(draft).some(ref => ref.type === 'image')) return agent.suggestNextPrompt(messages, hints)
+      return prepareSuggestion(async signal => {
+        const images = await suggestionImages(draft, pastedImages, pendingImages, signal)
+        signal.throwIfAborted()
+        if (getEditorText(editor) !== draft || editorCursorOffset(editor) !== (hints?.draft?.length ?? 0)) throw new Error('Suggestion input changed')
+        return agent.suggestNextPrompt(messages, { ...hints, images })
+      })
+    },
+    draft: () => getEditorText(editor),
+    cursor: () => editorCursorOffset(editor),
+    changed: () => { suggestionTicker.sync(); renderer.requestRender() },
+  })
+  const suggestionInput = createSuggestionInput({
+    controller: suggestions,
+    eligible: suggestionInputReady,
+    editor: () => editor,
+    replace: text => mutateEditor(state => replaceAfterCursor(state, text)),
+    changed: () => renderer.requestRender(),
+    dismissed: () => runInteraction.clear(),
+    inventory: suggestionInventory,
+    showArguments: completion => { editor = showCompletions(editor, completion.items, completion.start, completion.end, completion.note) },
+  })
+  resources.add(() => { suggestions.cancel(); suggestionTicker.dispose() })
   let disableRaw: (() => void) | null = null
   let enhancedKeyboard: EnhancedKeyboardSession | null = null
   let inputBuffer: TerminalInputBuffer | null = null
@@ -672,7 +736,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       // [DONE:n] tags and stuck when a step was never tagged.
       planModeItems = []
       const execMessage = `Execute the plan.\n\nRemaining steps:\n${remaining}\n\nExecute each step in order.`
-      commitLines(buildUserMessage(execMessage))
+      commitUserMessage(execMessage)
       await runQuery(execMessage)
       return
     }
@@ -691,7 +755,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       return
     }
 
-    commitLines(buildUserMessage(choice))
+    commitUserMessage(choice)
     await runQuery(choice)
   }
   let streamMachine: StreamMachineState | null = null
@@ -1657,7 +1721,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       backgroundStopPending: interaction.interruptPending,
       busy: isLoading,
       interaction,
-      suggestion: suggestions.text(),
+      suggestion: suggestions.completing() ? '' : suggestions.text(),
+      suggestionPosition: suggestions.position(),
+      suggestionCompletion: suggestions.completing() ? suggestions.text() : '',
+      suggestionReplacing: suggestions.replacing(),
+      suggestionStatus: suggestions.feedback(),
+      suggestionExplicit: suggestions.isExplicit(),
+      suggestionFrame: suggestionTicker.frame,
       loopParked,
       queuedCount: queuedUserMessages.length + queuedCompactionSubmissions.length,
     })
@@ -1979,6 +2049,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     committer.restore(outputLines, expandedOutputLines)
   }
 
+  function commitUserMessage(text: string): void {
+    suggestionContext.user(text)
+    commitLines(buildUserMessage(text))
+  }
+
   function commitLines(outputLines: OutputLine[]) {
     committer.commit(outputLines)
   }
@@ -2164,6 +2239,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   async function resumeSession(session: SessionMeta, notice?: OutputLine[]) {
     const revision = ++composerRevision
+    suggestionContextId++
     suggestions.cancel()
     taskSession.cancelFlow()
     loopSession.reset()
@@ -2186,6 +2262,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       const { messagesToOutputLines } = await import('../render/output.js')
       const { transcriptToMessages } = await import('../session/transcript.js')
       const messages = transcriptToMessages(transcript)
+      suggestionContext.restore(transcript)
       // A resumed session starts with no active plan; plan mode is re-entered
       // via /plan on the live conversation.
       planModeItems = []
@@ -2229,10 +2306,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   async function rebuildAfterManualCompaction(outcome: Extract<ManualCompactionOutcome, { status: 'compacted' }>) {
     if (!sessionId) return
     const transcript = await agent.loadContextTranscript(sessionId)
-    const messages = transcriptToMessages(transcript).filter(message =>
-      !(message.role === 'user' && message.text.startsWith(COMPACT_SUMMARY_PREFIX)),
-    )
+    const messages = transcriptToMessages(transcript.filter(item => !isLegacyContextSummary(item)))
     const { shown, hidden } = selectResumeMessages(messages)
+    suggestionContext.replaceHistory(transcript)
 
     appState = {
       ...appState,
@@ -2260,7 +2336,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     const submissions = queuedCompactionSubmissions
     queuedCompactionSubmissions = []
     for (const submission of submissions) {
-      commitLines(buildUserMessage(submission.displayText))
+      commitUserMessage(submission.displayText)
       await runQuery(submission.expandedText, submission.contentJson)
     }
   }
@@ -2473,7 +2549,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     renderer.requestRender()
 
     let completed = false
-    let suggestionBoundary = false
     try {
       const stream = prebuiltStream
         ?? await agent.query(text, sessionId ?? undefined, planning ? 'planning_interactive' : 'interactive', contentJson, hostToolExtension?.specsJson ?? HOST_TOOL_SPECS_JSON)
@@ -2499,7 +2574,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         if (!streamMachine) break
 
         if (isHostToolEvent(event)) {
-          suggestions.cancel()
+          suggestions.cancelAutomatic()
           const response = await dispatchHostToolCall(
             event.payload,
             collectAskUserAnswers,
@@ -2534,8 +2609,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
         streamMachine = update.state
         appState = update.state.appState
+        suggestionContext.observe(event)
         spinnerState = update.state.spinnerState
-        if (['turn_started', 'error', 'llm_call_retry', 'quota_waiting', 'outage_waiting', 'context_compaction_started'].includes(event.kind)) suggestions.cancel()
+        if (['turn_started', 'error', 'llm_call_retry', 'quota_waiting', 'outage_waiting', 'context_compaction_started'].includes(event.kind)) suggestions.cancelAutomatic()
         if (update.sessionRevoked) handleCloudSessionRevoked()
         shareNotices.record(sessionId, update.noticeLines)
 
@@ -2560,8 +2636,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
           }
         }
 
-        if (event.kind === 'turn_started' || event.kind === 'error') suggestionBoundary = false
-        if (isSuggestionBoundary(event)) suggestionBoundary = true
 
         // Reconcile against the native queue instead of draining the visible
         // copy wholesale: OneAtATime mode may consume only the first of several
@@ -2606,6 +2680,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         commitFlushResult(final)
       }
       const message = errorText(err)
+      suggestionContext.fail()
       commitSystem('sys-err', message, 'error')
       sessionHook.runFailed(undefined, message)
       reconcileQueuedUserMessages()
@@ -2620,9 +2695,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         isLoading = false
         streamMachine = null
         stopSpinner()
-        if (!completed) suggestions.cancel()
+        if (!completed) suggestions.cancelAutomatic()
         if (loopRun) loopSession.endRun(completed ? 'ok' : 'error')
-        else if (completed && suggestionBoundary) requestProductSuggestion('answer')
+        else if (completed && suggestionContext.hasAnswer) requestProductSuggestion('answer')
         commitRunFooter()
         if (taskSession.unfinishedFlow(hostToolExtension)) {
           commitSystem('sys-task-incomplete', '  Task change not saved yet · reply to continue editing, or /task cancel')
@@ -2646,15 +2721,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   }
 
   function handleKey(event: KeyEvent) {
-    // Tab/Right fill the editor, never submit. Eligibility requires an empty
-    // focused composer with no menu; otherwise preserve completion/cursor keys.
-    // All other input cancels before asynchronous key handling.
-    if ((event.type === 'tab' || event.type === 'right') && suggestions.text()) {
-      const text = suggestions.take()
-      mutateEditor(state => insertText(state, text))
-      renderer.requestRender()
-      return
-    }
+    if (suggestionInput.handle(event)) return
     suggestions.cancel()
     if (event.type !== 'escape' || overlay.kind !== 'none' || editor.completion || queueEdit.editingEntry()) {
       runInteraction.clear()
@@ -2905,6 +2972,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   }
 
   function interruptStream(id: string, text: string) {
+    suggestionContext.interrupt()
     unfreezeTerminalTitle()
     // Revoke ownership before aborting: native abort settles asynchronously,
     // and its rejected Promise must not later emit a second Interrupted/error
@@ -2948,6 +3016,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     setOverlay: next => { overlay = next },
     commitSystem,
     commitLines,
+    commitUser: commitUserMessage,
     clearAll,
     requestRender: () => renderer.requestRender(),
   })
@@ -3209,7 +3278,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             // In log mode, send to forked agent
             runLogQuery(logMode, expandedText)
           } else {
-            commitLines(buildUserMessage(displayText))
+            commitUserMessage(displayText)
             // If the model stopped the task edit with a plain-text question,
             // the next reply is still in that edit flow, not a normal coding
             // turn. Keep its task tool available until confirmation/cancel.
@@ -3436,6 +3505,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     if (result.overlay) overlay = result.overlay
     if (result.clearContext) {
       composerRevision++
+      suggestionContextId++
+      suggestionContext.clear()
       suggestions.cancel()
       taskSession.cancelFlow()
       loopSession.reset()
@@ -3466,6 +3537,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     }
     if (result.newSession) {
       composerRevision++
+      suggestionContextId++
+      suggestionContext.clear()
       suggestions.cancel()
       taskSession.cancelFlow()
       loopSession.reset()
@@ -3533,7 +3606,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         taskSession.open()
       } else if (taskShareId(args) !== null) {
         // A pasted share link is an import, not a request to interpret.
-        commitLines(buildUserMessage(text.trim()))
+        commitUserMessage(text.trim())
         void taskSession.import(args.trim())
       } else {
         taskSession.create(text.trim(), args)
@@ -3545,14 +3618,14 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     } else if (name === '/env') {
       await handleEnvCommand(replCommands, args)
     } else if (name === '/harden') {
-      commitLines(buildUserMessage(text.trim()))
+      commitUserMessage(text.trim())
       runQuery(buildCommandPrompt({ name: 'harden', input: text.trim(), instructions: buildHardenPrompt(args) }))
     } else if (name === '/clip') {
       const sub = args.trim().toLowerCase()
       if (sub === 'all') {
         // /clip all is expanded server-side into the memory skill's session
         // distillation prompt; bare /clip remains a zero-token local action.
-        commitLines(buildUserMessage(text.trim()))
+        commitUserMessage(text.trim())
         runQuery('/clip all')
       } else if (sub === 'copy') {
         await handleCopyCommand(replCommands)
@@ -4135,7 +4208,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     streamMachine = createStreamMachineState(appState, spinnerState)
     startSpinner()
     renderer.requestRender()
-    commitLines(buildUserMessage(prompt))
+    commitUserMessage(prompt)
 
     try {
       const stream = await forked.query(prompt)
@@ -4162,6 +4235,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         })
         streamMachine = update.state
         appState = update.state.appState
+        suggestionContext.observe(event)
         spinnerState = update.state.spinnerState
         if (update.sessionRevoked) handleCloudSessionRevoked()
 

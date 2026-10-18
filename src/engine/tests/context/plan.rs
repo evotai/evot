@@ -14,6 +14,7 @@ fn entry(seq: u64, message: AgentMessage) -> CompactEntry {
 
 fn user(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text { text: text.into() }],
         timestamp: 0,
     })

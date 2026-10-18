@@ -6,6 +6,7 @@ use evotengine::types::*;
 
 fn user_msg(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![Content::Text {
             text: text.to_string(),
         }],

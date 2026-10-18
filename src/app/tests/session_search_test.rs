@@ -19,6 +19,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

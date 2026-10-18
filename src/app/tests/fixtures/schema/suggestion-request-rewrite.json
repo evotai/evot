@@ -1,0 +1,7 @@
+{
+  "messages": [{"role":"user","text":"Run the tests"}],
+  "explicit": true,
+  "draft": "Run the ",
+  "suffix": "old suite",
+  "rejected": []
+}

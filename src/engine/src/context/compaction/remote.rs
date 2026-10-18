@@ -39,7 +39,7 @@ pub fn with_previous_local_summary(
 ) -> Vec<AgentMessage> {
     let mut input = Vec::with_capacity(evicted.len().saturating_add(1));
     if let Some(summary) = previous_summary.filter(|summary| !summary.trim().is_empty()) {
-        input.push(AgentMessage::Llm(Message::User {
+        input.push(AgentMessage::Llm(Message::User { provenance: None,
             content: vec![Content::Text {
                 text: format!(
                     "The conversation history before this point was compacted into the following summary:\n\n{summary}"

@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {"role":"user","text":"Can you implement the tests?"},
+    {"role":"assistant","text":"Use the unit suite or the full suite?"}
+  ],
+  "draft": "Run the",
+  "rejected": ["Run the unit suite"]
+}

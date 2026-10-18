@@ -1,5 +1,5 @@
 import type { SessionWithText, TranscriptItem } from '../../native/index.js'
-import { replayUserText } from '../../session/task-notification.js'
+import { replayUserInput } from '../../session/user-input.js'
 
 /** UI-only enrichment, never serialized into the native/search wire contract. */
 export interface SessionRecognition extends SessionWithText {
@@ -36,7 +36,7 @@ function glimpse(text: string, cap: number): string[] {
 function visibleText(item: TranscriptItem, clip = true): { role: 'user' | 'assistant'; text: string } | undefined {
   if (item.type === 'user' && typeof item.text === 'string') {
     if (item.text.startsWith('The conversation history before this')) return undefined
-    const text = replayUserText(item.text).filter(part => part.kind === 'user').map(part => part.text).join('\n').trim()
+    const text = replayUserInput(item).filter(part => part.kind === 'user').map(part => part.text).join('\n').trim()
     return text ? { role: 'user', text: clip ? excerpt(text) : text } : undefined
   }
   if (item.type !== 'assistant') return undefined

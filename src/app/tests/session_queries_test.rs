@@ -21,6 +21,7 @@ async fn session_queries_filter_drafts_before_limit_without_an_agent() -> TestRe
     .await?;
     visible
         .write_items(vec![TranscriptItem::User {
+            provenance: None,
             text: "hello".into(),
             content: vec![],
         }])

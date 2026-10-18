@@ -3,8 +3,7 @@
  * Supports slash commands and file paths.
  */
 
-import { readdirSync, statSync } from 'fs'
-import { join, dirname, basename } from 'path'
+import { completePath, resolvePathTarget } from './path-completion.js'
 import { ALL_COMMANDS, COMMANDS, type SlashCommand } from './index.js'
 
 /**
@@ -16,7 +15,7 @@ function isSlashPrefix(text: string): boolean {
   if (!text.startsWith('/')) return false
   const rest = text.slice(1)
   const cmdPart = rest.split(/\s/)[0] ?? ''
-  return /^[a-zA-Z]*$/.test(cmdPart)
+  return /^[a-zA-Z_]*$/.test(cmdPart)
 }
 
 export interface CompletionResult {
@@ -26,6 +25,8 @@ export interface CompletionResult {
   candidates: string[]
   /** Start index of the word being completed in the line */
   wordStart: number
+  /** End of a path token being completed at a middle cursor position. */
+  wordEnd?: number
 }
 
 /**
@@ -33,23 +34,25 @@ export interface CompletionResult {
  */
 export function complete(line: string, cursorCol: number): CompletionResult | null {
   const beforeCursor = line.slice(0, cursorCol)
-
-  // Slash command completion: input looks like a hand-typed command
-  if (isSlashPrefix(beforeCursor)) {
-    return completeSlashCommand(beforeCursor)
+  const commandText = beforeCursor.trimStart()
+  // Command names and fixed subcommands win. An unmatched argument can
+  // still be a path, including in `/loop inspect ../project/file`.
+  if (isSlashPrefix(commandText)) {
+    const command = completeSlashCommand(commandText)
+    if (command) return { ...command, wordStart: command.wordStart + beforeCursor.length - commandText.length }
   }
+  const path = fileCompletionTarget(line, cursorCol)
+  return path ? completePath(path, cursorCol) : null
+}
 
-  // File path completion: walk back from the cursor collecting only
-  // path-friendly characters so that paths glued to surrounding text
-  // (CJK, punctuation, etc.) are still detected. Trigger only when the
-  // captured segment looks like a real path: contains `/` or starts with
-  // `~/` (a bare `~` is not enough because we'd otherwise replace it).
-  const word = currentPathLike(beforeCursor)
-  if (word && (word.includes('/') || word.startsWith('~/'))) {
-    return completeFilePath(word, cursorCol)
-  }
-
-  return null
+/** Pure routing check shared by local completion and AI input assistance.
+ * A path remains a local target even when it currently has no filesystem
+ * matches. Merely pressing Tab must not send a path draft to the model. */
+export function fileCompletionTarget(line: string, cursorCol: number): ReturnType<typeof resolvePathTarget> {
+  const before = line.slice(0, cursorCol)
+  const commandText = before.trimStart()
+  if (/^\/[a-zA-Z_]*$/.test(commandText) && completeSlashCommand(commandText)) return null
+  return resolvePathTarget(line, cursorCol)
 }
 
 /** What the bare `/` hint may assume about the session it is typed into. */
@@ -216,7 +219,8 @@ function completeSubCommand(cmd: string, partial: string, wordStart: number): Co
   return { replacement: common, candidates: matches, wordStart }
 }
 
-function completeSlashCommand(input: string): CompletionResult | null {
+/** Pure registry completion, also used to route model-assisted arguments. */
+export function completeSlashCommand(input: string): CompletionResult | null {
   const parts = input.split(/\s+/)
   const cmd = parts[0]!.toLowerCase()
 
@@ -251,96 +255,8 @@ function completeSlashCommand(input: string): CompletionResult | null {
 }
 
 // ---------------------------------------------------------------------------
-// File path completion
+// Shared prefix helper
 // ---------------------------------------------------------------------------
-
-function completeFilePath(word: string, cursorCol: number): CompletionResult | null {
-  const wordStart = cursorCol - word.length
-
-  // Expand ~
-  const expanded = word.startsWith('~')
-    ? (process.env.HOME ?? '') + word.slice(1)
-    : word
-
-  // Always treat the path as parent + basename so tab works whether or not
-  // the typed path happens to resolve to an existing directory. This avoids
-  // the previous bug where typing `~/github/pi` (where `pi` is a real
-  // directory) produced candidates like `~/github/piLICENSE` because the
-  // trailing `/` separator was missing in the candidate prefix.
-  let dir: string
-  let prefix: string
-  if (expanded.endsWith('/')) {
-    dir = expanded
-    prefix = ''
-  } else {
-    dir = dirname(expanded) || '.'
-    prefix = basename(expanded)
-  }
-
-  let entries: string[]
-  try {
-    entries = readdirSync(dir)
-  } catch {
-    return null
-  }
-
-  const matches = prefix
-    ? entries.filter((e) => e.startsWith(prefix))
-    : entries.filter((e) => !e.startsWith('.')) // hide dotfiles by default
-
-  if (matches.length === 0) return null
-
-  // Build full paths relative to the original word, preserving the user's
-  // tilde / relative form rather than the expanded absolute path.
-  const dirPrefix = word.endsWith('/')
-    ? word
-    : word.slice(0, word.length - prefix.length)
-
-  const fullMatches = matches.map((m) => {
-    const fullPath = join(dir, m)
-    try {
-      if (statSync(fullPath).isDirectory()) return dirPrefix + m + '/'
-    } catch { /* ignore */ }
-    return dirPrefix + m
-  })
-
-  if (fullMatches.length === 1) {
-    return {
-      replacement: fullMatches[0]!,
-      candidates: fullMatches,
-      wordStart,
-    }
-  }
-
-  const common = commonPrefix(fullMatches)
-  return {
-    replacement: common,
-    candidates: fullMatches,
-    wordStart,
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function currentWord(beforeCursor: string): string | null {
-  // Extract the last whitespace-delimited word
-  const match = beforeCursor.match(/(\S+)$/)
-  return match ? match[1]! : null
-}
-
-// Walk back from the end collecting characters that look like part of a
-// Unix path. Stops at any non-path character — whitespace, CJK, quotes,
-// brackets, etc. — so a path glued to surrounding text (e.g. `看下~/x`)
-// is still extracted correctly.
-function currentPathLike(beforeCursor: string): string | null {
-  const isPathChar = (ch: string): boolean => /[A-Za-z0-9_./~+-]/.test(ch)
-  let i = beforeCursor.length
-  while (i > 0 && isPathChar(beforeCursor[i - 1]!)) i--
-  if (i === beforeCursor.length) return null
-  return beforeCursor.slice(i)
-}
 
 function commonPrefix(strings: string[]): string {
   if (strings.length === 0) return ''

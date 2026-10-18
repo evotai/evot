@@ -390,7 +390,7 @@ fn notice(kind: &str, text: &str) -> Value {
 
 fn project_semantic(item: &TranscriptItem) -> Option<Value> {
     Some(match item {
-        TranscriptItem::User { text, content } => {
+        TranscriptItem::User { text, content, .. } => {
             let blocks: Vec<Value> = if content.is_empty() {
                 vec![json!({"type": "text", "text": text})]
             } else {

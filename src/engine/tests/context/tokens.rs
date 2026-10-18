@@ -27,6 +27,7 @@ fn text_uses_utf16_code_units_like_javascript() {
 #[test]
 fn message_content_is_summed_before_rounding() {
     let message = AgentMessage::Llm(Message::User {
+        provenance: None,
         content: vec![
             Content::Text { text: "a".into() },
             Content::Text { text: "b".into() },

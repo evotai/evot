@@ -118,6 +118,9 @@ pub enum TranscriptItem {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         content: Vec<TranscriptUserContent>,
+        /// Versioned source metadata; never changes text/content sent to models.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<evot_engine::InputProvenance>,
     },
     Assistant {
         #[serde(alias = "content_blocks")]
@@ -240,7 +243,11 @@ impl TranscriptItem {
             })
             .collect();
 
-        Self::User { text, content }
+        Self::User {
+            text,
+            content,
+            provenance: None,
+        }
     }
 }
 

@@ -958,10 +958,13 @@ impl ProcessTask {
 
     fn summary(&self) -> ProcessSummary {
         let state = self.state.lock();
-        let output_file_truncated = self.output.lock().file_truncated;
+        let output = self.output.lock();
+        let output_file_truncated = output.file_truncated;
         ProcessSummary {
             task_id: self.id.clone(),
             command: self.command.clone(),
+            description: self.description.clone(),
+            quiet_for: self.quiet_for(&state, &output),
             cwd: self.cwd.clone(),
             output_path: self.output_path.clone(),
             status: state.status.clone(),

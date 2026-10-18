@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import * as r from '../src/native/contracts/results.js'
-import { array, nullable, object, text, uint } from '../src/native/contracts/schema.js'
+import { array, boolean, nullable, object, oneOf, text, uint } from '../src/native/contracts/schema.js'
 import legacy from './fixtures/contracts/native-results-legacy.json'
+import backgroundWithPurpose from './fixtures/contracts/background-with-purpose.json'
 import { campaignContent } from '../src/term/app/campaigns.js'
 
 describe('native result contracts', () => {
@@ -46,6 +47,23 @@ describe('native result contracts', () => {
     expect(legacyReader.read(current, '$')).toBe(current)
     expect(() => legacyReader.read({ ...current, user_prompts: [3] }, '$')).toThrow()
     expect(() => r.sessionWithText.read({ ...current, changed_paths: [3] }, '$')).toThrow()
+  })
+
+  test('background purpose and quiet time are additive across native versions', () => {
+    expect(r.backgroundProcess.read(legacy.background, '$')).not.toHaveProperty('description')
+    expect(r.backgroundProcess.read(backgroundWithPurpose, '$')).toBe(backgroundWithPurpose)
+    const oldReader = object({
+      task_id: text, command: text, cwd: text, output_path: text,
+      status: oneOf('running_foreground', 'running', 'completed', 'failed', 'killed'),
+      exit_code: nullable({ read: (value, path) => {
+        if (typeof value !== 'number' || !Number.isInteger(value)) throw new Error(`Invalid integer at ${path}`)
+        return value
+      } }),
+      elapsed_ms: uint, output_file_truncated: boolean, stopped_by_user: boolean,
+    })
+    expect(oldReader.read(backgroundWithPurpose, '$')).toBe(backgroundWithPurpose)
+    expect(() => r.backgroundProcess.read({ ...backgroundWithPurpose, quiet_for_ms: -1 }, '$')).toThrow('quiet_for_ms')
+    expect(() => r.backgroundProcess.read({ ...backgroundWithPurpose, description: 1 }, '$')).toThrow('description')
   })
 
   test('bad fields fail at their path without private values', () => {

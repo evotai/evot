@@ -193,6 +193,7 @@ async fn auto_compaction_persists_structured_compact_item() -> TestResult {
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

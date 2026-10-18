@@ -306,6 +306,7 @@ async fn manual_compact_uses_llm_summary() -> TestResult {
 
 fn user(text: &str) -> TranscriptItem {
     TranscriptItem::User {
+        provenance: None,
         text: text.into(),
         content: vec![],
     }

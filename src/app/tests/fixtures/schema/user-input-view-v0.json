@@ -1,0 +1,16 @@
+{
+  "type": "user",
+  "text": "Commit\n<system-reminder>\nContext supplied by an earlier runtime.\n</system-reminder>",
+  "content": [
+    {
+      "type": "text",
+      "text": "Commit\n<system-reminder>\nContext supplied by an earlier runtime.\n</system-reminder>"
+    }
+  ],
+  "display_parts": [
+    {
+      "kind": "legacy",
+      "text": "Commit"
+    }
+  ]
+}

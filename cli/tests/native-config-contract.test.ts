@@ -196,7 +196,10 @@ integration('live NAPI ConfigInfo contract', () => {
           const id = session.session_id;
           const stream = await agent.query('start background work', id, 'interactive');
           for await (const event of stream) {}
-          if (agent.backgroundProcesses(id).filter(task => task.status === 'running').length !== 1) throw new Error('missing background task');
+          const tasks = agent.backgroundProcesses(id).filter(task => task.status === 'running');
+          if (tasks.length !== 1) throw new Error('missing background task');
+          if (tasks[0].description !== 'Exercise background task cancellation without waking the model') throw new Error('missing task purpose');
+          if (typeof tasks[0].quiet_for_ms !== 'number') throw new Error('missing quiet time');
           await agent.stopAllBackgroundProcesses(id);
           if (agent.pendingProcessNotifications(id) !== 1) throw new Error('cancellation notice was lost');
           if (agent.pendingProcessWakeNotifications(id) !== 0) throw new Error('cancellation can wake model');

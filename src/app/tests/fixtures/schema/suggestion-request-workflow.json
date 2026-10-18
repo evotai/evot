@@ -1,0 +1,15 @@
+{
+  "messages": [{"role": "user", "text": "Finish the login changes"}],
+  "explicit": true,
+  "draft": null,
+  "suffix": "",
+  "rejected": [],
+  "workflow": {
+    "schema_version": 1,
+    "session": "resumed",
+    "last_turn": "interrupted",
+    "pending_tools": 0,
+    "tasks": {"source": "checklist", "pending": 1, "in_progress": 1, "completed": 1, "next": [{"text": "Run tests", "status": "in_progress"}, {"text": "Review remaining changes", "status": "pending"}]},
+    "runtime": {"execution": "idle", "mode": "normal", "queued_inputs": 0, "background_tasks": 0}
+  }
+}

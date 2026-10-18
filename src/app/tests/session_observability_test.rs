@@ -378,6 +378,7 @@ fn aggregator_to_run_summary_from_stats_works_with_run_finished() {
 fn aggregator_from_items_batch_ingest() {
     let items = vec![
         TranscriptItem::User {
+            provenance: None,
             text: "hello".into(),
             content: vec![],
         },

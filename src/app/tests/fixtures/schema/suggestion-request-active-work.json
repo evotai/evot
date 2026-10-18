@@ -1,0 +1,21 @@
+{
+  "messages": [{"role": "user", "text": "Validate authentication changes and monitor CI"}],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "active",
+    "last_turn": "answered",
+    "pending_tools": 0,
+    "runtime": {
+      "execution": "waiting",
+      "mode": "normal",
+      "queued_inputs": 0,
+      "background_tasks": 1,
+      "activities": [
+        {"kind": "background", "id": "auth-tests", "goal": "Run focused authentication tests", "phase": "running", "elapsed_minutes": 2, "quiet_minutes": 1},
+        {"kind": "loop", "id": "loop:1000", "goal": "Monitor authentication CI", "phase": "waiting", "iteration": 3, "cadence": "fixed", "interval_ms": 900000, "next_check_at": "2026-03-26T12:30:00.000Z", "wait_reason": "Waiting for a new CI result", "unchanged_iterations": 2}
+      ]
+    }
+  }
+}

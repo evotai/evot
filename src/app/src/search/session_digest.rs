@@ -143,7 +143,7 @@ fn real_user_text(item: &TranscriptItem) -> Option<std::borrow::Cow<'_, str>> {
         TranscriptItem::User { text, .. }
             if !text.trim().is_empty() && !is_compact_summary_text(text) =>
         {
-            crate::command::user_facing_text(text)
+            crate::conversation::input::authored_text(item).map(std::borrow::Cow::Owned)
         }
         _ => None,
     }
