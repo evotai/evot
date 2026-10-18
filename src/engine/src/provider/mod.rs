@@ -16,6 +16,7 @@ pub mod traits;
 
 pub use anthropic::AnthropicProvider;
 pub use bedrock::BedrockProvider;
+pub use error::client_builder as http_client_builder;
 pub use error::new_client as http_client;
 pub use error::ProviderError;
 pub use mock::MockProvider;

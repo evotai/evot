@@ -69,11 +69,7 @@ async fn request<T: DeserializeOwned>(
     suffix: &str,
     body: Option<Vec<u8>>,
 ) -> Result<T> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| EvotError::Conf(e.to_string()))?;
-    let mut request = client
+    let mut request = crate::http::no_redirect_client()?
         .request(
             method,
             format!(

@@ -493,7 +493,11 @@ pub const STREAM_SEND_TIMEOUT: Duration = Duration::from_secs(120);
 /// Timeout for the connect phase only (TCP + TLS handshake).
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn build_client() -> Result<reqwest::Client, ProviderError> {
+/// The shared transport policy, before creating a connection pool.
+///
+/// Callers that must reject redirects can specialize this builder without
+/// duplicating the versioned User-Agent, timeouts, pool limits or TCP keepalive.
+pub fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(CONNECT_TIMEOUT)
@@ -506,13 +510,15 @@ fn build_client() -> Result<reqwest::Client, ProviderError> {
         .tcp_keepalive(Duration::from_secs(60))
         .tcp_keepalive_interval(Duration::from_secs(15))
         .tcp_keepalive_retries(3)
-        .build()
-        .map_err(|e| {
-            ProviderError::Other(format!(
-                "Failed to build HTTP client: {}",
-                format_transport_detail(&e, None)
-            ))
-        })
+}
+
+fn build_client() -> Result<reqwest::Client, ProviderError> {
+    client_builder().build().map_err(|e| {
+        ProviderError::Other(format!(
+            "Failed to build HTTP client: {}",
+            format_transport_detail(&e, None)
+        ))
+    })
 }
 
 /// A client with the shared transport policy but its own connection pool.

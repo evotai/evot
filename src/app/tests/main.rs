@@ -26,6 +26,7 @@ mod bootstrap_test;
 mod channel_supervisor_test;
 #[path = "channel_tasks_test.rs"]
 mod channel_tasks_test;
+mod cloud_http_test;
 #[path = "command_test.rs"]
 mod command_test;
 #[path = "compact_describe_test.rs"]

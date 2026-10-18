@@ -21,6 +21,9 @@ use crate::share::client::upload_timeout;
 const RETRY_BUDGET: Duration = Duration::from_secs(150);
 /// Used when the server says 429 without a usable `Retry-After`.
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
+/// Best-effort connection reuse must not make ignored response bodies stall a
+/// successful delete or extend the server's retry delay.
+const DISCARD_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn push(state: &AuthState, payload: &SyncPush) -> Result<PushResponse> {
     check_id(&payload.meta.session_id)?;
@@ -38,10 +41,12 @@ pub async fn push(state: &AuthState, payload: &SyncPush) -> Result<PushResponse>
             break response;
         }
         let wait = retry_after(&response).unwrap_or(DEFAULT_RETRY_AFTER);
-        if tokio::time::Instant::now() + wait > deadline {
+        let retry_at = tokio::time::Instant::now() + wait;
+        if retry_at > deadline {
             return Err(explain_failure(response, "too many sync requests; try again later").await);
         }
-        tokio::time::sleep(wait).await;
+        discard_body(response, retry_at).await;
+        tokio::time::sleep_until(retry_at).await;
     };
     if response.status().as_u16() == 409 {
         let body: serde_json::Value = response
@@ -76,13 +81,14 @@ pub async fn pull(state: &AuthState, session_id: &str, after_seq: u64) -> Result
 
 pub async fn delete(state: &AuthState, session_id: &str) -> Result<()> {
     check_id(session_id)?;
-    send_once(
+    let response = send_once(
         state,
         reqwest::Method::DELETE,
         &format!("/{session_id}"),
         None,
     )
     .await?;
+    discard_body(response, tokio::time::Instant::now() + DISCARD_TIMEOUT).await;
     Ok(())
 }
 
@@ -132,11 +138,7 @@ async fn send(
     suffix: &str,
     body: Option<Vec<u8>>,
 ) -> Result<reqwest::Response> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| EvotError::Conf(e.to_string()))?;
-    let mut request = client
+    let mut request = crate::http::no_redirect_client()?
         .request(
             method,
             format!(
@@ -172,6 +174,24 @@ async fn send(
         _ => "sync request failed",
     };
     Err(explain_failure(response, fallback).await)
+}
+
+/// Consume ignored bodies so HTTP/1.1 connections can return to the pool.
+/// Stream rather than buffer and bound the work: a large, stalled or broken
+/// body must not suppress a retry or turn a successful DELETE into a failure.
+async fn discard_body(mut response: reqwest::Response, deadline: tokio::time::Instant) {
+    let deadline = deadline.min(tokio::time::Instant::now() + DISCARD_TIMEOUT);
+    tokio::select! {
+        _ = tokio::time::sleep_until(deadline) => {}
+        _ = async {
+            loop {
+                match response.chunk().await {
+                    Ok(Some(_)) => {}
+                    Ok(None) | Err(_) => return,
+                }
+            }
+        } => {}
+    }
 }
 
 async fn decode<T: DeserializeOwned>(response: reqwest::Response) -> Result<T> {

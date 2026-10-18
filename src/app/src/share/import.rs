@@ -37,11 +37,9 @@ async fn fetch(auth: &AuthState, share: &SessionShareLink) -> Result<SyncPull> {
         SessionShareLink::Team(token) => (format!("/team/{token}/session.json"), true),
     };
     let url = format!("{}{}", auth.server_base_url.trim_end_matches('/'), path);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| EvotError::Conf(error.to_string()))?;
-    let mut request = client.get(url).timeout(REQUEST_TIMEOUT);
+    let mut request = crate::http::no_redirect_client()?
+        .get(url)
+        .timeout(REQUEST_TIMEOUT);
     if needs_auth {
         request = request.bearer_auth(&auth.cli_token);
     }

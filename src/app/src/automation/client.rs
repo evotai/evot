@@ -96,10 +96,7 @@ pub async fn fetch_task_share(auth: &AuthState, link: &str) -> Result<TaskShareS
         .ok_or_else(|| EvotError::Conf("not a shared task link".into()))?;
     let path = format!("/share/t/{share_id}/task.json");
     let url = format!("{}{}", auth.server_base_url.trim_end_matches('/'), path);
-    let response = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| EvotError::Conf(error.to_string()))?
+    let response = crate::http::no_redirect_client()?
         .get(url)
         .timeout(REQUEST_TIMEOUT)
         .send()
