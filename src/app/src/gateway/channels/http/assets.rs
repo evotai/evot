@@ -100,6 +100,13 @@ pub(super) fn router() -> Router {
             )),
         ),
         (
+            "/ui/login-errors.js",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/console/ui/login-errors.js"
+            )),
+        ),
+        (
             "/ui/chat-control.js",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

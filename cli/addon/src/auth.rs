@@ -20,7 +20,14 @@ pub async fn auth_poll(server_url: String, code: String, expires_at: i64) -> Nap
     match auth::poll_status(&server_url, &code, expires_at).await {
         Ok(auth::PollOutcome::Pending) => Ok(r#"{"status":"pending"}"#.to_string()),
         Ok(auth::PollOutcome::Expired) => Ok(r#"{"status":"expired"}"#.to_string()),
-        Ok(auth::PollOutcome::Denied) => Ok(r#"{"status":"denied"}"#.to_string()),
+        Ok(auth::PollOutcome::Denied {
+            reason,
+            reason_code,
+        }) => to_json(&serde_json::json!({
+            "status": "denied",
+            "reason": reason,
+            "reason_code": reason_code,
+        })),
         Ok(auth::PollOutcome::Success { user }) => {
             auth::save_auth(&user).map_err(to_napi)?;
             match sync_models_inner().await {

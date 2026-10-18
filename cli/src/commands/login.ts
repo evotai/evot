@@ -1,7 +1,7 @@
 import { exec } from 'node:child_process'
 
 import { authBegin, authPoll } from '../native/index.js'
-import { DEFAULT_SERVER, defaultDeps, runDeviceLogin, type LoginOutcome } from './login-flow.js'
+import { DEFAULT_SERVER, defaultDeps, loginDeniedMessage, runDeviceLogin, type LoginOutcome } from './login-flow.js'
 
 export { DEFAULT_SERVER }
 
@@ -36,7 +36,7 @@ function report(outcome: LoginOutcome): void {
       else console.log('  ✓ free models synced')
       break
     case 'denied':
-      console.error('  ✗ login denied')
+      console.error(`  ✗ ${loginDeniedMessage(outcome)}`)
       break
     case 'timeout':
       console.error('  ✗ login timed out, try again')

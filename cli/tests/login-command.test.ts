@@ -120,7 +120,7 @@ describe('handleLoginCommand', () => {
       now: () => 0,
     })).toBe(false)
     expect(denied.lines.at(-1)?.id).toBe('sys-login-err')
-    expect(denied.lines.at(-1)?.text).toContain('login denied')
+    expect(denied.lines.at(-1)?.text).toContain('login denied: server did not provide a reason; try again')
 
     const timedOut = createContext()
     expect(await handleLoginCommand(timedOut.ctx, {
@@ -132,6 +132,26 @@ describe('handleLoginCommand', () => {
       now: () => 0,
     })).toBe(false)
     expect(timedOut.lines.at(-1)?.text).toContain('timed out')
+  })
+
+  test('shows the server denial reason and diagnostic code in the TUI', async () => {
+    const { ctx, lines } = createContext()
+    const ok = await handleLoginCommand(ctx, {
+      fingerprint: async () => 'fp',
+      begin: async () => loginResponse(),
+      poll: async () => ({
+        status: 'denied',
+        reason: 'This account has been disabled by an administrator.',
+        reason_code: 'account_disabled',
+      }),
+      openBrowser: () => {},
+      sleep: async () => {},
+      now: () => 0,
+    })
+    expect(ok).toBe(false)
+    expect(lines.at(-1)?.id).toBe('sys-login-err')
+    expect(lines.at(-1)?.text).toContain('login denied: This account has been disabled by an administrator. [account_disabled]')
+    expect(lines.map(line => line.id)).not.toContain('sys-login-ok')
   })
 
   test('surfaces begin failures in the TUI', async () => {

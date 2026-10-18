@@ -227,7 +227,12 @@ async fn console_assets_carry_executable_content_types() -> TestResult {
         "missing skeleton shimmer"
     );
 
-    for path in ["/ui/app.js", "/ui/models.js", "/ui/feishu.js"] {
+    for path in [
+        "/ui/app.js",
+        "/ui/models.js",
+        "/ui/feishu.js",
+        "/ui/login-errors.js",
+    ] {
         let (status, content_type, body) = get(path).await?;
         assert_eq!(status, StatusCode::OK, "{path} should be reachable");
         assert!(

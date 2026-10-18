@@ -38,7 +38,7 @@ describe('module dependency boundaries', () => {
   })
 
   test('Web clients are independent of DOM and UI modules', async () => {
-    for (const file of ['chat-transport', 'chat-control', 'chat-state', 'chat-stream-state', 'json-client']) {
+    for (const file of ['chat-transport', 'chat-control', 'chat-state', 'chat-stream-state', 'json-client', 'login-errors']) {
       const text = await source(`../../src/app/assets/console/ui/${file}.js`)
       for (const forbidden of ['document.', 'window.', 'from "./app.js"', 'from "./chat.js"']) expect(text).not.toContain(forbidden)
     }

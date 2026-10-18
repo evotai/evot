@@ -4,6 +4,8 @@ import { array, boolean, nullable, object, oneOf, text, uint } from '../src/nati
 import legacy from './fixtures/contracts/native-results-legacy.json'
 import backgroundWithPurpose from './fixtures/contracts/background-with-purpose.json'
 import { campaignContent } from '../src/term/app/campaigns.js'
+import deniedLegacy from '../../src/app/tests/fixtures/schema/auth-poll-denied-v0.json'
+import deniedCurrent from '../../src/app/tests/fixtures/schema/auth-poll-denied-v1.json'
 
 describe('native result contracts', () => {
   test('historical results retain missing fields and opaque content', () => {
@@ -98,6 +100,24 @@ describe('native result contracts', () => {
     const notices = r.cloudNotices.read([legacy.notice, { ...legacy.notice, kind: 'future' }], '$')
     expect(notices).toHaveLength(2)
     expect(campaignContent(notices)).toHaveLength(1)
+  })
+
+  test('denial diagnostics are additive and readable across native versions', () => {
+    expect(r.authPoll.read(deniedLegacy, '$')).toBe(deniedLegacy)
+    expect(deniedLegacy).not.toHaveProperty('reason_code')
+    const legacyDeniedReader = object({ status: oneOf('denied') })
+    for (const current of [
+      deniedCurrent,
+      { status: 'denied', reason: null, reason_code: null },
+      { status: 'denied', reason: 'Sign-in refused' },
+      { status: 'denied', reason_code: 'future_server_reason' },
+    ]) {
+      expect(r.authPoll.read(current, '$')).toBe(current)
+      expect(legacyDeniedReader.read(current, '$')).toBe(current)
+    }
+    for (const field of ['reason', 'reason_code']) {
+      expect(() => r.authPoll.read({ ...deniedCurrent, [field]: 42 }, '$')).toThrow(`$.${field}`)
+    }
   })
 
   test('native wrappers cannot assert JSON into domain types', async () => {

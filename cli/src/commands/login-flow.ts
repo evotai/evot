@@ -10,7 +10,15 @@ export interface LoginDeps {
 export type LoginOutcome =
   | { status: 'success'; user: { name: string; email: string }; syncError?: string }
   | { status: 'timeout' }
-  | { status: 'denied' }
+  | { status: 'denied'; reason?: string | null; reasonCode?: string | null }
+
+/** Keep the server's explanation and stable diagnostic code visible together. */
+export function loginDeniedMessage(outcome: Extract<LoginOutcome, { status: 'denied' }>): string {
+  const reason = outcome.reason?.trim()
+  const code = outcome.reasonCode?.trim()
+  if (!reason && !code) return 'login denied: server did not provide a reason; try again'
+  return 'login denied' + (reason ? `: ${reason}` : '') + (code ? ` [${code}]` : '')
+}
 
 export const DEFAULT_SERVER = process.env.EVOT_SERVER_URL ?? 'https://auto.evot.ai'
 
@@ -87,7 +95,10 @@ export async function runLoginPolling(
           begin,
         }
       case 'denied':
-        return { outcome: { status: 'denied' }, begin }
+        return {
+          outcome: { status: 'denied', reason: result.reason, reasonCode: result.reason_code },
+          begin,
+        }
       case 'expired':
         return { outcome: { status: 'timeout' }, begin }
     }

@@ -73,7 +73,8 @@ export interface ServerInfo { port: number; address: string; channels: string[];
 export interface LoginCodeResponse { code: string; login_url: string; expires_at: number; expires_in_ms: number; interval_ms: number }
 export interface CloudUser { id: string; name: string; email: string }
 export type AuthPollResult =
-  | { status: 'pending' | 'expired' | 'denied' }
+  | { status: 'pending' | 'expired' }
+  | { status: 'denied'; reason?: string | null; reason_code?: string | null }
   | { status: 'success'; state: { user: CloudUser }; sync_error?: string }
 export type AuthRefreshStatus = 'recovered' | 'login_required' | 'unavailable'
 export interface AuthRefreshResult { status: AuthRefreshStatus; user: CloudUser | null; error?: string | null; cleanup_error?: string | null }
@@ -131,7 +132,8 @@ export const serverInfo: Schema<ServerInfo> = object({ port: uint, address: text
 export const loginCode: Schema<LoginCodeResponse> = object({ code: text, login_url: text, expires_at: integer, expires_in_ms: integer, interval_ms: integer })
 export const cloudUser: Schema<CloudUser> = object({ id: text, name: text, email: text })
 export const authPoll: Schema<AuthPollResult> = tagged('status', {
-  pending: object({ status: oneOf('pending') }), expired: object({ status: oneOf('expired') }), denied: object({ status: oneOf('denied') }),
+  pending: object({ status: oneOf('pending') }), expired: object({ status: oneOf('expired') }),
+  denied: object({ status: oneOf('denied'), reason: optional(nullable(text)), reason_code: optional(nullable(text)) }),
   success: object({ status: oneOf('success'), state: object({ user: cloudUser }), sync_error: optional(text) }),
 })
 export const authRefresh: Schema<AuthRefreshResult> = object({

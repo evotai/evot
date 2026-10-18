@@ -622,9 +622,17 @@ impl Server {
                 *self.login.lock() = None;
                 Json(serde_json::json!({ "status": "expired" })).into_response()
             }
-            Ok(crate::auth::PollOutcome::Denied) => {
+            Ok(crate::auth::PollOutcome::Denied {
+                reason,
+                reason_code,
+            }) => {
                 *self.login.lock() = None;
-                Json(serde_json::json!({ "status": "denied" })).into_response()
+                Json(serde_json::json!({
+                    "status": "denied",
+                    "reason": reason,
+                    "reason_code": reason_code,
+                }))
+                .into_response()
             }
             Ok(crate::auth::PollOutcome::Success { user }) => {
                 *self.login.lock() = None;

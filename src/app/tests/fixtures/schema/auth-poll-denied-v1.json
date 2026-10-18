@@ -1,0 +1,5 @@
+{
+  "status": "denied",
+  "reason_code": "account_disabled",
+  "reason": "This account has been disabled by an administrator."
+}

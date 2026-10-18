@@ -7,7 +7,7 @@ import type { ConfigInfo } from '../native/index.js'
 import { findLastAssistantMarkdown, findLastAssistantTurn } from '../session/assistant-markdown.js'
 import { runShareCommand } from '../commands/share.js'
 import type { OutputLine } from '../render/output.js'
-import { defaultDeps, type LoginDeps } from '../commands/login-flow.js'
+import { defaultDeps, loginDeniedMessage, type LoginDeps } from '../commands/login-flow.js'
 import { createCommandOutput } from './command-output.js'
 import { renderCommandNotice, renderErrorNotice } from '../render/command-notice.js'
 import type { RunResult } from '../update/types.js'
@@ -273,7 +273,7 @@ export async function handleLoginCommand(
         return true
       }
       case 'denied':
-        ctx.commitSystem('sys-login-err', renderErrorNotice('login denied'))
+        ctx.commitSystem('sys-login-err', renderErrorNotice(loginDeniedMessage(outcome)))
         return false
       case 'timeout':
         ctx.commitSystem('sys-login-err', renderErrorNotice('login timed out, try again'))

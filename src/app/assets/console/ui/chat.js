@@ -6,6 +6,7 @@ import { streamChat } from "./chat-transport.js";
 import { requestSteering, isQueuedCommand } from "./chat-control.js";
 import { ChatState } from "./chat-state.js";
 import { ChatStreamState } from "./chat-stream-state.js";
+import { loginDeniedMessage } from "./login-errors.js";
 import { esc, getJson, postJson, relTime, skeletonHtml, tierLabel, toast } from "./app.js";
 
 const $ = (id) => document.getElementById(id);
@@ -2183,7 +2184,7 @@ async function openLogin() {
       if (result.reload_error) toast("Model reload failed: " + result.reload_error, "err");
       else if (!result.providers) toast("No cloud models registered — restart evot once", "err");
     } else {
-      toast(result.status === "denied" ? "Login denied" : "Login code expired", "err");
+      toast(result.status === "denied" ? loginDeniedMessage(result) : "Login code expired", "err");
     }
   };
   loginTimer = window.setTimeout(poll, interval);

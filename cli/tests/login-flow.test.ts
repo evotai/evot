@@ -1,7 +1,10 @@
 import { describe, test, expect } from 'bun:test'
 
-import { runDeviceLogin, runLoginPolling, type LoginDeps } from '../src/commands/login-flow'
-import type { AuthPollResult, LoginCodeResponse } from '../native/index.js'
+import { loginDeniedMessage, runDeviceLogin, runLoginPolling, type LoginDeps } from '../src/commands/login-flow'
+import deniedLegacy from '../../src/app/tests/fixtures/schema/auth-poll-denied-v0.json'
+import deniedCurrent from '../../src/app/tests/fixtures/schema/auth-poll-denied-v1.json'
+import { authPoll } from '../src/native/contracts/results.js'
+import type { AuthPollResult, LoginCodeResponse } from '../src/native/index.js'
 
 function createFakeDeps(pollResults: AuthPollResult[]): {
   deps: LoginDeps
@@ -68,6 +71,20 @@ describe('runLoginPolling', () => {
     expect(outcome.status).toBe('timeout')
   })
 
+  test('keeps denial diagnostics from the poll response', async () => {
+    for (const response of [deniedLegacy, deniedCurrent]) {
+      const result = authPoll.read(response, '$')
+      const { deps, calls } = createFakeDeps([{ status: 'pending' }, result])
+      const { outcome } = await runLoginPolling(deps, 'http://x', 'fp')
+      expect(outcome).toEqual({
+        status: 'denied',
+        reason: result.status === 'denied' ? result.reason : undefined,
+        reasonCode: result.status === 'denied' ? result.reason_code : undefined,
+      })
+      expect(calls.polls).toBe(2)
+    }
+  })
+
   test('maps expired to timeout and denied to denied', async () => {
     const expired = createFakeDeps([{ status: 'expired' }])
     const expiredOutcome = (await runLoginPolling(expired.deps, 'http://x', 'fp')).outcome
@@ -76,6 +93,21 @@ describe('runLoginPolling', () => {
     const denied = createFakeDeps([{ status: 'denied' }])
     const deniedOutcome = (await runLoginPolling(denied.deps, 'http://x', 'fp')).outcome
     expect(deniedOutcome.status).toBe('denied')
+  })
+})
+
+describe('loginDeniedMessage', () => {
+  test('shows explanations, stable codes, and an honest legacy fallback', () => {
+    for (const [details, expected] of [
+      [{}, 'login denied: server did not provide a reason; try again'],
+      [{ reason: null, reasonCode: null }, 'login denied: server did not provide a reason; try again'],
+      [{ reason: '  ', reasonCode: '\t' }, 'login denied: server did not provide a reason; try again'],
+      [{ reason: 'Approval refused' }, 'login denied: Approval refused'],
+      [{ reasonCode: 'future_server_reason' }, 'login denied [future_server_reason]'],
+      [{ reason: '  Approval refused  ', reasonCode: ' code_denied ' }, 'login denied: Approval refused [code_denied]'],
+    ] as const) {
+      expect(loginDeniedMessage({ status: 'denied', ...details })).toBe(expected)
+    }
   })
 })
 

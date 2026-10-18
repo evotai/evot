@@ -14,9 +14,14 @@ pub const DEFAULT_SERVER_URL: &str = "https://auto.evot.ai";
 #[derive(Debug, Clone)]
 pub enum PollOutcome {
     Pending,
-    Success { user: AuthState },
+    Success {
+        user: AuthState,
+    },
     Expired,
-    Denied,
+    Denied {
+        reason: Option<String>,
+        reason_code: Option<String>,
+    },
 }
 
 /// Result of one authenticated catalog read.
@@ -100,7 +105,16 @@ pub async fn poll_status(base_url: &str, code: &str, expires_at: i64) -> Result<
             Ok(PollOutcome::Success { user })
         }
         "expired" => Ok(PollOutcome::Expired),
-        "denied" => Ok(PollOutcome::Denied),
+        "denied" => Ok(PollOutcome::Denied {
+            reason: response
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .map(String::from),
+            reason_code: response
+                .get("reason_code")
+                .and_then(|value| value.as_str())
+                .map(String::from),
+        }),
         _ => Ok(PollOutcome::Pending),
     }
 }

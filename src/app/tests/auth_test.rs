@@ -815,6 +815,67 @@ mod wiremock_tests {
     }
 
     #[tokio::test]
+    async fn poll_status_keeps_denial_diagnostics() -> Result<(), Box<dyn std::error::Error>> {
+        for body in [
+            include_str!("fixtures/schema/auth-poll-denied-v0.json"),
+            include_str!("fixtures/schema/auth-poll-denied-v1.json"),
+            r#"{"status":"denied","reason":"Sign-in refused"}"#,
+            r#"{"status":"denied","reason_code":"future_server_reason"}"#,
+            r#"{"status":"denied","reason":null,"reason_code":null}"#,
+        ] {
+            let server = MockServer::start().await;
+            let response: serde_json::Value = serde_json::from_str(body)?;
+            Mock::given(method("GET"))
+                .and(path("/v1/auth/cli/status"))
+                .and(wiremock::matchers::query_param("code", "CODE"))
+                .and(wiremock::matchers::query_param("expires_at", "42"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(&response))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            match auth::poll_status(&server.uri(), "CODE", 42).await? {
+                auth::PollOutcome::Denied {
+                    reason,
+                    reason_code,
+                } => {
+                    assert_eq!(reason.as_deref(), response["reason"].as_str());
+                    assert_eq!(reason_code.as_deref(), response["reason_code"].as_str());
+                }
+                other => panic!("expected denied, got {other:?}"),
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn poll_status_keeps_expiry_and_http_failure_distinct_from_denial(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/auth/cli/status"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "expired"
+            })))
+            .mount(&server)
+            .await;
+        assert!(matches!(
+            auth::poll_status(&server.uri(), "CODE", 42).await?,
+            auth::PollOutcome::Expired
+        ));
+        server.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/auth/cli/status"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "status": "denied", "reason": "not a successful poll"
+            })))
+            .mount(&server)
+            .await;
+        assert!(auth::poll_status(&server.uri(), "CODE", 42).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn sync_notices_uses_public_endpoint_without_bearer_token() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
