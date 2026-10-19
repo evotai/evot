@@ -29,7 +29,19 @@ pub(super) fn validated(
     if draft.is_none()
         || (draft_prose.trim().is_ascii() && !draft_prose.trim().contains(char::is_whitespace))
     {
-        if let Some(user) = messages.iter().rev().find(|message| message.role == "user") {
+        // Anchor on the user's prose, matching the prompt's language rule: a
+        // terse ASCII command ("commit and push") carries no script evidence,
+        // so fall back to the nearest earlier user message that does. Any
+        // user message is accepted when none carries a script.
+        let users = messages
+            .iter()
+            .rev()
+            .filter(|message| message.role == "user");
+        if let Some(user) = users
+            .clone()
+            .find(|message| has_script(&message.text))
+            .or_else(|| users.clone().next())
+        {
             references.push(&user.text);
         }
     }
@@ -123,6 +135,28 @@ pub(super) fn candidates(
     out
 }
 
+/// Whether the message's prose (outside inline code) contains a non-Latin
+/// script. Used to skip terse ASCII commands when anchoring language.
+fn has_script(text: &str) -> bool {
+    super::references::prose(text)
+        .split('`')
+        .step_by(2)
+        .flat_map(|segment| segment.chars())
+        .any(|ch| script_class(ch) != 0)
+}
+
+fn script_class(ch: char) -> u8 {
+    match ch {
+        '\u{3040}'..='\u{30ff}' => 1, // kana
+        '\u{ac00}'..='\u{d7af}' => 2, // hangul
+        '\u{4e00}'..='\u{9fff}' => 3, // han
+        '\u{0400}'..='\u{052f}' => 4, // cyrillic
+        '\u{0600}'..='\u{06ff}' => 5, // arabic
+        '\u{0900}'..='\u{097f}' => 6, // devanagari
+        _ => 0,
+    }
+}
+
 /// Catch obvious script switches even if the model disregards the language
 /// instruction. Natural-language identity (e.g. English vs French) remains
 /// the model's job; identifiers and inline/fenced code are not evidence.
@@ -134,15 +168,7 @@ fn language_matches(reference: &str, suggestion: &str) -> bool {
         .step_by(2)
         .collect::<Vec<_>>()
         .join(" ");
-    let script = |ch: char| match ch {
-        '\u{3040}'..='\u{30ff}' => 1, // kana
-        '\u{ac00}'..='\u{d7af}' => 2, // hangul
-        '\u{4e00}'..='\u{9fff}' => 3, // han
-        '\u{0400}'..='\u{052f}' => 4, // cyrillic
-        '\u{0600}'..='\u{06ff}' => 5, // arabic
-        '\u{0900}'..='\u{097f}' => 6, // devanagari
-        _ => 0,
-    };
+    let script = script_class;
     // Kana takes priority over shared Han; do not mistake Japanese for Chinese.
     let expected = if prose.chars().any(|ch| script(ch) == 1) {
         1

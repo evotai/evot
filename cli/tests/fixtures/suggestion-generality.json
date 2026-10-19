@@ -1695,5 +1695,39 @@
         ]
       }
     }
+  },
+  {
+    "name": "language: terse English command does not flip a Chinese user to English",
+    "expected": "suggest",
+    "any_match": "[\\u4e00-\\u9fff]",
+    "none_match": "^[A-Za-z0-9 ,.:;'\"()/_-]+$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "看看这个 todo 应用的列表页为什么加载慢"
+        },
+        {
+          "role": "assistant",
+          "text": "列表页每次渲染都会重新请求全部任务。建议先加缓存，再做分页。"
+        },
+        {
+          "role": "user",
+          "text": "先加缓存，顺便补个测试"
+        },
+        {
+          "role": "assistant",
+          "text": "已加缓存并补了测试，全部通过。改动还没提交。"
+        },
+        {
+          "role": "user",
+          "text": "commit and push"
+        },
+        {
+          "role": "assistant",
+          "text": "已提交并推送到 main。分页还没做。"
+        }
+      ]
+    }
   }
 ]

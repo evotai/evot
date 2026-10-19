@@ -231,7 +231,7 @@ fn prompt_anchors_latest_user_language_even_when_assistant_changes_language() ->
             .contains("language_reference"));
         let prediction = instructions(&config).ok_or("missing instructions")?;
         assert!(prediction.contains("LANGUAGE IS MANDATORY"));
-        assert!(prediction.contains("not code, paths, identifiers or product names"));
+        assert!(prediction.contains("the language the USER writes prose in"));
         assert!(config.tools.is_empty());
         assert_eq!(config.thinking_level, ThinkingLevel::Off);
         assert_eq!(config.max_tokens, Some(192));
@@ -1300,4 +1300,93 @@ async fn deprecated_rejected_drafts_do_not_remove_cached_candidate_options() {
     )
     .await;
     assert_eq!(result, vec![" targeted tests", " full suite"]);
+}
+
+#[test]
+fn language_rule_anchors_on_user_prose_not_the_latest_terse_command() -> TestResult {
+    let messages = vec![
+        SuggestionMessage {
+            role: "user".into(),
+            text: "\u{7ee7}\u{7eed}\u{5206}\u{6790}\u{751f}\u{4ea7}\u{65e5}\u{5fd7}".into(),
+        },
+        SuggestionMessage {
+            role: "assistant".into(),
+            text: "Found two P0 issues.".into(),
+        },
+        SuggestionMessage {
+            role: "user".into(),
+            text: "commit and deploy".into(),
+        },
+        SuggestionMessage {
+            role: "assistant".into(),
+            text: "Deployed.".into(),
+        },
+    ];
+    let config = prompt_config(&endpoint(), &messages, &SuggestionHints {
+        explicit: true,
+        ..Default::default()
+    })
+    .ok_or("no config")?;
+    let text = instructions(&config).ok_or("no instructions")?;
+    assert!(text.contains("the language the USER writes prose in"));
+    assert!(text.contains("does not change their language"));
+    assert!(text.contains("or a summary's language"));
+    assert!(!text.contains("most recent user message"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn language_anchor_skips_terse_ascii_commands_and_uses_user_prose() -> TestResult {
+    let messages = vec![
+        SuggestionMessage { role: "user".into(), text: "\u{770b}\u{770b}\u{5217}\u{8868}\u{9875}\u{4e3a}\u{4ec0}\u{4e48}\u{52a0}\u{8f7d}\u{6162}".into() },
+        SuggestionMessage { role: "assistant".into(), text: "Every render refetches all tasks.".into() },
+        SuggestionMessage { role: "user".into(), text: "commit and push".into() },
+        SuggestionMessage { role: "assistant".into(), text: "\u{5df2}\u{63d0}\u{4ea4}\u{5e76}\u{63a8}\u{9001}\u{3002}".into() },
+    ];
+    let hints = SuggestionHints {
+        explicit: true,
+        ..Default::default()
+    };
+    // Chinese output must survive even though the latest user line is ASCII.
+    let chinese = "\u{7ee7}\u{7eed}\u{505a}\u{5206}\u{9875}";
+    let kept = sample(
+        &endpoint(),
+        &messages,
+        &hints,
+        Arc::new(MockProvider::text(chinese)),
+        CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(kept, vec![chinese]);
+    // And a Latin-only reply is now the script switch to reject.
+    let dropped = sample(
+        &endpoint(),
+        &messages,
+        &hints,
+        Arc::new(MockProvider::text("Continue with pagination")),
+        CancellationToken::new(),
+    )
+    .await;
+    assert!(dropped.is_empty());
+    // An all-ASCII session still anchors on the latest user message as before.
+    let ascii = vec![
+        SuggestionMessage {
+            role: "user".into(),
+            text: "add pagination".into(),
+        },
+        SuggestionMessage {
+            role: "assistant".into(),
+            text: "Done.".into(),
+        },
+    ];
+    let kept = sample(
+        &endpoint(),
+        &ascii,
+        &hints,
+        Arc::new(MockProvider::text("Run the tests")),
+        CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(kept, vec!["Run the tests"]);
+    Ok(())
 }
