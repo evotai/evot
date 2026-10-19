@@ -8,6 +8,7 @@
 
 ## News
 
+- **2026-10-18** `Tab` — context-aware suggestions, e.g. “Run the tests.” `Tab` cycles; `→` accepts without sending.
 - **2026-10-14** `/loop` — babysit a PR, poll a deploy, check back on a build; the agent picks when to wake and when to stop.
 - **2026-09-16** `/task` — scheduled runs with push delivery.
 - **2026-09-13** `/share` — read-only session links on evot.ai.
