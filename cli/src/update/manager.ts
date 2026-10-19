@@ -44,6 +44,7 @@ export class UpdateManager extends EventEmitter {
   private periodicTimer: ReturnType<typeof setInterval> | null = null
   private stagedStatusTimer: ReturnType<typeof setInterval> | null = null
   private lastNotifiedVersion: string | null = null
+  private latestRelease: ReleaseInfo | null = null
   private consecutiveFailures = 0
   private retryAfter = 0
   private inFlight = false
@@ -129,10 +130,18 @@ export class UpdateManager extends EventEmitter {
         this.retryAfter = 0
       }
 
-      if (result.kind === 'available' && result.latest.version !== this.lastNotifiedVersion) {
-        this.lastNotifiedVersion = result.latest.version
-        this.emit('update-available', result.latest)
-        this.maybeStage(result.latest)
+      if (result.kind === 'available') {
+        // Keep the newest target even if a later check returns stale data.
+        if (!this.latestRelease || compareVersions(result.latest.version, this.latestRelease.version) > 0) {
+          this.latestRelease = result.latest
+        }
+        if (this.latestRelease.version !== this.lastNotifiedVersion) {
+          this.lastNotifiedVersion = this.latestRelease.version
+          this.emit('update-available', this.latestRelease)
+        }
+        // Only notifications are deduplicated. Failed downloads retry on the
+        // next scheduled check, independently of whether we already notified.
+        this.maybeStage(this.latestRelease)
       }
     } catch {
       this.recordFailure()
@@ -172,7 +181,9 @@ export class UpdateManager extends EventEmitter {
 
     this.stage(release, controller.signal)
       .then(() => {
-        this.setStatus({ kind: 'staged', version: release.version })
+        if (!controller.signal.aborted) {
+          this.setStatus({ kind: 'staged', version: release.version })
+        }
       })
       .catch(() => {
         // Silent by contract: the manual `/update` path reports failures with
@@ -186,7 +197,14 @@ export class UpdateManager extends EventEmitter {
         }
       })
       .finally(() => {
-        if (this.stagingAbort === controller) this.stagingAbort = null
+        if (this.stagingAbort !== controller) return
+        this.stagingAbort = null
+        // A check may have found a newer release while this download was busy.
+        // Hand over immediately, but leave retries of the same failed version
+        // to the scheduler so an outage cannot cause a tight download loop.
+        if (this.latestRelease && compareVersions(this.latestRelease.version, release.version) > 0) {
+          this.maybeStage(this.latestRelease)
+        }
       })
   }
 

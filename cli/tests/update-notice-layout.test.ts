@@ -10,7 +10,7 @@ describe('update notice presentation', () => {
     expect(updateNoticeSpans({ ...input, visible: false })).toBeNull()
     expect(updateNoticeSpans({ ...input, busy: true })).toBeNull()
     expect(updateNoticeSpans({ ...input, status: 'failed' })).toBeNull()
-    expect(updateNoticeSpans({ ...input, status: 'staged', busy: true })?.map(span => span.text).join('')).toBe('✔ Update installed v1.2 · /restart to apply')
+    expect(updateNoticeSpans({ ...input, status: 'staged', busy: true })?.map(span => span.text).join('')).toBe('✔ Update ready v1.2 · /restart to apply')
     expect(updateNoticeSpans({ ...input, status: 'downloading', busy: true })?.[0]?.text).toBe('⬇ Auto-updating to v1.2…')
   })
 

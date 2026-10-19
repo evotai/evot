@@ -14,7 +14,7 @@ export function updateNoticeSpans(input: UpdateNoticeInput): StyledSpan[] | null
   if (!input.visible) return null
   if (input.status === 'staged' && input.version) return [
     { text: '✔ ', hex: getTheme().brandHex },
-    { text: `Update installed v${input.version}`, hex: getTheme().brandHex },
+    { text: `Update ready v${input.version}`, hex: getTheme().brandHex },
     { text: ' · /restart to apply', dim: true },
   ]
   if (input.status === 'downloading' && input.version) return [{ text: `⬇ Auto-updating to v${input.version}…`, dim: true }]
