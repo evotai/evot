@@ -1,0 +1,96 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "text": "Now tighten the retry backoff in the uploader."
+    },
+    {
+      "role": "assistant",
+      "text": "Done. Backoff is now exponential with jitter, capped at 30s. Unit tests pass. The change is staged but not committed."
+    }
+  ],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "resumed",
+    "last_turn": "answered",
+    "pending_tools": 0,
+    "progress": {
+      "calls": 5,
+      "executed": 5,
+      "completed": 5,
+      "failed": 0,
+      "since_last_reply": 0,
+      "awaiting_input": false,
+      "recent": [
+        {
+          "name": "edit",
+          "status": "completed"
+        },
+        {
+          "name": "bash",
+          "status": "completed",
+          "description": "Run uploader unit tests"
+        }
+      ]
+    },
+    "thread": [
+      {
+        "user": "Add a size limit to the uploader.",
+        "assistant": "Added a 50MB limit with a clear error.",
+        "tools": 4,
+        "failed": 0,
+        "outcome": "answered"
+      },
+      {
+        "user": "Show me the diff before committing.",
+        "assistant": "Here is the diff for the two files.",
+        "tools": 1,
+        "failed": 0,
+        "outcome": "answered"
+      },
+      {
+        "user": "Looks good, commit it.",
+        "assistant": "Committed as 3f2a1c9.",
+        "tools": 1,
+        "failed": 0,
+        "outcome": "answered"
+      },
+      {
+        "user": "Make the error message mention the limit in MB.",
+        "assistant": "Updated the message and test.",
+        "tools": 2,
+        "failed": 0,
+        "outcome": "answered"
+      },
+      {
+        "user": "Diff please.",
+        "assistant": "Diff shown.",
+        "tools": 1,
+        "failed": 0,
+        "outcome": "answered",
+        "from": {
+          "stage": "recovering"
+        }
+      },
+      {
+        "user": "Commit.",
+        "assistant": "Committed as 8b7d0e2.",
+        "tools": 1,
+        "failed": 0,
+        "outcome": "answered",
+        "from": {
+          "reply": "Diff shown.",
+          "stage": "answered"
+        }
+      }
+    ],
+    "runtime": {
+      "execution": "idle",
+      "mode": "normal",
+      "queued_inputs": 0,
+      "background_tasks": 0
+    }
+  }
+}

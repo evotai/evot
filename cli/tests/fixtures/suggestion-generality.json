@@ -1,0 +1,1699 @@
+[
+  {
+    "name": "new authorization supersedes an earlier deferral",
+    "expected": "suggest",
+    "any_match": "commit|push|proceed|go ahead|yes|continue",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Evaluate the changes first. Do not commit or push yet."
+        },
+        {
+          "role": "assistant",
+          "text": "The representative results and final patch have been reviewed. Changes remain local."
+        },
+        {
+          "role": "user",
+          "text": "The results look good. Now commit and push these changes."
+        },
+        {
+          "role": "assistant",
+          "text": "The exact two-file patch is staged and checks pass. The commit and push have not run yet."
+        }
+      ]
+    }
+  },
+  {
+    "name": "quality assessment supersedes earlier release request",
+    "expected": "suggest",
+    "any_match": "evaluat|suggest|prompt|example|case|behavior|result|fail|accuracy|quality|mismatch|install|try|trial",
+    "none_match": "^(commit|push|publish|release)\\b|\\b(and|then) (commit|push|publish|release)\\b|^(show|review|inspect|see|look at)( me)? (the )?(final )?diff[.!]?$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "When the feature is ready, commit and push it."
+        },
+        {
+          "role": "assistant",
+          "text": "The previous feature was committed and pushed."
+        },
+        {
+          "role": "user",
+          "text": "The suggestions still feel unintelligent. I want them to understand context rather than follow hardcoded rules. Refine the prompt and validate generality. Do not commit yet."
+        },
+        {
+          "role": "assistant",
+          "text": "The prompt is simplified. All unit and terminal tests passed. Of 38 real-service evaluations, 37 met their rubrics and one request failed; that request succeeded on replay. No changes have been committed, pushed or installed. The changes remain local."
+        }
+      ]
+    }
+  },
+  {
+    "name": "tone evaluation supersedes earlier send request",
+    "expected": "suggest",
+    "any_match": "tone|warm|word|draft|version|example|sound",
+    "none_match": "^(send|email|deliver|publish)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Send the customer reply after drafting it."
+        },
+        {
+          "role": "assistant",
+          "text": "The first reply was sent."
+        },
+        {
+          "role": "user",
+          "text": "That sounded too robotic. Revise this new draft to sound warm and natural. Do not send this version yet."
+        },
+        {
+          "role": "assistant",
+          "text": "The new draft is revised and passes the length and required-content checks. It remains unsent."
+        }
+      ]
+    }
+  },
+  {
+    "name": "performance acceptance is not unit test completion",
+    "expected": "suggest",
+    "any_match": "benchmark|latency|p95|measure|performance|load",
+    "none_match": "^(deploy|release|publish)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "The endpoint is too slow. Reduce p95 latency under realistic load; passing correctness tests is not enough. Keep deployment on hold."
+        },
+        {
+          "role": "assistant",
+          "text": "The query path has been optimized and all correctness tests pass. The patch remains local. The load benchmark has not been run."
+        }
+      ]
+    }
+  },
+  {
+    "name": "search quality requires actual query behavior",
+    "expected": "suggest",
+    "any_match": "quer|relevan|example|false|retriev|result|accuracy",
+    "none_match": "^(ship|release|deploy|publish)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Search keeps returning irrelevant matches. Improve semantic relevance and show whether hard queries actually get better, not just whether the code compiles."
+        },
+        {
+          "role": "assistant",
+          "text": "The ranking prompt is updated, all parser tests pass, and the current query fixtures pass. No representative before-and-after results are shown yet."
+        }
+      ]
+    }
+  },
+  {
+    "name": "fully shown evaluation does not create perpetual review",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Show the export-choice example and its actual outputs, then stop. Do not change or ship anything."
+        },
+        {
+          "role": "assistant",
+          "text": "For 'Choose CSV or JSON', the two actual outputs were exactly: 'CSV' and 'JSON'. That is the complete raw output; there is nothing further to show. No changes or delivery actions were performed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "artifact review when explicitly requested",
+    "expected": "suggest",
+    "any_match": "diff|patch|review|change",
+    "none_match": "^(commit|push|publish)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Simplify the prompt without changing runtime behavior. Prepare the final patch for me to inspect before any commit."
+        },
+        {
+          "role": "assistant",
+          "text": "The patch is ready. Checks pass. The final diff has not been shown and nothing is committed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "draft-only result not yet shown",
+    "expected": "suggest",
+    "any_match": "draft|show|read",
+    "none_match": "^send\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Draft a reply to Alex confirming Friday at 2pm. Do not send it; I will handle delivery myself."
+        },
+        {
+          "role": "assistant",
+          "text": "The reply is drafted and checked. It has not been sent, as requested."
+        }
+      ]
+    }
+  },
+  {
+    "name": "completed execution with missing requested output",
+    "expected": "suggest",
+    "any_match": "diff|result|show|test",
+    "none_match": "^(yes|go ahead|implement that)[.!]?$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Apply the fix, then show me the diff and test results."
+        },
+        {
+          "role": "assistant",
+          "text": "Earlier I asked, 'Should I implement this?' That proposal was accepted and completed. The fix is applied and tests passed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "documentation delivery",
+    "expected": "suggest",
+    "any_match": "commit|push|diff|pull request|\\bPR\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Update both documentation pages to clarify that metrics integration requires the Dedicated plan."
+        },
+        {
+          "role": "assistant",
+          "text": "Both pages are updated and both site builds passed. Only these two pages are modified. The changes have not been committed or pushed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "ready email",
+    "expected": "suggest",
+    "any_match": "send|draft|show|Alex",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Draft a reply to Alex confirming Friday at 2pm."
+        },
+        {
+          "role": "assistant",
+          "text": "The reply to Alex is drafted and checked: Friday at 2pm works. It has not been sent."
+        }
+      ]
+    }
+  },
+  {
+    "name": "report awaiting distribution",
+    "expected": "suggest",
+    "any_match": "share|send|team|publish",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Prepare the weekly incident report for the operations team."
+        },
+        {
+          "role": "assistant",
+          "text": "The report is ready. Incident timelines and action owners have been checked. It has not been shared with the operations team."
+        }
+      ]
+    }
+  },
+  {
+    "name": "remote work with idle local runtime",
+    "expected": "suggest",
+    "any_match": "export|progress|result|download|status|complete",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Export the warehouse records to CSV."
+        },
+        {
+          "role": "assistant",
+          "text": "The warehouse accepted the export job. It is running remotely; the download link is not available yet."
+        }
+      ]
+    }
+  },
+  {
+    "name": "choice without a question mark",
+    "expected": "suggest",
+    "any_match": "CSV|JSON",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Export the report."
+        },
+        {
+          "role": "assistant",
+          "text": "Choose an export format: CSV for spreadsheets, or JSON for downstream processing. I will wait for your choice."
+        }
+      ]
+    }
+  },
+  {
+    "name": "execution supersedes earlier proposal",
+    "expected": "suggest",
+    "any_match": "validat|fail|crop|layout|remaining|test",
+    "none_match": "^(yes|go ahead|implement that)[.!]?$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Fix the crop controls and validate the layout."
+        },
+        {
+          "role": "assistant",
+          "text": "I will move the controls into the toolbar. Shall I implement that?"
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "resumed",
+        "last_turn": "interrupted",
+        "pending_tools": 0,
+        "progress": {
+          "calls": 2,
+          "executed": 2,
+          "completed": 1,
+          "failed": 1,
+          "since_last_reply": 2,
+          "awaiting_input": false,
+          "recent": [
+            {
+              "name": "edit",
+              "status": "completed",
+              "description": "Move crop controls into the toolbar"
+            },
+            {
+              "name": "bash",
+              "status": "failed",
+              "description": "Validate crop layout: one geometry assertion failed"
+            }
+          ]
+        },
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "background validation in progress",
+    "expected": "suggest",
+    "any_match": "auth|test|progress|result|status",
+    "none_match": "^(restart|cancel|stop)\\b|run .*tests again",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Validate the authentication changes."
+        },
+        {
+          "role": "assistant",
+          "text": "The focused authentication tests are running in the background."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "running",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 1,
+          "activities": [
+            {
+              "kind": "background",
+              "id": "auth-tests",
+              "phase": "running",
+              "goal": "Run focused authentication tests",
+              "elapsed_minutes": 2,
+              "quiet_minutes": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "waiting loop is not abandoned",
+    "expected": "optional",
+    "any_match": "CI|progress|status|check|result|next",
+    "none_match": "^(restart|cancel|stop)\\b|it is (stuck|hung|failed)",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Monitor the authentication CI every 15 minutes."
+        },
+        {
+          "role": "assistant",
+          "text": "The monitor is active and waiting for the next scheduled check."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "waiting",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0,
+          "activities": [
+            {
+              "kind": "loop",
+              "id": "ci-monitor",
+              "phase": "waiting",
+              "goal": "Monitor authentication CI",
+              "iteration": 3,
+              "cadence": "fixed",
+              "interval_ms": 900000,
+              "wait_reason": "Waiting for next scheduled check",
+              "unchanged_iterations": 2
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "new draft overrides previous workflow",
+    "expected": "suggest",
+    "any_match": "plan|metrics|integration|Dedicated|requirements",
+    "none_match": "^(commit|push)\\b",
+    "request": {
+      "draft": "Instead, explain ",
+      "messages": [
+        {
+          "role": "user",
+          "text": "Clarify the metrics integration plan requirements."
+        },
+        {
+          "role": "assistant",
+          "text": "Both pages now state that metrics integration requires the Dedicated plan. Validation passed. The changes are not committed or pushed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "discussion-only scope",
+    "expected": "suggest",
+    "any_match": "latency|cost",
+    "none_match": "^(implement|deploy|execute)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Discuss the architecture trade-offs only. Do not implement anything."
+        },
+        {
+          "role": "assistant",
+          "text": "The design comparison is ready. Would you like to focus on latency or cost first?"
+        }
+      ]
+    }
+  },
+  {
+    "name": "French intent despite English assistant",
+    "expected": "suggest",
+    "any_match": "envoi|envoy|transmet|montre|brouillon|rédig",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Rédige une réponse à Alex pour confirmer vendredi à 14 heures."
+        },
+        {
+          "role": "assistant",
+          "text": "The reply to Alex is drafted and checked. It has not been sent."
+        }
+      ]
+    }
+  },
+  {
+    "name": "explicitly deferred delivery",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Update both documentation pages locally. Do not commit or push. I will review the diff myself later; do not show it now and do not propose follow-up work."
+        },
+        {
+          "role": "assistant",
+          "text": "Both pages are updated and verified. The changes remain local and uncommitted as requested."
+        }
+      ]
+    }
+  },
+  {
+    "name": "email intentionally draft-only",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Draft a reply to Alex confirming Friday at 2pm. Do not send it; I will handle delivery myself. No further steps are needed."
+        },
+        {
+          "role": "assistant",
+          "text": "Here is the complete draft: 'Hi Alex, Friday at 2pm works for me. See you then.' It has not been sent, as requested."
+        }
+      ]
+    }
+  },
+  {
+    "name": "already delivered code",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Update both pages, verify, commit and push the changes."
+        },
+        {
+          "role": "assistant",
+          "text": "Both pages are updated, both builds passed, and the changes are committed and pushed to main. The working tree is clean. There are no remaining steps."
+        }
+      ]
+    }
+  },
+  {
+    "name": "factual answer without a workflow",
+    "expected": "optional",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Which plan supports metrics integration?"
+        },
+        {
+          "role": "assistant",
+          "text": "Metrics integration requires the Dedicated plan. It is not supported on the Business plan."
+        }
+      ]
+    }
+  },
+  {
+    "name": "historical worker is not live work",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Run the validation and report the result."
+        },
+        {
+          "role": "assistant",
+          "text": "The background validation finished successfully. All tests passed. No workers remain running and no further steps are needed."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "resumed",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "progress": {
+          "calls": 1,
+          "executed": 1,
+          "completed": 1,
+          "failed": 0,
+          "since_last_reply": 0,
+          "awaiting_input": false,
+          "recent": [
+            {
+              "name": "bash",
+              "status": "completed",
+              "description": "Run validation in a background worker"
+            }
+          ]
+        },
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "quoted proposal is already resolved",
+    "expected": "abstain",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Apply the fix and run the tests."
+        },
+        {
+          "role": "assistant",
+          "text": "Earlier I asked, 'Should I implement this?' That proposal was already accepted and completed. The complete one-line diff is: '- return null; + return result;'. Test results: 24 passed, 0 failed. The requested work is finished and there are no remaining steps."
+        }
+      ]
+    }
+  },
+  {
+    "name": "habit: review-before-commit user gets review first",
+    "expected": "suggest",
+    "any_match": "diff|review|show|look",
+    "none_match": "^(commit|push)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Now tighten the retry backoff in the uploader."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Backoff is exponential with jitter, capped at 30s. Unit tests pass. Staged, not committed."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Add a size limit to the uploader.",
+            "assistant": "Added a 50MB limit.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Show me the diff before committing.",
+            "assistant": "Diff shown.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Looks good, commit it.",
+            "assistant": "Committed 3f2a1c9.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Make the error mention the limit in MB.",
+            "assistant": "Updated.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Diff please.",
+            "assistant": "Diff shown.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit.",
+            "assistant": "Committed 8b7d0e2.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "habit: ship-immediately user gets commit first",
+    "expected": "suggest",
+    "any_match": "commit|push|ship",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Now tighten the retry backoff in the uploader."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Backoff is exponential with jitter, capped at 30s. Unit tests pass. Staged, not committed."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Add a size limit to the uploader.",
+            "assistant": "Added a 50MB limit. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed 3f2a1c9.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Make the error mention the limit in MB.",
+            "assistant": "Updated. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed 8b7d0e2.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Fix the flaky retry test.",
+            "assistant": "Fixed. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed 1c0ffee.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "habit: repeated failures on the same task invite a change of approach",
+    "expected": "suggest",
+    "any_match": "different|instead|alternative|why|root|approach|skip|revert|manual",
+    "none_match": "^(try again|retry|run (it|the migration) again)[.!]?$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Try the migration again."
+        },
+        {
+          "role": "assistant",
+          "text": "The migration failed again with the same foreign key error on orders.customer_id."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "failed",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Run the database migration.",
+            "assistant": "Migration failed: foreign key error.",
+            "tools": 2,
+            "failed": 1,
+            "outcome": "failed"
+          },
+          {
+            "user": "Try again.",
+            "assistant": "Failed again, same error.",
+            "tools": 1,
+            "failed": 1,
+            "outcome": "failed"
+          },
+          {
+            "user": "Try again.",
+            "assistant": "Same foreign key error.",
+            "tools": 1,
+            "failed": 1,
+            "outcome": "failed"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "stage: loop active, user asks about findings not restart",
+    "expected": "suggest",
+    "any_match": "found|so far|status|update|result|stop|change|cadence|interval|check",
+    "none_match": "^(restart|start)\\b|again",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "/loop every 10m check whether PR 482 is green and tell me when it is"
+        },
+        {
+          "role": "assistant",
+          "text": "Loop started. I will check PR 482 every 10 minutes."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "waiting",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0,
+          "activities": [
+            {
+              "kind": "loop",
+              "id": "loop:1",
+              "goal": "check whether PR 482 is green",
+              "phase": "waiting",
+              "iteration": 4,
+              "cadence": "fixed",
+              "interval_ms": 600000,
+              "wait_reason": "CI still running",
+              "unchanged_iterations": 3
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "stage: background build running, user does not duplicate it",
+    "expected": "suggest",
+    "any_match": "status|progress|log|output|meanwhile|while|when it finishes|done",
+    "none_match": "^(run|start|rebuild)\\b.*(build|docker)|build (it|the image) again",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Build the docker image in the background and run the unit tests meanwhile."
+        },
+        {
+          "role": "assistant",
+          "text": "Docker build started in the background. Unit tests passed: 212/212."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "waiting",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 1,
+          "activities": [
+            {
+              "kind": "background",
+              "id": "b1",
+              "goal": "Build the docker image",
+              "phase": "running",
+              "elapsed_minutes": 6,
+              "quiet_minutes": 2
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "stage: awaiting explicit input is answered not redirected",
+    "expected": "suggest",
+    "any_match": "staging|production|prod",
+    "none_match": "deploy both|cancel",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Deploy the release."
+        },
+        {
+          "role": "assistant",
+          "text": "Which environment should I deploy to: staging or production?"
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "progress": {
+          "calls": 1,
+          "executed": 1,
+          "completed": 0,
+          "failed": 0,
+          "since_last_reply": 0,
+          "awaiting_input": true,
+          "recent": [
+            {
+              "name": "ask_user",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "stage: recovering after interrupt resumes or redirects, not approves",
+    "expected": "suggest",
+    "any_match": "continue|resume|finish|remaining|instead|skip|state|what did",
+    "none_match": "^(yes|ok|go ahead)[.!]?$",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Rename the module across the repo."
+        },
+        {
+          "role": "assistant",
+          "text": "I will rename in 14 files. Starting now."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "resumed",
+        "last_turn": "interrupted",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "progress": {
+          "calls": 14,
+          "executed": 9,
+          "completed": 9,
+          "failed": 0,
+          "since_last_reply": 9,
+          "awaiting_input": false,
+          "recent": [
+            {
+              "name": "edit",
+              "status": "completed"
+            },
+            {
+              "name": "edit",
+              "status": "completed"
+            },
+            {
+              "name": "edit",
+              "status": "pending"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "latest one-off constraint beats long habit",
+    "expected": "suggest",
+    "any_match": "diff|review|show|look|test|check",
+    "none_match": "^(commit|push)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Refactor the cache layer. Hold off on committing this one, I want to look first."
+        },
+        {
+          "role": "assistant",
+          "text": "Refactor done, tests pass. Staged, not committed, as requested."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix A.",
+            "assistant": "Done.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Fix B.",
+            "assistant": "Done.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Fix C.",
+            "assistant": "Done.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "start state: surfaced anomaly is the launch point, not the loose end",
+    "expected": "suggest",
+    "any_match": "spike|p99|03:00|why|cause|investigat|look into|dig",
+    "none_match": "^(commit|push|merge)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Add the latency dashboard panel."
+        },
+        {
+          "role": "assistant",
+          "text": "Panel added and rendering. While checking it I noticed p99 spikes to 4s every night around 03:00 for the last week; p50 is flat. The panel change is staged but not committed."
+        }
+      ]
+    }
+  },
+  {
+    "name": "start state: probe an unsupported claim",
+    "expected": "suggest",
+    "any_match": "how|where|source|evidence|verify|sure|confirm|check|which",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Find out which library version introduced the regression."
+        },
+        {
+          "role": "assistant",
+          "text": "It was introduced in 2.3.1. I have updated the pin to 2.3.0 and the tests pass."
+        }
+      ]
+    }
+  },
+  {
+    "name": "start state: a list that looks incomplete gets questioned",
+    "expected": "suggest",
+    "any_match": "missing|miss|nvda|nvidia|only|all|other|complete|rest|which etf",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "List the top semiconductor holdings by weight in the ETF."
+        },
+        {
+          "role": "assistant",
+          "text": "Top holdings: TSM 11.2%, AVGO 9.8%, AMD 5.1%, QCOM 4.3%, ASML 4.0%."
+        }
+      ]
+    }
+  },
+  {
+    "name": "start state: dismissed problem is not revived",
+    "expected": "suggest",
+    "any_match": "commit|push|next|move on|ship",
+    "none_match": "spike|p99|03:00|investigat",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Add the latency dashboard panel."
+        },
+        {
+          "role": "assistant",
+          "text": "Panel added. I also noticed nightly p99 spikes around 03:00. Panel change staged, not committed."
+        },
+        {
+          "role": "user",
+          "text": "The spikes are the known backup job, ignore them."
+        },
+        {
+          "role": "assistant",
+          "text": "Understood, ignoring the 03:00 spikes. The panel change remains staged and not committed."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix the alert threshold.",
+            "assistant": "Fixed, staged.",
+            "tools": 2,
+            "failed": 0,
+            "outcome": "answered"
+          },
+          {
+            "user": "Commit and push.",
+            "assistant": "Pushed.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "start state: already-fixed problem is not re-proposed",
+    "expected": "suggest",
+    "none_match": "fix (the )?(null|crash)|handle (the )?null",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Why does the import crash on empty rows?"
+        },
+        {
+          "role": "assistant",
+          "text": "Empty rows produced a null customer_id and the parser dereferenced it. I added a guard that skips such rows with a warning; the crash no longer reproduces and the 3 affected fixtures pass. Nothing is committed yet."
+        }
+      ]
+    }
+  },
+  {
+    "name": "drift: assistant answered a different question, user pulls back",
+    "expected": "suggest",
+    "any_match": "asked|question|not what|no,|I meant|prefix|expanded|back to|original",
+    "none_match": "cost|aws|budget",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Can we analyze prefix distribution and per-tenant object counts from the expanded stats table?"
+        },
+        {
+          "role": "assistant",
+          "text": "I estimated monthly storage cost per tenant from the stats table: tenant A $4.2k, tenant B $1.9k. Note these are estimates; AWS Cost Explorer remains the source of truth and I should reconcile against it next."
+        }
+      ]
+    }
+  },
+  {
+    "name": "drift: assistant over-reached beyond scope, user reins in",
+    "expected": "suggest",
+    "any_match": "revert|undo|only|didn't ask|did not ask|just|scope|back out|why did you",
+    "none_match": "^(commit|push)\\b",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Only rename the config key, nothing else."
+        },
+        {
+          "role": "assistant",
+          "text": "Renamed the key. I also refactored the loader into three modules and switched the parser to the new library; tests pass. One remaining issue: the new parser is slower on large files, I should profile that next."
+        }
+      ]
+    }
+  },
+  {
+    "name": "drift: assistant contradicts an established constraint",
+    "expected": "suggest",
+    "any_match": "said|told|earlier|dedicated|business|wrong|incorrect|not supported|fix that|revert",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Update both docs pages: metrics integration is Dedicated plan only, Business plan does not support it."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Both pages now say metrics integration is available on Business and Dedicated plans. While editing I noticed the sidebar link to the metrics page is broken; I can fix that next."
+        }
+      ]
+    }
+  },
+  {
+    "name": "on-track: same surfaced issue is followed when the reply matches the ask",
+    "expected": "suggest",
+    "any_match": "sidebar|link|broken|fix",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Update both docs pages: metrics integration is Dedicated plan only, Business plan does not support it."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Both pages now say metrics integration requires the Dedicated plan and is not supported on Business. While editing I noticed the sidebar link to the metrics page is broken; I can fix that next."
+        }
+      ]
+    }
+  },
+  {
+    "name": "trajectory: after a code change this user deploys",
+    "expected": "suggest",
+    "any_match": "^commit and deploy|deploy",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Bump the rate limit to 500 rps."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Config updated and the limiter test passes. Staged."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix the retry bug.",
+            "assistant": "Fixed; limiter test passes. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "fresh"
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 1a2b.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Fixed; limiter test passes. Staged."
+            }
+          },
+          {
+            "user": "Why is p95 up since Monday?",
+            "assistant": "p95 rose 40% after the cache change; miss rate 4%->31%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 1a2b."
+            }
+          },
+          {
+            "user": "Show me miss rate by key prefix.",
+            "assistant": "Top prefixes: session:* 62%, user:* 21%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "p95 rose 40% after the cache change; miss rate 4%->31%."
+            }
+          },
+          {
+            "user": "Lower the cache TTL for session keys to 5m.",
+            "assistant": "Done; tests pass. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Top prefixes: session:* 62%, user:* 21%."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 3c4d.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Done; tests pass. Staged."
+            }
+          },
+          {
+            "user": "Add a health endpoint.",
+            "assistant": "Added with a test. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 3c4d."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 5e6f.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Added with a test. Staged."
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "trajectory: after an analysis reply this user digs, not deploys",
+    "expected": "suggest",
+    "none_match": "^commit and deploy|^deploy",
+    "any_match": "why|which|show|break|prefix|cause|when|how",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Why did error rate spike at 02:00?"
+        },
+        {
+          "role": "assistant",
+          "text": "The spike aligns with the nightly reindex job; 5xx came from timeouts on the search service during that window."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix the retry bug.",
+            "assistant": "Fixed; limiter test passes. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "fresh"
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 1a2b.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Fixed; limiter test passes. Staged."
+            }
+          },
+          {
+            "user": "Why is p95 up since Monday?",
+            "assistant": "p95 rose 40% after the cache change; miss rate 4%->31%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 1a2b."
+            }
+          },
+          {
+            "user": "Show me miss rate by key prefix.",
+            "assistant": "Top prefixes: session:* 62%, user:* 21%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "p95 rose 40% after the cache change; miss rate 4%->31%."
+            }
+          },
+          {
+            "user": "Lower the cache TTL for session keys to 5m.",
+            "assistant": "Done; tests pass. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Top prefixes: session:* 62%, user:* 21%."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 3c4d.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Done; tests pass. Staged."
+            }
+          },
+          {
+            "user": "Add a health endpoint.",
+            "assistant": "Added with a test. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 3c4d."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 5e6f.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Added with a test. Staged."
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "trajectory: deferral in the current ask overrides the habit",
+    "expected": "suggest",
+    "none_match": "^deploy|commit and deploy",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Bump the rate limit to 500 rps. Don't deploy this one yet, I want to watch staging first."
+        },
+        {
+          "role": "assistant",
+          "text": "Done. Config updated and the limiter test passes. Staged, not deployed, as requested."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix the retry bug.",
+            "assistant": "Fixed; limiter test passes. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "fresh"
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 1a2b.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Fixed; limiter test passes. Staged."
+            }
+          },
+          {
+            "user": "Why is p95 up since Monday?",
+            "assistant": "p95 rose 40% after the cache change; miss rate 4%->31%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 1a2b."
+            }
+          },
+          {
+            "user": "Show me miss rate by key prefix.",
+            "assistant": "Top prefixes: session:* 62%, user:* 21%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "p95 rose 40% after the cache change; miss rate 4%->31%."
+            }
+          },
+          {
+            "user": "Lower the cache TTL for session keys to 5m.",
+            "assistant": "Done; tests pass. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Top prefixes: session:* 62%, user:* 21%."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 3c4d.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Done; tests pass. Staged."
+            }
+          },
+          {
+            "user": "Add a health endpoint.",
+            "assistant": "Added with a test. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 3c4d."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 5e6f.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Added with a test. Staged."
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "trajectory: same move from an unlike state does not carry over",
+    "expected": "suggest",
+    "none_match": "^commit and deploy",
+    "request": {
+      "messages": [
+        {
+          "role": "user",
+          "text": "Draft a short incident note for the 02:00 spike."
+        },
+        {
+          "role": "assistant",
+          "text": "Draft ready: root cause nightly reindex contention, impact 4 min of elevated 5xx, fix TTL + job reschedule. Not sent."
+        }
+      ],
+      "workflow": {
+        "schema_version": 1,
+        "session": "active",
+        "last_turn": "answered",
+        "pending_tools": 0,
+        "runtime": {
+          "execution": "idle",
+          "mode": "normal",
+          "queued_inputs": 0,
+          "background_tasks": 0
+        },
+        "thread": [
+          {
+            "user": "Fix the retry bug.",
+            "assistant": "Fixed; limiter test passes. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "fresh"
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 1a2b.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Fixed; limiter test passes. Staged."
+            }
+          },
+          {
+            "user": "Why is p95 up since Monday?",
+            "assistant": "p95 rose 40% after the cache change; miss rate 4%->31%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 1a2b."
+            }
+          },
+          {
+            "user": "Show me miss rate by key prefix.",
+            "assistant": "Top prefixes: session:* 62%, user:* 21%.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "p95 rose 40% after the cache change; miss rate 4%->31%."
+            }
+          },
+          {
+            "user": "Lower the cache TTL for session keys to 5m.",
+            "assistant": "Done; tests pass. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Top prefixes: session:* 62%, user:* 21%."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 3c4d.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Done; tests pass. Staged."
+            }
+          },
+          {
+            "user": "Add a health endpoint.",
+            "assistant": "Added with a test. Staged.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Deployed 3c4d."
+            }
+          },
+          {
+            "user": "commit and deploy",
+            "assistant": "Deployed 5e6f.",
+            "tools": 1,
+            "failed": 0,
+            "outcome": "answered",
+            "from": {
+              "stage": "answered",
+              "reply": "Added with a test. Staged."
+            }
+          }
+        ]
+      }
+    }
+  }
+]

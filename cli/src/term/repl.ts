@@ -93,7 +93,7 @@ import {
 } from './input/editor.js'
 import { UndoStack } from './input/undo-stack.js'
 import { commandIdentity, validCommandInput, type CommandInventory } from './app/suggestion/arguments.js'
-import { SuggestionContext } from './app/suggestion/context.js'
+import { SuggestionContext, type WorkflowRuntime } from './app/suggestion/context.js'
 import { activeWork } from './app/suggestion/activities.js'
 import { suggestionImages } from './app/suggestion/images.js'
 import { prepareSuggestion } from './app/suggestion/request.js'
@@ -529,18 +529,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     key: () => `${suggestionContextId}:${planning}:${!!logMode}`,
     eligible: suggestionInputReady,
     automaticEligible: automaticSuggestionEligible,
-    context: () => {
-      const background = backgroundTerminals.runningProcesses()
-      const loop = loopSession.snapshot
-      return suggestionContext.snapshot({
-        execution: isLoading ? (['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
-          : loop?.active || background.length > 0 ? 'waiting' : 'idle',
-        mode: logMode ? 'log' : planning ? 'plan' : 'normal',
-        queued: queuedUserMessages.length + queuedCompactionSubmissions.length,
-        background: background.length, plan: planModeItems,
-        activities: activeWork(background, loop, loopSession.runInFlight),
-      })
-    },
+    context: () => suggestionContext.snapshot(liveWorkflowRuntime()),
     validate: text => validCommandInput(text, suggestionInventory),
     identity: text => commandIdentity(text, suggestionInventory),
     allowsCommand: text => allowedSuggestionCommand(text, composerPolicy().allowedCommands),
@@ -2049,8 +2038,23 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     committer.restore(outputLines, expandedOutputLines)
   }
 
+  /** Runtime facts as the suggestion layer sees them; also recorded as the
+   * stage a user acted from, so the trajectory carries real transitions. */
+  function liveWorkflowRuntime(): WorkflowRuntime {
+    const background = backgroundTerminals.runningProcesses()
+    const loop = loopSession.snapshot
+    return {
+      execution: isLoading ? (['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
+        : loop?.active || background.length > 0 ? 'waiting' : 'idle',
+      mode: logMode ? 'log' : planning ? 'plan' : 'normal',
+      queued: queuedUserMessages.length + queuedCompactionSubmissions.length,
+      background: background.length, plan: planModeItems,
+      activities: activeWork(background, loop, loopSession.runInFlight),
+    }
+  }
+
   function commitUserMessage(text: string): void {
-    suggestionContext.user(text)
+    suggestionContext.user(text, liveWorkflowRuntime())
     commitLines(buildUserMessage(text))
   }
 

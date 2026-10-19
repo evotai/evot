@@ -133,38 +133,67 @@ fn malformed_services_disable_without_fallback() -> TestResult {
 }
 
 #[test]
-fn prompt_prioritizes_typed_intent_pending_questions_and_distinct_candidates() -> TestResult {
+fn prompt_preserves_conversation_and_a_bounded_prediction_contract() -> TestResult {
     let config = prompt_config(
         &endpoint(),
         &history("Add tests", "Ready."),
         &SuggestionHints::default(),
     )
     .ok_or("no config")?;
-    // Assert behavior, not fidelity to a prompt with incompatible UX rules.
-    let (source, language) = instructions(&config)
-        .ok_or("missing instruction turn")?
-        .split_once("\n\nLANGUAGE IS MANDATORY:")
-        .ok_or("missing language requirement")?;
-    assert!(source.contains("DRAFT IN PROGRESS is the strongest evidence of intent"));
-    assert!(source.contains("Questions and clarification requests must address genuine unknowns"));
-    assert!(source.contains("an empty composer is not an invitation to invent follow-up work"));
-    assert!(
-        source.contains("discard any candidate whose answer is already in the recent conversation")
-    );
-    assert!(source.contains("Do not invent missing personal details"));
-    assert!(source.starts_with(
-        "[SUGGESTION MODE: Suggest what the user might naturally type next into evot.]"
-    ));
-    assert!(source.contains("THE LATEST ASSISTANT MESSAGE MATTERS MOST"));
-    assert!(source.contains("asks a question"));
-    assert!(source.contains("Differences must change the action, scope or constraint"));
-    assert!(language.contains("3 distinct suggestions, one per line"));
-    assert!(!source.contains("Codex"));
-    assert!(language.contains("most recent user message"));
+    let recent = history("Add tests", "Ready.");
+    for (message, original) in config.messages.iter().zip(&recent) {
+        assert_eq!(message.role(), original.role);
+        assert_eq!(message_text(message), Some(original.text.as_str()));
+    }
+    assert_eq!(config.messages.len(), recent.len() + 1);
+    let instruction = instructions(&config).ok_or("missing instruction turn")?;
+    assert!(instruction.len() < 5_000);
     assert!(config.system_prompt.is_empty());
-    assert!(!instructions(&config)
-        .ok_or("missing instructions")?
-        .contains("NONE"));
+    assert!(config.tools.is_empty());
+    assert_eq!(config.thinking_level, ThinkingLevel::Off);
+    assert_eq!(config.max_tokens, Some(192));
+    Ok(())
+}
+
+#[tokio::test]
+async fn output_length_contract_excludes_the_literal_prefix_without_relaxing_validation(
+) -> TestResult {
+    let prefix = "a".repeat(400);
+    let messages = history("Extend this token", "Ready.");
+    for rewriting in [false, true] {
+        let hints = SuggestionHints {
+            explicit: true,
+            draft: Some(prefix.clone()),
+            suffix: rewriting.then(String::new),
+            ..Default::default()
+        };
+        let config = prompt_config(&endpoint(), &messages, &hints).ok_or("missing config")?;
+        // This is an editor/protocol size contract, not an intent instruction.
+        assert!(instructions(&config)
+            .ok_or("missing instructions")?
+            .contains("At most 160 characters of new text"));
+        for size in [160, 161] {
+            let tail = "b".repeat(size);
+            let response = if rewriting {
+                serde_json::to_string(&vec![tail.clone()])?
+            } else {
+                format!("{prefix}{tail}")
+            };
+            let result = sample(
+                &endpoint(),
+                &messages,
+                &hints,
+                Arc::new(MockProvider::text(response)),
+                CancellationToken::new(),
+            )
+            .await;
+            if size == 160 {
+                assert_eq!(result, vec![tail]);
+            } else {
+                assert!(result.is_empty());
+            }
+        }
+    }
     Ok(())
 }
 

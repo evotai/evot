@@ -203,6 +203,17 @@ pub async fn sample_with_updates(
             _ => {}
         }
     }
+    // Lengths only: distinguish model abstention from otherwise useful text
+    // rejected by the output contract without logging user content or secrets.
+    let returned_candidate_chars = serde_json::from_str::<Vec<String>>(&text)
+        .ok()
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| item.chars().count())
+                .collect::<Vec<_>>()
+        });
+    tracing::debug!(target: "evot::suggestion", stage = "response_shape", returned_candidate_chars = ?returned_candidate_chars);
     let candidates = validated(&text, messages, hints);
     if !candidates.is_empty() {
         first_candidate_ms.get_or_insert(started.elapsed().as_millis());

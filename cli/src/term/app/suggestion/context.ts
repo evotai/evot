@@ -1,5 +1,5 @@
 import type { TranscriptItem } from '../../../native/contracts/results.js'
-import type { SuggestionMessage, SuggestionTasks, SuggestionTurn, SuggestionWorkflow } from '../../../native/contracts/suggestion.js'
+import type { SuggestionExchange, SuggestionMessage, SuggestionTasks, SuggestionTurn, SuggestionWorkflow } from '../../../native/contracts/suggestion.js'
 import { runContextEvent, transcriptContextEvents, type ContextEvent } from './events.js'
 import { recentHistory } from './history.js'
 import { SuggestionProgressLedger } from './progress.js'
@@ -30,6 +30,13 @@ export class SuggestionContext {
   private tasks: SuggestionTasks | undefined
   private progress = new SuggestionProgressLedger()
   private replyAvailable = false
+  /** Closed exchanges, oldest first. The open one lives in `current`. */
+  private thread: SuggestionExchange[] = []
+  private current: SuggestionExchange | undefined
+  /** Stage at the instant the user acted, set by `user()` before apply.
+   * Replayed transcripts have no live runtime, so they derive it from the
+   * observed lifecycle alone. */
+  private leaving: string | undefined
 
   clear(): void {
     this.messages = []
@@ -38,6 +45,9 @@ export class SuggestionContext {
     this.tasks = undefined
     this.progress.clear()
     this.replyAvailable = false
+    this.thread = []
+    this.current = undefined
+    this.leaving = undefined
   }
 
   restore(items: readonly TranscriptItem[], session: SuggestionWorkflow['session'] = 'resumed'): void {
@@ -57,7 +67,11 @@ export class SuggestionContext {
 
   get hasAnswer(): boolean { return this.replyAvailable && this.turn === 'answered' }
 
-  user(text: string): void { this.apply({ kind: 'user', text }) }
+  user(text: string, runtime: WorkflowRuntime = IDLE_WORKFLOW): void {
+    this.leaving = this.stageNow(runtime)
+    this.apply({ kind: 'user', text })
+    this.leaving = undefined
+  }
   begin(): void { this.apply({ kind: 'begin' }) }
   interrupt(): void { this.apply({ kind: 'interrupt' }) }
   fail(): void { this.apply({ kind: 'error' }) }
@@ -74,18 +88,22 @@ export class SuggestionContext {
       next: plan.slice(0, 6).map(item => ({ text: taskLabel(item.text), status: 'pending' as const })),
     } : undefined)
     const progress = this.progress.snapshot()
+    // Only exchanges older than the verbatim window add information.
+    const messages = recentHistory(this.messages)
+    const verbatimUsers = messages.filter(message => message.role === 'user').length
+    const thread = this.thread.slice(0, Math.max(0, this.thread.length - (verbatimUsers - (this.current ? 1 : 0))))
     const workflow: SuggestionWorkflow = {
       schema_version: 1, session: this.session, last_turn: this.turn,
       pending_tools: this.progress.pendingCount,
       ...(tasks ? { tasks: { ...tasks, next: tasks.next.map(item => ({ ...item })) } } : {}),
       ...(progress ? { progress } : {}),
+      ...(thread.length ? { thread: thread.map(exchange => ({ ...exchange })) } : {}),
       runtime: { execution: runtime.execution, mode: runtime.mode, queued_inputs: runtime.queued, background_tasks: runtime.background,
         ...(runtime.activities?.length ? { activities: runtime.activities.map(activity => ({ ...activity })) } : {}),
       },
     }
     const recovering = runtime.execution === 'idle' && !runtime.queued && !runtime.background && !runtime.activities?.length
       && (workflow.pending_tools > 0 || ['unfinished', 'interrupted', 'failed'].includes(this.turn))
-    const messages = recentHistory(this.messages)
     return { messages, workflow, answered: this.hasAnswer,
       automatic: messages.some(message => message.role === 'user')
         && (recovering || (this.replyAvailable && ['answered', 'unknown'].includes(this.turn) && messages.at(-1)?.role === 'assistant')),
@@ -99,6 +117,7 @@ export class SuggestionContext {
         this.tasks = undefined
         this.progress.clear()
         this.push('user', event.text)
+        this.open(event.text)
         // A new goal and a new run both begin an unfinished exchange.
       case 'begin':
         this.session = 'active'; this.turn = 'unfinished'; this.replyAvailable = false
@@ -112,8 +131,10 @@ export class SuggestionContext {
           this.progress.reply()
           this.push('assistant', event.text)
           this.tasks = checklistTasks(event.text) ?? this.tasks
+          if (this.current) this.current.assistant = exchangeLabel(event.text, 100)
         }
         for (const tool of event.tools) this.progress.call(tool)
+        if (this.current) this.current.tools += event.tools.length
         this.turn = event.turn
         this.replyAvailable = Boolean(event.text.trim())
         break
@@ -121,8 +142,35 @@ export class SuggestionContext {
       case 'tool_finished':
         this.progress.finished(event.id, event.name, event.failed)
         if (event.failed) { this.turn = 'failed'; this.replyAvailable = false }
+        if (this.current && event.failed) this.current.failed++
         break
     }
+    if (this.current) this.current.outcome = this.turn
+  }
+
+  /** Close the previous exchange with its final outcome and start a new one.
+   * The opening exchange is pinned: it usually names the session's goal. */
+  private open(text: string): void {
+    // Capture the state being left before anything about the new ask is applied.
+    const from = { ...(this.current?.assistant ? { reply: this.current.assistant } : {}), stage: this.leaving ?? this.stageNow(IDLE_WORKFLOW) }
+    if (this.current) {
+      this.thread.push(this.current)
+      if (this.thread.length > 48) this.thread.splice(1, 1)
+    }
+    this.current = { user: exchangeLabel(text, 120), tools: 0, failed: 0, outcome: 'unfinished', from }
+  }
+
+  /** Same derivation as the Rust `stage()`, from the runtime at the moment a user acts. */
+  private stageNow(runtime: WorkflowRuntime): string {
+    const live = (kind: string) => runtime.activities?.some(a => a.kind === kind && (a.phase === 'running' || a.phase === 'waiting')) ?? false
+    if (live('loop')) return 'loop'
+    if (live('background') || runtime.background > 0) return 'background'
+    if (runtime.execution === 'running' || runtime.execution === 'retrying') return 'foreground_running'
+    if (runtime.queued > 0) return 'queued'
+    if (this.progress.snapshot()?.awaiting_input) return 'awaiting_input'
+    if (this.turn === 'unfinished' || this.turn === 'interrupted' || this.turn === 'failed') return 'recovering'
+    if (this.turn === 'answered') return 'answered'
+    return 'fresh'
   }
 
   private push(role: SuggestionMessage['role'], text: string): void {
@@ -137,4 +185,10 @@ export class SuggestionContext {
     let total = this.messages.reduce((sum, message) => sum + message.text.length, 0)
     while (this.messages.length > 64 || (total > 131_072 && this.messages.length > 2)) total -= this.messages.shift()?.text.length ?? 0
   }
+}
+
+/** First line of prose, bounded. Enough to recall the ask, never a transcript. */
+function exchangeLabel(text: string, length: number): string {
+  const paragraph = text.trim().split(/\n\s*\n/)[0] ?? ''
+  return Array.from(paragraph.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, length).join('')
 }

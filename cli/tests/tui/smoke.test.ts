@@ -4,11 +4,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { smokeEnvironment, seedSmokeHome } from '../helpers/smoke-home.js'
-import { suggestionInstructions } from '../helpers/suggestion-request.js'
+import { suggestionInstructions, suggestionWorkflow } from '../helpers/suggestion-request.js'
 import { fixtureClipboard } from '../helpers/clipboard.js'
 import { suggestionImageFixture } from '../helpers/suggestion-image.js'
 import closedFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-closed.json'
 import externalWorkFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-external-work.json'
+import handoffFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-handoff.json'
+import generalityCases from '../fixtures/suggestion-generality.json'
 import { getTheme } from '../../src/render/theme/index.js'
 import { ScreenHarness } from '../helpers/screen.js'
 
@@ -935,7 +937,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       }
       predictions++
       const instructions = suggestionInstructions(body)
-      expect(instructions).toContain('Current task state: running')
+      expect(instructions).toContain('CURRENT STAGE: foreground_running')
       const chunk = { id: 'prediction', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['new', 'another', 'later']) }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
@@ -1208,9 +1210,9 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
   }, 60_000)
 
   for (const scenario of [
-    { name: 'interrupted work', reason: 'aborted', text: '- [x] Implement changes\n- [ ] Run validation', group: 'resume_recover', candidate: 'Resume remaining validation' },
-    { name: 'pending question', reason: 'stop', text: 'Unit tests or integration tests?', group: 'assess_next, respond, review_follow_up', candidate: 'Run the unit tests' },
-    { name: 'tool-only interrupted work', reason: 'aborted', text: '', group: 'resume_recover, start_redirect', candidate: 'Continue the remaining validation', execution: true },
+    { name: 'interrupted work', reason: 'aborted', text: '- [x] Implement changes\n- [ ] Run validation', candidate: 'Resume remaining validation' },
+    { name: 'pending question', reason: 'stop', text: 'Unit tests or integration tests?', candidate: 'Run the unit tests' },
+    { name: 'tool-only interrupted work', reason: 'aborted', text: '', candidate: 'Continue the remaining validation', execution: true },
   ]) test(`workflow-aware resume distinguishes ${scenario.name} without executing input`, async () => {
     const requests: Record<string, unknown>[] = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
@@ -1218,13 +1220,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(body.model).toBe('suggestion-fixture')
       requests.push(body)
       const instruction = suggestionInstructions(body)
-      expect(instruction).toContain(`INTENT GROUPS, most relevant first: ${scenario.group}`)
+      expect(suggestionWorkflow(body).last_turn).toBe(scenario.reason === 'stop' ? 'answered' : 'interrupted')
       expect(instruction).toContain('"session":"resumed"')
       expect(instruction).toContain('"background_tasks":0')
       if ('execution' in scenario) {
         expect(instruction).toContain('"since_last_reply":3')
         expect(instruction).toContain('Inspect the remaining layout mismatch')
-        expect(instruction).toContain('EXECUTION CHRONOLOGY')
+        expect(suggestionWorkflow(body).progress?.awaiting_input).toBe(false)
         expect(JSON.stringify(body)).not.toContain('DO_NOT_SEND')
       }
       const text = instruction.includes('CURSOR REWRITE MODE') ? JSON.stringify([scenario.candidate]) : scenario.candidate
@@ -1307,7 +1309,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const instruction = suggestionInstructions(body)
       expect(JSON.stringify(body.messages)).toContain('The image build has started')
       expect(instruction).toContain('"execution":"idle"')
-      expect(instruction).toContain('Idle runtime does not prove the overall task is done')
+      expect(suggestionWorkflow(body).runtime.background_tasks).toBe(0)
       const candidates = ['Check the image build progress', 'Show the resulting image tag']
       const text = instruction.includes('CURSOR REWRITE MODE') ? JSON.stringify(candidates) : candidates.join('\n')
       const chunk = { id: 'remote-work', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
@@ -1335,14 +1337,65 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
+  for (const scenario of [
+    { name: 'validated but uncommitted changes offer a grounded handoff without sending or executing it',
+      messages: handoffFixture.messages, evidence: 'have not been committed or pushed',
+      candidates: ['Commit the documentation changes', 'Commit and push the changes'] },
+    { name: 'quality assessment suggestions preserve the latest deferral through resume, Tab and acceptance',
+      messages: generalityCases.find(item => item.name === 'quality assessment supersedes earlier release request')?.request.messages ?? [],
+      evidence: 'Do not commit yet', candidates: ['Show actual suggestion examples', 'Investigate the failed evaluation request'] },
+  ]) test(scenario.name, async () => {
+    let requests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      requests++
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('suggestion-fixture')
+      const instruction = suggestionInstructions(body)
+      expect(suggestionWorkflow(body).last_turn).toBe('answered')
+      expect(JSON.stringify(body.messages)).toContain(scenario.evidence)
+      const candidates = scenario.candidates
+      const content = instruction.includes('CURSOR REWRITE MODE') ? JSON.stringify(candidates) : candidates.join('\n')
+      const chunk = { id: 'handoff', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(true, false, false, base, home => {
+        seedSuggestionService(home, base)
+        expect(scenario.messages.length).toBeGreaterThan(0)
+        seedSuggestionConversation(home, scenario.messages)
+      }, ['--resume', SEEDED_SESSION_ID])
+      await session.waitForScreen(new RegExp(`${scenario.candidates[0]}\\s+1/2 ⇥`))
+      session.write('\x1b')
+      await session.waitForScreen(/Enter a coding task/)
+      session.write('\t')
+      await session.waitForScreen(new RegExp(`${scenario.candidates[0]}\\s+1/2 ⇥`))
+      session.write('\t')
+      await session.waitForScreen(new RegExp(`${scenario.candidates[1]}\\s+2/2 ⇥`))
+      session.write('\x1b[C')
+      await session.waitForScreen(new RegExp(`^(?![\\s\\S]*⇥)[\\s\\S]*${scenario.candidates[1]}`))
+      expect(requests).toBe(2)
+      expect(session.historyEntries()).toEqual([])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
   test('startup resume produces one suggestion without a new turn', async () => {
     let requests = 0
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as { model: string; messages: { content: string }[] }
       expect(body.model).toBe('suggestion-fixture')
-      suggestionInstructions(body)
-      expect(JSON.stringify(body.messages)).not.toContain('smoke resume prompt')
+      // The oldest ask falls out of the verbatim window but is carried, condensed,
+      // in the trajectory so the long-horizon goal is not lost.
       expect(body.messages.slice(0, -1).every(message => !message.content.includes('smoke resume prompt'))).toBe(true)
+      const instruction = suggestionInstructions(body)
+      expect(instruction).toContain('TRAJECTORY')
+      expect(instruction).toContain('1. [fresh] → user: "smoke resume prompt"')
+      expect(instruction).toContain('CURRENT STAGE: answered')
       requests++
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
         delta: { role: 'assistant', content: 'Review the most recent refinement' }, finish_reason: 'stop' }] }
@@ -1429,7 +1482,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const body = await request.json() as Record<string, unknown>
       if (body.model === 'suggestion-fixture') {
         const prompt = suggestionInstructions(body)
-        expect(prompt).toContain('WORK IN FLIGHT')
+        expect(suggestionWorkflow(body).runtime.activities?.length).toBeGreaterThan(0)
         expect(prompt).toContain('Run focused authentication tests')
         expect(prompt).toContain('"kind":"background"')
         expect(prompt).not.toContain('PRIVATE_SHELL_MARKER')
@@ -1485,7 +1538,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(prompt).toContain('"goal":"monitor authentication CI"')
       expect(prompt).toContain('"phase":"running"')
       expect(prompt).toContain('"iteration":1')
-      expect(prompt).toContain('WORK IN FLIGHT')
+      expect(suggestionWorkflow(body).runtime.activities?.length).toBeGreaterThan(0)
       const chunk = { id: 'loop-suggestion', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['Check authentication CI progress']) }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
@@ -1515,7 +1568,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       if (suggesting) {
         suggestions++
         const prompt = suggestionInstructions(body)
-        expect(prompt).toContain('Current task state: waiting')
+        expect(prompt).toContain('CURRENT STAGE: loop')
         expect(prompt).toContain('"goal":"check the login tests"')
         expect(prompt).toContain('"phase":"waiting"')
         expect(prompt).toContain('"interval_ms":900000')

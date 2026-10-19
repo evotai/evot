@@ -2,6 +2,7 @@ use super::SuggestionHints;
 use super::SuggestionMessage;
 
 const MAX_CANDIDATES: usize = 3;
+pub(super) const MAX_CANDIDATE_CHARS: usize = 160;
 
 /// Shared by the final response and completed candidates from the stream.
 /// A partial string is never passed to this validator.
@@ -107,7 +108,7 @@ pub(super) fn candidates(
         } else {
             candidate
         };
-        if candidate.chars().count() > 160
+        if candidate.chars().count() > MAX_CANDIDATE_CHARS
             || out
                 .iter()
                 .any(|existing| same_intent_text(existing, &candidate))
@@ -192,7 +193,7 @@ fn filter(text: &str, completing: bool) -> Option<String> {
     if text.is_empty()
         || text.eq_ignore_ascii_case("NONE")
         || text == "[]"
-        || text.chars().count() > if completing { 560 } else { 160 }
+        || text.chars().count() > if completing { 560 } else { MAX_CANDIDATE_CHARS }
         || text.starts_with(['`', '"', '“', '<'])
         || text.chars().any(|ch| ch.is_control())
     {

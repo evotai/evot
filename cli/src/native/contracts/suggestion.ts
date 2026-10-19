@@ -36,6 +36,19 @@ export interface SuggestionActivity {
   wait_reason?: string
   unchanged_iterations?: number
 }
+/** One earlier user→assistant exchange, condensed. Carries the long-horizon
+ * goal and this user's habits beyond the verbatim recent-message window. */
+export interface SuggestionExchange {
+  user: string
+  assistant?: string
+  tools: number
+  failed: number
+  outcome: SuggestionTurn
+  /** The state the user moved from: what the previous reply left (its first
+   * paragraph) and the stage at that moment. Together with `user` this makes
+   * each exchange a trajectory step. Additive; absent in older writers. */
+  from?: { reply?: string; stage: string }
+}
 export interface SuggestionWorkflow {
   schema_version: 1
   session: 'new' | 'resumed' | 'active'
@@ -44,6 +57,8 @@ export interface SuggestionWorkflow {
   tasks?: SuggestionTasks
   /** Bounded tool metadata, never arguments, results or internal reasoning. */
   progress?: SuggestionProgress
+  /** Earlier exchanges oldest first, excluding the current one. Additive. */
+  thread?: SuggestionExchange[]
   runtime: {
     execution: 'idle' | 'running' | 'waiting' | 'retrying'
     mode: 'normal' | 'plan' | 'log'

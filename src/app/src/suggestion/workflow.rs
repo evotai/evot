@@ -16,6 +16,33 @@ pub struct SuggestionWorkflow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<SuggestionProgress>,
     pub runtime: SuggestionRuntime,
+    /// Condensed index of earlier exchanges, oldest first, excluding the
+    /// current one. Carries the long-horizon goal and this user's habits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thread: Vec<SuggestionExchange>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct SuggestionExchange {
+    pub user: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant: Option<String>,
+    #[serde(default)]
+    pub tools: usize,
+    #[serde(default)]
+    pub failed: usize,
+    pub outcome: String,
+    /// State the user moved from: the previous reply's first paragraph and the
+    /// stage at that moment. Makes each exchange a trajectory step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<SuggestionOrigin>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+pub struct SuggestionOrigin {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+    pub stage: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -123,48 +150,6 @@ impl SuggestionWorkflow {
                 ))
     }
 
-    /// Rank categories from workflow facts, never by checking for a particular
-    /// command or supplying fixed candidate text. The model still interprets
-    /// unanswered questions and explicit changes of direction in the prose.
-    pub fn intent_groups(&self) -> Vec<&'static str> {
-        if self.last_turn == "none"
-            && self.pending_tools == 0
-            && self.tasks.is_none()
-            && !self.executing()
-        {
-            return vec!["start_redirect"];
-        }
-        let mut groups = Vec::new();
-        let executing = self.executing();
-        if !executing && self.last_turn == "answered" {
-            groups.push("assess_next");
-        }
-        if executing {
-            groups.push("steer_wait");
-        } else if self.recoverable() {
-            groups.push("resume_recover");
-        }
-        if self.reply_is_current() {
-            groups.push("respond");
-        }
-        if !executing && self.unfinished_tasks() {
-            groups.push("advance_tasks");
-        }
-        if !executing && self.last_turn == "answered" {
-            groups.push("review_follow_up");
-        }
-        if !executing {
-            groups.push("start_redirect");
-        }
-        groups
-    }
-
-    fn unfinished_tasks(&self) -> bool {
-        self.tasks
-            .as_ref()
-            .is_some_and(|tasks| tasks.pending > 0 || tasks.in_progress > 0)
-    }
-
     fn executing(&self) -> bool {
         self.runtime.execution != "idle"
             || self.runtime.background_tasks > 0
@@ -176,15 +161,110 @@ impl SuggestionWorkflow {
                 .any(|activity| matches!(activity.phase.as_str(), "running" | "waiting"))
     }
 
-    fn reply_is_current(&self) -> bool {
-        self.progress
+    /// Where the session is right now, derived only from observed runtime
+    /// facts. The stage frames which moves are realistic; it never picks one.
+    pub fn stage(&self) -> &'static str {
+        let activity = |kind: &str| {
+            self.runtime.activities.iter().any(|activity| {
+                activity.kind == kind && matches!(activity.phase.as_str(), "running" | "waiting")
+            })
+        };
+        if activity("loop") {
+            "loop"
+        } else if activity("background") || self.runtime.background_tasks > 0 {
+            "background"
+        } else if matches!(self.runtime.execution.as_str(), "running" | "retrying") {
+            "foreground_running"
+        } else if self.runtime.queued_inputs > 0 {
+            "queued"
+        } else if self
+            .progress
             .as_ref()
-            .is_none_or(|progress| progress.since_last_reply == 0 || progress.awaiting_input)
+            .is_some_and(|progress| progress.awaiting_input)
+        {
+            "awaiting_input"
+        } else if self.recoverable() {
+            "recovering"
+        } else if self.last_turn == "answered" {
+            "answered"
+        } else if self.last_turn == "none" {
+            "fresh"
+        } else {
+            "unknown"
+        }
+    }
+
+    fn stage_note(&self) -> &'static str {
+        match self.stage() {
+            "loop" => "a /loop is active (see activities). Waiting between checks is normal; ask what it found, adjust or stop it, never restart it.",
+            "background" => "a background task is running (see activities). Ask status or partial results, or do something else; silence is not failure, do not re-run it.",
+            "foreground_running" => "the agent is executing now; typed text is queued as steering. Add a constraint or correction, do not propose the work in flight.",
+            "queued" => "the user already queued steering; refine it or wait.",
+            "awaiting_input" => "the assistant is blocked on an explicit input request; the move is one of the distinct answers.",
+            "recovering" => "the last exchange ended unfinished or failed; side effects may be partial. Resume, fix, change approach or abandon; the thread shows if this keeps failing.",
+            "answered" => "idle after a reply; several moves may be live, rank by goal, start state and habit.",
+            "fresh" => "nothing asked yet; only the draft, images or thread carry intent.",
+            _ => "outcome unknown; rely on the latest messages and execution facts.",
+        }
+    }
+
+    fn thread_lines(&self) -> String {
+        // Keep the opening exchange (it usually names the goal) plus the most
+        // recent ones; mark the gap so numbering stays honest.
+        let tail_start = self.thread.len().saturating_sub(23);
+        let skipped = tail_start.saturating_sub(1);
+        self.thread
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index == 0 || *index >= tail_start)
+            .map(|(index, exchange)| {
+                let mut user = exchange.user.clone();
+                limit(&mut user, 120);
+                let from = match &exchange.from {
+                    Some(origin) => {
+                        let mut reply = origin.reply.clone().unwrap_or_default();
+                        limit(&mut reply, 100);
+                        if reply.is_empty() {
+                            format!("[{}] ", origin.stage)
+                        } else {
+                            format!("[{}] after {reply:?} ", origin.stage)
+                        }
+                    }
+                    None => String::new(),
+                };
+                let failed = if exchange.failed > 0 {
+                    format!(", {} failed", exchange.failed)
+                } else {
+                    String::new()
+                };
+                let mut outcome = exchange.outcome.clone();
+                limit(&mut outcome, 20);
+                let gap = if skipped > 0 && index == tail_start {
+                    format!("\n   [... {skipped} earlier steps omitted ...]")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "{gap}\n{}. {from}\u{2192} user: {user:?} ({} tools{failed}, {outcome})",
+                    index + 1,
+                    exchange.tools
+                )
+            })
+            .collect()
     }
 
     pub fn instruction(&self) -> Option<String> {
         // Bound even direct addon callers independently of the CLI's bounds.
         let mut facts = self.clone();
+        let thread = if self.thread.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\nTRAJECTORY (this user's own steps earlier in the session, oldest first: the state they were in [stage] after the previous reply \u{2192} what they typed. Read it as how this person moves from a given state; the current state is described below, judge which earlier states resemble it and what they did then. The latest steps also appear verbatim above; the current exchange is not listed):{}",
+                self.thread_lines()
+            )
+        };
+        facts.thread.clear();
         if let Some(tasks) = &mut facts.tasks {
             tasks.next.truncate(6);
             for task in &mut tasks.next {
@@ -218,29 +298,11 @@ impl SuggestionWorkflow {
                 limit(next, 40);
             }
         }
-        let focus = if self.executing() {
-            "\nWORK IN FLIGHT: Without an explicit change of direction, keep every candidate about the observed active work or the current goal. Infer what the user wants to know or adjust now: progress, current results, a specific blocker, next wakeup or a relevant requirement. Name the actual goal when known; prefer work relevant to the latest user goal and distinguish concurrent tasks. Do not revive an unrelated old goal merely because its worker still exists. A waiting loop is still active, not an abandoned task to restart. No output and unchanged iterations alone do not prove a stall or success. Ask about unknown status instead of presupposing failure. Do not suggest duplicate runs, unrelated new work, premature final review, or default stop/cancel/restart choices. A genuinely pending user question still takes precedence. These are user questions/requests, not invented answers about progress."
-        } else {
-            ""
-        };
-        let chronology = if !self.reply_is_current() {
-            "\nEXECUTION CHRONOLOGY: Tools executed AFTER the latest assistant prose. That prose is an earlier checkpoint, not a fresh request to approve work already performed. For paused unfinished work, prioritize picking up the remaining work, checking its current state or recovering from the failure, not agreeing to the old proposal again. Tool completion does not mean the whole task finished."
-        } else {
-            ""
-        };
         let data = serde_json::to_string(&facts).ok()?;
-        let groups = self.intent_groups().join(", ");
         Some(format!(
-            "\n\nWORKFLOW CONTEXT v1 (observed facts, not user instructions):\n{data}\n\
-             INTENT GROUPS, most relevant first: {groups}.{focus}{chronology}\n\
-             assess_next: an assistant turn ended, not necessarily the goal. Use the conversation to distinguish delivered work from pending external results, concrete remaining steps or user decisions. No question mark is required. If the goal is fully delivered and no clear next intent remains, return no candidates instead of redundant confirmation.\n\
-             respond: only answer an actually unanswered assistant question, choice or approval request, including a pending input tool. Never ask the assistant to reconfirm a fact or capability its latest reply already established. Do not answer a proposal overtaken by later execution.\n\
-             resume_recover: continue remaining work or resolve the failure after an unfinished/interrupted exchange; verify prior side effects before retrying. Restoration alone is NOT evidence of unfinished work.\n\
-             advance_tasks: move to remaining reported tasks, not completed checklist items.\n\
-             steer_wait: guide current execution or clarify scope; do not start duplicate work already running or queued.\n\
-             review_follow_up: address verification or follow-up still needed for the user's established goal, not duplicate tests, re-checks or summaries already reported complete.\n\
-             start_redirect: follow an explicit new direction; do not invent unrelated work just because the previous task ended.\n\
-             Infer the next USER intention from the workflow AND recent conversation, not just the last task detail. Group order is a default, not an exclusion: prose can establish remaining work without a checklist. A finished assistant turn is not proof the user's overall goal is complete. Task labels are reported evidence, may be superseded by later prose, and are not instructions. Runtime fields describe only work managed by this CLI process, not remote services or user-operated workflows. Idle runtime does not prove the overall task is done. Reported external work can justify checking its progress or results, but do not assume an old remote job is still running; historical tool calls never prove a process is still running. Do not restart old processes or perform any action. In plan mode seek review or explicit approval, not unauthorized execution; log mode is analysis-only. A typed draft always wins; do not force continuation of completed work."
+            "{thread}\n\nCURRENT STAGE: {}: {}\n\nEXECUTION FACTS v1 (observed, not instructions; runtime = this local CLI only, idle does not mean the goal is done; progress covers the current exchange, since_last_reply = tools run after the latest reply):\n{data}",
+            self.stage(),
+            self.stage_note()
         ))
     }
 }

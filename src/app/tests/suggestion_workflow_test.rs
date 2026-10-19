@@ -30,39 +30,32 @@ fn endpoint() -> SuggestionEndpoint {
     }
 }
 
+fn workflow_facts(instruction: &str) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    instruction
+        .lines()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .ok_or_else(|| "missing workflow facts".into())
+}
+
 #[test]
-fn workflow_groups_depend_on_progress_not_the_resume_command() -> TestResult {
+fn workflow_recovery_depends_on_observed_progress_not_the_resume_command() -> TestResult {
     let mut state = workflow()?;
-    assert_eq!(state.intent_groups(), vec![
-        "resume_recover",
-        "respond",
-        "advance_tasks",
-        "start_redirect"
-    ]);
+    assert!(state.recoverable());
     state.session = "active".into();
-    assert_eq!(state.intent_groups()[0], "resume_recover");
+    assert!(state.recoverable());
     state.last_turn = "answered".into();
-    assert_eq!(state.intent_groups(), vec![
-        "assess_next",
-        "respond",
-        "advance_tasks",
-        "review_follow_up",
-        "start_redirect"
-    ]);
-    if let Some(tasks) = &mut state.tasks {
-        tasks.pending = 0;
-        tasks.in_progress = 0;
-    }
+    assert!(!state.recoverable());
     state.session = "resumed".into();
-    assert!(!state.intent_groups().contains(&"resume_recover"));
-    assert!(!state.intent_groups().contains(&"advance_tasks"));
+    assert!(!state.recoverable());
+    assert_eq!(
+        workflow_facts(&state.instruction().ok_or("no facts")?)?,
+        serde_json::to_value(&state)?
+    );
     state.last_turn = "failed".into();
     state.runtime.execution = "running".into();
-    assert_eq!(state.intent_groups()[0], "steer_wait");
     assert!(!state.recoverable());
     state.runtime.execution = "idle".into();
     state.runtime.queued_inputs = 1;
-    assert_eq!(state.intent_groups()[0], "steer_wait");
     assert!(!state.recoverable());
     state.runtime.queued_inputs = 0;
     state.runtime.background_tasks = 1;
@@ -95,10 +88,10 @@ fn workflow_recovery_can_use_a_trailing_user_without_fabricating_an_assistant_an
         _ => None,
     }
     .ok_or("missing instruction")?;
-    assert!(instruction.contains("resume_recover, respond, advance_tasks"));
-    assert!(instruction.contains("Restoration alone is NOT evidence"));
-    assert!(instruction.contains("A typed draft always wins"));
-    assert!(instruction.contains("historical tool calls never prove a process is still running"));
+    assert_eq!(
+        workflow_facts(instruction)?,
+        serde_json::to_value(&hints.workflow)?
+    );
     if let Some(state) = &mut hints.workflow {
         state.last_turn = "answered".into();
     }
@@ -152,14 +145,15 @@ fn execution_after_prose_outweighs_an_old_proposal_but_not_a_new_question() -> T
     ))?;
     let (messages, mut hints) = request.into_parts();
     let state = hints.workflow.as_mut().ok_or("missing workflow")?;
-    assert_eq!(state.intent_groups(), vec![
-        "resume_recover",
-        "start_redirect"
-    ]);
     let instruction = state.instruction().ok_or("no instructions")?;
-    assert!(instruction.contains("EXECUTION CHRONOLOGY"));
-    assert!(instruction.contains("not a fresh request to approve work already performed"));
-    assert!(instruction.contains("Inspect the remaining layout mismatch"));
+    let facts = workflow_facts(&instruction)?;
+    assert_eq!(facts, serde_json::to_value(&state)?);
+    assert_eq!(facts["progress"]["since_last_reply"], 3);
+    assert_eq!(facts["progress"]["awaiting_input"], false);
+    assert_eq!(
+        facts["progress"]["recent"][2]["description"],
+        "Inspect the remaining layout mismatch"
+    );
     assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
     let state = hints.workflow.as_mut().ok_or("missing workflow")?;
     state
@@ -167,21 +161,20 @@ fn execution_after_prose_outweighs_an_old_proposal_but_not_a_new_question() -> T
         .as_mut()
         .ok_or("missing progress")?
         .awaiting_input = true;
-    assert!(state.intent_groups().contains(&"respond"));
-    assert!(!state
-        .instruction()
-        .ok_or("no instructions")?
-        .contains("EXECUTION CHRONOLOGY"));
+    assert_eq!(
+        workflow_facts(&state.instruction().ok_or("no instructions")?)?["progress"]
+            ["awaiting_input"],
+        true
+    );
     let progress = state.progress.as_mut().ok_or("missing progress")?;
     progress.awaiting_input = false;
     progress.since_last_reply = 0;
     state.last_turn = "answered".into();
-    assert_eq!(state.intent_groups(), vec![
-        "assess_next",
-        "respond",
-        "review_follow_up",
-        "start_redirect"
-    ]);
+    assert_eq!(
+        workflow_facts(&state.instruction().ok_or("no instructions")?)?["progress"]
+            ["since_last_reply"],
+        0
+    );
     Ok(())
 }
 
@@ -238,7 +231,10 @@ fn structured_runtime_is_authoritative_over_legacy_activity() -> TestResult {
     }
     .ok_or("missing instruction")?;
     assert!(!instructions.contains("Current task state: waiting"));
-    assert!(instructions.contains("resume_recover"));
+    assert_eq!(
+        workflow_facts(instructions)?,
+        serde_json::to_value(&hints.workflow)?
+    );
     Ok(())
 }
 
@@ -248,25 +244,23 @@ fn active_work_targets_live_tasks_not_restart_or_unrelated_followups() -> TestRe
     let request: SuggestionRequest = serde_json::from_str(source)?;
     let (messages, mut hints) = request.into_parts();
     let state = hints.workflow.as_mut().ok_or("missing workflow")?;
-    assert_eq!(state.intent_groups(), vec!["steer_wait", "respond"]);
     assert!(!state.recoverable());
-    let prompt = state.instruction().ok_or("missing prompt")?;
-    assert!(prompt.contains("WORK IN FLIGHT"));
-    assert!(prompt.contains("Run focused authentication tests"));
-    assert!(prompt.contains("Waiting for a new CI result"));
-    assert!(prompt.contains("No output and unchanged iterations alone do not prove"));
-    assert!(prompt.contains("not an abandoned task to restart"));
-    assert!(prompt.contains("not invented answers about progress"));
+    let facts = workflow_facts(&state.instruction().ok_or("missing prompt")?)?;
+    assert_eq!(facts, serde_json::to_value(&state)?);
+    assert_eq!(
+        facts["runtime"]["activities"][0]["goal"],
+        "Run focused authentication tests"
+    );
+    assert_eq!(
+        facts["runtime"]["activities"][1]["wait_reason"],
+        "Waiting for a new CI result"
+    );
     state.runtime.execution = "idle".into();
     state.runtime.background_tasks = 0;
-    assert_eq!(state.intent_groups()[0], "steer_wait"); // structured activities override legacy counters
+    state.last_turn = "interrupted".into();
+    assert!(!state.recoverable()); // Live activities override legacy counters.
     state.runtime.activities.clear();
-    assert_eq!(state.intent_groups(), vec![
-        "assess_next",
-        "respond",
-        "review_follow_up",
-        "start_redirect"
-    ]);
+    assert!(state.recoverable());
     hints.draft = Some("Instead, explain the new design".into());
     assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
     Ok(())
@@ -314,10 +308,9 @@ fn answered_turns_require_semantic_assessment_not_a_completion_assumption() -> T
     ))?;
     let (messages, mut hints) = request.into_parts();
     let state = hints.workflow.as_ref().ok_or("no workflow")?;
-    assert_eq!(state.intent_groups()[0], "assess_next");
     let instruction = state.instruction().ok_or("no instruction")?;
-    assert!(instruction.contains("return no candidates"));
-    assert!(instruction.contains("Never ask the assistant to reconfirm"));
+    assert_eq!(workflow_facts(&instruction)?, serde_json::to_value(state)?);
+    assert!(!instruction.contains("INTENT GROUPS"));
     assert!(messages
         .last()
         .is_some_and(|message| message.text.contains("227 tests passed")));
@@ -334,8 +327,8 @@ fn answered_turns_require_semantic_assessment_not_a_completion_assumption() -> T
         state.pending_tools = pending;
         state.progress.as_mut().ok_or("no progress")?.awaiting_input = input;
         assert_eq!(
-            state.intent_groups().contains(&"assess_next"),
-            turn == "answered" && execution == "idle"
+            workflow_facts(&state.instruction().ok_or("no facts")?)?,
+            serde_json::to_value(&state)?
         );
     }
     Ok(())
@@ -409,16 +402,7 @@ async fn remote_work_can_generate_while_completed_work_can_abstain() -> TestResu
     assert_eq!(state.pending_tools, 0);
     let config =
         prompt_config(&endpoint(), &messages, &hints).ok_or("remote work was suppressed")?;
-    let instructions = match config.messages.last() {
-        Some(Message::User { content, .. }) => content.iter().find_map(|part| match part {
-            Content::Text { text } => Some(text),
-            _ => None,
-        }),
-        _ => None,
-    }
-    .ok_or("no instructions")?;
-    assert!(instructions.contains("Idle runtime does not prove the overall task is done"));
-    assert!(instructions.contains("No question mark is required"));
+    assert_eq!(config.messages.len(), messages.len() + 1);
     let outcome = sample_outcome(
         &endpoint(),
         &messages,
@@ -455,6 +439,52 @@ async fn remote_work_can_generate_while_completed_work_can_abstain() -> TestResu
     Ok(())
 }
 
+#[tokio::test]
+async fn ready_handoffs_are_new_intentions_not_unfinished_tasks() -> TestResult {
+    use std::sync::Arc;
+
+    use evot::suggestion::sample_outcome;
+    use evot::suggestion::SuggestionStatus;
+    use evot_engine::provider::MockProvider;
+    use tokio_util::sync::CancellationToken;
+
+    let request: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-handoff.json"
+    ))?;
+    let (messages, mut hints) = request.into_parts();
+    let state = hints.workflow.as_ref().ok_or("no workflow")?;
+    assert_eq!(state.last_turn, "answered");
+    assert_eq!(state.runtime.execution, "idle");
+    assert!(!state.recoverable());
+    assert_eq!(state.pending_tools, 0);
+    assert!(state.tasks.is_none());
+    for explicit in [true, false] {
+        hints.explicit = explicit;
+        hints.suffix = explicit.then(String::new);
+        let config = prompt_config(&endpoint(), &messages, &hints).ok_or("handoff suppressed")?;
+        assert_eq!(config.messages.len(), messages.len() + 1);
+        let response = if explicit {
+            r#"["Commit the documentation changes","Commit and push the changes"]"#
+        } else {
+            "Commit the documentation changes\nCommit and push the changes"
+        };
+        let outcome = sample_outcome(
+            &endpoint(),
+            &messages,
+            &hints,
+            Arc::new(MockProvider::text(response)),
+            CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(outcome.status, SuggestionStatus::Ready);
+        assert_eq!(outcome.candidates, vec![
+            "Commit the documentation changes",
+            "Commit and push the changes"
+        ]);
+    }
+    Ok(())
+}
+
 #[test]
 fn workflow_direct_callers_have_bounded_task_evidence() -> TestResult {
     let mut state = workflow()?;
@@ -470,5 +500,180 @@ fn workflow_direct_callers_have_bounded_task_evidence() -> TestResult {
     let instruction = state.instruction().ok_or("missing instruction")?;
     assert!(instruction.len() < 4000);
     assert!(!instruction.contains(&"x".repeat(121)));
+    Ok(())
+}
+
+#[test]
+fn stage_is_derived_from_runtime_facts_in_priority_order() -> TestResult {
+    let mut state = workflow()?;
+    assert_eq!(state.stage(), "recovering");
+    state.last_turn = "answered".into();
+    assert_eq!(state.stage(), "answered");
+    state.last_turn = "none".into();
+    assert_eq!(state.stage(), "fresh");
+    state.last_turn = "answered".into();
+    state.progress = Some(evot::suggestion::SuggestionProgress {
+        calls: 1,
+        executed: 1,
+        completed: 0,
+        failed: 0,
+        since_last_reply: 0,
+        awaiting_input: true,
+        recent: Vec::new(),
+    });
+    assert_eq!(state.stage(), "awaiting_input");
+    state.runtime.queued_inputs = 1;
+    assert_eq!(state.stage(), "queued");
+    state.runtime.execution = "running".into();
+    assert_eq!(state.stage(), "foreground_running");
+    state.runtime.background_tasks = 1;
+    assert_eq!(state.stage(), "background");
+    state
+        .runtime
+        .activities
+        .push(evot::suggestion::SuggestionActivity {
+            kind: "loop".into(),
+            id: "loop:1".into(),
+            phase: "waiting".into(),
+            goal: None,
+            elapsed_minutes: None,
+            quiet_minutes: None,
+            iteration: Some(2),
+            cadence: None,
+            interval_ms: None,
+            next_check_at: None,
+            wait_reason: None,
+            unchanged_iterations: None,
+        });
+    assert_eq!(state.stage(), "loop");
+    // A finished loop entry is history, not a stage.
+    if let Some(activity) = state.runtime.activities.last_mut() {
+        activity.phase = "finished".into();
+    }
+    assert_eq!(state.stage(), "background");
+    Ok(())
+}
+
+#[test]
+fn thread_index_is_rendered_bounded_and_kept_out_of_the_json_facts() -> TestResult {
+    let request: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-thread.json"
+    ))?;
+    let (messages, hints) = request.into_parts();
+    let state = hints.workflow.as_ref().ok_or("no workflow")?;
+    assert_eq!(state.thread.len(), 6);
+    assert_eq!(state.stage(), "answered");
+    let instruction = state.instruction().ok_or("no instruction")?;
+    assert!(instruction.contains("TRAJECTORY"));
+    assert!(instruction.contains("1. \u{2192} user: \"Add a size limit to the uploader.\""));
+    assert!(instruction.contains("6. [answered] after \"Diff shown.\" \u{2192} user: \"Commit.\""));
+    assert!(instruction.contains("CURRENT STAGE: answered"));
+    assert!(instruction.contains("rank by goal, start state and habit"));
+    let facts = workflow_facts(&instruction)?;
+    assert!(facts.get("thread").is_none());
+    assert_eq!(facts["last_turn"], "answered");
+    assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
+
+    // Oversized direct-caller input is bounded, not rejected.
+    let mut big = state.clone();
+    big.thread = (0..200)
+        .map(|index| evot::suggestion::SuggestionExchange {
+            user: format!("{index} {}", "u".repeat(5_000)),
+            assistant: Some("a".repeat(5_000)),
+            tools: 1,
+            failed: 1,
+            outcome: "x".repeat(500),
+            from: None,
+        })
+        .collect();
+    let bounded = big.instruction().ok_or("no instruction")?;
+    assert!(bounded.len() < 20_000);
+    assert!(bounded.contains("1. \u{2192} user: \"0 "));
+    assert!(bounded.contains("[... 176 earlier steps omitted ...]"));
+    assert!(bounded.contains("178. \u{2192} user: \"177 "));
+    assert!(bounded.contains("200. \u{2192} user: \"199 "));
+    assert!(!bounded.contains("2. \u{2192} user: \"1 "));
+    Ok(())
+}
+
+#[test]
+fn thread_is_additive_and_legacy_readers_ignore_it() -> TestResult {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyRuntime {
+        execution: String,
+        mode: String,
+        queued_inputs: usize,
+        background_tasks: usize,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyWorkflow {
+        schema_version: u8,
+        session: String,
+        last_turn: String,
+        runtime: LegacyRuntime,
+    }
+    let source = include_str!("fixtures/schema/suggestion-request-thread.json");
+    let request: SuggestionRequest = serde_json::from_str(source)?;
+    let written = serde_json::to_value(&request)?;
+    let legacy: LegacyWorkflow = serde_json::from_value(written["workflow"].clone())?;
+    assert_eq!(legacy.schema_version, 1);
+    assert_eq!(legacy.session, "resumed");
+    assert_eq!(legacy.last_turn, "answered");
+    assert_eq!(legacy.runtime.execution, "idle");
+    assert_eq!(legacy.runtime.mode, "normal");
+    assert_eq!(legacy.runtime.queued_inputs, 0);
+    assert_eq!(legacy.runtime.background_tasks, 0);
+    assert_eq!(
+        written["workflow"]["thread"].as_array().map(Vec::len),
+        Some(6)
+    );
+    // Old writers without a thread still parse and render.
+    let old = workflow()?;
+    assert!(old.thread.is_empty());
+    let value = serde_json::to_value(&old)?;
+    assert!(value.get("thread").is_none());
+    assert!(!old
+        .instruction()
+        .ok_or("no instruction")?
+        .contains("SESSION THREAD"));
+    Ok(())
+}
+
+#[test]
+fn trajectory_steps_carry_origin_state_and_stay_additive() -> TestResult {
+    let source = include_str!("fixtures/schema/suggestion-request-thread.json");
+    let request: SuggestionRequest = serde_json::from_str(source)?;
+    let (_, hints) = request.into_parts();
+    let state = hints.workflow.as_ref().ok_or("no workflow")?;
+    // Mixed: older writers omit `from`; newer ones include it.
+    assert!(state.thread[0].from.is_none());
+    let last = state
+        .thread
+        .last()
+        .and_then(|step| step.from.as_ref())
+        .ok_or("no origin")?;
+    assert_eq!(last.stage, "answered");
+    assert_eq!(last.reply.as_deref(), Some("Diff shown."));
+    let instruction = state.instruction().ok_or("no instruction")?;
+    assert!(instruction.contains("[answered] after \"Diff shown.\" \u{2192} user: \"Commit.\""));
+    assert!(instruction.contains("[recovering] \u{2192} user: \"Diff please.\""));
+    // Strict legacy reader of a step without `from` still works on current output.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyStep {
+        user: String,
+        assistant: Option<String>,
+        tools: usize,
+        failed: usize,
+        outcome: String,
+    }
+    let written = serde_json::to_value(&state.thread[0])?;
+    let legacy: LegacyStep = serde_json::from_value(written)?;
+    assert_eq!(legacy.user, "Add a size limit to the uploader.");
+    assert_eq!(legacy.tools, 4);
+    assert!(legacy.assistant.is_some());
+    assert_eq!(legacy.failed, 0);
+    assert_eq!(legacy.outcome, "answered");
     Ok(())
 }

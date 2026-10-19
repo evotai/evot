@@ -27,6 +27,8 @@ pub use types::SuggestionOutcome;
 pub use types::SuggestionRequest;
 pub use types::SuggestionStatus;
 pub use workflow::SuggestionActivity;
+pub use workflow::SuggestionExchange;
+pub use workflow::SuggestionOrigin;
 pub use workflow::SuggestionProgress;
 pub use workflow::SuggestionRuntime;
 pub use workflow::SuggestionTask;

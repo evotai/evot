@@ -1,3 +1,5 @@
+import type { SuggestionWorkflow } from '../../src/native/contracts/suggestion.js'
+
 export function suggestionMessageText(content: unknown): string {
   if (typeof content === 'string') return content
   return Array.isArray(content) ? content.map(block => typeof block.text === 'string' ? block.text : '').join('') : ''
@@ -21,4 +23,14 @@ export function suggestionInstructions(request: Record<string, unknown>): string
     throw new Error('Unexpected extra prompt metadata')
   }
   return text
+}
+
+/** Decode observed workflow facts without coupling tests to intent instructions. */
+export function suggestionWorkflow(request: Record<string, unknown>): SuggestionWorkflow {
+  for (const line of suggestionInstructions(request).split('\n')) {
+    if (!line.startsWith('{')) continue
+    const value = JSON.parse(line)
+    if (value.schema_version === 1 && value.runtime) return value
+  }
+  throw new Error('Missing workflow facts')
 }

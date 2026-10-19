@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {"role": "user", "text": "Fetch remote main and clarify the metrics integration plan requirements in both language versions of the documentation"},
+    {"role": "assistant", "text": "Done. Local main is up to date with origin/main. Both documentation pages now state that metrics integration requires the Dedicated plan and is unavailable on the Business plan. The existing support-ticket activation process is preserved. Both site builds and the whitespace check passed. Only the two documentation pages are modified; the changes have not been committed or pushed."}
+  ],
+  "explicit": true,
+  "suffix": "",
+  "workflow": {
+    "schema_version": 1,
+    "session": "active",
+    "last_turn": "answered",
+    "pending_tools": 0,
+    "progress": {"calls": 8, "executed": 8, "completed": 8, "failed": 0, "since_last_reply": 0, "awaiting_input": false, "recent": []},
+    "runtime": {"execution": "idle", "mode": "normal", "queued_inputs": 0, "background_tasks": 0}
+  }
+}

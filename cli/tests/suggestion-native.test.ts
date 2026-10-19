@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedSmokeHome, smokeEnvironment } from './helpers/smoke-home.js'
-import { suggestionInstructions, suggestionMessageText } from './helpers/suggestion-request.js'
+import { suggestionInstructions, suggestionMessageText, suggestionWorkflow } from './helpers/suggestion-request.js'
 import { suggestionImageFixture } from './helpers/suggestion-image.js'
 
 // Explicit opt-in to a freshly built addon; never use the developer's HOME.
@@ -23,6 +23,7 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     const text = requests.length === 11 ? '[]'
       : requests.length === 13 ? JSON.stringify(['Check the image build progress', 'Show the resulting image tag'])
       : requests.length === 14 ? JSON.stringify([' Explain the post', ' Draft a reply'])
+      : requests.length === 15 ? JSON.stringify(['Commit the documentation changes', 'Commit and push the changes'])
       : prompt.includes('CURSOR REWRITE MODE')
       ? JSON.stringify(prompt.includes('COMMAND ARGUMENT ASSISTANCE') ? [' 5m check CI', ' status', ' 10m run tests'] : ['unit tests', 'integration tests\nThen review', 'smoke tests'])
       : prompt.includes('\nCommit\n') ? 'Commit current changes\nCommit after reviewing the diff\nCommit and push the branch'
@@ -115,6 +116,9 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
         try { agent.suggestNextPrompt(JSON.stringify(request)); } catch { rejected = true; }
         if (!rejected) throw new Error('text or attachment admission limit was bypassed');
       }
+      const handoff = await Bun.file(${JSON.stringify(new URL('../../src/app/tests/fixtures/schema/suggestion-request-handoff.json', import.meta.url).pathname)}).json();
+      const nextStep = await agent.suggestNextPrompt(JSON.stringify(handoff)).outcome();
+      if (nextStep.status !== 'ready' || nextStep.candidates[0] !== 'Commit the documentation changes') throw new Error('ready result handoff was suppressed');
       const fs = await import('node:fs/promises');
       await fs.writeFile(${JSON.stringify(join(root, 'models.cache.json'))}, JSON.stringify({schema_version:1,synced_at:2,response:{services:{}}}));
       if ((await agent.suggestNextPrompt(context).outcome()).status !== 'unavailable') throw new Error('unexpected fallback');
@@ -131,24 +135,26 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
     expect(code, stderr).toBe(0)
     expect(stdout.trim()).toBe('suggestion contract passed')
     expect(stdout + stderr).not.toContain('service-test-key')
-    expect(requests).toHaveLength(14)
+    expect(requests).toHaveLength(15)
+    expect(suggestionWorkflow(requests[14]!).last_turn).toBe('answered')
+    expect(suggestionWorkflow(requests[14]!).runtime.execution).toBe('idle')
+    expect(JSON.stringify(requests[14]!.messages)).toContain('have not been committed or pushed')
     const largeImageContent = (requests[13]!.messages as { content: { type: string; source?: { data: string }; image_url?: { url: string } }[] }[]).at(-1)?.content
     if (protocol === 'anthropic') expect(largeImageContent?.find(block => block.type === 'image')?.source?.data).toBe(largeImage)
     else expect(largeImageContent?.find(block => block.type === 'image_url')?.image_url?.url).toBe(`data:image/png;base64,${largeImage}`)
-    expect(suggestionInstructions(requests[10]!)).toContain('INTENT GROUPS, most relevant first: assess_next, respond')
+    expect(suggestionWorkflow(requests[10]!).last_turn).toBe('answered')
     expect(JSON.stringify(requests[10])).toContain('All 227 tests passed')
     expect(JSON.stringify(requests[12])).toContain('The image build has started')
-    expect(suggestionInstructions(requests[12]!)).toContain('Idle runtime does not prove the overall task is done')
+    expect(suggestionWorkflow(requests[12]!).runtime.execution).toBe('idle')
     const imageRequest = requests[9] as { messages: { content: { type: string; source?: { type: string; data: string }; image_url?: { url: string } }[] }[] }
     const imageContent = imageRequest.messages.at(-1)?.content
     expect(Array.isArray(imageContent)).toBe(true)
     if (protocol === 'anthropic') expect(imageContent?.find(block => block.type === 'image')?.source?.data).toBeTruthy()
     else expect(imageContent?.find(block => block.type === 'image_url')?.image_url?.url).toStartWith('data:image/png;base64,')
     expect(suggestionInstructions(requests[9]!)).toContain('Use the visible images')
-    expect(suggestionInstructions(requests[8]!)).toContain('EXECUTION CHRONOLOGY')
-    expect(suggestionInstructions(requests[8]!)).toContain('"since_last_reply":3')
-    expect(suggestionInstructions(requests[8]!)).not.toContain('first: resume_recover, respond')
-    expect(suggestionInstructions(requests[7]!)).toContain('resume_recover, respond, advance_tasks')
+    expect(suggestionWorkflow(requests[8]!).progress?.since_last_reply).toBe(3)
+    expect(suggestionWorkflow(requests[8]!).progress?.awaiting_input).toBe(false)
+    expect(suggestionWorkflow(requests[7]!).tasks?.pending).toBeGreaterThan(0)
     expect(suggestionInstructions(requests[7]!)).toContain('"session":"resumed"')
     expect(suggestionInstructions(requests[7]!)).toContain('"last_turn":"interrupted"')
     expect(requests[5]!.max_tokens).toBe(320)
