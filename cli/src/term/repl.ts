@@ -3240,6 +3240,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         case 'o':
           toggleExpanded()
           return
+        case 'y':
+          // Keyboard twin of `/clip copy`: last reply's Markdown source to the
+          // clipboard. Ctrl+Y is the one free Ctrl letter with a clipboard
+          // connotation (readline yank).
+          void handleCopyCommand(replCommands)
+          return
         case '-':
           if (undoEditor()) renderer.requestRender()
           return

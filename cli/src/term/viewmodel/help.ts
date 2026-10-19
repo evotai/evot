@@ -19,6 +19,7 @@ const KEYS: Entry[] = [
   ['Tab', 'Complete command / path'],
   ['Shift+Tab', 'Cycle thinking level'],
   ['Ctrl+O', 'Expand/collapse output'],
+  ['Ctrl+Y', 'Copy last reply (Markdown source) to clipboard'],
   ['Ctrl+U', 'Clear line before cursor'],
   ['Ctrl+K', 'Clear line after cursor'],
   ['Ctrl+W', 'Delete word before cursor'],

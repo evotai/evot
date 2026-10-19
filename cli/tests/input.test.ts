@@ -76,6 +76,10 @@ describe('parseInput', () => {
     test('Ctrl+G, which focuses queued prompts', () => {
       expect(parse('\x07')).toEqual([{ type: 'ctrl', key: 'g' }])
     })
+
+    test('Ctrl+Y, which copies the last reply as Markdown', () => {
+      expect(parse('\x19')).toEqual([{ type: 'ctrl', key: 'y' }])
+    })
   })
 
   describe('arrow keys', () => {
