@@ -567,7 +567,22 @@ STATE_BACKUP=""
 
 log "installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
 
-# --- PATH guidance ---
+# --- PATH setup ---
+# A child process cannot change the calling terminal's PATH. Persist the
+# setting for future shells and print the exact command for the current one.
+# EVOT_NO_MODIFY_PATH=1 leaves shell configuration under the caller's control.
+
+add_path_to_profile() {
+  if grep -Fqx -- "$PATH_LINE" "$1" 2>/dev/null; then
+    return 0
+  fi
+  if (mkdir -p "$(dirname "$1")" && printf '\n# evot\n%s\n' "$PATH_LINE" >> "$1"); then
+    log "configured PATH in $1"
+  else
+    warn "could not configure $1; add the command below manually"
+    return 1
+  fi
+}
 
 case ":$PATH:" in
   *":$INSTALL_DIR:"*)
@@ -580,22 +595,50 @@ case ":$PATH:" in
     ;;
   *)
     SHELL_NAME="$(basename "${SHELL:-/bin/sh}")"
+    # Single-quote literal paths, including spaces, dollar signs and quotes.
+    QUOTED_INSTALL_DIR="'$(printf '%s' "$INSTALL_DIR" | sed "s/'/'\\\\''/g")'"
+    PATH_LINE="export PATH=$QUOTED_INSTALL_DIR:\"\$PATH\""
     case "$SHELL_NAME" in
-      zsh)  RC="$HOME/.zshrc" ;;
+      zsh)  RC="${ZDOTDIR:-$HOME}/.zshrc" ;;
       bash) RC="$HOME/.bashrc" ;;
-      fish) RC="$HOME/.config/fish/config.fish" ;;
-      *)    RC="$HOME/.profile" ;;
+      fish)
+        RC="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/evot.fish"
+        # Unlike POSIX sh, fish interprets escaped backslashes in single quotes.
+        QUOTED_INSTALL_DIR="'$(printf '%s' "$INSTALL_DIR" | sed 's/\\/\\\\/g' | sed "s/'/'\\\\''/g")'"
+        PATH_LINE="contains -- $QUOTED_INSTALL_DIR \$PATH; or set -gx PATH $QUOTED_INSTALL_DIR \$PATH"
+        ;;
+      *) RC="$HOME/.profile" ;;
     esac
 
-    warn "${INSTALL_DIR} is not in your PATH"
-    echo "  add it to your shell config:"
     echo ""
-    if [ "$SHELL_NAME" = "fish" ]; then
-      echo "    set -Ux fish_user_paths $INSTALL_DIR \$fish_user_paths"
-    else
-      echo "    echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> $RC"
-      echo "    source $RC"
+    PATH_CONFIGURED=no
+    if [ "${EVOT_NO_MODIFY_PATH:-0}" = 1 ]; then
+      warn "skipped shell configuration (EVOT_NO_MODIFY_PATH=1)"
+    elif add_path_to_profile "$RC"; then
+      PATH_CONFIGURED=yes
+      # Login bash reads the first existing login profile, not .bashrc.
+      if [ "$SHELL_NAME" = bash ]; then
+        LOGIN_RC="$HOME/.profile"
+        for PROFILE in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+          if [ -f "$PROFILE" ]; then
+            LOGIN_RC="$PROFILE"
+            break
+          fi
+        done
+        if ! add_path_to_profile "$LOGIN_RC"; then
+          RC="$LOGIN_RC"
+          PATH_CONFIGURED=no
+        fi
+      fi
     fi
-    echo ""
+
+    if [ "$PATH_CONFIGURED" = yes ]; then
+      log "open a new terminal, or run this command in the current terminal:"
+    else
+      warn "${INSTALL_DIR} is not in your PATH"
+      printf '  Add this command to %s and run it in the current terminal:\n' "$RC"
+    fi
+    printf '\n    %s\n\n' "$PATH_LINE"
+    printf '  Then log in:\n\n    evot login\n\n'
     ;;
 esac

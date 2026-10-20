@@ -18,6 +18,11 @@
 
 ```bash
 curl -fsSL https://evot.ai/install | sh
+```
+
+The installer configures your PATH. Open a new terminal, or run the command it prints to use evot in the current terminal. Then log in:
+
+```bash
 evot login
 ```
 
