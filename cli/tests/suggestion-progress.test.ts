@@ -5,14 +5,14 @@ import { context } from './helpers/suggestion-context.js'
 
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 
-function harness() {
+function harness(initialDraft = 'Run ') {
   let resolve!: (outcome: SuggestionOutcome) => void
   const result = new Promise<SuggestionOutcome>(done => { resolve = done })
   const pending: ((value: string[] | null) => void)[] = []
   const queued: (string[] | null)[] = []
   let calls = 0
   let aborted = false
-  let draft = 'Run '
+  let draft = initialDraft
   const emit = (value: string[] | null) => {
     const waiter = pending.shift()
     if (waiter) waiter(value)
@@ -92,6 +92,23 @@ test('invalid progress and input changes never expose unsafe or stale suggestion
   expect(h.controller.text()).toBe('')
   h.controller.reconcile()
   expect(h.aborted()).toBe(true)
+})
+
+test('typing preserves a streamed placeholder while cancelling remaining generation', async () => {
+  const h = harness('')
+  h.emit(['Run the tests'])
+  await tick()
+  h.setDraft('temporary input')
+  h.controller.reconcile()
+  expect(h.aborted()).toBe(true)
+  expect(h.controller.text()).toBe('')
+  h.emit(['Run the tests', 'Late candidate'])
+  await tick()
+  h.setDraft('')
+  h.controller.reconcile()
+  expect(h.controller.text()).toBe('Run the tests')
+  expect(h.controller.position()).toEqual({ current: 1, total: 1 })
+  expect(h.calls()).toBe(1)
 })
 
 test('provider failure withdraws a streamed preview and leaves Tab retry feedback', async () => {

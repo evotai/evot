@@ -11,7 +11,8 @@ interface Intent { key: string; context: SuggestionSnapshot; draft: string; curs
 
 /** Owns one cancellable side request and its result. Automatic triggers need
  * a completed answer; explicit Tab can follow interruption or start a new
- * session. A successful batch is immutable until the composer/session changes. */
+ * session. Empty-composer batches survive temporary typing; draft completions
+ * remain bound to their exact text and cursor. */
 export class PromptSuggestion {
   private generation = 0
   private request: NativeSuggestion | null = null
@@ -59,6 +60,13 @@ export class PromptSuggestion {
     return true
   }
 
+  /** Local Tab/Right routing invalidates draft-bound completions, not the
+   * placeholder waiting underneath the user's temporary input. */
+  yieldToLocalInput(): void {
+    if (this.intent?.draft === '' && this.batch?.count()) this.reconcile()
+    else this.cancel()
+  }
+
   /** Background task transitions only invalidate speculative suggestions. */
   cancelAutomatic(): void {
     if (!this.explicit) this.cancel()
@@ -92,9 +100,13 @@ export class PromptSuggestion {
     this.launch(true)
   }
 
-  private valid(): boolean {
-    return this.host.eligible() && (this.explicit || this.host.automaticEligible?.() !== false)
+  private current(): boolean {
+    return (this.explicit || this.host.automaticEligible?.() !== false)
       && this.intent !== null && this.intent.key === this.host.key()
+  }
+
+  private valid(): boolean {
+    return this.host.eligible() && this.current() && this.intent !== null
       && this.intent.draft === (this.host.draft?.() ?? '')
       && this.intent.cursor === (this.host.cursor?.() ?? this.intent.draft.length)
   }
@@ -185,7 +197,21 @@ export class PromptSuggestion {
   }
 
   reconcile(): void {
-    if (this.intent && !this.valid()) this.cancel()
+    if (!this.intent || this.valid()) return
+    if (this.current() && this.intent.draft === '' && this.batch?.count()) {
+      // Local completion/command windows temporarily own the composer, just
+      // like a nonempty draft. Neither should discard its empty-input batch.
+      // Stop streaming so late results cannot replace the restored selection.
+      if (!this.request && !this.notice && !this.waitingForNext) return
+      this.generation++
+      this.request?.abort()
+      this.request = null
+      this.notice = undefined
+      this.waitingForNext = false
+      this.host.changed()
+      return
+    }
+    this.cancel()
   }
 
   feedback(): SuggestionFeedback | undefined {

@@ -1,6 +1,8 @@
 mod candidates;
 mod endpoint;
+mod generate;
 mod images;
+mod model;
 mod prompt;
 mod references;
 mod request;
@@ -10,10 +12,10 @@ mod types;
 mod workflow;
 
 pub use endpoint::SuggestionEndpoint;
+pub use generate::generate;
+pub use model::SuggestionModel;
 pub use prompt::prompt_config;
 pub use request::parse_request;
-pub use sample::generate;
-pub use sample::generate_with_updates;
 pub use sample::sample;
 pub use sample::sample_outcome;
 pub use sample::sample_with_updates;

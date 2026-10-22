@@ -9,6 +9,7 @@ use evot::suggestion::sample;
 use evot::suggestion::SuggestionEndpoint;
 use evot::suggestion::SuggestionHints;
 use evot::suggestion::SuggestionMessage;
+use evot::suggestion::SuggestionModel;
 use evot_engine::provider::MockProvider;
 use evot_engine::provider::MockResponse;
 use evot_engine::provider::MockToolCall;
@@ -25,13 +26,24 @@ use tokio_util::sync::CancellationToken;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn endpoint() -> SuggestionEndpoint {
-    SuggestionEndpoint {
-        model: "cloud/suggest".into(),
-        protocol: "openai".into(),
-        base_url: "https://example.invalid/v1/llm".into(),
+fn endpoint() -> SuggestionModel {
+    model_with_window(8192)
+}
+
+fn model_with_window(window: u32) -> SuggestionModel {
+    SuggestionModel {
+        config: evot::conf::resolve_model_config(
+            evot::conf::Protocol::OpenAi,
+            "evot-suggestion",
+            "cloud/suggest",
+            Some("https://example.invalid/v1/llm"),
+            Default::default(),
+            Default::default(),
+            Some(window),
+            None,
+            Some(true),
+        ),
         api_key: "test-key".into(),
-        context_window: 8192,
     }
 }
 
@@ -261,10 +273,9 @@ fn bounded_context_and_small_windows_fail_silently() -> TestResult {
             .iter()
             .any(|original| message_text(message) == Some(original.text.as_str())));
     }
-    let mut small = endpoint();
-    small.context_window = 128;
+    let small = model_with_window(128);
     assert!(prompt_config(&small, &messages, &SuggestionHints::default()).is_none());
-    small.context_window = 1024;
+    let small = model_with_window(1024);
     assert!(prompt_config(
         &small,
         &history("Task", "Reply"),

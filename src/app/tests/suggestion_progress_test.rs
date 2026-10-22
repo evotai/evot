@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use evot::suggestion::sample_with_updates;
-use evot::suggestion::SuggestionEndpoint;
 use evot::suggestion::SuggestionHints;
 use evot::suggestion::SuggestionListener;
 use evot::suggestion::SuggestionMessage;
+use evot::suggestion::SuggestionModel;
 use evot::suggestion::SuggestionOutcome;
 use evot::suggestion::SuggestionStatus;
 use evot_engine::provider::ProviderError;
@@ -80,12 +80,19 @@ fn spawn(
         fail,
     });
     let task = tokio::spawn(async move {
-        let endpoint = SuggestionEndpoint {
-            model: "fixture".into(),
-            protocol: "openai".into(),
-            base_url: "https://invalid.example/v1".into(),
+        let endpoint = SuggestionModel {
+            config: evot::conf::resolve_model_config(
+                evot::conf::Protocol::OpenAi,
+                "evot-suggestion",
+                "fixture",
+                Some("https://invalid.example/v1"),
+                Default::default(),
+                Default::default(),
+                Some(8192),
+                None,
+                Some(true),
+            ),
             api_key: "fixture".into(),
-            context_window: 8192,
         };
         let messages = vec![
             SuggestionMessage {

@@ -146,6 +146,28 @@ test('local path completion preempts cached and in-flight model suggestions', as
   }
 })
 
+test('local Tab and Right retain the empty-composer suggestion for later clearing', async () => {
+  for (const text of ['@src', 'read @src', './missing-path/file', 'read ../evot/xx']) {
+    for (const type of ['tab', 'right']) {
+      const h = harness('')
+      h.input.handle({ type: 'tab' })
+      h.requests[0]!.resolve({ candidates: ['Run the tests', 'Review the diff'], status: 'ready' })
+      await tick()
+      h.controller.next()
+      h.setEditor(insertText(createEditorState(), text))
+      h.controller.reconcile()
+      expect(h.input.handle({ type })).toBe(false)
+      expect(h.text()).toBe(text)
+      expect(h.controller.text()).toBe('')
+      h.setEditor(createEditorState())
+      h.controller.reconcile()
+      expect(h.controller.text()).toBe('Review the diff')
+      expect(h.controller.position()).toEqual({ current: 2, total: 2 })
+      expect(h.requests).toHaveLength(1)
+    }
+  }
+})
+
 test('finishing a path with whitespace returns Tab to intent assistance', () => {
   const h = harness('read ../evot/xx ')
   expect(h.input.handle({ type: 'tab' })).toBe(true)

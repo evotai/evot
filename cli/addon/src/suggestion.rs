@@ -26,7 +26,10 @@ pub struct NapiSuggestion {
 }
 
 impl NapiSuggestion {
-    pub fn start(request: evot::suggestion::SuggestionRequest) -> Self {
+    pub fn start(
+        request: evot::suggestion::SuggestionRequest,
+        current: evot::conf::LlmConfig,
+    ) -> Self {
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
         let (messages, hints) = request.into_parts();
@@ -34,7 +37,8 @@ impl NapiSuggestion {
         let listener = Arc::new(move |candidates| {
             updates.send_replace(candidates);
         });
-        let handle = tokio::spawn(evot::suggestion::generate_with_updates(
+        let handle = tokio::spawn(evot::suggestion::generate(
+            current,
             messages,
             hints,
             task_cancel,

@@ -1,7 +1,7 @@
 use evot::suggestion::prompt_config;
-use evot::suggestion::SuggestionEndpoint;
 use evot::suggestion::SuggestionHints;
 use evot::suggestion::SuggestionMessage;
+use evot::suggestion::SuggestionModel;
 use evot::suggestion::SuggestionRequest;
 use evot::suggestion::SuggestionWorkflow;
 use evot_engine::Content;
@@ -20,13 +20,20 @@ fn workflow() -> Result<Box<SuggestionWorkflow>, serde_json::Error> {
         .ok_or_else(|| serde::de::Error::custom("missing workflow"))
 }
 
-fn endpoint() -> SuggestionEndpoint {
-    SuggestionEndpoint {
-        model: "test".into(),
-        protocol: "openai".into(),
-        base_url: "https://example.invalid".into(),
+fn endpoint() -> SuggestionModel {
+    SuggestionModel {
+        config: evot::conf::resolve_model_config(
+            evot::conf::Protocol::OpenAi,
+            "evot-suggestion",
+            "test",
+            Some("https://example.invalid"),
+            Default::default(),
+            Default::default(),
+            Some(8192),
+            None,
+            Some(true),
+        ),
         api_key: "test".into(),
-        context_window: 8192,
     }
 }
 

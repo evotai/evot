@@ -703,6 +703,52 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
+  test('without a published service suggestions use the current local provider and model', async () => {
+    let chatRequests = 0
+    let suggestionRequests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as Record<string, unknown>
+      expect(body.model).toBe('smoke-model')
+      expect(request.headers.get('authorization')).toBe('Bearer smoke-test-key')
+      const suggesting = JSON.stringify(body.messages).includes('SUGGESTION MODE')
+      let content = 'Implementation is ready. Should I run tests or review the diff?'
+      if (suggesting) {
+        suggestionRequests++
+        suggestionInstructions(body)
+        expect(body.tools ?? []).toEqual([])
+        expect(body.max_tokens).toBe(192)
+        content = 'Run the targeted tests\nReview the diff'
+      } else chatRequests++
+      const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
+        delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    } })
+    let session: Session | undefined
+    try {
+      session = await startEvot(false, false, false, `http://127.0.0.1:${server.port}/v1`)
+      session.write('Implement the requested change\x0d')
+      await session.waitForScreen(/Run the targeted tests\s+1\/2 ⇥/)
+      expect(chatRequests).toBe(1)
+      expect(suggestionRequests).toBe(1)
+      session.write('temporary draft')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*temporary draft/)
+      session.write('\x7f'.repeat('temporary draft'.length))
+      await session.waitForScreen(/Run the targeted tests\s+1\/2 ⇥/)
+      session.write('\t')
+      await session.waitForScreen(/Review the diff\s+2\/2 ⇥/)
+      session.write('\x1b[C')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Review the diff/)
+      expect(chatRequests).toBe(1)
+      expect(suggestionRequests).toBe(1)
+      expect(session.historyEntries()).toEqual(['Implement the requested change'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
   test('published suggestion returns three cached candidates and Tab wraps without more requests', async () => {
     const input = '\x1b[C'
     let chatRequests = 0
@@ -739,6 +785,24 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
       expect(suggestionRequests).toBe(1)
       expect(suggestionBodies[0]).not.toContain('ALREADY REJECTED')
+      // Exercise the automatic result before Tab promotes it to explicit input
+      // assistance; cycling first would miss automatic-only invalidation.
+      for (const [draft, clear] of [
+        ['temporary input', '\x15'],
+        ['中文输入', '\x03'],
+        ['temporary input', '\x7f'.repeat('temporary input'.length)],
+        ['中文输入', '\x7f'.repeat(4)],
+        ['temporary input', '\x01' + '\x1b[3~'.repeat('temporary input'.length)],
+        ['\x1b[200~pasted draft\x1b[201~', '\x15'],
+        ['/re', '\x7f'.repeat(3)],
+        ['@README', '\x7f'.repeat(7)],
+      ] as const) {
+        session.write(draft)
+        await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*/)
+        session.write(clear)
+        await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
+        expect(suggestionRequests).toBe(1)
+      }
       session.write('\t')
       await session.waitForScreen(/Review the diff\s+2\/3 ⇥/)
       session.write('\t')
@@ -746,6 +810,16 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('\t')
       await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
       session.write('\t\t')
+      await session.waitForScreen(/Commit the change\s+3\/3 ⇥/)
+      expect(suggestionRequests).toBe(1)
+      // Typing hides the placeholder without discarding its selected candidate.
+      session.write('temporary draft')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*temporary draft/)
+      session.write('\x15') // Ctrl+U clears the draft.
+      await session.waitForScreen(/Commit the change\s+3\/3 ⇥/)
+      session.write('x')
+      await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*x/)
+      session.write('\x7f') // Backspace also restores the placeholder.
       await session.waitForScreen(/Commit the change\s+3\/3 ⇥/)
       expect(suggestionRequests).toBe(1)
       const beforeAccept = chatRequests

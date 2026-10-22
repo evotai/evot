@@ -13,9 +13,9 @@ use super::candidates::validated;
 use super::prompt::prompt_config;
 use super::stream::CandidateStream;
 use super::stream::SuggestionListener;
-use super::SuggestionEndpoint;
 use super::SuggestionHints;
 use super::SuggestionMessage;
+use super::SuggestionModel;
 use super::SuggestionOutcome;
 use super::SuggestionStatus;
 
@@ -25,87 +25,32 @@ use super::SuggestionStatus;
 // failures can still return earlier; they are not this local deadline.
 pub const SUGGESTION_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Single bounded request; deliberately not an agent run. No retries, tools,
-/// compaction, transcript writes, main-model fallback or auth-refresh traffic.
-pub async fn generate(
-    messages: Vec<SuggestionMessage>,
-    hints: SuggestionHints,
-    cancel: CancellationToken,
-) -> SuggestionOutcome {
-    generate_with_updates(messages, hints, cancel, None).await
-}
-
-pub async fn generate_with_updates(
-    messages: Vec<SuggestionMessage>,
-    hints: SuggestionHints,
-    cancel: CancellationToken,
-    listener: Option<SuggestionListener>,
-) -> SuggestionOutcome {
-    let started = std::time::Instant::now();
-    let work = async {
-        let Some(endpoint) = super::endpoint::current().await else {
-            tracing::debug!(target: "evot::suggestion", outcome = "not_published");
-            return SuggestionOutcome::status(SuggestionStatus::Unavailable);
-        };
-        let Some(protocol) = endpoint.parsed_protocol() else {
-            return SuggestionOutcome::status(SuggestionStatus::Unavailable);
-        };
-        let provider: Arc<dyn StreamProvider> = match protocol {
-            crate::conf::Protocol::Anthropic => Arc::new(evot_engine::provider::AnthropicProvider),
-            crate::conf::Protocol::OpenAi => Arc::new(evot_engine::provider::OpenAiCompatProvider),
-            crate::conf::Protocol::OpenAiResponses => {
-                Arc::new(evot_engine::provider::OpenAiResponsesProvider)
-            }
-        };
-        sample_with_updates(
-            &endpoint,
-            &messages,
-            &hints,
-            provider,
-            cancel.clone(),
-            listener,
-        )
-        .await
-    };
-    tokio::select! {
-        biased;
-        _ = cancel.cancelled() => SuggestionOutcome::default(),
-        result = tokio::time::timeout(SUGGESTION_TIMEOUT, work) => match result {
-            Ok(result) => result,
-            Err(_) => {
-                tracing::info!(target: "evot::suggestion", outcome = "timeout", elapsed_ms = started.elapsed().as_millis());
-                SuggestionOutcome::status(SuggestionStatus::TimedOut)
-            }
-        },
-    }
-}
-
 /// Candidate-only convenience API; interactive callers use sample_outcome to
 /// distinguish an empty prediction from a failed transport.
 pub async fn sample(
-    endpoint: &SuggestionEndpoint,
+    model: &SuggestionModel,
     messages: &[SuggestionMessage],
     hints: &SuggestionHints,
     provider: Arc<dyn StreamProvider>,
     cancel: CancellationToken,
 ) -> Vec<String> {
-    sample_outcome(endpoint, messages, hints, provider, cancel)
+    sample_outcome(model, messages, hints, provider, cancel)
         .await
         .candidates
 }
 
 pub async fn sample_outcome(
-    endpoint: &SuggestionEndpoint,
+    model: &SuggestionModel,
     messages: &[SuggestionMessage],
     hints: &SuggestionHints,
     provider: Arc<dyn StreamProvider>,
     cancel: CancellationToken,
 ) -> SuggestionOutcome {
-    sample_with_updates(endpoint, messages, hints, provider, cancel, None).await
+    sample_with_updates(model, messages, hints, provider, cancel, None).await
 }
 
 pub async fn sample_with_updates(
-    endpoint: &SuggestionEndpoint,
+    model: &SuggestionModel,
     messages: &[SuggestionMessage],
     hints: &SuggestionHints,
     provider: Arc<dyn StreamProvider>,
@@ -134,7 +79,7 @@ pub async fn sample_with_updates(
         prepared = Some(owned);
     }
     let hints = prepared.as_ref().unwrap_or(hints);
-    let Some(config) = prompt_config(endpoint, messages, hints) else {
+    let Some(config) = prompt_config(model, messages, hints) else {
         tracing::info!(target: "evot::suggestion", outcome = "insufficient_context");
         return if hints.images.is_empty() {
             SuggestionOutcome::default()

@@ -4,8 +4,8 @@ use crate::auth::ModelsResponse;
 use crate::conf::parse_protocol;
 use crate::conf::Protocol;
 
-/// A service published independently of the chat picker. No Free/Premium
-/// inference, judge reuse, or fast-model fallback is allowed.
+/// Published service DTO. Runtime model selection lives in `model`, not in
+/// the catalog or its persistent representation.
 #[derive(Clone, Deserialize)]
 pub struct SuggestionEndpoint {
     pub model: String,
@@ -37,11 +37,8 @@ impl SuggestionEndpoint {
     }
 }
 
-pub(super) async fn current() -> Option<SuggestionEndpoint> {
-    crate::blocking::blocking_io("suggestion_config", read_current)
-        .await
-        .ok()
-        .flatten()
+pub(super) async fn current() -> crate::error::Result<Option<SuggestionEndpoint>> {
+    crate::blocking::blocking_io("suggestion_config", read_current).await
 }
 
 fn read_current(
@@ -53,6 +50,20 @@ fn read_current(
     if cancel.is_cancelled() {
         return Err(crate::blocking::cancelled("suggestion_config"));
     }
-    Ok(crate::auth::load_models_cache()?
-        .and_then(|cache| SuggestionEndpoint::from_catalog(&cache.response)))
+    let Some(cache) = crate::auth::load_models_cache()? else {
+        return Ok(None);
+    };
+    let published = cache
+        .response
+        .extra
+        .get("services")
+        .and_then(|services| services.get("suggestion"));
+    if published.is_none_or(serde_json::Value::is_null) {
+        return Ok(None);
+    }
+    SuggestionEndpoint::from_catalog(&cache.response)
+        .map(Some)
+        .ok_or_else(|| {
+            crate::error::EvotError::Conf("invalid suggestion service configuration".into())
+        })
 }

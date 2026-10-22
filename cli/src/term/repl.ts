@@ -2726,15 +2726,15 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   function handleKey(event: KeyEvent) {
     if (suggestionInput.handle(event)) return
-    suggestions.cancel()
     if (event.type !== 'escape' || overlay.kind !== 'none' || editor.completion || queueEdit.editingEntry()) {
       runInteraction.clear()
     }
     // Typing keeps focus in the composer while refreshing the formal window
     // above it. Up/down is the explicit gesture that promotes that same state.
-    if (activateCommandWindow(event)) return
+    if (activateCommandWindow(event)) { suggestions.reconcile(); return }
     handleKeyInner(event)
     refreshCommandWindowPreview(isCommandWindowTypingEvent(event))
+    suggestions.reconcile()
   }
 
   function handleKeyInner(event: KeyEvent) {
@@ -3039,6 +3039,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
 
   function handleLoadingEnter() {
+    suggestions.cancel()
     const displayText = getDisplayText()
     const historyText = getHistoryText()
     const imageResult = buildImageContentBlocks()
@@ -3279,6 +3280,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             : getExpandedText()
           // Allow image-only or text-only submissions
           if (!expandedText && !imageBlocks) return
+          suggestions.cancel()
           if (historyText) saveInputHistory(historyText)
           clearAll()
           renderer.requestRender()

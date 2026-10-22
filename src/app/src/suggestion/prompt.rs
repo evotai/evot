@@ -4,9 +4,9 @@ use evot_engine::Message;
 use evot_engine::StopReason;
 use evot_engine::ThinkingLevel;
 
-use super::SuggestionEndpoint;
 use super::SuggestionHints;
 use super::SuggestionMessage;
+use super::SuggestionModel;
 
 const HISTORY_TOKENS: usize = 4_096;
 const TOKEN_HEADROOM: usize = 1_024;
@@ -60,10 +60,13 @@ fn rewrite_instruction(prefix: &str, suffix: &str) -> Option<String> {
 /// A contiguous recent suffix, independently bounded from callers. Like
 /// Codex, skip sampling if the prompt cannot leave 1024 tokens of headroom.
 pub fn prompt_config(
-    endpoint: &SuggestionEndpoint,
+    model: &SuggestionModel,
     messages: &[SuggestionMessage],
     hints: &SuggestionHints,
 ) -> Option<StreamConfig> {
+    if !hints.images.is_empty() && !model.config.supports_image() {
+        return None;
+    }
     let draft = hints.draft();
     let rewriting = hints.suffix.is_some();
     if draft.is_some_and(|draft| {
@@ -85,11 +88,7 @@ pub fn prompt_config(
     {
         return None;
     }
-    let window = if endpoint.context_window == 0 {
-        8192
-    } else {
-        endpoint.context_window as usize
-    };
+    let window = model.config.context_window() as usize;
     // Same shape as Codex: a recent native-message suffix followed by one
     // prediction instruction. Never reintroduce the start of a long session.
     let draft_section = match hints.suffix.as_deref() {
@@ -185,32 +184,20 @@ pub fn prompt_config(
         content.extend(images);
     }
     native_messages.push(instruction);
-    let protocol = endpoint.parsed_protocol()?;
     let output_tokens = if rewriting {
         REWRITE_OUTPUT_TOKENS
     } else {
         OUTPUT_TOKENS
     };
-    let model_config = crate::conf::resolve_model_config(
-        protocol,
-        "evot-suggestion",
-        &endpoint.model,
-        Some(&endpoint.base_url),
-        Default::default(),
-        Default::default(),
-        (endpoint.context_window > 0).then_some(endpoint.context_window),
-        Some(output_tokens),
-        Some(!hints.images.is_empty()),
-    );
     Some(StreamConfig {
-        model: endpoint.model.clone(),
-        api_key: endpoint.api_key.clone(),
+        model: model.config.id().to_string(),
+        api_key: model.api_key.clone(),
         system_prompt: String::new(),
         messages: native_messages,
         tools: Vec::new(),
         thinking_level: ThinkingLevel::Off,
         max_tokens: Some(output_tokens),
-        model_config: Some(model_config),
+        model_config: Some(model.config.clone()),
         cache_config: Default::default(),
         prompt_cache_key: None,
         client: None,

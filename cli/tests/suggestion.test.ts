@@ -244,6 +244,89 @@ test('unsafe or duplicate candidates are dropped individually, not the whole res
   expect(h.controller.text()).toBe('Review the diff')
 })
 
+test('empty-composer suggestions restore the selected candidate after typing and clearing', async () => {
+  for (const explicit of [false, true]) {
+    const h = harness()
+    if (explicit) h.complete(messages(), '')
+    else h.start(messages())
+    h.requests[0]!.resolve(['Run the tests', 'Review the diff'])
+    await tick()
+    if (explicit) h.controller.next()
+    const selected = explicit ? 'Review the diff' : 'Run the tests'
+    for (const draft of ['new input', 'new inpu', '', 'another draft', '']) {
+      h.setDraft(draft)
+      h.controller.reconcile()
+      expect(h.controller.text()).toBe(draft ? '' : selected)
+      expect(h.controller.pending()).toBe(false)
+      if (draft) expect(h.controller.next()).toBe(false)
+    }
+    expect(h.controller.position()).toEqual({ current: explicit ? 2 : 1, total: 2 })
+    expect(h.requests).toHaveLength(1)
+    expect(h.controller.take()).toBe(selected)
+  }
+})
+
+test('empty-composer suggestions survive temporary completion windows until the draft is cleared', async () => {
+  for (const explicit of [false, true]) {
+    const h = harness()
+    if (explicit) h.complete(messages(), '')
+    else h.start(messages())
+    h.requests[0]!.resolve(['Run the tests', 'Review the diff'])
+    await tick()
+    if (explicit) h.controller.next()
+    h.setDraft('/resume')
+    h.setEligible(false)
+    h.controller.reconcile()
+    expect(h.controller.text()).toBe('')
+    expect(h.controller.next()).toBe(false)
+    expect(h.controller.dismiss()).toBe(false)
+    h.setDraft('/')
+    h.controller.reconcile()
+    h.setDraft('')
+    h.controller.reconcile()
+    expect(h.controller.text()).toBe('')
+    h.setEligible(true)
+    h.controller.reconcile()
+    expect(h.controller.text()).toBe(explicit ? 'Review the diff' : 'Run the tests')
+    expect(h.controller.position()).toEqual({ current: explicit ? 2 : 1, total: 2 })
+    expect(h.requests).toHaveLength(1)
+  }
+})
+
+test('suspended placeholders are discarded on dismissal, session changes and new runs', async () => {
+  for (const invalidate of ['cancel', 'session', 'run'] as const) {
+    const h = harness()
+    h.start(messages())
+    h.requests[0]!.resolve(['Run the tests'])
+    await tick()
+    h.setDraft('temporary input')
+    h.controller.reconcile()
+    if (invalidate === 'cancel') h.controller.cancel()
+    else if (invalidate === 'session') h.setKey('other session')
+    else h.setAutomaticEligible(false)
+    h.controller.reconcile()
+    h.setDraft('')
+    h.setKey('session:1')
+    h.setEligible(true)
+    h.setAutomaticEligible(true)
+    expect(h.controller.text()).toBe('')
+  }
+})
+
+test('draft-bound completions do not reappear after editing back to their original draft', async () => {
+  const h = harness()
+  h.setDraft('Run the')
+  h.complete(messages(), 'Run the')
+  h.requests[0]!.resolve([' tests'])
+  await tick()
+  h.setDraft('Run something else')
+  h.controller.reconcile()
+  h.setDraft('Run the')
+  expect(h.controller.text()).toBe('')
+  h.setDraft('')
+  expect(h.controller.text()).toBe('')
+})
+
 test('typing cancels transport and late success cannot reappear', async () => {
   const { controller, requests, start } = harness()
   start(messages())

@@ -677,15 +677,18 @@ impl NapiAgent {
         NapiCompaction::start(self.agent.clone(), session_id, custom_instructions)
     }
 
-    /// Start a best-effort suggestion using only the independently published
-    /// service. Context is bounded again in Rust; it never touches the run.
+    /// Start a disposable suggestion with the current model snapshot as the
+    /// fallback when no dedicated service is published. Never touches the run.
     #[napi]
     pub fn suggest_next_prompt(
         &self,
         context_json: String,
     ) -> Result<crate::suggestion::NapiSuggestion> {
         let request = evot::suggestion::parse_request(&context_json).map_err(Error::from_reason)?;
-        Ok(crate::suggestion::NapiSuggestion::start(request))
+        Ok(crate::suggestion::NapiSuggestion::start(
+            request,
+            self.agent.llm(),
+        ))
     }
 
     /// Send a steering message into a running session.

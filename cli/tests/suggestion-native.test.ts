@@ -121,7 +121,7 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       if (nextStep.status !== 'ready' || nextStep.candidates[0] !== 'Commit the documentation changes') throw new Error('ready result handoff was suppressed');
       const fs = await import('node:fs/promises');
       await fs.writeFile(${JSON.stringify(join(root, 'models.cache.json'))}, JSON.stringify({schema_version:1,synced_at:2,response:{services:{}}}));
-      if ((await agent.suggestNextPrompt(context).outcome()).status !== 'unavailable') throw new Error('unexpected fallback');
+      if ((await agent.suggestNextPrompt(context).outcome()).status !== 'failed') throw new Error('missing current-provider fallback to closed fixture endpoint');
       const cancelled = agent.suggestNextPrompt(context);
       cancelled.abort();
       if (await cancelled.result() !== null) throw new Error('cancelled request returned text');

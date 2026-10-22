@@ -28,7 +28,7 @@ export function createSuggestionInput(host: {
     const currentLine = editor.lines[editor.cursorLine] ?? ''
     const before = currentLine.slice(0, editor.cursorCol)
     if (editor.completion || extractAtPrefix(before)) {
-      host.controller.cancel()
+      host.controller.yieldToLocalInput()
       return false
     }
     // Finite command arguments (model/session IDs) own their namespace even
@@ -36,14 +36,14 @@ export function createSuggestionInput(host: {
     if (event.type === 'tab' && host.eligible() && host.inventory && host.showArguments && editor.cursorLine === 0) {
       const completion = argumentCompletion(getEditorText(editor), editorCursorOffset(editor), host.inventory())
       if (completion) {
-        host.controller.cancel()
+        host.controller.yieldToLocalInput()
         host.showArguments(completion)
         host.changed()
         return true
       }
     }
     if (fileCompletionTarget(currentLine, editor.cursorCol)) {
-      host.controller.cancel()
+      host.controller.yieldToLocalInput()
       return false
     }
     if (event.type === 'tab' && host.controller.next()) {
