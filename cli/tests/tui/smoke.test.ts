@@ -26,15 +26,28 @@ function selectionBackgroundAnsi(): string {
 }
 
 const PTY_RELAY = `
-import os, pty, select, sys, signal
+import os, pty, select, sys, signal, fcntl, termios, struct, json
 status = 0
+resize_fd = 3 if os.environ.get('EVOT_TEST_RESIZE_CONTROL') == '1' else None
+resize_pending = ''
 pid, fd = pty.fork()
 if pid == 0:
     os.environ['TERM'] = 'xterm-256color'
     os.execv(sys.argv[1], sys.argv[1:])
 try:
     while True:
-        r, _, _ = select.select([sys.stdin.buffer, fd], [], [], 0.1)
+        inputs = [sys.stdin.buffer, fd] + ([resize_fd] if resize_fd is not None else [])
+        r, _, _ = select.select(inputs, [], [], 0.1)
+        if resize_fd is not None and resize_fd in r:
+            command = os.read(resize_fd, 4096)
+            if not command:
+                resize_fd = None
+            else:
+                resize_pending += command.decode()
+                while '\\n' in resize_pending:
+                    line, resize_pending = resize_pending.split('\\n', 1)
+                    columns, rows = json.loads(line)
+                    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
         if sys.stdin.buffer in r:
             data = sys.stdin.buffer.read1(4096)
             if not data:
@@ -62,6 +75,7 @@ sys.exit(os.waitstatus_to_exitcode(status) if status else 0)
 
 type Session = {
   write: (data: string) => void
+  resize: (columns: number, rows: number) => void
   outputSince: () => string
   /**
    * Resolve once the output since the last checkpoint matches, or reject after
@@ -228,8 +242,8 @@ async function startEvot(
   if (seedPreviewCacheMiss) seedResumePreviewCacheMiss(stateHome)
   setup?.(stateHome)
   const child = spawn('python3', ['-c', PTY_RELAY, EVOT_BIN, ...startupArgs], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...smokeEnvironment(isolatedHome), ...environment?.(stateHome) },
+    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+    env: { ...smokeEnvironment(isolatedHome), ...environment?.(stateHome), EVOT_TEST_RESIZE_CONTROL: '1' },
   })
   let all = ''
   let seen = 0
@@ -286,6 +300,11 @@ async function startEvot(
   }
   return {
     write: data => { child.stdin!.write(data) },
+    resize: (columns, rows) => {
+      screen.resize(columns, rows)
+      const control = child.stdio[3] as import('node:stream').Writable
+      control.write(`${JSON.stringify([columns, rows])}\n`)
+    },
     outputSince,
     waitFor,
     waitForScreen,
@@ -331,6 +350,51 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       rmSync(home, { recursive: true, force: true })
     }
   }, 20_000)
+
+  test('resizing a long completed answer keeps the latest viewport and suggestion without replaying history', async () => {
+    let requests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => {
+      requests++
+      const content = 'Run the targeted tests\nReview the diff\nCommit the changes'
+      return new Response([
+        `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`,
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+      ].join(''), { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      session = await startEvot(true, false, false, undefined, home => {
+        seedSuggestionService(home, `http://127.0.0.1:${server.port}/v1`)
+        const history = Array.from({ length: 800 }, (_, row) =>
+          `Result ${row}: the completed operation produced a long diagnostic entry that must stay in native scrollback.`)
+        seedSuggestionConversation(home, [
+          { role: 'user', text: 'Review the completed operation' },
+          { role: 'assistant', text: `${history.join('\n')}\n\nLATEST RESIZE ANSWER` },
+        ])
+      }, ['--resume', SEEDED_SESSION_ID])
+      await session.waitForScreen(/LATEST RESIZE ANSWER[\s\S]*Run the targeted tests/)
+      for (const [columns, rows] of [[81, 24], [95, 24], [65, 24], [90, 30], [80, 24]] as const) {
+        session.checkpoint()
+        session.resize(columns, rows)
+        await session.waitFor('Run the targeted tests')
+        await session.waitForScreen(/LATEST RESIZE ANSWER[\s\S]*Run the targeted tests/)
+        const output = session.outputSince()
+        expect(output).not.toContain('\x1b[3J')
+        expect(output).not.toContain('Result 0:')
+        expect(output.length).toBeLessThan(rows * columns * 8)
+      }
+      session.write('draft after resize')
+      await session.waitForScreen('draft after resize')
+      session.write('\x15')
+      await session.waitForScreen('Run the targeted tests')
+      session.write('\t')
+      await session.waitForScreen('Review the diff')
+      expect(requests).toBe(1)
+    } finally {
+      if (session) await session.kill()
+      server.stop(true)
+    }
+  }, 60_000)
 
   test('renders the composer and echoes typed text', async () => {
     const session = await startEvot()

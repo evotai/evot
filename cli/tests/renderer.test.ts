@@ -796,7 +796,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('a resize repaints history and reports the redraw', async () => {
+    test('a resize repaints only the viewport and reports a non-destructive redraw', async () => {
       const screen = new ScreenHarness(80, 10)
       const diagnostics: RendererDiagnostic[] = []
       const renderer = new TermRenderer({ stdout: screen.stdout, onDiagnostic: d => diagnostics.push(d) })
@@ -808,8 +808,8 @@ describe('TermRenderer', () => {
       screen.terminal.resize(60, 10)
       screen.stdout.emit('resize')
       await paint(renderer, screen)
-      expect(diagnostics.map(d => d.kind)).toEqual(['full_redraw'])
-      expect(diagnostics[0]?.kind === 'full_redraw' && diagnostics[0].branch).toBe('width_change')
+      expect(diagnostics.map(d => d.kind)).toEqual(['viewport_redraw'])
+      expect(diagnostics[0]?.kind === 'viewport_redraw' && diagnostics[0].branch).toBe('width_change')
       renderer.destroy()
     })
 
@@ -957,7 +957,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('actual resize uses pi-style full redraw', async () => {
+    test('actual resize repaints the viewport without clearing scrollback', async () => {
       const { renderer, stdout } = createRenderer()
       renderer.init()
       renderer.setRenderCallback(() => ['line1', 'line2'])
@@ -968,7 +968,8 @@ describe('TermRenderer', () => {
       stdout.emit('resize')
       await Bun.sleep(20)
 
-      expect(stdout.output).toContain('\x1b[2J\x1b[H\x1b[3J')
+      expect(stdout.output).toContain('\x1b[2J\x1b[H')
+      expect(stdout.output).not.toContain('\x1b[3J')
       expect(stdout.output).toContain('line1')
       renderer.destroy()
     })

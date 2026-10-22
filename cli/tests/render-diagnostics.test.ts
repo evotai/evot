@@ -30,6 +30,19 @@ test('full redraws are logged with cause, geometry and the region that changed f
   expect(diagnostics.summary()).toBe('  Render: 2 full redraw(s) with scrollback cleared · 0 stale scrollback row(s) over 0 frame(s)')
 })
 
+test('viewport resize repaints are logged separately from destructive history replays', () => {
+  const { diagnostics, logged } = harness({ value: 0 })
+  diagnostics.record({
+    kind: 'viewport_redraw', frame: 5, branch: 'width_change',
+    previousLines: 2000, newLines: 1900, viewportTop: 1976,
+    firstChanged: null, columns: 81, rows: 24,
+  })
+  expect(logged).toEqual([
+    '[render] viewport redraw · width_change · frame 5 · rows 2000→1900 · viewportTop 1976 · firstChanged n/a (n/a) · 81x24',
+  ])
+  expect(diagnostics.summary()).toBe('  Render: 0 full redraw(s) with scrollback cleared · 0 stale scrollback row(s) over 0 frame(s) · 1 viewport redraw(s) with scrollback preserved')
+})
+
 test('stale scrollback events are throttled and accumulated', () => {
   const now = { value: 1_000 }
   const { diagnostics, logged } = harness(now)

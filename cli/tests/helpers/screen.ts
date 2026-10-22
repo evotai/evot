@@ -14,7 +14,7 @@ export class ScreenHarness {
   readonly terminal: InstanceType<typeof Terminal>
   readonly stdout: NodeJS.WriteStream
 
-  constructor(readonly columns = 80, readonly rows = 24) {
+  constructor(columns = 80, rows = 24) {
     this.terminal = new Terminal({
       cols: columns,
       rows,
@@ -30,6 +30,17 @@ export class ScreenHarness {
     stream.rows = rows
     stream.columns = columns
     this.stdout = stream
+  }
+
+  get columns(): number { return this.terminal.cols }
+  get rows(): number { return this.terminal.rows }
+
+  /** Match both the physical emulator geometry and renderer's stdout. */
+  resize(columns: number, rows: number): void {
+    this.stdout.columns = columns
+    this.stdout.rows = rows
+    this.terminal.resize(columns, rows)
+    this.stdout.emit('resize')
   }
 
   /** Let queued writes drain into the emulator. */

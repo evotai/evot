@@ -18,6 +18,11 @@
  * shifting rows leaves the transcript duplicating one row and losing another,
  * and no escape sequence can patch scrollback, so it is repainted. `committedRows`
  * on RenderFrame is what separates the two cases.
+ *
+ * Resizing is different: rewrap the producer frame, but repaint only its new
+ * viewport. Replaying all history on every drag exposes old output as it scrolls
+ * past and discards native scrollback/selection. Off-screen history keeps its
+ * terminal-owned formatting until an explicit history repaint.
  */
 
 import { CURSOR_MARKER, type RenderFrame, type RenderOverlay } from './render-frame.js'
@@ -82,9 +87,9 @@ export interface RendererTraceEntry {
 }
 
 /**
- * Always-on, cheap render events for post-hoc debugging. A full redraw is the
- * one operation that can move a reader's viewport, so every occurrence is
- * reported with enough state to name the cause without a full trace.
+ * Always-on, cheap render events for post-hoc debugging. Destructive history
+ * replays and viewport-only resize repaints are reported separately so a jump
+ * can be attributed without a full trace.
  */
 export type RendererDiagnostic =
   | {
@@ -96,6 +101,18 @@ export type RendererDiagnostic =
     newLines: number
     viewportTop: number
     firstChanged: number | null
+    columns: number
+    rows: number
+  }
+  | {
+    /** Only the resized viewport was repainted; native scrollback is retained. */
+    kind: 'viewport_redraw'
+    frame: number
+    branch: string
+    previousLines: number
+    newLines: number
+    viewportTop: number
+    firstChanged: null
     columns: number
     rows: number
   }
@@ -329,9 +346,8 @@ export class TermRenderer {
   }
 
   private onResize = (): void => {
-    // Match pi: resize only schedules a normal frame. doRender compares the
-    // actual dimensions and decides whether a full redraw is necessary. Some
-    // terminals emit redundant resize events on focus/layout changes.
+    // Compare actual dimensions in doRender. A drag can emit many events, and
+    // terminals also emit redundant events on focus/layout changes.
     this.requestRender()
   }
 
@@ -544,16 +560,52 @@ export class TermRenderer {
       return
     }
 
-    // Width changed — wrapping changes, must full redraw
-    if (widthChanged) {
-      fullRender(true, forced ? 'forced_repaint' : 'width_change')
+    if (forced) {
+      fullRender(true, 'forced_repaint')
       return
     }
 
-    // Height changed. Match pi's Termux exception: the software keyboard
-    // changes terminal height and replaying history on every toggle is worse.
-    if (heightChanged && !isTermuxSession()) {
-      fullRender(true, 'height_change')
+    // Geometry changes invalidate physical cursor coordinates, not the user's
+    // scrollback. Paint only the new tail with absolute screen positioning:
+    // even terminals without synchronized-output support never see the old
+    // transcript replayed through their viewport. In particular, do not emit
+    // CRLF past the last screen row, which would scroll history unnecessarily.
+    // Termux retains its differential height-only path for keyboard toggles.
+    if (widthChanged || (heightChanged && !isTermuxSession())) {
+      // An explicit history edit (for example erasing a revealed secret)
+      // must still reach off-screen rows when it coincides with a resize.
+      if (repaintHistory) {
+        fullRender(true, 'history_invalidated')
+        return
+      }
+      this.diagnose({
+        kind: 'viewport_redraw',
+        frame,
+        branch: widthChanged ? 'width_change' : 'height_change',
+        previousLines: previousLineCount,
+        newLines: newLines.length,
+        viewportTop: previousViewportTopBefore,
+        firstChanged: null,
+        columns: width,
+        rows: height,
+      })
+      const viewportTop = Math.max(0, newLines.length - height)
+      let buffer = SYNC_START + HIDE_CURSOR + CLEAR_VIEWPORT
+      buffer += newLines.slice(viewportTop).join('\r\n')
+      this.hardwareCursorRow = Math.max(0, newLines.length - 1)
+      this.maxLinesRendered = newLines.length
+      this.previousViewportTop = viewportTop
+      this.previousWidth = width
+      this.previousHeight = height
+      this.adoptFrame(newLines)
+      this.invalidatedRows.clear()
+      // Retained scrollback may use the old wrapping. Explicit history edits
+      // must still repair it even if subsequent logical frames are unchanged.
+      this.scrollbackStaleFrom = viewportTop > 0 ? 0 : this.scrollbackStaleFrom
+      this.write(buffer)
+      this.positionHardwareCursor(cursorPos, newLines.length)
+      this.write(SYNC_END)
+      traceFrame(widthChanged ? 'width_change' : 'height_change')
       return
     }
 

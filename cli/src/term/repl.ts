@@ -1828,7 +1828,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // whole transcript. The cache extends in place on append and rebuilds only
     // on reset (clear/replace), width change, or shrink. See HistoryRenderCache.
     const cols = renderer.termCols
-    if (cols !== liveContentWidth) {
+    const widthChanged = cols !== liveContentWidth
+    if (widthChanged) {
       liveContentWidth = cols
       liveContentMaxHeight = 0
     }
@@ -1844,7 +1845,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       const shifted = bannerRows !== committedBannerRows
         || cachedHistoryLines.length < committedHistoryRows
         || (committedPrefixMayReshape && cachedHistoryLines.length !== committedHistoryRows)
-      if (shifted) renderer.invalidateScrollback()
+      // A resize reflows the viewport without replaying history. Explicit
+      // edits still take precedence, including an edit concurrent with resize.
+      if (shifted && (!widthChanged || committedPrefixMayReshape)) renderer.invalidateScrollback()
     }
     committedBannerRows = bannerRows
     committedHistoryRows = cachedHistoryLines.length
@@ -1884,8 +1887,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       && (commandWindowContentLines === null || commandWindowContentWidth !== cols)
     ) {
       // Background commits stay frozen while the command window is mounted,
-      // but a resize must rebuild wrapping before the renderer performs its
-      // unavoidable width-change redraw.
+      // but a resize must rebuild wrapping before the renderer repaints the
+      // new viewport without replaying history.
       commandWindowContentLines = latestContentLines
       commandWindowContentWidth = cols
     }

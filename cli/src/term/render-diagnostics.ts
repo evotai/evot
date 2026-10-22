@@ -26,6 +26,7 @@ const STALE_LOG_INTERVAL_MS = 1000
 
 export class RenderDiagnostics {
   private fullRedraws = 0
+  private viewportRedraws = 0
   private shifts = 0
   private staleEvents = 0
   private staleRows = 0
@@ -36,11 +37,13 @@ export class RenderDiagnostics {
   constructor(private readonly deps: RenderDiagnosticsDeps) {}
 
   record(diagnostic: RendererDiagnostic): void {
-    if (diagnostic.kind === 'full_redraw') {
-      this.fullRedraws++
+    if (diagnostic.kind === 'full_redraw' || diagnostic.kind === 'viewport_redraw') {
+      const full = diagnostic.kind === 'full_redraw'
+      if (full) this.fullRedraws++
+      else this.viewportRedraws++
       const region = diagnostic.firstChanged === null ? 'n/a' : this.regionOf(diagnostic.firstChanged)
       this.deps.log([
-        `[render] full redraw · ${diagnostic.branch} · frame ${diagnostic.frame}`
+        `[render] ${full ? 'full' : 'viewport'} redraw · ${diagnostic.branch} · frame ${diagnostic.frame}`
         + ` · rows ${diagnostic.previousLines}→${diagnostic.newLines}`
         + ` · viewportTop ${diagnostic.viewportTop}`
         + ` · firstChanged ${diagnostic.firstChanged ?? 'n/a'} (${region})`
@@ -79,12 +82,13 @@ export class RenderDiagnostics {
 
   /** One-line session summary for `/log`; null when nothing happened. */
   summary(): string | null {
-    if (this.fullRedraws === 0 && this.staleEvents === 0 && this.shifts === 0) return null
+    if (this.fullRedraws === 0 && this.viewportRedraws === 0 && this.staleEvents === 0 && this.shifts === 0) return null
     const parts = [
       `${this.fullRedraws} full redraw(s) with scrollback cleared`,
       `${this.staleRows} stale scrollback row(s) over ${this.staleEvents} frame(s)`,
     ]
     if (this.shifts > 0) parts.push(`${this.shifts} scrollback shift repaint(s)`)
+    if (this.viewportRedraws > 0) parts.push(`${this.viewportRedraws} viewport redraw(s) with scrollback preserved`)
     return `  Render: ${parts.join(' · ')}`
   }
 
