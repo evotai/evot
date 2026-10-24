@@ -19,10 +19,12 @@
  * and no escape sequence can patch scrollback, so it is repainted. `committedRows`
  * on RenderFrame is what separates the two cases.
  *
- * Resizing is different: rewrap the producer frame, but repaint only its new
- * viewport. Replaying all history on every drag exposes old output as it scrolls
- * past and discards native scrollback/selection. Off-screen history keeps its
- * terminal-owned formatting until an explicit history repaint.
+ * Resizing can retain native scrollback only when the terminal's physical rows
+ * stay aligned with the producer frame (for example, widening short plain-text
+ * lines). Once wrapping, full-width backgrounds, or viewport height can change
+ * that alignment, the renderer rebuilds it with a full repaint. Repainting a
+ * new logical tail over terminal-reflowed history corrupts both coordinates and
+ * backgrounds, and subsequent differential frames cannot repair the result.
  */
 
 import { CURSOR_MARKER, type RenderFrame, type RenderOverlay } from './render-frame.js'
@@ -351,6 +353,39 @@ export class TermRenderer {
     this.requestRender()
   }
 
+  /**
+   * A viewport-only resize is safe only while physical row i still represents
+   * logical row i. Native reflow is not observable through stdout, so anything
+   * that could change the row mapping must establish a fresh full-render base.
+   */
+  private canPreserveScrollbackOnResize(
+    newLines: string[],
+    width: number,
+    height: number,
+    widthChanged: boolean,
+    heightChanged: boolean,
+  ): boolean {
+    // With a scrollback buffer, height changes alter the terminal's physical
+    // viewport origin independently of our logical `lines.length - height`.
+    // If both frames fit on screen there is no off-screen history to misalign.
+    if (heightChanged && (this.previousLines.length > this.previousHeight || newLines.length > height)) {
+      return false
+    }
+    if (!widthChanged) return true
+
+    // Rewrapped text and resized background padding must replace the old
+    // physical rows, not coexist with terminal-reflowed copies of them.
+    if (newLines.length !== this.previousLines.length) return false
+    for (let row = 0; row < newLines.length; row++) {
+      if (newLines[row] !== this.previousLines[row]) return false
+      // On shrink, xterm and compatible terminals reflow rows whose content
+      // exceeds the new width. On grow, our full-render/differential invariant
+      // guarantees there are no native wrapped rows to join.
+      if (width < this.previousWidth && visibleWidth(this.previousLines[row]!) > width) return false
+    }
+    return true
+  }
+
   // --- Private: core render ---
 
   private doRender(): void {
@@ -565,17 +600,21 @@ export class TermRenderer {
       return
     }
 
-    // Geometry changes invalidate physical cursor coordinates, not the user's
-    // scrollback. Paint only the new tail with absolute screen positioning:
-    // even terminals without synchronized-output support never see the old
-    // transcript replayed through their viewport. In particular, do not emit
-    // CRLF past the last screen row, which would scroll history unnecessarily.
+    // Geometry changes may invalidate physical cursor coordinates as well as
+    // the row mapping in native scrollback. Preserve the viewport-only path
+    // only when that mapping is provably unchanged; otherwise rebuild a clean
+    // physical base before resuming differential rendering.
     // Termux retains its differential height-only path for keyboard toggles.
     if (widthChanged || (heightChanged && !isTermuxSession())) {
       // An explicit history edit (for example erasing a revealed secret)
       // must still reach off-screen rows when it coincides with a resize.
       if (repaintHistory) {
         fullRender(true, 'history_invalidated')
+        return
+      }
+      const branch = widthChanged ? 'width_change' : 'height_change'
+      if (!this.canPreserveScrollbackOnResize(newLines, width, height, widthChanged, heightChanged)) {
+        fullRender(true, branch)
         return
       }
       this.diagnose({
@@ -599,9 +638,8 @@ export class TermRenderer {
       this.previousHeight = height
       this.adoptFrame(newLines)
       this.invalidatedRows.clear()
-      // Retained scrollback may use the old wrapping. Explicit history edits
-      // must still repair it even if subsequent logical frames are unchanged.
-      this.scrollbackStaleFrom = viewportTop > 0 ? 0 : this.scrollbackStaleFrom
+      // This path requires identical logical lines, so resize itself did not
+      // make retained rows stale. Keep an earlier stale mark until its repair.
       this.write(buffer)
       this.positionHardwareCursor(cursorPos, newLines.length)
       this.write(SYNC_END)

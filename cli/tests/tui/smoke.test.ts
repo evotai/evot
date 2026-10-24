@@ -351,7 +351,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 20_000)
 
-  test('resizing a long completed answer keeps the latest viewport and suggestion without replaying history', async () => {
+  test('resizing a long completed answer keeps the latest viewport and suggestion across geometry changes', async () => {
     let requests = 0
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => {
       requests++
@@ -379,9 +379,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         await session.waitFor('Run the targeted tests')
         await session.waitForScreen(/LATEST RESIZE ANSWER[\s\S]*Run the targeted tests/)
         const output = session.outputSince()
-        expect(output).not.toContain('\x1b[3J')
-        expect(output).not.toContain('Result 0:')
-        expect(output.length).toBeLessThan(rows * columns * 8)
+        // These history rows wrap differently at every width. Repainting once
+        // is the only correct way to restore the terminal's physical row base;
+        // patching a new logical tail over the reflowed scrollback duplicates
+        // rows and leaves partial-width backgrounds.
+        expect(output).toContain('\x1b[3J')
+        expect(output.match(/Result 0:/g)).toHaveLength(1)
       }
       session.write('draft after resize')
       await session.waitForScreen('draft after resize')
