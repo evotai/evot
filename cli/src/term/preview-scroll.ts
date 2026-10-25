@@ -15,6 +15,11 @@ export const PANE_MIN_LIST_WIDTH = 46
 /** Gap and rail between the list and the pane (`  │ `). */
 const PANE_GUTTER = 4
 
+export interface PreviewViewport {
+  width: number
+  height: number
+}
+
 /** Shared by keyboard handling and rendering: content never sets window size. */
 export function previewGeometry(columns: number, rows: number) {
   const available = Math.max(1, Math.floor(Number.isFinite(columns) ? columns : 80) - 1)

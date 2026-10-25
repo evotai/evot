@@ -1,5 +1,16 @@
 import type { RunInteractionState } from '../app/run-interaction.js'
 import { backgroundChord } from '../design/key-hints.js'
+import { truncateAnsiToWidth } from '../../render/wrap.js'
+import type { ViewBlock } from './types.js'
+import { finiteSize } from './width.js'
+
+/** Animated metrics must never add/remove rows beneath the transcript. */
+export function buildRunStatusBlock(text: string, columns: number): ViewBlock {
+  return {
+    lines: [{ spans: [{ text: truncateAnsiToWidth(text.replace(/[\r\n]+/g, ' '), finiteSize(columns, 80)) }] }],
+    marginTop: 1,
+  }
+}
 
 /** Copy and display policy only. Never reads native state or handles keys. */
 export function runStatusPresentation(state: RunInteractionState): {

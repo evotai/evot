@@ -25,6 +25,13 @@ describe('update notice presentation', () => {
     expect(status.lines[1]?.spans).toEqual([{ text: 'Thinking…' }])
   })
 
+  test('a narrow notice never overflows or displaces the fixed-height run status', () => {
+    const status: ViewBlock = { lines: [{ spans: [{ text: 'Running command · esc twice to interrupt' }] }], marginTop: 1 }
+    const notice = [{ text: 'Update ready v1.2 · /restart to apply' }]
+    expect(attachUpdateNotice(status, notice, 40)).toBe(status)
+    expect(spansWidth(standaloneUpdateNotice(notice, 12, false).lines[0]!.spans)).toBeLessThanOrEqual(12)
+  })
+
   test('standalone notice keeps one blank only when it owns the region', () => {
     const notice = [{ text: 'update' }]
     expect(standaloneUpdateNotice(notice, 80, false).marginTop).toBe(1)

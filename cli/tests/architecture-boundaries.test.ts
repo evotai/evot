@@ -23,7 +23,7 @@ describe('module dependency boundaries', () => {
     expect(frame).not.toContain('process.')
     expect(frame).not.toContain('import ')
     const host = await source('../src/term/repl.ts')
-    expect(host).toContain('return buildShellFrame(')
+    expect(host).toContain('buildShellFrame({')
     expect(host).not.toContain('bottomAnchorStart:')
   })
 

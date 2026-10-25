@@ -27,6 +27,7 @@ test('ordinary terminal: write streaming preserves reading position and completi
   renderer.init()
   renderer.setRenderCallback(() => ({
     lines: [...Array.from({ length: 50 }, (_, i) => `history ${i}`), ...(committed ?? rows(call, expanded)), 'spinner', `> ${CURSOR_MARKER}`, 'footer'],
+    committedRows: 50 + (committed?.length ?? 0),
     bottomAnchor: true,
   }))
   try {
@@ -58,15 +59,18 @@ test('ordinary terminal: write streaming preserves reading position and completi
     expect(traces.every(e => e.branch === 'differential_update' || e.branch === 'no_change')).toBe(true)
     expect(traces.flatMap(e => e.ansiWrites).join('')).not.toContain('\x1b[3J')
 
-    // Completion deliberately changes layouts once. If the preview is already
-    // in native scrollback, the renderer must replay it to remove those rows.
+    // Completion can recover the visible tail without clearing history. The
+    // next durable commit repairs the provisional preview in scrollback once.
     call = { ...call, status: 'done', result: 'Wrote content', durationMs: 12 }
     await paint(renderer, screen)
+    expect(traces.flatMap(e => e.ansiWrites).join('')).not.toContain('\x1b[3J')
+    traces.length = 0
+    committed = rows(call)
+    await paint(renderer, screen)
+    expect(traces.map(e => e.branch)).toEqual(['scrollback_shift'])
     const completedRows = screen.viewport()
     const completedTop = screen.terminal.buffer.active.viewportY
     traces.length = 0
-    // Committing the final card must not trigger another replay.
-    committed = rows(call)
     await paint(renderer, screen)
     expect(screen.viewport()).toEqual(completedRows)
     expect(screen.terminal.buffer.active.viewportY).toBe(completedTop)

@@ -1,14 +1,14 @@
 import type { KeyEvent } from './input.js'
 import type { SelectorState } from './selector.js'
 import type { Hint } from './design/key-hints.js'
-import { selectorPreviewGeometry, previewScrollLimit } from './preview-scroll.js'
+import { selectorPreviewGeometry, previewScrollLimit, type PreviewViewport } from './preview-scroll.js'
 import { SELECTOR_OWNER } from './app/selector-identity.js'
 
 export type PaneAction = { kind: 'update'; state: SelectorState } | { kind: 'none' }
 
 /** Shared focus/scroll ownership. null delegates to the feature's list actions;
  * 'none' consumes a key in the detail pane so it cannot mutate the list. */
-export function handleSplitPaneKey(state: SelectorState, event: KeyEvent, columns = 80, rows = 24): PaneAction | null {
+export function handleSplitPaneKey(state: SelectorState, event: KeyEvent, columns = 80, rows = 24, viewport?: PreviewViewport): PaneAction | null {
   const pane = state.previewPane
   if (!pane) return null
   const selected = state.items[state.focusIndex]
@@ -26,11 +26,12 @@ export function handleSplitPaneKey(state: SelectorState, event: KeyEvent, column
   const up = event.type === 'up' || (state.noFilter && event.type === 'char' && event.char === 'k')
   if (event.type === 'page-up' || event.type === 'page-down' || (pane.focused && (up || down))) {
     if (!selected?.preview?.length) return { kind: 'none' }
-    const geometry = selectorPreviewGeometry(state, columns, rows)
+    const geometry = viewport ?? selectorPreviewGeometry(state, columns, rows)
     const max = previewScrollLimit(selected.preview, geometry.width, geometry.height)
     const offset = Math.min(pane.offset, max)
-    const delta = event.type === 'page-down' ? geometry.height - 1
-      : event.type === 'page-up' ? 1 - geometry.height : down ? 1 : -1
+    const page = Math.max(1, geometry.height - 1)
+    const delta = event.type === 'page-down' ? page
+      : event.type === 'page-up' ? -page : down ? 1 : -1
     return { kind: 'update', state: { ...disarm(), previewPane: {
       ...pane, offset: Math.max(0, Math.min(max, offset + delta)),
     } } }

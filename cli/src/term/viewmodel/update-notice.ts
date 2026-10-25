@@ -1,6 +1,6 @@
 import { getTheme } from '../../render/theme/index.js'
 import type { StyledSpan, ViewBlock } from './types.js'
-import { joinLeftRight, spansWidth } from './width.js'
+import { joinLeftRight, spansWidth, truncateSpansToWidth } from './width.js'
 
 export interface UpdateNoticeInput {
   status: string
@@ -28,6 +28,9 @@ export function updateNoticeSpans(input: UpdateNoticeInput): StyledSpan[] | null
 /** Inline status retains its row count; narrow widths use the shared layout. */
 export function attachUpdateNotice(status: ViewBlock, notice: StyledSpan[], columns: number): ViewBlock {
   const last = status.lines.length - 1
+  // A passive update must not displace the run status/action or overflow the
+  // fixed-height row. It can be shown later when there is room or no run.
+  if (spansWidth(status.lines[last]?.spans ?? []) + 1 + spansWidth(notice) > columns) return status
   return {
     ...status,
     lines: [...status.lines.slice(0, last), { spans: joinLeftRight(status.lines[last]?.spans ?? [], notice, columns) }],
@@ -35,6 +38,7 @@ export function attachUpdateNotice(status: ViewBlock, notice: StyledSpan[], colu
 }
 
 export function standaloneUpdateNotice(notice: StyledSpan[], columns: number, hasContentAbove: boolean): ViewBlock {
-  const pad = Math.max(0, columns - spansWidth(notice))
-  return { lines: [{ spans: [{ text: ' '.repeat(pad) }, ...notice] }], marginTop: hasContentAbove ? 0 : 1 }
+  const visible = truncateSpansToWidth(notice, columns)
+  const pad = Math.max(0, columns - spansWidth(visible))
+  return { lines: [{ spans: [{ text: ' '.repeat(pad) }, ...visible] }], marginTop: hasContentAbove ? 0 : 1 }
 }

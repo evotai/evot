@@ -213,10 +213,10 @@ describe('composer placement on a real screen', () => {
     renderer.destroy()
   })
 
-  // Addressable shrink preserves history. Removing content already above the
-  // viewport still needs the existing off-viewport fallback, not a blind patch.
+  // Addressable shrink preserves history. If the caret leaves the physical
+  // viewport, repaint only that viewport instead of replaying native history.
   test.each([1, 3, 8, 12, 30, 80])(
-    'discarding %i thinking rows only redraws history when the removal is off-screen',
+    'discarding %i thinking rows recovers off-screen geometry without replaying history',
     async thinkingRows => {
       const screen = new ScreenHarness(80, 24)
       const branches: string[] = []
@@ -241,7 +241,7 @@ describe('composer placement on a real screen', () => {
       const footerRow = visibleShrink ? screen.rows - 1 - thinkingRows : screen.rows - 1
       expect(screen.rowOf('footer row')).toBe(footerRow)
       expect(viewport[footerRow - 1]).toBe('\u276f')
-      expect(branches.at(-1)).toBe(visibleShrink ? 'differential_update' : 'deleted_lines_above_viewport')
+      expect(branches.at(-1)).toBe(visibleShrink ? 'differential_update' : 'cursor_recovery')
       // No stale thinking rows survive the interrupt.
       expect(viewport.some(line => line.startsWith('thinking '))).toBe(false)
       renderer.destroy()
@@ -304,7 +304,7 @@ describe('composer placement on a real screen', () => {
     await screen.settle()
     expect(screen.rowOf('footer row')).toBe(screen.rows - 1)
 
-    // The repaint re-emits the transcript rather than duplicating or losing it.
+    // Recovering the visible tail never wipes the existing transcript history.
     const buffer = screen.terminal.buffer.active
     const allRows: string[] = []
     for (let row = 0; row < buffer.length; row++) {

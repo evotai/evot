@@ -5,6 +5,7 @@
 
 import { providerFailurePresentation } from '../provider/error-presentation.js'
 import { formatCacheHitPercent } from '../render/cache.js'
+import { truncateAnsiToWidth, visibleWidth } from '../render/wrap.js'
 import { resolveRunInteraction, type RunInteractionState } from './app/run-interaction.js'
 import { runStatusPresentation } from './viewmodel/run-status.js'
 import { confirmationHintAnsi } from './viewmodel/confirmation-hint.js'
@@ -289,6 +290,8 @@ export interface SpinnerFormatOptions {
   /** Shared capabilities from the run interaction controller. */
   interaction?: RunInteractionState
   hideInteractionHint?: boolean
+  /** A status row is single-line; preserve its action hint before optional metrics. */
+  columns?: number
   /** Requested model, used to identify long quota waits. */
   model?: string
 }
@@ -365,12 +368,18 @@ export function formatSpinnerLine(
   const tokenSuffix = presentation.showUsage ? formatSpinnerTokenSuffix(state, now, stats) : ''
   const interruptHint = options.hideInteractionHint ? '' : confirmationHintAnsi(presentation.hint, presentation.confirmationPending)
 
-  if (slow) {
-    return `\x1b[31m${char}\x1b[0m \x1b[31m${label}\x1b[0m\x1b[2m (${status}${tokenSuffix})${interruptHint}\x1b[0m`
+  const content = slow
+    ? `\x1b[31m${char}\x1b[0m \x1b[31m${label}\x1b[0m\x1b[2m (${status}${tokenSuffix})`
+    : `\x1b[36m${char}\x1b[0m ${glimmerText(label, state.glimmerPos)}\x1b[2m (${status}${tokenSuffix})`
+  if (options.columns === undefined) return `${content}${interruptHint}\x1b[0m`
+  const columns = Number.isFinite(options.columns) ? Math.max(1, Math.floor(options.columns)) : 80
+  const hintWidth = visibleWidth(interruptHint)
+  // Keep the complete action whenever there is still room for a status glyph.
+  // Metrics may shorten, but must not move the editor on every digit change.
+  if (interruptHint && hintWidth + 2 < columns) {
+    return `${truncateAnsiToWidth(content, columns - hintWidth)}${interruptHint}\x1b[0m`
   }
-
-  const glimmerLabel = glimmerText(label, state.glimmerPos)
-  return `\x1b[36m${char}\x1b[0m ${glimmerLabel}\x1b[2m (${status}${tokenSuffix})${interruptHint}\x1b[0m`
+  return truncateAnsiToWidth(`${content}${interruptHint}\x1b[0m`, columns)
 }
 
 function glimmerText(text: string, pos: number): string {

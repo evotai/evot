@@ -16,6 +16,8 @@ import { getTheme, setDetectedThemeScheme } from '../render/theme/index.js'
 import { compactionToolName, createSpinnerState, advanceSpinner, formatSpinnerLine, setSpinnerPhase, spinnerStatsFromLastUsage } from './spinner.js'
 import { carryModelEfforts, createModelWindow, createResumeWindow } from './app/selector-windows.js'
 import { buildShellFrame } from './viewmodel/shell.js'
+import { buildRunStatusBlock } from './viewmodel/run-status.js'
+import type { PreviewViewport } from './preview-scroll.js'
 import { promptFromSnapshot } from './viewmodel/prompt-snapshot.js'
 import { forkTrailTitles } from './viewmodel/fork-trail.js'
 import { backNotice, exitLineageHint, forkNotice, resolveBackTarget } from './app/fork-nav.js'
@@ -577,6 +579,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   let focusedCommandWindowGeneration: number | null = null
   let commandWindowContentLines: string[] | null = null
   let commandWindowContentWidth: number | null = null
+  let selectorPreviewViewport: PreviewViewport | undefined
   let deferredCloudModelNotice: string | null = null
   let deferredCloudCampaignId: string | null = null
   let deferredSkillNotice: string | null = null
@@ -825,6 +828,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function releaseCommandWindowLayout(): void {
     commandWindowContentLines = null
     commandWindowContentWidth = null
+    selectorPreviewViewport = undefined
     // The window is gone, so its search-text warm-up has nothing left to serve.
     // Cancelling here rather than per keystroke keeps warming alive across
     // typing inside an open window, which is exactly when it is needed.
@@ -1341,7 +1345,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     if (preview.kind === 'selector') {
       // Use the same navigation path as an open selector so the first arrow
       // both focuses the list and moves from the preview's highlighted row.
-      const action = handleSelectorControl(preview.state, event, renderer.termCols, renderer.termRows)
+      const action = handleSelectorControl(preview.state, event, renderer.termCols, renderer.termRows, selectorPreviewViewport)
       if (action.kind !== 'update') return false
       overlay = { kind: 'selector', state: action.state }
     } else {
@@ -1927,14 +1931,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             ),
         {
           model: appState.model,
+          columns: renderer.termCols,
           interaction: runInteraction.snapshot(runInteractionInput()),
         },
       )
-      spinnerBlock = {
-        lines: wrapTextWithAnsi(spinnerText, renderer.termCols).map(text => ({ spans: [{ text }] })),
-        // Separating blank above the status row; queue rows bring their own.
-        marginTop: 1,
-      }
+      spinnerBlock = buildRunStatusBlock(spinnerText, renderer.termCols)
     } else if (!isLoading && overlay.kind !== 'ask-user' && loopSession.waiting) {
       // Parked between loop ticks. The wakeup card in the transcript says why;
       // this row says until when. A background shell the agent left running
@@ -1945,10 +1946,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
           remainingMs: wait.remainingMs,
           stopPending: runInteraction.snapshot(runInteractionInput()).interruptPending,
         })
-        spinnerBlock = {
-          lines: wrapTextWithAnsi(waitText, renderer.termCols).map(text => ({ spans: [{ text }] })),
-          marginTop: 1,
-        }
+        spinnerBlock = buildRunStatusBlock(waitText, renderer.termCols)
       }
     } else if (backgroundWaitSince !== null && overlay.kind !== 'ask-user') {
       //
@@ -1964,12 +1962,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         // No per-call usage belongs to a wait: nothing is being spent while the
         // agent is parked.
         undefined,
-        { model: appState.model, interaction: runInteraction.snapshot(runInteractionInput()), hideInteractionHint: true },
+        { model: appState.model, columns: renderer.termCols, interaction: runInteraction.snapshot(runInteractionInput()), hideInteractionHint: true },
       )
-      spinnerBlock = {
-        lines: wrapTextWithAnsi(waitText, renderer.termCols).map(text => ({ spans: [{ text }] })),
-        marginTop: 1,
-      }
+      spinnerBlock = buildRunStatusBlock(waitText, renderer.termCols)
     }
 
     // Match pi's sibling order before editorContainer: pending messages, then
@@ -2024,7 +2019,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       preEditorBlocks.push(standaloneUpdateNotice(updateNotice, renderer.termCols, preEditorBlocks.length > 0))
     }
 
-    return buildShellFrame({
+    const frame = buildShellFrame({
       contentLines,
       committedRows: historyRowCount,
       preEditorBlocks,
@@ -2033,6 +2028,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       commandFocused: focusedCommandWindowGeneration !== null,
       preview: commandWindowPreview,
     })
+    selectorPreviewViewport = frame.previewViewport
+    return frame
   }
 
   renderer.setRenderCallback(buildFrame)
@@ -4318,7 +4315,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       void taskSession.handleKey(event)
       return
     }
-    const action = handleSelectorControl(overlay.state, event, renderer.termCols, renderer.termRows)
+    const action = handleSelectorControl(overlay.state, event, renderer.termCols, renderer.termRows,
+      focusedCommandWindowGeneration !== null ? selectorPreviewViewport : undefined)
 
     switch (action.kind) {
       case 'update':

@@ -1,5 +1,6 @@
 import { editSessionName } from './session-rename-editor.js'
 import type { KeyEvent } from '../input.js'
+import type { PreviewViewport } from '../preview-scroll.js'
 import { browseSearchKey } from './browse-window.js'
 import { handleSplitPaneKey, resetPaneForSelection } from '../split-pane.js'
 import {
@@ -53,12 +54,12 @@ function disarmDelete(state: SelectorState): SelectorState {
   return { ...state, pendingDeleteId: undefined, pendingDeleteKind: undefined, subtitle }
 }
 
-export function handleSelectorControl(state: SelectorState, event: KeyEvent, columns = 80, rows = 24): SelectorControlAction {
-  const action = handleControl(state, event, columns, rows)
+export function handleSelectorControl(state: SelectorState, event: KeyEvent, columns = 80, rows = 24, viewport?: PreviewViewport): SelectorControlAction {
+  const action = handleControl(state, event, columns, rows, viewport)
   return action.kind === 'update' ? { ...action, state: resetPaneForSelection(state, action.state) } : action
 }
 
-function handleControl(state: SelectorState, event: KeyEvent, columns: number, rows: number): SelectorControlAction {
+function handleControl(state: SelectorState, event: KeyEvent, columns: number, rows: number, viewport?: PreviewViewport): SelectorControlAction {
   if (state.owner === SELECTOR_OWNER.resume && state.rename) {
     const edit = editSessionName(state.rename, event)
     if (edit.kind === 'cancel') return { kind: 'update', state: { ...state, rename: undefined } }
@@ -67,7 +68,7 @@ function handleControl(state: SelectorState, event: KeyEvent, columns: number, r
       ? { kind: 'rename-session', sessionId: edit.value.sessionId, title: edit.title, state: next }
       : { kind: 'update', state: next }
   }
-  const paneAction = handleSplitPaneKey(state, event, columns, rows)
+  const paneAction = handleSplitPaneKey(state, event, columns, rows, viewport)
   if (paneAction) return paneAction
   const filtered = browseSearchKey(state, event)
   if (filtered) return { kind: 'update', state: filtered }

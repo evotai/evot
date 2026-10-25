@@ -583,7 +583,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('a shrink that ends above the viewport still needs a full redraw and reports it', async () => {
+    test('a shrink that ends above the viewport recovers only the visible screen and reports it', async () => {
       const screen = new ScreenHarness(80, 10)
       const diagnostics: RendererDiagnostic[] = []
       const renderer = new TermRenderer({ stdout: screen.stdout, onDiagnostic: d => diagnostics.push(d) })
@@ -595,9 +595,9 @@ describe('TermRenderer', () => {
       lines = lines.slice(0, 5)
       await paint(renderer, screen)
       expect(screen.viewport().slice(0, 5)).toEqual(['row 0', 'row 1', 'row 2', 'row 3', 'row 4'])
-      expect(diagnostics.map(d => d.kind)).toEqual(['stale_scrollback', 'full_redraw'])
+      expect(diagnostics.map(d => d.kind)).toEqual(['stale_scrollback', 'viewport_redraw'])
       const redraw = diagnostics[1]
-      if (redraw?.kind !== 'full_redraw') throw new Error('expected a full_redraw diagnostic')
+      if (redraw?.kind !== 'viewport_redraw') throw new Error('expected a viewport_redraw diagnostic')
       expect(redraw.branch).toBe('deleted_lines_above_viewport')
       expect(redraw.previousLines).toBe(40)
       expect(redraw.newLines).toBe(5)
@@ -667,7 +667,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('a live-region row shifting above the viewport is repainted, not left stale', async () => {
+    test('hidden live shifts stay provisional, then repair once when committed', async () => {
       const screen = new ScreenHarness(80, 10)
       const diagnostics: RendererDiagnostic[] = []
       const renderer = new TermRenderer({
@@ -677,14 +677,23 @@ describe('TermRenderer', () => {
       renderer.init()
       // 4 committed rows; everything after is live region.
       let lines = Array.from({ length: 30 }, (_, i) => `row ${i}`)
-      renderer.setRenderCallback(() => ({ lines, committedRows: 4 }))
+      let committedRows = 4
+      renderer.setRenderCallback(() => ({ lines, committedRows }))
       await paint(renderer, screen)
 
-      // A row is inserted inside the live region, above the viewport. Leaving
-      // scrollback alone would duplicate row 19 and lose INSERTED entirely.
+      // Streaming must not clear/replay history for an insertion above the
+      // viewport. The hidden live copy is provisional; the visible tail is exact.
       lines = [...lines.slice(0, 4), 'INSERTED', ...lines.slice(4)]
       await paint(renderer, screen)
 
+      expect(diagnostics.map(d => d.kind)).toEqual(['stale_scrollback'])
+      expect(screen.viewport()).toEqual(Array.from({ length: 10 }, (_, i) => `row ${20 + i}`))
+
+      // The already-adopted diff is no longer visible to comparison, but the
+      // commit boundary must still repair it so durable output is not lost.
+      diagnostics.length = 0
+      committedRows = lines.length
+      await paint(renderer, screen)
       expect(diagnostics.map(d => d.kind)).toEqual(['scrollback_shift', 'full_redraw'])
       expect(diagnostics.map(d => d.kind === 'full_redraw' && d.branch)).toEqual([false, 'scrollback_shift'])
       const buffer = screen.terminal.buffer.active
@@ -695,6 +704,9 @@ describe('TermRenderer', () => {
       // Every logical row exists exactly once, in order.
       for (const line of lines) expect(rows).toContain(line)
       expect(rows.filter(r => r === 'row 19')).toHaveLength(1)
+      diagnostics.length = 0
+      await paint(renderer, screen)
+      expect(diagnostics).toEqual([])
       renderer.destroy()
     })
 
@@ -968,7 +980,9 @@ describe('TermRenderer', () => {
       stdout.emit('resize')
       await Bun.sleep(20)
 
-      expect(stdout.output).toContain('\x1b[2J\x1b[H')
+      expect(stdout.output).toContain('\x1b[H')
+      expect(stdout.output).toContain('\x1b[2K')
+      expect(stdout.output).not.toContain('\x1b[2J')
       expect(stdout.output).not.toContain('\x1b[3J')
       expect(stdout.output).toContain('line1')
       renderer.destroy()
