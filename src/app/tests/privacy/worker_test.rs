@@ -7,23 +7,51 @@ use super::masker::Masker;
 use super::policy::PrivacySettings;
 use super::rules;
 use super::state::EgressState;
+use super::state::TaintOrigin;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+fn origin(tool: &str) -> TaintOrigin {
+    TaintOrigin {
+        kind: "API_KEY".into(),
+        rule: Some("secrets.test".into()),
+        tool: tool.into(),
+    }
+}
 
 #[test]
 fn taint_index_snapshots_are_constant_time_and_immutable() {
     let state = EgressState::default();
-    state.taint("/workspace/a.txt");
+    state.taint("/workspace/a.txt", origin("write"));
     let before = state.names();
     assert!(Arc::ptr_eq(&before, &state.names()));
-    state.taint("/workspace/b.txt");
+    state.taint("/workspace/b.txt", origin("bash"));
     let after = state.names();
     assert!(!before.contains("b.txt"));
     assert!(after.contains("a.txt") && after.contains("b.txt"));
-    assert!(state.is_tainted("/workspace/a.txt") && state.is_tainted("/workspace/b.txt"));
+    assert!(
+        state.origin("/workspace/a.txt").is_some() && state.origin("/workspace/b.txt").is_some()
+    );
     assert!(Arc::ptr_eq(&after, &state.names()));
-    state.taint("/workspace/a.txt");
+    // The first marking stands: a second write does not rewrite why.
+    state.taint("/workspace/a.txt", origin("edit"));
     assert!(Arc::ptr_eq(&after, &state.names()));
+    assert_eq!(state.origin("/workspace/a.txt"), Some(origin("write")));
+}
+
+#[test]
+fn untaint_forgets_the_path_and_its_name_but_keeps_namesakes() {
+    let state = EgressState::default();
+    state.taint("/a/x.txt", origin("write"));
+    state.taint("/b/x.txt", origin("write"));
+    state.taint("/a/y.txt", origin("write"));
+    assert!(state.untaint("/a/x.txt"));
+    assert!(state.origin("/a/x.txt").is_none() && state.origin("/b/x.txt").is_some());
+    assert!(state.names().contains("x.txt"));
+    assert!(state.untaint("/b/x.txt"));
+    assert!(!state.names().contains("x.txt") && state.names().contains("y.txt"));
+    assert!(!state.untaint("/b/x.txt"));
+    assert_eq!(state.origin("/a/x.txt"), None);
 }
 
 #[test]

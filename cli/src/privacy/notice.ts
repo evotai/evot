@@ -4,13 +4,18 @@
 
 export type PrivacyTarget = 'request' | 'share' | 'sync' | 'task' | 'task report' | 'delivery'
 
+/** A refused tool call: why in the user's terms, and each `/privacy ...`
+ * command that would lift it (none when only a rewrite would). */
 export type PrivacyStop =
   | { kind: 'blocked'; target: PrivacyTarget; kinds: string[] }
-  | { kind: 'tool'; reason: string; host: string | null }
+  | { kind: 'tool'; reason: string; why: string | null; commands: string[] }
   | { kind: 'unavailable'; reason: string }
 
 const BLOCKED = /privacy blocked this (request|share|sync|task report|task|delivery): it contains ([A-Z0-9_]+(?:, [A-Z0-9_]+)*)\. Nothing was sent/
-const TOOL = /privacy blocked this tool call: it (.+?)\. It did not run\.(?: .*?\/privacy trust ([^\s.]+(?:\.[^\s.]+)*))?/s
+const TOOL = /privacy blocked this tool call: it (.+?)\. It did not run\.(.*)/s
+const WHY = /^Why: (.+?)\.?$/m
+/** `  /privacy untaint path — ...` or `  /privacy trust host — ...`, one per line. */
+const COMMAND = /^\s*(\/privacy (?:untaint|trust) \S+)(?: — .*)?$/gm
 const UNAVAILABLE = /privacy masking is unavailable, so nothing was sent: (.+?)\. Fix the settings or rule packs with \/privacy/s
 
 export function parsePrivacyStop(text: string | null | undefined): PrivacyStop | null {
@@ -18,7 +23,12 @@ export function parsePrivacyStop(text: string | null | undefined): PrivacyStop |
   const blocked = text.match(BLOCKED)
   if (blocked) return { kind: 'blocked', target: blocked[1] as PrivacyTarget, kinds: blocked[2]!.split(', ') }
   const tool = text.match(TOOL)
-  if (tool) return { kind: 'tool', reason: tool[1]!, host: tool[2] && tool[2] !== 'HOST' ? tool[2] : null }
+  if (tool) {
+    const rest = tool[2] ?? ''
+    const why = rest.match(WHY)
+    const commands = [...rest.matchAll(COMMAND)].map(m => m[1]!)
+    return { kind: 'tool', reason: tool[1]!, why: why ? why[1]! : null, commands }
+  }
   const unavailable = text.match(UNAVAILABLE)
   if (unavailable) return { kind: 'unavailable', reason: unavailable[1]!.trim() }
   return null
@@ -43,20 +53,24 @@ export function privacyCard(stop: PrivacyStop): PrivacyCard {
   }
   if (stop.kind === 'tool') {
     const hidden = stop.reason.startsWith('runs decoded code')
-    return {
-      title: 'blocked tool call',
-      rows: [
-        { tone: 'status', text: `✗ · did not run · it ${stop.reason}` },
-        {
+    const rows: PrivacyCardRow[] = [{ tone: 'status', text: `✗ · did not run · it ${stop.reason}` }]
+    if (stop.why) rows.push({ tone: 'error', text: stop.why })
+    if (hidden) {
+      rows.push({ tone: 'hint', text: 'Rewrite it as plain, readable code' })
+    } else if (stop.commands.length > 0) {
+      rows.push({ tone: 'hint', text: 'To let it through, run one of these (agreeing in chat does not):' })
+      for (const command of stop.commands) {
+        rows.push({
           tone: 'hint',
-          text: hidden
-            ? 'Rewrite it as plain, readable code'
-            : stop.host
-              ? `Trust this host: /privacy trust ${stop.host}`
-              : 'Trust a host: /privacy trust HOST',
-        },
-      ],
+          text: command.startsWith('/privacy untaint')
+            ? `  ${command}   — that file holds no real secret`
+            : `  ${command}   — let tool calls send secrets to that host`,
+        })
+      }
+    } else {
+      rows.push({ tone: 'hint', text: 'Nothing here to trust or unmark; ask for the call to be rewritten without the secret' })
     }
+    return { title: 'blocked tool call', rows }
   }
   const kinds = stop.kinds.join(', ')
   const mask = stop.kinds.map(kind => `/privacy ${kind} mask`).join(' · ')

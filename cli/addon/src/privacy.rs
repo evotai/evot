@@ -30,3 +30,10 @@ pub async fn privacy_save(settings_json: String) -> NapiResult<String> {
         .map_err(failure)?;
     serde_json::to_string(&saved).map_err(failure)
 }
+
+/// `/privacy untaint PATH`: stop judging that file (against `cwd`) as
+/// holding a secret for the rest of this process. `true` when it was marked.
+#[napi]
+pub fn privacy_untaint(path: String, cwd: String) -> bool {
+    evot::privacy::untaint(&path, std::path::Path::new(&cwd))
+}

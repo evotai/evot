@@ -25,6 +25,7 @@ use sha2::Sha256;
 use super::scan::Finder;
 use super::scan::Span;
 use super::state::EgressState;
+use super::state::TaintOrigin;
 use crate::error::EvotError;
 use crate::error::Result;
 
@@ -112,19 +113,25 @@ impl Vault {
         remember_locked(&mut self.state.write(), kind, value);
     }
 
-    /// Remember that `path` (absolute) holds something secret.
-    pub fn taint(&self, path: &str) {
-        self.egress.taint(path);
+    /// Remember that `path` (absolute) holds something secret, and why.
+    pub fn taint(&self, path: &str, origin: TaintOrigin) {
+        self.egress.taint(path, origin);
+    }
+
+    /// Forget that `path` (absolute) holds a secret. `true` when it was marked.
+    pub fn untaint(&self, path: &str) -> bool {
+        self.egress.untaint(path)
+    }
+
+    /// Why `path` is marked, when it is.
+    pub fn taint_origin(&self, path: &str) -> Option<TaintOrigin> {
+        self.egress.origin(path)
     }
 
     /// The file names of the tainted paths, to rule a word out before
     /// resolving it as a path.
     pub fn tainted_names(&self) -> Arc<HashSet<String>> {
         self.egress.names()
-    }
-
-    pub fn is_tainted(&self, path: &str) -> bool {
-        self.egress.is_tainted(path)
     }
 
     /// Remember that the variable `name` holds a secret.

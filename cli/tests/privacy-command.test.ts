@@ -37,14 +37,17 @@ function status(settings: PrivacySettings = defaults): PrivacyStatus {
   }
 }
 
-function port(initial = defaults): { port: PrivacyPort; saved: PrivacySettings[] } {
+function port(initial = defaults): { port: PrivacyPort; saved: PrivacySettings[]; marked: Set<string> } {
   const saved: PrivacySettings[] = []
+  const marked = new Set(['tests/pdf.test.js'])
   let current = initial
   return {
     saved,
+    marked,
     port: {
       status: async () => status(current),
       save: async (settings) => { saved.push(settings); current = settings; return settings },
+      untaint: (path) => marked.delete(path),
     },
   }
 }
@@ -95,6 +98,17 @@ describe('/privacy', () => {
     // Settings from before the guard have no list: nothing is trusted.
     expect(await runPrivacyCommand(port().port, '7')).toContain('tool calls keep secrets on this machine')
     expect(await runPrivacyCommand(p, 'trust')).toBe(USAGE)
+  })
+
+  test('untaint lifts the mark on one file for this run, and says when there was none', async () => {
+    const { port: p, saved, marked } = port()
+    expect(await runPrivacyCommand(p, 'untaint tests/pdf.test.js')).toContain('tests/pdf.test.js is no longer judged as holding a secret')
+    expect(marked.has('tests/pdf.test.js')).toBe(false)
+    expect(await runPrivacyCommand(p, 'untaint tests/pdf.test.js')).toContain('was not marked; nothing to lift')
+    expect(await runPrivacyCommand(p, 'untaint')).toBe(USAGE)
+    // Nothing is written: the mark lives in the running process only.
+    expect(saved).toHaveLength(0)
+    expect(USAGE).toContain('/privacy untaint FILE')
   })
 
   test('nothing on the command line turns a check off', async () => {

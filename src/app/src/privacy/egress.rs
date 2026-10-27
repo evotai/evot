@@ -35,10 +35,20 @@ use super::rules::SECRET_FILE;
 use super::scan::Finder;
 use super::scan::Hit;
 use super::shadow::ShadowCounters;
+use super::state::TaintOrigin;
 use super::vault::Vault;
 
 /// Past this a token is not a path.
 const MAX_PATH: usize = 4096;
+
+/// A file the call reads that an earlier call wrote a secret into, with
+/// why it is marked. `path` is as the user would type it to `/privacy
+/// untaint`: relative to `cwd` when under it, absolute otherwise.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaintedFile {
+    pub path: String,
+    pub origin: TaintOrigin,
+}
 
 /// What a call carries, each thing once.
 struct Carried<'a> {
@@ -48,14 +58,20 @@ struct Carried<'a> {
     /// The values themselves, to keep a host that holds one out of the
     /// notice. Never leaves this check.
     values: Vec<String>,
+    /// Files read that an earlier call marked, for the notice.
+    tainted: Vec<TaintedFile>,
     cancel: Option<&'a CancellationToken>,
 }
 
-/// What a call may not do, and the one remote host it named, when that
-/// host is safe to show (it carries no value), for the user to trust.
+/// What a call may not do, and what the notice needs to say why and what
+/// the user can do: the one remote host it named, when that host is safe
+/// to show (it carries no value); the program that makes it send; the
+/// marked files it reads.
 pub(super) struct Verdict {
     pub hits: Vec<Hit>,
     pub host: Option<String>,
+    pub sender: Option<String>,
+    pub tainted: Vec<TaintedFile>,
 }
 
 impl Verdict {
@@ -63,6 +79,8 @@ impl Verdict {
         Self {
             hits: Vec::new(),
             host: None,
+            sender: None,
+            tainted: Vec::new(),
         }
     }
 }
@@ -74,8 +92,20 @@ impl<'a> Carried<'a> {
             hits: Vec::new(),
             tags: BTreeSet::new(),
             values: Vec::new(),
+            tainted: Vec::new(),
             cancel,
         }
+    }
+
+    /// Why the files this call writes will be marked: the first thing it
+    /// carries, which is what the record names too.
+    fn origin(&self, tool: &str) -> Option<TaintOrigin> {
+        let first = self.hits.first()?;
+        Some(TaintOrigin {
+            kind: first.kind.clone(),
+            rule: first.rule.clone(),
+            tool: tool.to_string(),
+        })
     }
 
     fn add(
@@ -151,6 +181,8 @@ pub(super) fn check(
         return Verdict {
             hits: hidden.with(Action::Block),
             host: None,
+            sender: None,
+            tainted: Vec::new(),
         };
     }
     let writer = egress.writer_paths(tool, arguments);
@@ -182,13 +214,15 @@ pub(super) fn check(
         (None, None) => Vec::new(),
     };
     let sends = !egress.is_local(tool) && command.is_none_or(|c| egress.sends(c));
+    let origin = carried.origin(tool);
     if !sends {
         if command.is_some() {
             shadow.shell_unclassified();
         }
-        taint(policy, vault, &writes, cwd, cancel);
+        taint(policy, vault, &writes, origin, cwd, cancel);
         return Verdict::clear();
     }
+    let sender = command.and_then(|c| egress.sender(c));
     let mut named = None;
     let offsite = if policy.egress_allows_tool(tool) {
         Some(true)
@@ -222,16 +256,24 @@ pub(super) fn check(
         trusted.then(|| hosts.iter().any(|h| !egress.local_host(h)))
     };
     match offsite {
-        None => Verdict {
-            hits: carried.with(Action::Block),
-            host: named,
-        },
+        None => {
+            let tainted = std::mem::take(&mut carried.tainted);
+            Verdict {
+                hits: carried.with(Action::Block),
+                host: named,
+                sender,
+                tainted,
+            }
+        }
         Some(offsite) => {
-            taint(policy, vault, &writes, cwd, cancel);
+            taint(policy, vault, &writes, origin, cwd, cancel);
             if offsite {
+                let tainted = std::mem::take(&mut carried.tainted);
                 Verdict {
                     hits: carried.with(Action::Warn),
                     host: named,
+                    sender,
+                    tainted,
                 }
             } else {
                 Verdict::clear()
@@ -308,7 +350,20 @@ fn carries(
         }
         let path = resolve(cwd, token);
         let shown = path.to_string_lossy();
-        if vault.is_tainted(&shown) || (sensitive && path.exists()) {
+        let origin = vault.taint_origin(&shown);
+        if origin.is_some() || (sensitive && path.exists()) {
+            if let Some(origin) = origin {
+                let typed = path
+                    .strip_prefix(cwd)
+                    .map(|rel| rel.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| shown.to_string());
+                if !carried.tainted.iter().any(|t| t.path == typed) {
+                    carried.tainted.push(TaintedFile {
+                        path: typed,
+                        origin,
+                    });
+                }
+            }
             carried.add(
                 SECRET_FILE,
                 Finder::Egress,
@@ -331,17 +386,21 @@ fn taint(
     policy: &Policy,
     vault: &Vault,
     paths: &[String],
+    origin: Option<TaintOrigin>,
     cwd: &Path,
     cancel: Option<&CancellationToken>,
 ) {
     if cancel.is_some_and(CancellationToken::is_cancelled) {
         return;
     }
+    let Some(origin) = origin else {
+        return;
+    };
     for path in paths {
         let path = resolve(cwd, path);
         let path = path.to_string_lossy();
         if !policy.engine.egress.untainted(&path) {
-            vault.taint(&path);
+            vault.taint(&path, origin.clone());
         }
     }
 }
@@ -386,7 +445,7 @@ fn tokens(text: &str) -> impl Iterator<Item = &str> {
 }
 
 /// `path` made absolute against `cwd` (and `~`), `.` and `..` folded.
-fn resolve(cwd: &Path, path: &str) -> PathBuf {
+pub(super) fn resolve(cwd: &Path, path: &str) -> PathBuf {
     let joined = match path.strip_prefix("~/") {
         Some(rest) => match std::env::var_os("HOME") {
             Some(home) => PathBuf::from(home).join(rest),

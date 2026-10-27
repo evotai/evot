@@ -114,6 +114,57 @@ impl Egress {
         self.senders.iter().any(|re| re.is_match(command))
     }
 
+    /// The program that makes `command` send (`curl`, `node`, `git push`),
+    /// for the notice. The earliest sender match, stripped of shell
+    /// separators, wrappers (`sudo`, `env X=1`) and its directory.
+    pub fn sender(&self, command: &str) -> Option<String> {
+        const WRAPPERS: &[&str] = &[
+            "sudo", "env", "exec", "nohup", "time", "nice", "command", "builtin", "xargs",
+            "timeout", "watch",
+        ];
+        let found = self
+            .senders
+            .iter()
+            .filter_map(|re| re.find(command))
+            .min_by_key(|m| (m.start(), std::cmp::Reverse(m.end())))?;
+        let text = found
+            .as_str()
+            .trim_start_matches(|c: char| c.is_whitespace() || ";&|(`{".contains(c))
+            .trim_start_matches("$(")
+            .trim_end_matches(|c: char| c.is_whitespace() || ";&|)`}".contains(c));
+        let mut words = text.split_whitespace().peekable();
+        while let Some(word) = words.peek().copied() {
+            let plain = word.rsplit('/').next().unwrap_or(word);
+            let wrapper = WRAPPERS.contains(&plain)
+                || word.starts_with('-')
+                || (word.contains('=') && !word.starts_with('$'));
+            if !wrapper {
+                break;
+            }
+            words.next();
+            if plain == "timeout" {
+                words.next();
+            }
+        }
+        // The program by name (`/usr/bin/node` → `node`, `./send.py` →
+        // `send.py`); a subcommand stays (`git push`).
+        let program: Vec<&str> = words
+            .enumerate()
+            .map(|(i, word)| {
+                if i == 0 {
+                    word.rsplit('/')
+                        .next()
+                        .filter(|w| !w.is_empty())
+                        .unwrap_or(word)
+                } else {
+                    word
+                }
+            })
+            .collect();
+        let program = program.join(" ");
+        (!program.is_empty()).then_some(program)
+    }
+
     /// Code decoded into execution, which cannot be read before it runs.
     pub fn hidden(&self, command: &str) -> Option<String> {
         self.hidden

@@ -15,6 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
+use super::egress;
 use super::masker;
 use super::masker::Masker;
 use super::notice::blocked_message;
@@ -309,6 +310,14 @@ where
     for name in names {
         vault.remember_env(name.as_ref().trim());
     }
+}
+
+/// `/privacy untaint PATH`: stop judging that file as holding a secret
+/// for the rest of this process. `path` is as the user typed it, against
+/// `cwd`. `true` when it was marked.
+pub fn untaint(path: &str, cwd: &Path) -> bool {
+    let path = egress::resolve(cwd, path.trim());
+    vault().untaint(&path.to_string_lossy())
 }
 
 /// Write `record` where `masker` keeps them; failing to is logged, never fatal.

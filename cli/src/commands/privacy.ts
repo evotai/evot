@@ -3,14 +3,17 @@ import type { PrivacyEvent, PrivacySettings, PrivacyStatus } from '../native/ind
 export interface PrivacyPort {
   status: (days: number) => Promise<PrivacyStatus>
   save: (settings: PrivacySettings) => Promise<PrivacySettings>
+  /** Stop judging FILE as holding a secret for the rest of this process; true when it was marked. */
+  untaint: (path: string) => boolean
 }
 
-// Three verbs. Nothing here turns a check off: that stays out of the
+// Four verbs. Nothing here turns a check off: that stays out of the
 // command line (settings.json, by hand), so a slip cannot do it.
 export const USAGE = [
   '  /privacy                  what was masked or blocked',
   '  /privacy trust HOST       let tool calls send secrets to HOST (*.suffix, or tool:NAME)',
   '  /privacy term WORD        always mask WORD: a name, a codename, a host',
+  '  /privacy untaint FILE     a file a tool wrote a secret-looking value into holds no real secret (this run only)',
   '  Add rm to undo: /privacy trust rm HOST · /privacy term rm WORD',
 ].join('\n')
 
@@ -108,6 +111,13 @@ export async function runPrivacyCommand(port: PrivacyPort, args: string): Promis
   if (!sub || /^\d+$/.test(sub)) {
     const days = sub ? Math.max(1, Number(sub)) : DEFAULT_DAYS
     return renderStatus(await port.status(days))
+  }
+  if (sub === 'untaint') {
+    const path = rest.join(' ').trim()
+    if (!path) return USAGE
+    return port.untaint(path)
+      ? `  ${path} is no longer judged as holding a secret; tool calls may read it again this run`
+      : `  ${path} was not marked; nothing to lift. The call was stopped for another reason (see its card)`
   }
   const status = await port.status(1)
   const edit = editSettings(status.settings, sub, rest)

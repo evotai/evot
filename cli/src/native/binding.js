@@ -37,6 +37,7 @@ export const authRefreshSession = binding.authRefreshSession
 export const authNotices = binding.authNotices
 export const privacyStatus = binding.privacyStatus
 export const privacySave = binding.privacySave
+export const privacyUntaint = binding.privacyUntaint
 export const taskList = binding.taskList
 export const taskDeliveryDefaults = binding.taskDeliveryDefaults
 export const taskGet = binding.taskGet

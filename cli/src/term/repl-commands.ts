@@ -363,9 +363,14 @@ export async function handleUpdateCommand(
 
 export async function handlePrivacyCommand(ctx: ReplCommandContext, args: string): Promise<void> {
   const { runPrivacyCommand } = await import('../commands/privacy.js')
-  const { privacyStatus, privacySave } = await import('../native/index.js')
+  const { privacyStatus, privacySave, privacyUntaint } = await import('../native/index.js')
   try {
-    ctx.commitSystem('sys-privacy', await runPrivacyCommand({ status: privacyStatus, save: privacySave }, args))
+    const cwd = ctx.agent.cwd
+    ctx.commitSystem('sys-privacy', await runPrivacyCommand({
+      status: privacyStatus,
+      save: privacySave,
+      untaint: (path) => privacyUntaint(path, cwd),
+    }, args))
   } catch (err) {
     ctx.commitSystem('sys-privacy-err', failureText('privacy failed', err))
   }

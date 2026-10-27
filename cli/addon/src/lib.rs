@@ -31,6 +31,7 @@ pub use exit::reap_exited_children;
 pub use fork::NapiForkedAgent;
 pub use privacy::privacy_save;
 pub use privacy::privacy_status;
+pub use privacy::privacy_untaint;
 pub use run::NapiRun;
 pub use run::NapiSubmitOutcome;
 pub use server::run_acp;

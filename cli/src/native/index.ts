@@ -10,7 +10,7 @@ export type { CloudPushProgress, CloudPushResult, CloudPullResult, RemoteSession
 export type { CloudSync, CloudVisibility } from './contracts/results.js'
 export type { PrivacyAction, PrivacyEvent, PrivacyKind, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
 // @ts-ignore — binding.js is generated
-import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
+import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, privacyUntaint as rawPrivacyUntaint, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
 
 import { QueryStream } from './query-stream.js'
 export { QueryStream } from './query-stream.js'
@@ -617,6 +617,11 @@ export async function privacyStatus(days: number): Promise<PrivacyStatus> {
 /** Validate and save privacy settings; returns them as saved. */
 export async function privacySave(settings: PrivacySettings): Promise<PrivacySettings> {
   return decodeResult(await rawPrivacySave(JSON.stringify(settings)), privacy.privacySettings)
+}
+
+/** `/privacy untaint PATH`: stop judging that file as holding a secret for the rest of this process. True when it was marked. */
+export function privacyUntaint(path: string, cwd: string): boolean {
+  return Boolean(rawPrivacyUntaint(path, cwd))
 }
 
 export const taskList = rawTaskList

@@ -11,7 +11,6 @@ use evot_engine::ToolError;
 use evot_engine::ToolResult;
 
 use super::masker::Masker;
-use super::notice::egress_blocked_message;
 use super::notice::unavailable_message;
 use super::record::Target;
 use super::service;
@@ -73,10 +72,7 @@ impl GuardedTool {
         let reason = record.reason();
         service::keep(&masker, record).await;
         if report.blocked() {
-            return Err(ToolError::Failed(egress_blocked_message(
-                &reason,
-                report.host(),
-            )));
+            return Err(ToolError::Failed(report.egress_notice(&reason)));
         }
         Ok(())
     }

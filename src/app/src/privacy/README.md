@@ -12,6 +12,12 @@ behavior. Existing enforcement is not replaced by shadow decisions.
 - Tool-effect state has its own lock. Its basename index uses immutable `Arc`
   snapshots instead of rebuilding and copying every filename for each call.
   Snapshots are released before writes so sequential taint updates remain cheap.
+- Each tainted path records why (`TaintOrigin`: the kind found, the pack rule,
+  the writing tool). A refused call's notice names the marked files it reads
+  with that origin, the program that makes the command send (`node`, `curl`),
+  and each `/privacy ...` command that lifts the block; it prints no
+  placeholder when none applies. `/privacy untaint FILE` (`privacy::untaint`)
+  drops one path's mark for the rest of the process; nothing is persisted.
 - A guarded call reads configuration and checks arguments in one blocking I/O
   batch. Cancellation is checked before execution, between argument scans,
   before candidate-path filesystem checks and during multi-file rule loading. A regex scan already in progress still
