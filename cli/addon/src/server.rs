@@ -38,6 +38,36 @@ pub async fn start_server(
         .map_err(|e| Error::from_reason(format!("server error: {e}")))
 }
 
+/// Serve ACP v1 on this process's stdin/stdout until stdin closes.
+///
+/// `tools` is `full`, `readonly`, or `none`; `permission` is `ask` (the
+/// client approves every tool call) or `allow`; `ephemeral` keeps sessions in
+/// memory only. Diagnostics go to the log file, never to stdout.
+#[napi]
+pub async fn run_acp(
+    model: Option<String>,
+    env_file: Option<String>,
+    tools: Option<String>,
+    permission: Option<String>,
+    ephemeral: Option<bool>,
+) -> Result<()> {
+    init_tracing();
+    let mode = evot::acp::tool_mode(tools.as_deref().unwrap_or("full"))
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+    let ask_permission = evot::acp::ask_permission(permission.as_deref().unwrap_or("ask"))
+        .map_err(|e| Error::from_reason(e.to_string()))?;
+    let config = load_config(None, model, env_file)?;
+    let options = evot::acp::AcpOptions {
+        mode,
+        ask_permission,
+        ephemeral: ephemeral.unwrap_or(false),
+        agent_version: version(),
+    };
+    evot::acp::serve_stdio(config, options)
+        .await
+        .map_err(|e| Error::from_reason(format!("acp error: {e}")))
+}
+
 struct EmbeddedServer {
     info: String,
     cancel: tokio_util::sync::CancellationToken,

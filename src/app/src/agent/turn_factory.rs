@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::run::runtime;
 use super::run::runtime::TurnFactory;
 use super::tools::HostTools;
+use super::tools::ToolApprover;
 use super::tools::ToolMode;
 use super::turn_assembler::TurnAssembler;
 use super::turn_assembler::TurnBuildRequest;
@@ -21,6 +22,7 @@ pub(super) struct AgentTurnFactory {
     pub host_tools: Option<HostTools>,
     /// Run-scoped tools attached by a prepared command.
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
+    pub approver: Option<Arc<dyn ToolApprover>>,
 }
 
 #[async_trait::async_trait]
@@ -36,6 +38,7 @@ impl TurnFactory for AgentTurnFactory {
                     input,
                     host_tools: self.host_tools.clone(),
                     extra_tools: self.extra_tools.clone(),
+                    approver: self.approver.clone(),
                     consume_process_notifications: true,
                     previous_llm: self.previous_llm.clone(),
                 },

@@ -78,6 +78,21 @@ Use comma-separated model names to configure multiple models. For OpenAI-compati
 
 </details>
 
+<details>
+<summary>Use evot from editors and other tools (ACP)</summary>
+
+`evot acp` serves the [Agent Client Protocol](https://agentclientprotocol.com) v1 on stdin/stdout, so any ACP client can drive evot:
+
+```bash
+evot acp                            # full coding tools
+evot acp --tools readonly           # read and search only
+evot acp --tools none --ephemeral   # answer-only, sessions kept in memory
+```
+
+Supported methods: `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/list`, `session/resume`, `session/close`, and `session/set_config_option` for the per-session `model` selector. Tools run inside evot; it does not send `session/request_permission`. `--tools none` offers the model no tools, skills, or project instructions. `--ephemeral` writes no sessions to disk.
+
+</details>
+
 ## Less harness. More model.
 
 - **Small by design.** ~1k prompt tokens and four core tools: `read`, `bash`, `edit`, `write`.

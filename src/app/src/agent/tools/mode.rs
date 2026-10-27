@@ -10,6 +10,8 @@ pub enum ToolMode {
     Headless,
     Planning,
     Readonly,
+    /// Tool-free conversation for embedding clients that only want an answer.
+    Chat,
 }
 
 impl ToolMode {
@@ -38,6 +40,13 @@ impl ToolMode {
             },
             Self::Readonly => RunPolicy {
                 tools: ToolAccess::Readonly,
+                budget: ExecutionBudget::Configured,
+                host_tools: false,
+                background_processes: false,
+                web_fetch: false,
+            },
+            Self::Chat => RunPolicy {
+                tools: ToolAccess::None,
                 budget: ExecutionBudget::Configured,
                 host_tools: false,
                 background_processes: false,

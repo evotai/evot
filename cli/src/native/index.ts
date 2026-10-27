@@ -10,7 +10,7 @@ export type { CloudPushProgress, CloudPushResult, CloudPullResult, RemoteSession
 export type { CloudSync, CloudVisibility } from './contracts/results.js'
 export type { PrivacyAction, PrivacyEvent, PrivacyKind, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
 // @ts-ignore — binding.js is generated
-import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
+import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
 
 import { QueryStream } from './query-stream.js'
 export { QueryStream } from './query-stream.js'
@@ -498,6 +498,14 @@ export function version(): string {
 
 export async function startServer(port?: number, model?: string, envFile?: string): Promise<void> {
   return rawStartServer(port ?? null, model ?? null, envFile ?? null)
+}
+
+export type AcpTools = 'full' | 'readonly' | 'none'
+export type AcpPermission = 'ask' | 'allow'
+
+/** Serve ACP v1 on stdin/stdout until stdin closes. Stdout carries protocol frames only. */
+export async function runAcp(opts: { model?: string; envFile?: string; tools: AcpTools; permission: AcpPermission; ephemeral: boolean }): Promise<void> {
+  return rawRunAcp(opts.model ?? null, opts.envFile ?? null, opts.tools, opts.permission, opts.ephemeral)
 }
 
 import type { ServerInfo, LoginCodeResponse, AuthPollResult, CloudUser, AuthRefreshResult, CloudNotice } from './contracts/results.js'

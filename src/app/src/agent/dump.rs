@@ -21,6 +21,7 @@ fn mode_label(mode: ToolMode) -> &'static str {
         ToolMode::Headless => "Headless",
         ToolMode::Planning => "Planning",
         ToolMode::Readonly => "Readonly",
+        ToolMode::Chat => "Chat",
     }
 }
 

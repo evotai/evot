@@ -1,7 +1,7 @@
 import type { Agent } from './native/index.js'
 
 export interface CliOptions {
-  command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami'
+  command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami' | 'acp'
   model?: string
   prompt?: string
   port?: number
@@ -18,6 +18,12 @@ export interface CliOptions {
   skillsDirs: string[]
   skillNames: string[]
   files: string[]
+  /** `evot acp --tools`: tools ACP sessions may use. */
+  acpTools: 'full' | 'readonly' | 'none'
+  /** `evot acp --permission`: ask the client before every tool call, or not. */
+  acpPermission: 'ask' | 'allow'
+  /** `evot acp --ephemeral`: keep ACP sessions in memory only. */
+  ephemeral: boolean
 }
 
 export async function parseArgs(argv: string[]): Promise<CliOptions> {
@@ -31,6 +37,9 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
     skillsDirs: [],
     skillNames: [],
     files: [],
+    acpTools: 'full',
+    acpPermission: 'ask',
+    ephemeral: false,
   }
 
   for (let i = 0; i < argv.length; i++) {
@@ -46,6 +55,26 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
       continue
     }
 
+    if (arg === 'acp') { opts.command = 'acp'; continue }
+    if (arg === '--tools' && argv[i + 1]) {
+      const tools = argv[++i]
+      if (tools !== 'full' && tools !== 'readonly' && tools !== 'none') {
+        console.error(`Invalid --tools: ${tools} (expected full, readonly, or none)`)
+        process.exit(1)
+      }
+      opts.acpTools = tools
+      continue
+    }
+    if (arg === '--permission' && argv[i + 1]) {
+      const permission = argv[++i]
+      if (permission !== 'ask' && permission !== 'allow') {
+        console.error(`Invalid --permission: ${permission} (expected ask or allow)`)
+        process.exit(1)
+      }
+      opts.acpPermission = permission
+      continue
+    }
+    if (arg === '--ephemeral') { opts.ephemeral = true; continue }
     if (arg === 'login') { opts.command = 'login'; continue }
     if (arg === 'logout') { opts.command = 'logout'; continue }
     if (arg === 'whoami') { opts.command = 'whoami'; continue }
@@ -116,6 +145,7 @@ export async function printHelp() {
   console.log('Commands:')
   console.log('  (default)              Interactive REPL')
   console.log('  serve                  Start HTTP server')
+  console.log('  acp                    Serve the Agent Client Protocol (ACP) on stdio')
   console.log('  update                 Update evot to latest version')
   console.log()
   console.log('Options:')
@@ -134,6 +164,9 @@ export async function printHelp() {
   console.log('  --append-system-prompt <text>')
   console.log('  --skills <dir>         Skills directory (repeatable)')
   console.log('  --skill <name>         One-shot only: enable a skill by name (repeatable)')
+  console.log('  --tools <policy>       acp only: full | readonly | none (default: full)')
+  console.log('  --permission <policy>  acp only: ask | allow — ask the client before each tool call (default: ask)')
+  console.log('  --ephemeral            acp only: keep sessions in memory, write nothing to disk')
   console.log('  --version, -v          Show version')
   console.log('  --update               Update evot to latest version')
   console.log('  --help, -h             Show this help')

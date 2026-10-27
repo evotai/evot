@@ -271,6 +271,7 @@ fn production_cache_reloads_and_guard_factory_preserves_behavior() -> TestResult
                         name: "fixture_sender",
                         ran: ran.clone(),
                     })],
+                    approver: None,
                     consume_process_notifications: false,
                     previous_llm: None,
                 },

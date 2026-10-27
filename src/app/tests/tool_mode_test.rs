@@ -36,3 +36,13 @@ fn tool_builder_consumes_resolved_policy_not_transport_presets() {
     assert!(!source.contains("matches!(mode"));
     assert!(source.contains("policy: RunPolicy"));
 }
+
+#[test]
+fn chat_preset_offers_no_tools_of_any_kind() {
+    let policy = ToolMode::Chat.policy();
+    assert_eq!(policy.tools, ToolAccess::None);
+    assert_eq!(policy.budget, ExecutionBudget::Configured);
+    assert!(!policy.host_tools);
+    assert!(!policy.background_processes);
+    assert!(!policy.web_fetch);
+}

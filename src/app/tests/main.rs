@@ -2,6 +2,7 @@ use evot::blocking;
 use evot::error;
 use evot::types;
 
+mod acp_test;
 #[path = "agent_prompt_test.rs"]
 mod agent_prompt_test;
 #[path = "agent_thinking_test.rs"]
@@ -134,6 +135,7 @@ mod suggestion_request_test;
 mod suggestion_test;
 mod suggestion_workflow_test;
 mod sync_test;
+mod tool_approval_test;
 #[path = "tool_mode_test.rs"]
 mod tool_mode_test;
 mod turn_assembler_test;

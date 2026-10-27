@@ -24,6 +24,8 @@ pub enum PromptMode {
     Headless,
     /// Forked, read-only conversation.
     Readonly,
+    /// Tool-free conversation: no shell, so sandbox and variable notes are moot.
+    Chat,
 }
 
 /// Runtime inputs that decide which dynamic sections apply this turn.
@@ -82,6 +84,8 @@ pub fn dynamic_sections(ctx: &DynamicContext) -> Vec<Section> {
             text: LANGUAGE_SECTION.to_string(),
         }),
         PromptMode::Headless | PromptMode::Readonly => {}
+        // Sandbox rules and variable names only matter to a shell.
+        PromptMode::Chat => return sections,
     }
 
     if ctx.sandbox {
@@ -108,5 +112,6 @@ pub(crate) fn prompt_mode(mode: crate::agent::tools::ToolMode) -> PromptMode {
         ToolMode::Planning => PromptMode::Planning,
         ToolMode::Headless => PromptMode::Headless,
         ToolMode::Readonly => PromptMode::Readonly,
+        ToolMode::Chat => PromptMode::Chat,
     }
 }

@@ -32,6 +32,12 @@ describe('applied-update notice routing', () => {
     expect(err).toEqual([line])
   })
 
+  test('acp mode keeps protocol stdout clean', () => {
+    const { out, err } = captureRouting('acp')
+    expect(out).toEqual([])
+    expect(err).toEqual([line])
+  })
+
   test('interactive paths still announce on stdout', () => {
     for (const command of ['repl', 'login']) {
       const { out, err } = captureRouting(command)

@@ -7,6 +7,7 @@ autotests = false
 
 [dependencies]
 evot-engine.workspace = true
+agent-client-protocol-schema = { version = "=1.12.0", default-features = false }
 aho-corasick = "=1.1.4"
 anyhow.workspace = true
 async-trait.workspace = true
@@ -30,7 +31,7 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 toml.workspace = true
 tower-http.workspace = true
 tracing.workspace = true

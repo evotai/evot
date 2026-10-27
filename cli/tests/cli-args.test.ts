@@ -31,6 +31,21 @@ describe('parseArgs', () => {
     expect(opts.skillNames).toEqual([])
   })
 
+  test('acp parses its tool policy and ephemeral flag', async () => {
+    const defaults = await parseArgs(['acp'])
+    expect(defaults.command).toBe('acp')
+    expect(defaults.acpTools).toBe('full')
+    expect(defaults.ephemeral).toBe(false)
+    expect(defaults.acpPermission).toBe('ask')
+
+    const opts = await parseArgs(['acp', '--tools', 'none', '--permission', 'allow', '--ephemeral', '--model', 'test:alpha'])
+    expect(opts.acpPermission).toBe('allow')
+    expect(opts.command).toBe('acp')
+    expect(opts.acpTools).toBe('none')
+    expect(opts.ephemeral).toBe(true)
+    expect(opts.model).toBe('test:alpha')
+  })
+
   test('--skill selects skills by name', async () => {
     const opts = await parseArgs(['-p', 'hello', '--skill', 'review', '--skill', 'custom'])
     expect(opts.skillNames).toEqual(['review', 'custom'])

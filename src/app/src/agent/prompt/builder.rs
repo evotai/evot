@@ -18,6 +18,10 @@ const GUIDELINES_TRAILER: &[&str] = &[
 const IDENTITY_INTRO: &str =
     "You are an expert coding assistant running in evot, a coding agent harness. \
      You help users by reading files, executing commands, editing code, and writing new files.";
+const CHAT_IDENTITY: &str =
+    "You are evot, an AI assistant embedded in another application. \
+     This session has no tools: you cannot read files, run commands, browse, or call functions. \
+     Answer directly from the conversation, and say what is missing when it does not contain enough information.";
 const IDENTITY_OUTRO: &str =
     "In addition to the tools above, you may have access to other custom tools depending on the project.";
 
@@ -60,6 +64,24 @@ impl SystemPrompt {
             .with_environment_static()
             .with_dynamic_boundary()
             .build_with_sections()
+    }
+
+    /// Base for a tool-free turn (`ToolMode::Chat`): no tool list, tool
+    /// guidance, or project instructions written for a coding harness.
+    pub fn chat(cwd: &str) -> (String, Vec<Section>) {
+        Self {
+            cwd: cwd.to_string(),
+            has_bash: false,
+            has_dedicated_search: false,
+            tools_guidelines: Vec::new(),
+            sections: vec![Section {
+                name: "identity",
+                text: CHAT_IDENTITY.to_string(),
+            }],
+        }
+        .with_environment_static()
+        .with_dynamic_boundary()
+        .build_with_sections()
     }
 
     /// Construct a prompt whose identity "Available tools" list is derived from

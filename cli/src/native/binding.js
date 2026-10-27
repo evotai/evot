@@ -22,6 +22,7 @@ const binding = loadNativeBinding({
 export const NapiAgent = binding.NapiAgent
 export const version = binding.version
 export const startServer = binding.startServer
+export const runAcp = binding.runAcp
 export const startServerBackground = binding.startServerBackground
 export const stopServerBackground = binding.stopServerBackground
 export const fastExit = binding.fastExit

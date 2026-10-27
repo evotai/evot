@@ -70,6 +70,9 @@ pub(crate) fn build_tools(
     process_manager: Option<std::sync::Arc<ProcessManager>>,
     host_tools: Option<HostTools>,
 ) -> Vec<Box<dyn evot_engine::AgentTool>> {
+    if policy.tools == ToolAccess::None {
+        return Vec::new();
+    }
     if policy.tools == ToolAccess::Readonly {
         // Read-only mode: read + structured search, no mutation or shell.
         return vec![

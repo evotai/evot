@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::tools::HostTools;
+use super::tools::ToolApprover;
 use super::tools::ToolMode;
 use super::Run;
 use crate::conf::LlmConfig;
@@ -36,6 +37,8 @@ pub struct QueryRequest {
     /// Tools scoped to this run only, added by a prepared command (e.g.
     /// `/sessions` attaches `session_search`). Never part of ordinary turns.
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
+    /// When set, every tool call in this run waits for this approver.
+    pub approver: Option<Arc<dyn ToolApprover>>,
 }
 
 impl QueryRequest {
@@ -51,6 +54,7 @@ impl QueryRequest {
             host_tools: None,
             cwd: None,
             extra_tools: Vec::new(),
+            approver: None,
         }
     }
 
@@ -64,6 +68,7 @@ impl QueryRequest {
             host_tools: None,
             cwd: None,
             extra_tools: Vec::new(),
+            approver: None,
         }
     }
 
@@ -98,6 +103,11 @@ impl QueryRequest {
 
     pub fn cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn approver(mut self, approver: Arc<dyn ToolApprover>) -> Self {
+        self.approver = Some(approver);
         self
     }
 }

@@ -18,8 +18,10 @@ use super::prompt::prompt_mode;
 use super::prompt::skills_prompt_section;
 use super::prompt::DynamicContext;
 use super::prompt::Section;
+use super::prompt::SystemPrompt;
 use super::run::engine::EngineOptions;
 use super::run::policy::ExecutionBudget;
+use super::run::policy::ToolAccess;
 use super::run::runtime::TurnInput;
 use super::sandbox::SandboxPolicy;
 use super::tools::build_tools;
@@ -38,6 +40,8 @@ pub struct TurnBuildRequest {
     pub host_tools: Option<HostTools>,
     /// Run-scoped tools from a prepared command, appended after the mode's set.
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
+    /// Gate for every tool call of the turn, applied after the set is final.
+    pub approver: Option<Arc<dyn super::tools::ToolApprover>>,
     /// Dump/inspection callers must not drain pending process results.
     pub consume_process_notifications: bool,
     /// Selection replaced by the latest model switch, if any.
@@ -107,8 +111,15 @@ impl TurnAssembler {
     }
 
     fn build_system_prompt(&self, mode: ToolMode, cwd: &str) -> (String, Vec<Section>) {
-        let mut sections = self.system_prompt_sections.read().clone();
-        bind_workspace_sections(&mut sections, cwd);
+        let mut sections = if mode == ToolMode::Chat {
+            // The coding identity, tool guidance, and workspace instructions
+            // all describe a toolset a tool-free turn does not have.
+            SystemPrompt::chat(cwd).1
+        } else {
+            let mut sections = self.system_prompt_sections.read().clone();
+            bind_workspace_sections(&mut sections, cwd);
+            sections
+        };
         let ctx = DynamicContext {
             mode: prompt_mode(mode),
             sandbox: self.sandbox.enabled,
@@ -140,6 +151,7 @@ impl TurnAssembler {
             input,
             host_tools,
             extra_tools,
+            approver,
             consume_process_notifications,
             previous_llm,
         } = request;
@@ -175,7 +187,14 @@ impl TurnAssembler {
         let cwd_path = std::path::Path::new(&cwd);
         let skill_dirs = self.skills_dirs.read().clone();
         let selected_skill_names = self.skill_names.read().clone();
-        let skills = load_turn_skills(&skill_dirs, selected_skill_names.as_deref())?;
+        let policy = mode.policy();
+        // Skills and run-scoped tools only matter when the model can call tools.
+        let tool_free = policy.tools == ToolAccess::None;
+        let skills = if tool_free {
+            Vec::new()
+        } else {
+            load_turn_skills(&skill_dirs, selected_skill_names.as_deref())?
+        };
         let mut system_dirs = skill_dirs.clone();
         if let Ok(memory_dir) = crate::conf::paths::memory_dir() {
             if let Err(e) = std::fs::create_dir_all(&memory_dir) {
@@ -195,7 +214,6 @@ impl TurnAssembler {
             system_dirs.push(spill_dir.clone());
         }
         let sandbox_rt = self.sandbox.build_runtime(cwd_path, &system_dirs)?;
-        let policy = mode.policy();
         let process_manager = if policy.background_processes {
             Some(self.processes.acquire(session_id)?)
         } else {
@@ -209,7 +227,13 @@ impl TurnAssembler {
             process_manager.clone(),
             host_tools,
         );
-        tools.extend(extra_tools.into_iter().map(super::tools::shared_tool));
+        if !tool_free {
+            tools.extend(extra_tools.into_iter().map(super::tools::shared_tool));
+        }
+        // An embedding client may insist on approving each call before it runs.
+        if let Some(approver) = &approver {
+            tools = super::tools::require_approval(tools, approver);
+        }
         // Every call is judged before it runs: one that would send a secret
         // off the machine without the user's say-so fails instead.
         let tools = crate::privacy::guard_tools(tools, Some(session_id.to_string()));

@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod agent;
 pub mod api;
 pub(crate) mod atomic_file;

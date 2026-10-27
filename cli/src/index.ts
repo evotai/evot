@@ -55,6 +55,13 @@ async function main() {
       break
     }
 
+    case 'acp': {
+      // Stdout belongs to the protocol from here on; nothing else may print.
+      const { runAcp } = await import('./native/index.js')
+      await runAcp({ model: opts.model, envFile: opts.envFile, tools: opts.acpTools, permission: opts.acpPermission, ephemeral: opts.ephemeral })
+      process.exit(0)
+    }
+
     case 'prompt': {
       const { runPrompt } = await import('./prompt.js')
       await runPrompt(opts)

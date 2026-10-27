@@ -243,6 +243,7 @@ export function takeAppliedUpdate(): string | null {
  */
 export function reportAppliedUpdate(appliedVersion: string, command: string): void {
   const line = `  ✓ evot updated to v${appliedVersion} in the background; this session is running the new version.`
-  if (command === 'prompt') console.error(line)
+  // Machine-readable stdout (one-shot output, ACP frames) must stay clean.
+  if (command === 'prompt' || command === 'acp') console.error(line)
   else console.log(line)
 }

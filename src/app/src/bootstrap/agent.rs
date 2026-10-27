@@ -9,6 +9,16 @@ use crate::error::Result;
 /// Construct the application shared by native and gateway entry points.
 /// Channel startup and presentation belong to the caller, not this bootstrap.
 pub async fn build_agent(conf: &Config) -> Result<Arc<Agent>> {
+    build(conf, false).await
+}
+
+/// [`build_agent`] whose sessions live in memory only: nothing is written to
+/// the session archive.
+pub async fn build_ephemeral_agent(conf: &Config) -> Result<Arc<Agent>> {
+    build(conf, true).await
+}
+
+async fn build(conf: &Config, ephemeral: bool) -> Result<Arc<Agent>> {
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .map_err(|e| EvotError::Run(format!("failed to get cwd: {e}")))?;
@@ -27,7 +37,12 @@ pub async fn build_agent(conf: &Config) -> Result<Arc<Agent>> {
 
     tracing::info!(skills_dirs = ?skills_dirs, "agent skills directories");
 
-    let agent = Agent::new(conf, &cwd)?
+    let agent = if ephemeral {
+        Agent::new_ephemeral(conf, &cwd)?
+    } else {
+        Agent::new(conf, &cwd)?
+    };
+    let agent = agent
         .with_system_prompt_sections(system_prompt_text, system_prompt_sections)
         .with_skills_dirs(skills_dirs);
 

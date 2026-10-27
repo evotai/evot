@@ -33,6 +33,7 @@ pub use privacy::privacy_save;
 pub use privacy::privacy_status;
 pub use run::NapiRun;
 pub use run::NapiSubmitOutcome;
+pub use server::run_acp;
 pub use server::start_server;
 pub use server::start_server_background;
 pub use server::stop_server_background;

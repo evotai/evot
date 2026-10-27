@@ -72,6 +72,16 @@ impl Agent {
         Ok(Arc::new(Self::new_inner(config, cwd, storage)?))
     }
 
+    /// Agent whose sessions live only in memory: no session archive, no
+    /// spilled tool results, nothing left on disk after the process exits.
+    pub fn new_ephemeral(config: &Config, cwd: impl Into<String>) -> Result<Arc<Self>> {
+        let mut agent = Self::new_inner(config, cwd.into(), Arc::new(MemoryStorage::new()))?;
+        let mut assembler = TurnAssembler::new(config);
+        assembler.spill_root = None;
+        agent.assembler = Arc::new(assembler);
+        Ok(Arc::new(agent))
+    }
+
     fn new_inner(config: &Config, cwd: String, storage: Arc<dyn Storage>) -> Result<Self> {
         let system_prompt = format!("You are a helpful assistant. Working directory: {cwd}");
         Ok(Self {
@@ -671,6 +681,7 @@ impl Agent {
             previous_llm: self.selection.previous_llm(),
             host_tools: request.host_tools.clone(),
             extra_tools: request.extra_tools.clone(),
+            approver: request.approver.clone(),
         });
 
         let run = runtime::execute_run(runtime::ExecuteRunArgs {
@@ -906,6 +917,7 @@ impl Agent {
                     input: Vec::new(),
                     host_tools: None,
                     extra_tools: Vec::new(),
+                    approver: None,
                     consume_process_notifications: false,
                     previous_llm: None,
                 },
