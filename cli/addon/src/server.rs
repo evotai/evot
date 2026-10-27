@@ -9,10 +9,11 @@ fn load_config(
     model: Option<String>,
     env_file: Option<String>,
 ) -> Result<evot::api::Config> {
-    let mut config = evot::api::Config::load_with_env_file(env_file.as_deref())
+    // Long-running surfaces (serve, ACP, settings server) keep starting on a
+    // stale `--model`; the reason is logged by `with_model_or_fallback`.
+    let (mut config, _ignored_model) = evot::api::Config::load_with_env_file(env_file.as_deref())
         .map_err(|e| Error::from_reason(format!("config load failed: {e}")))?
-        .with_model(model)
-        .map_err(|e| Error::from_reason(format!("config model: {e}")))?;
+        .with_model_or_fallback(model);
     if let Some(p) = port {
         config = config.with_port(p);
     }

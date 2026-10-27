@@ -20,6 +20,7 @@ export function suggestionStatusText(input: SuggestionDisplay): string {
     case 'failed': return '  · suggestion failed · ⇥ retry'
     case 'timed_out': return '  · suggestion timed out · ⇥ retry'
     case 'unavailable': return '  · suggestions unavailable · ⇥ retry'
+    case 'unauthorized': return '  · suggestion key rejected · /login · ⇥ retry'
     default: return ''
   }
 }

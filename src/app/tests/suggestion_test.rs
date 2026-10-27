@@ -32,6 +32,7 @@ fn endpoint() -> SuggestionModel {
 
 fn model_with_window(window: u32) -> SuggestionModel {
     SuggestionModel {
+        route: evot::suggestion::SuggestionRoute::Cloud,
         config: evot::conf::resolve_model_config(
             evot::conf::Protocol::OpenAi,
             "evot-suggestion",
@@ -1059,6 +1060,42 @@ impl StreamProvider for FailedSuggestion {
     ) -> Result<StreamOutcome, ProviderError> {
         Err(ProviderError::Network("sensitive upstream detail".into()))
     }
+}
+
+struct RejectedCredentials;
+#[async_trait]
+impl StreamProvider for RejectedCredentials {
+    async fn stream(
+        &self,
+        _: StreamConfig,
+        _: tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+        _: CancellationToken,
+    ) -> Result<StreamOutcome, ProviderError> {
+        Err(ProviderError::Auth("401 invalid api key".into()))
+    }
+}
+
+#[tokio::test]
+async fn rejected_credentials_are_reported_as_unauthorized_not_generic_failure() {
+    use evot::suggestion::sample_outcome;
+    use evot::suggestion::SuggestionStatus;
+    let messages = history("Run tests", "Ready.");
+    let hints = SuggestionHints::default();
+    let unauthorized = sample_outcome(
+        &endpoint(),
+        &messages,
+        &hints,
+        Arc::new(RejectedCredentials),
+        CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(unauthorized.status, SuggestionStatus::Unauthorized);
+    assert!(unauthorized.candidates.is_empty());
+    // The addon contract spells it in snake_case like the other statuses.
+    assert_eq!(
+        serde_json::to_string(&unauthorized.status).ok().as_deref(),
+        Some("\"unauthorized\"")
+    );
 }
 
 #[tokio::test(start_paused = true)]

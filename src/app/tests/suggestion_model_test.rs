@@ -49,6 +49,7 @@ fn current_model_preserves_resolved_route_and_caps_without_chat_state() -> TestR
             model_config: config.clone(),
         };
         let model = SuggestionModel::from(llm);
+        assert_eq!(model.route, evot::suggestion::SuggestionRoute::CurrentModel);
         let prompt = prompt_config(
             &model,
             &[
@@ -98,6 +99,7 @@ fn published_service_resolves_independently_with_legacy_default_window() -> Test
     let mut service = SuggestionEndpoint::from_catalog(&cache.response).ok_or("missing service")?;
     service.context_window = 0;
     let model = SuggestionModel::try_from(&service)?;
+    assert_eq!(model.route, evot::suggestion::SuggestionRoute::Cloud);
     assert_eq!(model.config.id(), service.model);
     assert_eq!(model.config.base_url(), service.base_url);
     assert_eq!(model.api_key, service.api_key);

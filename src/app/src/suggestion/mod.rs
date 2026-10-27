@@ -14,6 +14,7 @@ mod workflow;
 pub use endpoint::SuggestionEndpoint;
 pub use generate::generate;
 pub use model::SuggestionModel;
+pub use model::SuggestionRoute;
 pub use prompt::prompt_config;
 pub use request::parse_request;
 pub use sample::sample;

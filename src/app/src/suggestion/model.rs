@@ -12,13 +12,34 @@ use crate::error::Result;
 /// than round-tripping the current model through a published service DTO.
 #[derive(Clone)]
 pub struct SuggestionModel {
+    /// Which credential set this request uses. Logged with failures so an
+    /// auth error can be attributed to the right key.
+    pub route: SuggestionRoute,
     pub config: ModelConfig,
     pub api_key: String,
+}
+
+/// The published cloud suggestion service and the active chat model carry
+/// different credentials; one can be rejected while the other works.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SuggestionRoute {
+    Cloud,
+    CurrentModel,
+}
+
+impl SuggestionRoute {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cloud => "cloud",
+            Self::CurrentModel => "current_model",
+        }
+    }
 }
 
 impl From<LlmConfig> for SuggestionModel {
     fn from(current: LlmConfig) -> Self {
         Self {
+            route: SuggestionRoute::CurrentModel,
             config: current.model_config,
             api_key: current.api_key,
         }
@@ -33,6 +54,7 @@ impl TryFrom<&SuggestionEndpoint> for SuggestionModel {
             .parsed_protocol()
             .ok_or_else(|| EvotError::Conf("invalid suggestion service protocol".into()))?;
         Ok(Self {
+            route: SuggestionRoute::Cloud,
             config: crate::conf::resolve_model_config(
                 protocol,
                 "evot-suggestion",

@@ -558,6 +558,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     draft: () => getEditorText(editor),
     cursor: () => editorCursorOffset(editor),
     changed: () => { suggestionTicker.sync(); renderer.requestRender() },
+    // Automatic sampling is otherwise invisible; a rejected key would stay
+    // silent for days. Say it once, then pause until credentials change.
+    unauthorized: () => commitSystem('sys-suggestion-auth',
+      chalk.dim('  Inline suggestions paused: the suggestion service rejected its key. /login refreshes it; ⇥ retries.')),
   })
   const suggestionInput = createSuggestionInput({
     controller: suggestions,
@@ -1549,6 +1553,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
    */
   function reloadAfterAuthChange(): boolean {
     taskIdentity.refresh()
+    suggestions.credentialsChanged()
     const previousModel = agent.model
     const outcome = agent.reloadSelectionOutcome()
     refreshConfigInfo()
@@ -1775,6 +1780,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       serverState,
       releaseNotes,
       installDrift,
+      startupWarning: agent.startupWarning,
     })
   }
 
@@ -3607,6 +3613,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
     if (name === '/model' && args) {
       refreshConfigInfo()
+      // The current-model suggestion route now carries this provider's key.
+      suggestions.credentialsChanged()
       appState = { ...appState, model: agent.model }
     }
 

@@ -81,6 +81,7 @@ fn spawn(
     });
     let task = tokio::spawn(async move {
         let endpoint = SuggestionModel {
+            route: evot::suggestion::SuggestionRoute::Cloud,
             config: evot::conf::resolve_model_config(
                 evot::conf::Protocol::OpenAi,
                 "evot-suggestion",

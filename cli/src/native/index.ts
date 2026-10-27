@@ -122,6 +122,11 @@ export class Agent {
     return this.raw.cwd
   }
 
+  /** Non-fatal startup diagnostic, e.g. a `--model` that no longer resolves. */
+  get startupWarning(): string | null {
+    return this.raw.startupWarning ?? null
+  }
+
   async query(prompt: string, sessionId?: string, toolMode?: string, contentJson?: string, hostSpecsJson?: string): Promise<QueryStream> {
     const outcome = await this.raw.query(prompt, sessionId ?? null, toolMode ?? null, contentJson ?? null, hostSpecsJson ?? null)
     if (outcome.kind !== 'run') {

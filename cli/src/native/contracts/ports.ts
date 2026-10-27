@@ -15,7 +15,8 @@ export interface NativeCompaction {
 }
 export interface SuggestionOutcome {
   candidates: string[]
-  status: 'ready' | 'empty' | 'failed' | 'unavailable' | 'timed_out'
+  /** `unauthorized` is additive: older addons report rejected keys as `failed`. */
+  status: 'ready' | 'empty' | 'failed' | 'unavailable' | 'timed_out' | 'unauthorized'
 }
 export interface NativeSuggestion {
   /** Legacy single-candidate API. */
@@ -30,6 +31,8 @@ export interface NativeForkedAgent { query(prompt: string): Promise<NativeRun> }
 export interface NativeAgent {
   model: string
   readonly cwd: string
+  /** Non-fatal startup diagnostic (e.g. an ignored `--model`). Older addons omit it. */
+  readonly startupWarning?: string | null
   query(prompt: string, sessionId: string | null, mode: string | null, content: string | null, hostSpecs: string | null): Promise<NativeSubmitOutcome>
   createSession(): Promise<string>
   listSessions(limit: number | null): Promise<string>

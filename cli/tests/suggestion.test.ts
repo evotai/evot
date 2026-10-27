@@ -25,11 +25,13 @@ function harness(options: { allowsCommand?: (text: string) => boolean } = {}) {
   let automaticEligible = true
   let draft = ''
   let changes = 0
+  let unauthorizedNotices = 0
   let snapshot = fixtureContext()
   const requests: { resolve(value: string[], status?: SuggestionOutcome['status']): void; reject(error: Error): void; aborted: boolean; hints?: SuggestionHints }[] = []
   const controller = new PromptSuggestion({
     key: () => key, eligible: () => eligible, automaticEligible: () => automaticEligible, context: () => snapshot,
     changed: () => changes++, draft: () => draft,
+    unauthorized: () => unauthorizedNotices++,
     ...options,
     start: (_messages, hints) => {
       let resolve!: (value: SuggestionOutcome) => void
@@ -44,7 +46,8 @@ function harness(options: { allowsCommand?: (text: string) => boolean } = {}) {
     start: (history: UIMessage[], trigger?: SuggestionTrigger) => { snapshot = fixtureContext(history); controller.start(trigger) },
     complete: (history: UIMessage[], text: string) => { snapshot = fixtureContext(history); controller.complete(text) },
     setKey: (value: string) => { key = value },
-    setEligible: (value: boolean) => { eligible = value }, setAutomaticEligible: (value: boolean) => { automaticEligible = value }, setDraft: (value: string) => { draft = value }, changes: () => changes }
+    setEligible: (value: boolean) => { eligible = value }, setAutomaticEligible: (value: boolean) => { automaticEligible = value }, setDraft: (value: string) => { draft = value }, changes: () => changes,
+    unauthorizedNotices: () => unauthorizedNotices }
 }
 
 // Flush both the optional progress reader and the final-outcome promise.
@@ -533,6 +536,51 @@ test('Tab while an automatic request is pending promotes its eventual empty resu
   expect(h.controller.feedback()).toBe('failed')
   h.controller.next()
   expect(h.requests).toHaveLength(2)
+})
+
+test('a rejected key is announced once and pauses automatic sampling until credentials change', async () => {
+  const h = harness()
+  const history = messages()
+  // Silent automatic request: the user still hears about it exactly once.
+  h.start(history)
+  expect(h.requests).toHaveLength(1)
+  h.requests[0]!.resolve([], 'unauthorized')
+  await tick()
+  expect(h.unauthorizedNotices()).toBe(1)
+  expect(h.controller.feedback()).toBeUndefined()
+  // Later pauses do not keep hammering the same dead key.
+  h.start([...history, { id: 'u2', role: 'user', text: 'next', timestamp: 3 }, { id: 'a2', role: 'assistant', text: 'done', timestamp: 4 }])
+  expect(h.requests).toHaveLength(1)
+  // Explicit Tab still retries and shows the specific reason.
+  h.controller.next()
+  expect(h.requests).toHaveLength(2)
+  h.requests[1]!.resolve([], 'unauthorized')
+  await tick()
+  expect(h.controller.feedback()).toBe('unauthorized')
+  expect(h.unauthorizedNotices()).toBe(1)
+  // Login / model switch re-arms automatic sampling and the one-shot notice.
+  h.controller.cancel()
+  h.controller.credentialsChanged()
+  h.start([...history, { id: 'u3', role: 'user', text: 'again', timestamp: 5 }, { id: 'a3', role: 'assistant', text: 'ok', timestamp: 6 }])
+  expect(h.requests).toHaveLength(3)
+  h.requests[2]!.resolve([], 'unauthorized')
+  await tick()
+  expect(h.unauthorizedNotices()).toBe(2)
+})
+
+test('a successful explicit retry after a rejected key resumes automatic sampling', async () => {
+  const h = harness()
+  const history = messages()
+  h.start(history)
+  h.requests[0]!.resolve([], 'unauthorized')
+  await tick()
+  h.controller.next()
+  h.requests[1]!.resolve(['Run the tests'])
+  await tick()
+  expect(h.controller.text()).toBe('Run the tests')
+  h.controller.cancel()
+  h.start([...history, { id: 'u2', role: 'user', text: 'next', timestamp: 3 }, { id: 'a2', role: 'assistant', text: 'done', timestamp: 4 }])
+  expect(h.requests).toHaveLength(3)
 })
 
 test('failed or empty initial requests are retryable until a batch is available', async () => {

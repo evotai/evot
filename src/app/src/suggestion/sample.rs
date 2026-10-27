@@ -111,8 +111,11 @@ pub async fn sample_with_updates(
                 Ok(outcome) => break outcome,
                 Err(error) => {
                     // Error bodies can echo credentials or conversation text.
-                    tracing::info!(target: "evot::suggestion", outcome = "provider_error", error_kind = error_kind(&error), elapsed_ms = started.elapsed().as_millis());
-                    return SuggestionOutcome::status(SuggestionStatus::Failed);
+                    tracing::info!(target: "evot::suggestion", outcome = "provider_error", error_kind = error_kind(&error), route = model.route.as_str(), elapsed_ms = started.elapsed().as_millis());
+                    return SuggestionOutcome::status(match error {
+                        ProviderError::Auth(_) => SuggestionStatus::Unauthorized,
+                        _ => SuggestionStatus::Failed,
+                    });
                 }
             },
             Some(event) = rx.recv() => match event {

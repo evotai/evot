@@ -14,6 +14,12 @@ export async function runPrompt(opts: CliOptions) {
   }
 
   const agent: Agent = await createAgent(opts)
+  // Non-interactive runs have no picker to repair a stale `--model`, and a
+  // silent swap would make scripted output lie about which model ran.
+  if (agent.startupWarning) {
+    console.error(agent.startupWarning)
+    process.exit(1)
+  }
 
   let contentJson: string | undefined
   try {

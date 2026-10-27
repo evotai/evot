@@ -560,6 +560,35 @@ impl Config {
         Ok(self)
     }
 
+    /// Apply a `--model` override without letting a stale spec block startup.
+    ///
+    /// A model that was removed from the catalog (or a typo) must not lock the
+    /// user out of the surface where the selection can be repaired (`/login`,
+    /// the model picker). When the spec does not resolve, the configured
+    /// selection is kept and the reason is returned so the caller can surface
+    /// it; the configuration itself is left untouched.
+    pub fn with_model_or_fallback(mut self, model: Option<String>) -> (Self, Option<String>) {
+        let Some(value) = model else {
+            return (self, None);
+        };
+        match self.resolve_model_spec(&value) {
+            Ok((provider, model_override)) => {
+                self.llm.provider = provider;
+                self.llm.model_override = model_override;
+                (self, None)
+            }
+            Err(error) => {
+                let fallback = match self.active_selection() {
+                    Some((_, model)) if !model.is_empty() => format!("'{model}'"),
+                    _ => "the configured model".to_string(),
+                };
+                let warning = format!("--model '{value}' ignored ({error}); using {fallback}");
+                tracing::warn!(spec = %value, %error, "model override ignored");
+                (self, Some(warning))
+            }
+        }
+    }
+
     pub fn load() -> Result<Self> {
         super::load::load_config_inner(None)
     }

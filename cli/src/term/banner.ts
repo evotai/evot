@@ -101,6 +101,8 @@ export interface BannerOptions {
   releaseNotes?: string[] | null
   /** Install bookkeeping mismatch worth surfacing (see update/state.ts). */
   installDrift?: string | null
+  /** Non-fatal startup diagnostic from the agent (e.g. an ignored `--model`). */
+  startupWarning?: string | null
   /** Fully resolved, ordered skill directories from the agent. */
   skillsDirs?: string[]
 }
@@ -127,6 +129,7 @@ export function renderBanner(opts: BannerOptions, data?: BannerData): string {
     serverState,
     releaseNotes,
     installDrift,
+    startupWarning,
     skillsDirs,
   } = opts
 
@@ -160,6 +163,12 @@ export function renderBanner(opts: BannerOptions, data?: BannerData): string {
     detailLines.push('')
     detailLines.push(chalk.hex('#ffff00')(`  ⚠ Install mismatch: ${installDrift}`))
     detailLines.push(chalk.hex(MUTED)('    run /update to reinstall'))
+  }
+
+  if (startupWarning) {
+    detailLines.push('')
+    detailLines.push(chalk.hex('#ffff00')(`  ⚠ ${startupWarning}`))
+    detailLines.push(chalk.hex(MUTED)('    pick another with /model, or drop --model'))
   }
 
   const fullBannerLines = wrapBannerLines(

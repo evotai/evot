@@ -192,6 +192,64 @@ model = "gpt-5"
 }
 
 #[test]
+fn with_model_or_fallback_keeps_selection_for_unknown_spec() -> TestResult {
+    let _guard = env_lock()
+        .lock()
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    let temp = tempfile::tempdir()?;
+    let env_home = temp.path().join("home");
+    std::fs::create_dir_all(env_home.join(".evotai"))?;
+    std::fs::write(
+        env_home.join(".evotai").join("evot.toml"),
+        r#"
+[llm]
+provider = "anthropic"
+
+[providers.anthropic]
+api_key = "anthropic-key"
+base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4-20250514"
+"#,
+    )?;
+
+    let original_home = std::env::var_os("HOME");
+    std::env::set_var("HOME", &env_home);
+
+    let result = Config::load();
+
+    restore_env_var("HOME", original_home);
+    let config = result?;
+
+    // A valid spec applies exactly like `with_model` and reports nothing.
+    let (config, warning) = config.with_model_or_fallback(Some("anthropic:claude-opus".into()));
+    assert_eq!(warning, None);
+    assert_eq!(config.active_llm()?.model, "claude-opus");
+
+    // A removed/unknown model id keeps the previous selection and explains why.
+    let (config, warning) = config.with_model_or_fallback(Some("evot-free".into()));
+    let warning = warning.ok_or("expected a startup warning")?;
+    assert!(warning.contains("--model 'evot-free' ignored"), "{warning}");
+    assert!(
+        warning.contains("no provider with model 'evot-free'"),
+        "{warning}"
+    );
+    assert!(warning.contains("using 'claude-opus'"), "{warning}");
+    assert_eq!(config.active_llm()?.model, "claude-opus");
+
+    // An unknown provider in `provider:model` form is also non-fatal.
+    let (config, warning) = config.with_model_or_fallback(Some("gone:evot-free".into()));
+    assert!(warning.is_some_and(|w| w.contains("provider 'gone' not found")));
+    assert_eq!(config.active_llm()?.provider, "anthropic");
+
+    // No override: untouched, no warning.
+    let (config, warning) = config.with_model_or_fallback(None);
+    assert_eq!(warning, None);
+    assert_eq!(config.active_llm()?.model, "claude-opus");
+    Ok(())
+}
+
+#[test]
 fn explicit_openai_responses_protocol_loads_from_env() -> TestResult {
     let _guard = env_lock()
         .lock()

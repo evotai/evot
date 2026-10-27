@@ -37,7 +37,7 @@ export class BannerCache {
     const key = JSON.stringify([
       opts.version, opts.columns, opts.rows, opts.quiet,
       opts.configInfo !== undefined, opts.configInfo?.hasApiKey,
-      opts.serverState?.address, opts.releaseNotes, opts.installDrift, chalk.level,
+      opts.serverState?.address, opts.releaseNotes, opts.installDrift, opts.startupWarning, chalk.level,
     ])
     const theme = getTheme()
     if (this.frameKey !== key || this.theme !== theme) {

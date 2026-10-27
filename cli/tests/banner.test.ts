@@ -289,4 +289,25 @@ describe('renderBanner', () => {
     expect(banner).toContain('lib/evot-napi.darwin-arm64.node')
     expect(banner).toContain('run /update to reinstall')
   })
+
+  test('surfaces an ignored --model with a remedy instead of exiting', () => {
+    const { cwd, skillsDir } = createFixture(1)
+    const opts = {
+      version: '2026.4.13',
+      model: 'claude-opus',
+      cwd,
+      configInfo: { provider: 'provider', hasApiKey: true },
+      columns: 80,
+      rows: 30,
+      skillsDirs: [skillsDir],
+    }
+    expect(stripAnsi(renderBanner({ ...opts, startupWarning: null }))).not.toContain('ignored')
+
+    const banner = stripAnsi(renderBanner({
+      ...opts,
+      startupWarning: "--model 'evot-free' ignored (no provider with model 'evot-free'); using 'claude-opus'",
+    }))
+    expect(banner).toContain("--model 'evot-free' ignored")
+    expect(banner).toContain('pick another with /model, or drop --model')
+  })
 })

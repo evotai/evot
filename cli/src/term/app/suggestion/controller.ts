@@ -23,6 +23,10 @@ export class PromptSuggestion {
   private waitingForNext = false
   private readonly cache = new SuggestionCache()
   private notice: Exclude<SuggestionFeedback, 'pending'> | undefined
+  /** The route rejected its key. Automatic sampling pauses (the same key
+   * cannot succeed on the next pause) until an explicit retry succeeds or the
+   * host reports a credential change. */
+  private credentialsRejected = false
 
   constructor(private readonly host: {
     key(): string
@@ -35,6 +39,8 @@ export class PromptSuggestion {
     identity?(text: string): string | undefined
     start(messages: SuggestionMessage[], hints?: SuggestionHints): NativeSuggestion
     changed(): void
+    /** Fired once per rejection episode so the user learns why completions stopped. */
+    unauthorized?(): void
     draft?(): string
     cursor?(): number
   }) {}
@@ -72,8 +78,14 @@ export class PromptSuggestion {
     if (!this.explicit) this.cancel()
   }
 
+  /** Keys changed (login, model reload): automatic sampling may resume. */
+  credentialsChanged(): void {
+    this.credentialsRejected = false
+  }
+
   start(trigger: SuggestionTrigger = 'answer'): void {
     if (this.explicit && this.valid()) return
+    if (this.credentialsRejected) return
     if (!this.host.eligible() || this.host.automaticEligible?.() === false || (this.host.draft?.() ?? '')) return
     const context = this.host.context()
     if (!context.automatic || (trigger === 'answer' && !context.answered)) return
@@ -170,6 +182,12 @@ export class PromptSuggestion {
         if (!this.valid()) { this.cancel(); return }
         if (this.batch) this.batch.finish(outcome.candidates)
         else this.batch = makeBatch(outcome.candidates)
+        if (outcome.status === 'unauthorized') {
+          if (!this.credentialsRejected) this.host.unauthorized?.()
+          this.credentialsRejected = true
+        } else if (outcome.status === 'ready' || outcome.status === 'empty') {
+          this.credentialsRejected = false
+        }
         if (this.batch.count()) {
           if (this.waitingForNext && this.batch.count() > 1) this.batch.next()
           this.notice = undefined

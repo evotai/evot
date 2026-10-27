@@ -11,6 +11,10 @@ pub enum SuggestionStatus {
     Failed,
     Unavailable,
     TimedOut,
+    /// The suggestion route rejected its credentials. Unlike `Failed`, this
+    /// will not recover by retrying with the same key, so clients should tell
+    /// the user once and stop automatic sampling until the key changes.
+    Unauthorized,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]

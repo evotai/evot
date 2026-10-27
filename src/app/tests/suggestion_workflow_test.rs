@@ -22,6 +22,7 @@ fn workflow() -> Result<Box<SuggestionWorkflow>, serde_json::Error> {
 
 fn endpoint() -> SuggestionModel {
     SuggestionModel {
+        route: evot::suggestion::SuggestionRoute::Cloud,
         config: evot::conf::resolve_model_config(
             evot::conf::Protocol::OpenAi,
             "evot-suggestion",

@@ -91,6 +91,7 @@ impl NapiSuggestion {
             SuggestionStatus::Failed => "failed",
             SuggestionStatus::Unavailable => "unavailable",
             SuggestionStatus::TimedOut => "timed_out",
+            SuggestionStatus::Unauthorized => "unauthorized",
         };
         Ok(NapiSuggestionOutcome {
             candidates: outcome.candidates,
