@@ -124,6 +124,11 @@ async function dispatchTaskToolCall(
       case 'saved':
       case 'cancelled':
         return textResponse(call, outcome.message)
+      case 'blocked':
+        return errorResponse(
+          call,
+          `${outcome.message} Tell the user to keep secrets in the task's env file and name the variable in the instruction; do not retry with the value.`,
+        )
       case 'declined':
         return textResponse(call, 'Task change declined by the user. Do not retry unless asked.')
       case 'revise':

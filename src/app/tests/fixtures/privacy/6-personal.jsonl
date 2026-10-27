@@ -1,0 +1,13 @@
+{"text": "手机 13912345678", "finds": ["PHONE"]}
+{"text": "座机 021-52345678", "finds": ["PHONE"]}
+{"text": "phone +44 20 7946 0958", "finds": ["PHONE"]}
+{"text": "护照号码 E12345678", "finds": ["PASSPORT"]}
+{"text": "build E12345678 done", "finds": []}
+{"text": "车牌 粤B12345", "finds": ["PLATE"]}
+{"text": "微信：zhang_san88", "finds": ["SOCIAL"]}
+{"text": "QQ号 987654321", "finds": ["SOCIAL"]}
+{"text": "生日：1990-01-01", "finds": ["BIRTHDAY"]}
+{"text": "mail li.lei@6c8a1f-corp.cn", "finds": ["EMAIL"]}
+{"text": "server 8.8.4.4 down", "finds": ["IP"], "network": true}
+{"text": "server 8.8.4.4 down", "finds": []}
+{"text": "ether 3c:22:fb:12:34:56", "finds": ["MAC"], "network": true}

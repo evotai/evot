@@ -1,0 +1,28 @@
+{"text": "secretKey: Uint8Array;", "finds": []}
+{"text": "const tokenizer = new Tokenizer(options);", "finds": []}
+{"text": "max_tokens: 4096, input_tokens: 1200", "finds": []}
+{"text": "token_url: https://auth.example.org/oauth/token", "finds": []}
+{"text": "api_key_id = 'key_id_for_display_only'", "finds": []}
+{"text": "apiKey: process.env.OPENAI_API_KEY", "finds": []}
+{"text": "password: ${DB_PASSWORD}", "finds": []}
+{"text": "secret = get_secret('db')", "finds": []}
+{"text": "access_token: your_access_token_here", "finds": []}
+{"text": "AUTH_TOKEN=<replace-me>", "finds": []}
+{"text": "token: changeme", "finds": []}
+{"text": "client_secret = \"{{ .Values.clientSecret }}\"", "finds": []}
+{"text": "secret_name: production-database-credentials", "finds": []}
+{"text": "public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5", "finds": []}
+{"text": "sha256: 80e222f828767efc2f91624a8940f1f836f99eee3692f09e2e8c662248b483b7", "finds": []}
+{"text": "commit ffc050fec94dbca3a0aac36098b2cc2bd8183194", "finds": []}
+{"text": "uuid 123e4567-e89b-12d3-a456-426614174000", "finds": []}
+{"text": "密钥长度为 2048 位", "finds": []}
+{"text": "token 是 32 字节", "finds": []}
+{"text": "price 5.13800138000", "finds": []}
+{"text": "{\"ts\": 17929036837, \"n\": [13800138000, 1]}", "finds": []}
+{"text": "see icon@2x.png and @AGENTS.md", "finds": []}
+{"text": "git@github.com:org/repo.git", "finds": []}
+{"text": "mail bob@example.com", "finds": []}
+{"text": "build 192.168.1.10 version 1.2.3.4", "finds": []}
+{"text": "the passport office opens at 9", "finds": []}
+{"text": "basic usage of the cli", "finds": []}
+{"text": "Bearer authentication is described in RFC 6750", "finds": []}

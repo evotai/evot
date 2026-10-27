@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "secrets": true,
+  "personal": false,
+  "actions": {"EMAIL": "block"},
+  "terms": ["HistoricalProject"],
+  "terms_any_case": false,
+  "allow": ["fixture-allowed-value"],
+  "egress_allow": ["api.internal.example", "tool:fixture_sender"]
+}

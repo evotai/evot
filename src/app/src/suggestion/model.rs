@@ -71,14 +71,6 @@ impl SuggestionModel {
     }
 
     pub(super) fn provider(&self) -> Arc<dyn StreamProvider> {
-        use evot_engine::provider::ApiProtocol;
-        match self.config.protocol() {
-            ApiProtocol::AnthropicMessages => Arc::new(evot_engine::provider::AnthropicProvider),
-            ApiProtocol::OpenAiCompletions => Arc::new(evot_engine::provider::OpenAiCompatProvider),
-            ApiProtocol::BedrockConverseStream => Arc::new(evot_engine::provider::BedrockProvider),
-            ApiProtocol::OpenAiResponses => {
-                Arc::new(evot_engine::provider::OpenAiResponsesProvider)
-            }
-        }
+        crate::models::transport::for_api(self.config.protocol())
     }
 }

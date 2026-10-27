@@ -1,0 +1,9 @@
+{"text": "身份证 440305198512231010", "finds": ["ID_CARD"]}
+{"text": "身份证 440305198512231011", "finds": []}
+{"text": "card 6222023468535606889", "finds": ["BANK_CARD"]}
+{"text": "card 6222023468535606880", "finds": []}
+{"text": "IBAN GB82 WEST 1234 5698 7654 32", "finds": ["IBAN"]}
+{"text": "IBAN GB00 WEST 1234 5698 7654 32", "finds": []}
+{"text": "pay bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", "finds": ["CRYPTO_WALLET"]}
+{"text": "pay bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t5", "finds": []}
+{"text": "btc wallet 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2", "finds": ["CRYPTO_WALLET"]}

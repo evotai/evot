@@ -17,6 +17,7 @@ pub(crate) mod http;
 pub mod judge;
 pub mod models;
 pub mod observability;
+pub mod privacy;
 pub mod search;
 pub mod sessions;
 pub mod share;

@@ -9,6 +9,7 @@
  */
 
 import { providerFailurePresentation } from '../provider/error-presentation.js'
+import { parsePrivacyStop, privacyCard, type PrivacyStop } from '../privacy/notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
@@ -656,6 +657,15 @@ export function buildToolResult(
   expanded?: boolean,
   details: Record<string, unknown> = {},
 ): OutputLine[] {
+  // Privacy refused the call before it ran: say why and how to allow it.
+  const privacy = status === 'error' && result ? parsePrivacyStop(result) : null
+  if (privacy) {
+    const [statusRow, ...rows] = privacyCard(privacy).rows
+    return [
+      { id: genId('tool-status'), kind: 'tool', text: `  ${statusRow?.text ?? '✗ · blocked by privacy'}` },
+      ...rows.map((row): OutputLine => ({ id: genId('tool-res'), kind: row.tone === 'error' ? 'error' : 'tool_result', text: `  ${row.text}` })),
+    ]
+  }
   const exitCode = name.toLowerCase() === 'bash' ? detailNumber(details, 'exit_code') : undefined
   const isError = status === 'error' || details.error === true || (exitCode !== undefined && exitCode !== 0)
   // A task poll is summarized by the task's output, not by the protocol
@@ -810,6 +820,10 @@ export function buildLlmCard(text: string): OutputLine[] {
     .map((l) => l.replace(/^\s*error\s+/u, '').trim())
     .filter((l) => l.length > 0)
 
+  // Privacy stopped the request before it left: say that, not "invalid request".
+  const privacy = mark === '✗' ? parsePrivacyStop(body.join(' ')) : null
+  if (privacy) return buildPrivacyCard(privacy)
+
   const lines: OutputLine[] = []
   if (isRetry) {
     lines.push({ id: genId('tool'), kind: 'tool', text: '✦ llm  retry' })
@@ -895,6 +909,22 @@ export function buildEventCard(text: string): OutputLine[] {
     return stampToolCard(lines, 'success')
   }
   return buildLlmCard(text)
+}
+
+/**
+ * A privacy stop as a tool-style card:
+ *   ⊘ privacy  blocked request
+ *     ✗ · nothing was sent to the model · PRIVATE_KEY
+ *     <why> / <the command that undoes it>
+ */
+export function buildPrivacyCard(stop: PrivacyStop): OutputLine[] {
+  const card = privacyCard(stop)
+  const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${card.title}` }]
+  for (const row of card.rows) {
+    const kind = row.tone === 'status' ? 'tool' : row.tone === 'error' ? 'error' : 'tool_result'
+    lines.push({ id: genId(row.tone === 'status' ? 'tool' : 'tool-res'), kind, text: `  ${row.text}` })
+  }
+  return stampToolCard(lines, 'error')
 }
 
 export function buildError(message: string): OutputLine[] {

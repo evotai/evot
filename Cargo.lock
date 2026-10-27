@@ -591,6 +591,7 @@ dependencies = [
 name = "evot"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "async-trait",
  "axum",
@@ -604,6 +605,7 @@ dependencies = [
  "insta",
  "parking_lot",
  "prost",
+ "rand 0.8.5",
  "regex",
  "reqwest",
  "serde",

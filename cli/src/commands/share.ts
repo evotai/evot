@@ -1,6 +1,8 @@
 import type { Agent, CloudPushProgress, CloudPushResult, SessionMeta } from '../native/index.js'
 import { resolveSessionByPrefix } from '../term/app/resume.js'
 import { createHyperlink } from '../render/hyperlink.js'
+import { buildPrivacyCard, type OutputLine } from '../render/output.js'
+import { parsePrivacyStop } from '../privacy/notice.js'
 import { describeShareResult, shareAccess } from '../session/cloud-sessions.js'
 import type { ProgressBar, ProgressBarOptions } from '../term/progress-bar.js'
 
@@ -15,6 +17,8 @@ export interface ShareContext {
   flushShareNotices?(): Promise<void>
   isBusy?(): boolean
   commitSystem(id: string, text: string): void
+  /** Committed cards (a privacy stop); absent hosts fall back to a line. */
+  commitLines?(lines: OutputLine[]): void
   requestRender(): void
   /** The list caches remote state; tell it what just happened. */
   cloudAcknowledged?(sessionId: string, result: CloudPushResult): void
@@ -155,6 +159,10 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
     finish(url ? line.replace(url, createHyperlink(url)) : line)
     if (visibility === 'private' && result.kind === 'synced') show('  Page for your team or anyone? /share team · /share public')
   } catch (error) {
-    ctx.commitSystem('sys-share-error', `Share failed: ${error instanceof Error ? error.message : String(error)}`)
+    const message = error instanceof Error ? error.message : String(error)
+    const stop = parsePrivacyStop(message)
+    // A share uploads through sync; either way the user asked to share.
+    if (stop && ctx.commitLines) ctx.commitLines(buildPrivacyCard(stop.kind === 'blocked' ? { ...stop, target: 'share' } : stop))
+    else ctx.commitSystem('sys-share-error', `Share failed: ${message}`)
   }
 }

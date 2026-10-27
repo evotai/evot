@@ -427,6 +427,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('a command window previews live, then the first arrow focuses and navigates', async () => {
     const session = await startEvot()
+    // This test asserts the full selector's details, not its compact layout.
+    session.resize(100, 50)
     try {
       // A unique prefix immediately renders the formal model window above the
       // composer, but the highlighted row already uses the selector's complete
@@ -506,6 +508,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('skill command window opens live and stays stable through focus', async () => {
     const session = await startEvot()
+    session.resize(100, 50)
     try {
       // `/ski` uniquely identifies `/skill`; no Enter is needed to open the
       // installed-skill inventory and the composer keeps keyboard focus.
@@ -569,6 +572,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('resume preview stays responsive through rapid typing and deletion', async () => {
     const session = await startEvot(true)
+    session.resize(100, 50)
     try {
       const createdSessionId = SEEDED_SESSION_ID.slice(0, 8)
 

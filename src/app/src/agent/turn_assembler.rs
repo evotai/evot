@@ -161,6 +161,15 @@ impl TurnAssembler {
         }
         let variables = self.variables.read().clone();
         let envs = variables.map(|v| v.all_env_pairs()).unwrap_or_default();
+        // Values the shell is given show up in tool output with no context a
+        // rule could see; the provider key may be echoed by a misbehaving tool.
+        crate::privacy::remember_secrets(
+            envs.iter()
+                .map(|(_, value)| value.as_str())
+                .chain([llm.api_key.as_str()]),
+        );
+        // Their names too: a tool call can send a value by naming it.
+        crate::privacy::remember_secret_env(envs.iter().map(|(name, _)| name.as_str()));
         // System dirs cover skill scan directories and the builtin memory vault.
         let cwd = session.meta().await.cwd;
         let cwd_path = std::path::Path::new(&cwd);
@@ -201,6 +210,9 @@ impl TurnAssembler {
             host_tools,
         );
         tools.extend(extra_tools.into_iter().map(super::tools::shared_tool));
+        // Every call is judged before it runs: one that would send a secret
+        // off the machine without the user's say-so fails instead.
+        let tools = crate::privacy::guard_tools(tools, Some(session_id.to_string()));
         let (mut system_prompt, mut sections) = self.build_system_prompt(mode, &cwd);
         if let Some(section) = skills_prompt_section(&skills) {
             let insert_at = sections

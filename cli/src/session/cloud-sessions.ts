@@ -6,6 +6,7 @@
  * show and when to call. No terminal or renderer dependencies.
  */
 import type { CloudPushResult, RemoteSession, SessionMeta } from '../native/index.js'
+import { parsePrivacyStop, type PrivacyStop } from '../privacy/notice.js'
 
 /** Who can read a cloud session, as `/share` names it. */
 export type ShareAccess = 'private' | 'team' | 'public'
@@ -99,6 +100,9 @@ export interface CloudSessionSyncDeps {
   notify(text: string, level: 'info' | 'error'): void
   /** Repaint an open list when the periodic refresh changes its remote rows. */
   indexUpdated?(): void
+  /** Privacy blocked a push. Told once per session and set of kinds, since
+   * every later run retries the same history and is blocked the same way. */
+  privacyStopped?(sessionId: string, stop: PrivacyStop): void
 }
 
 /** Debounce after a run settles, so a rename right after does not double-push. */
@@ -113,6 +117,7 @@ export class CloudSessionSync {
   private inflight = new Map<string, Promise<CloudPushResult | null>>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private indexLoad: Promise<void> | null = null
+  private privacyTold = new Map<string, string>()
   private disposed = false
 
   constructor(private readonly deps: CloudSessionSyncDeps, private readonly delayMs = PUSH_DELAY_MS) {}
@@ -170,13 +175,22 @@ export class CloudSessionSync {
     const running = this.inflight.get(sessionId)
     if (running) return running
     const attempt = this.deps.push(sessionId, force).then(result => {
+      this.privacyTold.delete(sessionId)
       this.acknowledge(sessionId, result)
       if (result.kind === 'diverged') {
         this.deps.notify(`${cloudBadge('diverged', undefined)} changed on another machine · open it from /sessions to choose a side`, 'error')
       }
       return result as CloudPushResult | null
     }, (error: unknown) => {
-      this.deps.notify(`☁ sync failed, will retry after the next run · ${error instanceof Error ? error.message : String(error)}`, 'error')
+      const message = error instanceof Error ? error.message : String(error)
+      const stop = parsePrivacyStop(message)
+      if (stop && this.deps.privacyStopped) {
+        const key = stop.kind === 'blocked' ? stop.kinds.join(',') : stop.reason
+        if (this.privacyTold.get(sessionId) !== key) this.deps.privacyStopped(sessionId, stop)
+        this.privacyTold.set(sessionId, key)
+      } else {
+        this.deps.notify(`☁ sync failed, will retry after the next run · ${message}`, 'error')
+      }
       return null
     }).finally(() => { if (this.inflight.get(sessionId) === attempt) this.inflight.delete(sessionId) })
     this.inflight.set(sessionId, attempt)

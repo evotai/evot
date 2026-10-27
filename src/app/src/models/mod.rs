@@ -1,6 +1,7 @@
 mod catalog;
 mod selection;
 mod settings;
+pub mod transport;
 
 pub use catalog::model_catalog;
 pub use selection::ModelSelection;

@@ -1460,6 +1460,27 @@ describe('term stream machine', () => {
     expect(terminal.writeLines.some(line => line.text.includes(err))).toBe(true)
   })
 
+  test('a privacy block is one card, and the terminal error does not repeat it', () => {
+    const err = 'Invalid request: privacy blocked this request: it contains PRIVATE_KEY. Nothing was sent; run /privacy to review the rule.'
+    const state = createStreamMachineState(createInitialState('test', '/tmp'), createSpinnerState())
+    const failed = reduceRunEvent(state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'test', turn: 1, error: err, metrics: { duration_ms: 2 } },
+    }, { termRows: 24 })
+    const text = failed.commitLines.map(l => l.text).join('\n')
+    expect(text).toContain('⊘ privacy  blocked request')
+    expect(text).toContain('/privacy PRIVATE_KEY mask')
+    expect(text).not.toContain('Invalid request')
+    const terminal = reduceRunEvent(failed.state, { kind: 'error', payload: { message: err } }, { termRows: 24 })
+    expect(terminal.commitLines.map(l => l.text).join('\n')).not.toContain('privacy')
+    expect(terminal.writeLines.some(line => line.text.includes(err))).toBe(true)
+
+    // Raised before any LLM card (no call completed): the error alone shows it.
+    const alone = reduceRunEvent(createStreamMachineState(createInitialState('test', '/tmp'), createSpinnerState()),
+      { kind: 'error', payload: { message: err } }, { termRows: 24 })
+    expect(alone.commitLines[0]?.text).toBe('⊘ privacy  blocked request')
+  })
+
   test('an unconfigured model reports the configuration gap instead of an outage', () => {
     // Production: evot asked for a model with no channel behind it. llmproxy
     // answered 503 "No permitted model backend is configured.", which used to

@@ -24,7 +24,7 @@ import { backNotice, exitLineageHint, forkNotice, resolveBackTarget } from './ap
 import { createAppSelectorState, isCommandSelector, isBackgroundSelector, SELECTOR_OWNER } from './app/selector-identity.js'
 import { selectorExpandItems, selectorClearQuery, selectorReplaceItem, warmSearchableText, type SelectorItem, type SelectorState } from './selector.js'
 import { createAskState, handleAskKeyEvent, type AskQuestion } from './ask.js'
-import { buildAssistantLines, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
+import { buildAssistantLines, buildPrivacyCard, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
 import { manualCompactionLines } from './viewmodel/manual-compaction.js'
 import { wrapTextWithAnsi } from '../render/wrap.js'
 import { createHyperlink } from '../render/hyperlink.js'
@@ -206,6 +206,7 @@ import {
   handleClipCommand,
   handleCopyCommand,
   handleEnvCommand,
+  handlePrivacyCommand,
   handleShareCommand,
   handleLoginCommand,
   handleLogoutCommand,
@@ -379,6 +380,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   resources.add(() => loopSession.dispose())
 
   const taskSession = new TaskSession({
+    privacyStopped: stop => {
+      commitLines(buildPrivacyCard(stop))
+      renderer.requestRender()
+    },
     dimensions: () => ({ columns: renderer.termCols, rows: renderer.termRows }),
     envFile: opts.envFile,
     ensureDelivery: async signal => {
@@ -453,6 +458,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     notify: (text, level) => {
       if (destroyed) return
       commitSystem('sys-cloud-sync', level === 'error' ? chalk.dim(`  ${text}`) : `  ${text}`)
+      renderer.requestRender()
+    },
+    privacyStopped: (_sid, stop) => {
+      if (destroyed) return
+      commitLines(buildPrivacyCard(stop))
       renderer.requestRender()
     },
   })
@@ -3629,6 +3639,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       await runManualCompaction(args)
     } else if (name === '/env') {
       await handleEnvCommand(replCommands, args)
+    } else if (name === '/privacy') {
+      await handlePrivacyCommand(replCommands, args)
     } else if (name === '/harden') {
       commitUserMessage(text.trim())
       runQuery(buildCommandPrompt({ name: 'harden', input: text.trim(), instructions: buildHardenPrompt(args) }))

@@ -165,6 +165,7 @@ const SUB_COMMANDS: Record<string, string[]> = {
   '/help': COMMANDS.map(c => c.name.slice(1)),
   '/skill': ['install', 'list', 'update', 'remove'],
   '/env': ['list', 'get', 'set', 'del', 'load'],
+  '/privacy': ['trust', 'term', '<days>'],
   '/log': ['shot', 'query'],
   '/resume': ['<id>', '<request>'],
   '/sessions': ['<id>', '<request>'],

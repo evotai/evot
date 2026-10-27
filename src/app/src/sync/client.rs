@@ -25,9 +25,23 @@ const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 /// successful delete or extend the server's retry delay.
 const DISCARD_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub async fn push(state: &AuthState, payload: &SyncPush) -> Result<PushResponse> {
+/// Push one batch. `context` is the session's whole local history (see
+/// [`crate::privacy::upload_context`]), so a batch holding only part of the
+/// session is scrubbed as if the rest were beside it.
+pub async fn push(
+    state: &AuthState,
+    payload: &SyncPush,
+    context: &crate::privacy::UploadContext,
+) -> Result<PushResponse> {
     check_id(&payload.meta.session_id)?;
-    let body = serde_json::to_vec(payload).map_err(|e| EvotError::Conf(e.to_string()))?;
+    // The cloud copy never holds a secret: scrubbed for good before upload.
+    let body = crate::privacy::scrub_upload(
+        crate::privacy::Target::Sync,
+        &payload.meta.session_id,
+        payload,
+        Some(context),
+    )
+    .await?;
     let suffix = format!("/{}", payload.meta.session_id);
     // A chunked upload is many PUTs in a row, and the server's per-minute
     // cap on uploads sees each one. It answers 429 with `Retry-After`; wait

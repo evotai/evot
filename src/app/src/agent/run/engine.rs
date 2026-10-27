@@ -36,28 +36,17 @@ pub(super) fn build_engine(
     options: EngineOptions,
     prior_messages: Vec<evot_engine::AgentMessage>,
 ) -> evot_engine::Agent {
-    use evot_engine::provider::AnthropicProvider;
-    use evot_engine::provider::OpenAiCompatProvider;
-    use evot_engine::provider::OpenAiResponsesProvider;
-
     let model_config = options.model_config;
     let context_config =
         evot_engine::context::ContextConfig::from_model(&model_config, options.thinking_level);
-    let transport = |protocol: &Protocol| -> Arc<dyn evot_engine::provider::StreamProvider> {
-        match protocol {
-            Protocol::Anthropic => Arc::new(AnthropicProvider),
-            Protocol::OpenAiResponses => Arc::new(OpenAiResponsesProvider),
-            Protocol::OpenAi => Arc::new(OpenAiCompatProvider),
-        }
+    // Every transport, injected or built, goes through the privacy boundary.
+    let transport = |protocol: &Protocol| match &options.provider_override {
+        Some(provider) => crate::models::transport::overridden(provider.clone()),
+        None => crate::models::transport::for_protocol(protocol),
     };
-    let provider = options
-        .provider_override
-        .clone()
-        .unwrap_or_else(|| transport(&options.protocol));
+    let provider = transport(&options.protocol);
     let compaction_context = options.compaction_llm.map(|previous| {
-        let provider = options
-            .provider_override
-            .unwrap_or_else(|| transport(&previous.protocol));
+        let provider = transport(&previous.protocol);
         evot_engine::context::SummarizerContext {
             provider: crate::auth::recovery::with_recovery(
                 provider,

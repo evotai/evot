@@ -1,0 +1,142 @@
+{
+ "schema_version": 1,
+ "id": "cn-cloud",
+ "rules": [
+  {
+   "id": "cn.tencent-secret-id",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "AKID[A-Za-z0-9]{32}",
+   "keywords": [
+    "akid"
+   ],
+   "bound": "[A-Za-z0-9]",
+   "examples": {
+    "matches": [
+     "SecretId=AKIDj<cut>z1fWp6qieQ2rASANxk81akgBRgWjpKy"
+    ]
+   }
+  },
+  {
+   "id": "cn.volcengine-access-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "AKLT[A-Za-z0-9_-]{32,}",
+   "keywords": [
+    "aklt"
+   ],
+   "bound": "[A-Za-z0-9]",
+   "examples": {
+    "matches": [
+     "AKLTn<cut>ATlivVtbnFuUNpxDLa3ZbVFFhwCtqr92VWPqLLC"
+    ]
+   }
+  },
+  {
+   "id": "cn.aliyun-access-key-id",
+   "kind": "API_KEY",
+   "regex": "LTAI[A-Za-z0-9]{12,20}",
+   "keywords": [
+    "ltai"
+   ],
+   "bound": "[A-Za-z0-9]",
+   "examples": {
+    "matches": [
+     "AccessKeyId: LTAIlZrVFaNxP2mrCGaH"
+    ]
+   }
+  },
+  {
+   "id": "cn.baidu-qianfan",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "bce-v3/ALTAK-[A-Za-z0-9]{20,}/[a-f0-9]{40}",
+   "keywords": [
+    "bce-v3/"
+   ],
+   "examples": {
+    "matches": [
+     "bce-v3/ALTAK-O2UeWvwog0BEi680EMq47TVP/1bdf2596d52765016ec41f14f57f1535ef737ac7"
+    ]
+   }
+  },
+  {
+   "id": "cn.zhipu-api-key",
+   "kind": "API_KEY",
+   "regex": "\\b[a-f0-9]{32}\\.[A-Za-z0-9]{16}\\b",
+   "keywords": [
+    "."
+   ],
+   "examples": {
+    "matches": [
+     "ZHIPUAI_API_KEY b23efa3abb3dc095094c245dc10e5bf2.kwmha8WWrFOkaa7l"
+    ],
+    "ignores": [
+     "file 9e6d2c838fda1425c2b3809249de99f4.png"
+    ]
+   }
+  },
+  {
+   "id": "cn.robot-webhook",
+   "kind": "SECRET",
+   "confidence": "high",
+   "regex": "(?:oapi\\.dingtalk\\.com/robot/send\\?access_token=|qyapi\\.weixin\\.qq\\.com/cgi-bin/webhook/send\\?key=|open\\.(?:feishu\\.cn|larksuite\\.com)/open-apis/bot/v2/hook/)([A-Za-z0-9-]{16,})",
+   "keywords": [
+    "dingtalk.com",
+    "qyapi.weixin",
+    "/open-apis/bot/"
+   ],
+   "examples": {
+    "matches": [
+     "https://oapi.dingtalk.com/robot/send?access_token=bd72661d357e66e3f018d5967b4d9f93eb6b4120e798edb17488220d62785ad3",
+     "https://open.feishu.cn/open-apis/bot/v2/hook/0fd417f4-00bb-ecbe-840d-9b33917dbc68"
+    ]
+   }
+  },
+  {
+   "id": "cn.lark-access-token",
+   "kind": "TOKEN",
+   "regex": "\\b[tu]-g[0-9a-z]{4}[A-Za-z0-9_-]{30,}",
+   "keywords": [
+    "t-g",
+    "u-g"
+   ],
+   "bound": "${TOKEN_BOUND}",
+   "unless": [
+    "no_digit_and_letter"
+   ],
+   "examples": {
+    "matches": [
+     "t-g1044PZWFNqAly9CFlphYyPIwedAt7NaerSkgK9TM"
+    ],
+    "ignores": [
+     "t-graphql-subscription-handler-for-orders"
+    ]
+   }
+  },
+  {
+   "id": "cn.url-credential-param",
+   "kind": "SECRET",
+   "regex": "[?&](?i:access_token|token|api_key|apikey|secret|sign|signature|key)=([A-Za-z0-9%._~+/-]{16,})",
+   "keywords": [
+    "token=",
+    "key=",
+    "secret=",
+    "sign"
+   ],
+   "unless": [
+    "a_variable",
+    "no_digit_and_letter",
+    "a_placeholder"
+   ],
+   "examples": {
+    "matches": [
+     "https://api.x.com/v1?id=1&access_token=Zv6PQdMLXziwIF0A9chZmFFNXHWK7pgj"
+    ],
+    "ignores": [
+     "?key=user_settings_page_layout"
+    ]
+   }
+  }
+ ]
+}

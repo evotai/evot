@@ -32,7 +32,8 @@ pub async fn get_task(auth: &AuthState, task_id: &str) -> Result<serde_json::Val
 }
 
 pub async fn create_task(auth: &AuthState, body: &serde_json::Value) -> Result<CreatedTask> {
-    request(auth, reqwest::Method::POST, "/v1/tasks", Some(body), None).await
+    let body = task_body(body).await?;
+    request(auth, reqwest::Method::POST, "/v1/tasks", Some(&body), None).await
 }
 
 pub async fn update_task(
@@ -40,14 +41,23 @@ pub async fn update_task(
     task_id: &str,
     body: &serde_json::Value,
 ) -> Result<CreatedTask> {
+    let body = task_body(body).await?;
     request(
         auth,
         reqwest::Method::PATCH,
         &format!("/v1/tasks/{task_id}"),
-        Some(body),
+        Some(&body),
         None,
     )
     .await
+}
+
+/// A task definition as it may go to the server: refused if it holds any
+/// secret or personal data (it runs later from the stored copy, so a
+/// scrubbed one would do something else; secrets go in the env file).
+async fn task_body(body: &serde_json::Value) -> Result<serde_json::Value> {
+    let bytes = crate::privacy::scrub_upload(crate::privacy::Target::Task, "", body, None).await?;
+    Ok(serde_json::from_slice(&bytes)?)
 }
 
 pub async fn delete_task(auth: &AuthState, task_id: &str) -> Result<()> {
@@ -185,16 +195,43 @@ pub async fn report(
         auth,
         reqwest::Method::POST,
         &format!("/v1/task-runs/{run_id}/report"),
-        Some(&serde_json::json!({
-            "status": status,
-            "result_summary": summary,
-            "delivery_status": delivery_status,
-            "error": error,
-        })),
+        Some(&report_body(run_id, status, summary, delivery_status, error).await?),
         Some(("X-Evot-Lease", lease_token)),
     )
     .await?;
     Ok(())
+}
+
+/// A run's report with its result and error scrubbed for good. A blocked
+/// one still reports, with the privacy notice as its result: the run
+/// finished, and the server must hear so.
+async fn report_body(
+    run_id: &str,
+    status: &str,
+    summary: &str,
+    delivery_status: &str,
+    error: &str,
+) -> Result<serde_json::Value> {
+    let body = serde_json::json!({
+        "status": status,
+        "result_summary": summary,
+        "delivery_status": delivery_status,
+        "error": error,
+    });
+    match crate::privacy::scrub_upload(crate::privacy::Target::TaskReport, run_id, &body, None)
+        .await
+    {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(EvotError::Privacy(notice)) if notice.starts_with("privacy blocked") => {
+            Ok(serde_json::json!({
+                "status": status,
+                "result_summary": notice,
+                "delivery_status": delivery_status,
+                "error": "",
+            }))
+        }
+        Err(other) => Err(other),
+    }
 }
 
 async fn request<T: DeserializeOwned>(

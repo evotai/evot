@@ -7,6 +7,7 @@ autotests = false
 
 [dependencies]
 evot-engine.workspace = true
+aho-corasick = "=1.1.4"
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
@@ -17,6 +18,7 @@ fs2 = "=0.4.3"
 indexmap.workspace = true
 parking_lot.workspace = true
 prost = "0.13"
+rand = "=0.8.5"
 regex = "1"
 reqwest.workspace = true
 similar = { workspace = true }

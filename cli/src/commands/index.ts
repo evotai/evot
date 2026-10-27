@@ -52,6 +52,7 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
   { name: '/clip', description: 'Clip last reply to the memory vault; all = distill session; copy = clipboard', usage: '/clip [all | copy]', handler: 'builtin' },
   { name: '/compact', description: 'Compact session context', usage: '/compact [instructions]', handler: 'builtin' },
   { name: '/clear', description: 'Clear session context', handler: 'builtin' },
+  { name: '/privacy', description: 'Privacy: what was masked or blocked; trust a host; add your own words', usage: '/privacy [days | trust [rm] HOST | term [rm] WORD]', handler: 'builtin', minPrefixLength: 4 },
   { name: '/env', description: 'Manage variables', usage: '/env [list | get KEY [--reveal] | set K=V | del K | load FILE]', handler: 'builtin' },
   { name: '/log', description: 'Show or analyze session logs; shot exports markdown', usage: '/log [shot | query]', handler: 'builtin' },
   { name: '/_dump', description: 'Dump system prompt + tools + skills as JSON', usage: '/_dump [path]', handler: 'builtin' },

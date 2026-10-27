@@ -12,17 +12,12 @@ use std::sync::Arc;
 use evot_engine::judge::Judge;
 use evot_engine::judge::JudgeLimits;
 use evot_engine::judge::ProviderJudge;
-use evot_engine::provider::AnthropicProvider;
-use evot_engine::provider::OpenAiCompatProvider;
-use evot_engine::provider::OpenAiResponsesProvider;
-use evot_engine::provider::StreamProvider;
 pub use trace::TracingJudge;
 pub use trace::JUDGE_TRACE_FILE;
 pub use trace::JUDGE_TRACE_VERSION;
 
 use crate::conf::resolve_model_config;
 use crate::conf::JudgeEndpoint;
-use crate::conf::Protocol;
 
 /// The judge as the server publishes it right now. Resolved per run from the
 /// synced models cache, so switching the judge model off on the server stops
@@ -60,11 +55,7 @@ fn from_endpoint_with_session(
     session_id: Option<&str>,
 ) -> Option<Arc<dyn Judge>> {
     let endpoint = endpoint?;
-    let provider: Arc<dyn StreamProvider> = match endpoint.protocol {
-        Protocol::Anthropic => Arc::new(AnthropicProvider),
-        Protocol::OpenAiResponses => Arc::new(OpenAiResponsesProvider),
-        Protocol::OpenAi => Arc::new(OpenAiCompatProvider),
-    };
+    let provider = crate::models::transport::for_protocol(&endpoint.protocol);
     let model_config = resolve_model_config(
         endpoint.protocol.clone(),
         &endpoint.provider,

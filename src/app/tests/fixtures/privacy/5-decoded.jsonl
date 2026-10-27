@@ -1,0 +1,4 @@
+{"text": "Authorization: Basic YWRtaW46eHFaS200YlYzQXlB", "finds": ["TOKEN"]}
+{"text": "data: T1BFTkFJX0FQSV9LRVk9c2stcHJvai1WUHF6UHB0RUpRemhrUGtlbkc1WkZKb0M2dldDQmlKbXBmbHZKZnVwCg==", "finds": ["API_KEY"]}
+{"text": "next=https%3A%2F%2Fx.io%2Fcb%3Fk%3Dsk-proj-VPqzPptEJQzhkPkenG5ZFJoC6vWCBiJmpflvJfup", "finds": ["API_KEY"]}
+{"text": "image anVzdCBzb21lIG9yZGluYXJ5IHdvcmRzIGluIGEgZmlsZSwgbm90aGluZyBtb3Jl", "finds": []}

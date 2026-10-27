@@ -155,6 +155,9 @@ pub async fn push_session(
     }
     let after_seq = if force { 0 } else { cloud.synced_seq };
     let portable = portable_entries(&all)?;
+    // Scrub every batch against the whole session, not only itself: a
+    // secret named earlier, or a `.env` read in another batch, still goes.
+    let context = crate::privacy::upload_context(&(&meta, &portable)).await?;
     let viewer = if access != CloudAccess::Private && !portable.is_empty() {
         Some(serde_json::to_value(crate::share::export_session(
             &meta,
@@ -200,7 +203,7 @@ pub async fn push_session(
             viewer: if is_last { viewer.clone() } else { None },
             keep_viewer: !is_last,
         };
-        match client::push(state, &payload).await? {
+        match client::push(state, &payload, &context).await? {
             PushResponse::Acked(ack) => {
                 // Record every acknowledged batch, so an interrupted upload
                 // resumes after the last one that landed instead of starting over.

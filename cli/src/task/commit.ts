@@ -7,6 +7,7 @@
  *  decides what the user is asked and what leaves the machine.
  */
 
+import { parsePrivacyStop, type PrivacyStop } from '../privacy/notice.js'
 import type { AskUserAnswer, AskUserParams } from '../term/host-tools.js'
 import type { createTask, updateTask } from './client.js'
 import {
@@ -33,6 +34,9 @@ export interface TaskCommitContext {
   /** Transport seam. Absent: the native client, resolved on first save so
    *  importing this module never loads the addon. */
   persist?: TaskPersistence
+  /** Privacy refused the definition: show the card. Absent hosts get the
+   *  message alone. */
+  privacyStopped?: (stop: PrivacyStop) => void
 }
 
 export interface TaskPersistence {
@@ -70,6 +74,8 @@ export type TaskCommitOutcome =
   | { kind: 'revise'; feedback: string }
   /** The request reached the server and the outcome is unknown. */
   | { kind: 'failed'; message: string }
+  /** Privacy refused it before anything was sent: known not saved. */
+  | { kind: 'blocked'; message: string }
 
 const EDITABLE = [
   'name', 'cron', 'timezone', 'instruction', 'model', 'thinking_level', 'workspace_ref',
@@ -430,6 +436,11 @@ export async function commitTaskChange(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     flow.mutationError = message
+    const stop = parsePrivacyStop(message)
+    if (stop) {
+      context.privacyStopped?.(stop)
+      return { kind: 'blocked', message: `Not saved: ${message}` }
+    }
     return { kind: 'failed', message }
   }
 }

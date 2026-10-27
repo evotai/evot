@@ -1,6 +1,7 @@
 import { providerFailurePresentation } from '../../provider/error-presentation.js'
+import { parsePrivacyStop } from '../../privacy/notice.js'
 import { formatLongWaitError, reviewNotice } from '../../render/verbose.js'
-import { buildError, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../render/output.js'
+import { buildError, buildPrivacyCard, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../render/output.js'
 import { formatDuration } from '../../render/format.js'
 import { compactionToolName, recordStreamDelta, resetStreamStats, setLongWait, setRetryWait, setSpinnerPhase, type SpinnerState } from '../spinner.js'
 import { assistantToolCalls } from './assistant-content.js'
@@ -491,7 +492,8 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       if (alreadyShown) writeLines.push(...buildError(message))
       else {
         const failure = providerFailurePresentation({ error: message })
-        const lines = buildError(failure.kind === 'unknown' ? message : failure.label)
+        const privacy = parsePrivacyStop(message)
+        const lines = privacy ? buildPrivacyCard(privacy) : buildError(failure.kind === 'unknown' ? message : failure.label)
         commitLines.push(...lines)
         noticeLines.push(...lines)
         writeLines.push(...buildError(message))

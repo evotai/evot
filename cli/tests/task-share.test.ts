@@ -137,6 +137,25 @@ describe('commit pipeline for an import', () => {
     const { outcome } = run('Cancel')
     expect((await outcome).kind).toBe('cancelled')
   })
+
+  test('a definition privacy refuses is known not saved and shows the card', async () => {
+    const flow = createTaskFlowState('create')
+    const stops: unknown[] = []
+    const refuse = async () => {
+      throw new Error('privacy blocked this task: it contains API_KEY. Nothing was sent; run /privacy to review the rule.')
+    }
+    const outcome = await commitTaskChange({
+      flow,
+      defaults: async () => defaults,
+      pickModel: async () => ({ spec: 'evot-pro:claude-opus', thinkingLevel: 'high' }),
+      collectAnswers: async (params: AskUserParams): Promise<AskUserAnswer[]> =>
+        [{ header: 'Task', question: params.questions[0]?.question ?? '', answer: 'Confirm' }],
+      persist: { create: refuse, update: refuse },
+      privacyStopped: stop => stops.push(stop),
+    }, { arguments: importArguments(snapshot) })
+    expect(outcome.kind).toBe('blocked')
+    expect(stops).toEqual([{ kind: 'blocked', target: 'task', kinds: ['API_KEY'] }])
+  })
 })
 
 describe('sharing from the task list', () => {

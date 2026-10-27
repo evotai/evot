@@ -207,6 +207,8 @@ impl Agent {
     }
 
     pub fn with_variables(self: &Arc<Self>, variables: Arc<Variables>) -> Arc<Self> {
+        crate::privacy::remember_secrets(variables.secret_values());
+        crate::privacy::remember_secret_env(variables.variable_names());
         *self.assembler.variables.write() = Some(variables);
         Arc::clone(self)
     }
@@ -602,19 +604,10 @@ impl Agent {
     }
 
     fn llm_provider(&self, protocol: &Protocol) -> Arc<dyn evot_engine::provider::StreamProvider> {
-        use evot_engine::provider::AnthropicProvider;
-        use evot_engine::provider::OpenAiCompatProvider;
-        use evot_engine::provider::OpenAiResponsesProvider;
-
-        self.assembler
-            .provider_override
-            .read()
-            .clone()
-            .unwrap_or_else(|| match protocol {
-                Protocol::Anthropic => Arc::new(AnthropicProvider),
-                Protocol::OpenAiResponses => Arc::new(OpenAiResponsesProvider),
-                Protocol::OpenAi => Arc::new(OpenAiCompatProvider),
-            })
+        match self.assembler.provider_override.read().clone() {
+            Some(provider) => crate::models::transport::overridden(provider),
+            None => crate::models::transport::for_protocol(protocol),
+        }
     }
 
     fn compact_summarizer(&self) -> crate::compact::orchestrator::CompactSummarizer {

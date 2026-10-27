@@ -25,6 +25,11 @@ pub enum EvotError {
 
     #[error("cli error: {0}")]
     Cli(String),
+
+    /// Privacy stopped it: a blocked kind, or masking that could not run.
+    /// Shown as written; the CLI reads it back to show the privacy card.
+    #[error("{0}")]
+    Privacy(String),
 }
 
 pub type Result<T> = std::result::Result<T, EvotError>;

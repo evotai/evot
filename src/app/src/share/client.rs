@@ -38,7 +38,14 @@ pub(crate) async fn explain_failure(response: reqwest::Response, fallback: &str)
 }
 
 pub async fn upload(state: &AuthState, payload: &ShareUpload) -> Result<ShareCreated> {
-    let body = serde_json::to_vec(payload).map_err(|e| EvotError::Conf(e.to_string()))?;
+    // Nothing leaves for a share link without its secrets scrubbed for good.
+    let body = crate::privacy::scrub_upload(
+        crate::privacy::Target::Share,
+        &payload.session_id,
+        payload,
+        None,
+    )
+    .await?;
     request(state, reqwest::Method::POST, "", Some(body)).await
 }
 

@@ -1,0 +1,8 @@
+{"field": "recipient", "text": "王小明", "finds": ["PERSON"]}
+{"field": "收货地址", "text": "上海市浦东新区世纪大道100号", "finds": ["ADDRESS"]}
+{"field": "address", "text": "0x7ffd5a3c", "finds": []}
+{"field": "phone", "text": "+1 (415) 555-0132", "finds": ["PHONE"]}
+{"field": "api_key", "text": "nUfd7UACNWiP3sFd67JikEAvstqV", "finds": ["SECRET"]}
+{"field": "max_tokens", "text": "4096", "finds": []}
+{"field": "name", "text": "read_file", "finds": []}
+{"text": "收件人：李雷，联系地址：北京市海淀区中关村大街1号", "finds": ["PERSON", "ADDRESS"]}

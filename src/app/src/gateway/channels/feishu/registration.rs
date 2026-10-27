@@ -56,11 +56,13 @@ fn resolve_delivery(
         .map_err(|error| EvotError::Run(format!("Feishu client: {error}")))?;
     Ok(crate::delivery::resolve::ResolvedDelivery {
         targets,
-        sink: Box::new(super::delivery::FeishuMessageSink::new(
-            client,
-            super::token::TokenCache::new(),
-            config.app_id.clone(),
-            config.app_secret.clone(),
+        sink: Box::new(crate::privacy::ScrubbingSink::new(
+            super::delivery::FeishuMessageSink::new(
+                client,
+                super::token::TokenCache::new(),
+                config.app_id.clone(),
+                config.app_secret.clone(),
+            ),
         )),
     })
 }

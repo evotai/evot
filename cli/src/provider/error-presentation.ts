@@ -2,7 +2,9 @@
  * Consumers retain the original error separately for diagnostics. Prefer a
  * structured category; string matching is only for historical error events.
  */
-export type ProviderFailureKind = 'connection' | 'timeout' | 'dns' | 'busy' | 'overloaded' | 'gateway' | 'gateway-no-backend' | 'rate-limit' | 'quota' | 'authentication' | 'invalid-request' | 'context-overflow' | 'configuration' | 'backend-version' | 'model-not-found' | 'not-found' | 'unknown'
+import { parsePrivacyStop } from '../privacy/notice.js'
+
+export type ProviderFailureKind = 'connection' | 'timeout' | 'dns' | 'busy' | 'overloaded' | 'gateway' | 'gateway-no-backend' | 'rate-limit' | 'quota' | 'authentication' | 'invalid-request' | 'context-overflow' | 'configuration' | 'backend-version' | 'model-not-found' | 'not-found' | 'privacy-blocked' | 'privacy-unavailable' | 'unknown'
 
 /** Who failed, when the gateway says so. Two parties only: the model
  * provider (the backend serving the model) or the gateway (the proxy in
@@ -20,6 +22,9 @@ function classifyByOrigin(text: string, status: number): ProviderFailureKind | u
 }
 
 export function classifyProviderFailure(error: string): ProviderFailureKind {
+  // Raised locally before anything was sent, whatever HTTP-ish words follow.
+  const privacy = parsePrivacyStop(error)
+  if (privacy) return privacy.kind === 'blocked' ? 'privacy-blocked' : 'privacy-unavailable'
   const text = error.toLowerCase()
   // Numeric values in error details (e.g. "minimum of 512 pixels")
   // are not HTTP statuses. Accept explicit markers or a leading bare code.
@@ -60,6 +65,8 @@ const labels: Record<ProviderFailureKind, string> = {
   'context-overflow': 'Context limit exceeded',
   configuration: 'Configuration error', 'backend-version': 'The model provider requires a newer client version than the gateway uses.',
   'model-not-found': 'Model not found', 'not-found': 'Resource not found',
+  'privacy-blocked': 'Blocked by privacy masking · nothing was sent',
+  'privacy-unavailable': 'Privacy masking unavailable · nothing was sent',
   unknown: 'Request failed',
 }
 

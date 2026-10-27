@@ -1,0 +1,16 @@
+{"text": "OPENAI_API_KEY=sk-proj-u8jzPde0IgxLd6GncfBAepfJBd0Kh8oOOL8dKLzdocJ2isAj", "finds": ["API_KEY"]}
+{"text": "anthropic: sk-ant-api03-IhKtJ0RlgLKOmxgJTeKdNnFRIBXuDL7DxtpYlSXpfKtHF4vUCsMehGAkWvj7FAc9QeWJKY40uvSwMFLZDe1f8rESQedUSAA", "finds": ["API_KEY"]}
+{"text": "DEEPSEEK_API_KEY=sk-9e<cut>9cb0eb53f16947ccf25ec84d8dbc74", "finds": ["API_KEY"]}
+{"text": "SecretId: AKIDf<cut>ljoQoaF1LlqsajAIxNKu8iS2G8NPRVd", "finds": ["API_KEY"]}
+{"text": "volc ak AKLTD<cut>53X83RZJzzzzgEOzdmenCkhvMdgaKjIg8xNbe3n", "finds": ["API_KEY"]}
+{"text": "ALIBABA_CLOUD_ACCESS_KEY_ID=LTAINyjOq9wMxEhh2FDEEtfj", "finds": ["API_KEY"]}
+{"text": "qianfan bce-v3/ALTAK-gVvVqE1SkHbn88HxjSI6bWHt/28b5b7a767c76fb008f86bebb2737f6a6f0fb23c", "finds": ["API_KEY"]}
+{"text": "zhipu 6f5da2cec255404e4fb440034d660869.GpWLuqIA1id6Vw5D", "finds": ["API_KEY"]}
+{"text": "curl https://oapi.dingtalk.com/robot/send?access_token=d440e50454f31af3176813e02ea68ef786e4d3cea27d26934b484e73cf575dca", "finds": ["SECRET"]}
+{"text": "webhook https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=d6ba2b0a-ee0c-a923-7328-81584d8c4fa2", "finds": ["SECRET"]}
+{"text": "lark t-g1044rdZSlB5er8bOfZqfM2oeq3hDavJA76rNicHT", "finds": ["TOKEN"]}
+{"text": "hf_p8hkqdlm7tOtHWnsCGRlrwZbqcabUGJmGE for the model hub", "finds": ["API_KEY"]}
+{"text": "GROQ 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", "finds": ["API_KEY"]}
+{"text": "slack xoxb-<cut>148503316910-303836798297-krCaqx9vJupc94tnwlavyfEr", "finds": ["TOKEN"]}
+{"text": "aws AKIAMPAFQFJZCZBTTOFJ", "finds": ["API_KEY"]}
+{"text": "-----BEGIN OPENSSH PRIVATE KEY-----\nQ5TY4MyWuUFjsUNPjc01T5GOBUSZGi6HWGK10Zb0RLZ5TR9SPofbciOx9gy1CJdObOIRpF\n-----END OPENSSH PRIVATE KEY-----", "finds": ["PRIVATE_KEY"]}

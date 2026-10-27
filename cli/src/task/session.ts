@@ -5,6 +5,7 @@
  *  must provide is named in `TaskSessionHost`, so no Task state leaks into it.
  */
 
+import type { PrivacyStop } from '../privacy/notice.js'
 import type { ConfigInfo, ModelOption } from '../native/contracts/config-info.js'
 import { selectorDown, selectorFocusOn, selectorType, selectorUp, type SelectorState } from '../term/selector.js'
 import { handleSplitPaneKey, resetPaneForSelection } from '../term/split-pane.js'
@@ -71,6 +72,8 @@ export interface TaskSessionHost {
   closeOverlay: () => void
   requestRender: () => void
   notifyError: (text: string) => void
+  /** Privacy refused a task definition: show its card. */
+  privacyStopped?: (stop: PrivacyStop) => void
   /** A system line that is not an error: a published link, an import result. */
   notify: (text: string) => void
   /** Render a URL as a terminal hyperlink where supported. */
@@ -282,6 +285,8 @@ export class TaskSession {
           return
         case 'failed':
           this.#host.notifyError(`${outcome.message}. The save outcome is unknown; check /task before retrying.`)
+          return
+        case 'blocked':
           return
       }
     } catch (error) {
@@ -698,6 +703,7 @@ export class TaskSession {
       pickModel: request => this.#host.presentModelPicker(request),
       collectAnswers: params => this.#host.collectAnswers(params.questions),
       persist: { create: this.#api.create, update: this.#api.update },
+      privacyStopped: stop => this.#host.privacyStopped?.(stop),
     }
   }
 

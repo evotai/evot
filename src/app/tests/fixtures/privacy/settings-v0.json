@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "secrets": true,
+  "personal": true,
+  "actions": {"EMAIL": "warn"},
+  "terms": ["HistoricalProject"],
+  "terms_any_case": true,
+  "allow": ["fixture-allowed-value"]
+}

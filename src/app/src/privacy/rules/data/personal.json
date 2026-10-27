@@ -1,0 +1,663 @@
+{
+ "schema_version": 1,
+ "id": "personal",
+ "kinds": [
+  {
+   "name": "EMAIL",
+   "category": "personal"
+  },
+  {
+   "name": "PHONE",
+   "category": "personal"
+  },
+  {
+   "name": "ID_CARD",
+   "category": "personal"
+  },
+  {
+   "name": "PASSPORT",
+   "category": "personal"
+  },
+  {
+   "name": "BANK_CARD",
+   "category": "personal"
+  },
+  {
+   "name": "IBAN",
+   "category": "personal"
+  },
+  {
+   "name": "PERSON",
+   "category": "personal"
+  },
+  {
+   "name": "ADDRESS",
+   "category": "personal"
+  },
+  {
+   "name": "BIRTHDAY",
+   "category": "personal"
+  },
+  {
+   "name": "PLATE",
+   "category": "personal"
+  },
+  {
+   "name": "SOCIAL",
+   "category": "personal"
+  },
+  {
+   "name": "CRYPTO_WALLET",
+   "category": "personal"
+  },
+  {
+   "name": "IP",
+   "category": "network"
+  },
+  {
+   "name": "MAC",
+   "category": "network"
+  }
+ ],
+ "lists": {
+  "phone_context": [
+   "phone",
+   "tel",
+   "mobile",
+   "cell",
+   "fax",
+   "电话",
+   "手机",
+   "座机",
+   "联系",
+   "传真",
+   "電話",
+   "携帯"
+  ]
+ },
+ "checks": {
+  "url_userinfo": {
+   "before": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s/?#\"'<>@`]*$"
+  },
+  "fake_email": {
+   "value": "(?i)@(?:example\\.(?:com|org|net)|localhost)$|\\.(?:test|invalid|example|local)$|^git@|noreply"
+  },
+  "file_like_email": {
+   "value": "(?i)\\.(?:jpe?g|png|gif|webp|svg|heic|avif|bmp|ico|pdf|mp[34]|webm|mkv|wav|ttf|otf|woff2?|json|ya?ml|toml|xml|txt|csv|log|html?|css|s?css|[cm]?js|jsx|tsx?|rs|py|go|docx|xlsx|pptx|gz|tgz|tar|zip|7z|dmg|lock|md)$"
+  }
+ },
+ "rules": [
+  {
+   "id": "personal.email",
+   "kind": "EMAIL",
+   "regex": "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}",
+   "keywords": [
+    "@"
+   ],
+   "bound": "[A-Za-z0-9_%+-]",
+   "unless": [
+    "url_userinfo",
+    "fake_email",
+    "file_like_email"
+   ],
+   "examples": {
+    "matches": [
+     "mail carol@acme-corp.cn"
+    ],
+    "ignores": [
+     "bob@example.com",
+     "icon@2x.png",
+     "see @AGENTS.md",
+     "git@github.com:o/r.git",
+     "https://user@host.com/x"
+    ]
+   }
+  },
+  {
+   "id": "personal.cn-id",
+   "kind": "ID_CARD",
+   "confidence": "high",
+   "regex": "[1-9][0-9]{5}(?:18|19|20)[0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]",
+   "bound": "[A-Za-z0-9]",
+   "checksum": {
+    "algorithm": "cn_id"
+   },
+   "examples": {
+    "matches": [
+     "id 110105199001011232"
+    ],
+    "ignores": [
+     "110105199001011230"
+    ]
+   }
+  },
+  {
+   "id": "personal.cn-mobile",
+   "kind": "PHONE",
+   "regex": "(?:\\+?86[- ]?)?1[3-9][0-9]{9}",
+   "bound": "[0-9]",
+   "unless": [
+    "after_digit_dot",
+    "before_dot_digit",
+    "json_number_field",
+    "json_number_list"
+   ],
+   "context": {
+    "words": [
+     "@{phone_context}"
+    ]
+   },
+   "examples": {
+    "matches": [
+     "call 13800138000",
+     "+86 13800138000"
+    ],
+    "ignores": [
+     "price 5.13800138000",
+     "{\"ts\": 13800138000}",
+     "[13800138000, 1]"
+    ]
+   }
+  },
+  {
+   "id": "personal.cn-landline",
+   "kind": "PHONE",
+   "regex": "\\(?0[1-9][0-9]{1,2}\\)?[- ][2-9][0-9]{6,7}",
+   "bound": "[0-9]",
+   "examples": {
+    "matches": [
+     "tel 010-62345678",
+     "(021) 52345678"
+    ],
+    "ignores": [
+     "v0-1234567"
+    ]
+   }
+  },
+  {
+   "id": "personal.intl-phone",
+   "kind": "PHONE",
+   "confidence": "low",
+   "regex": "\\+[1-9][0-9]{0,2}[ .-]?(?:\\(?[0-9]{1,4}\\)?[ .-]?){2,4}[0-9]{2,4}",
+   "bound": "[A-Za-z0-9]",
+   "unless": [
+    {
+     "value": "^\\+86"
+    }
+   ],
+   "context": {
+    "words": [
+     "@{phone_context}"
+    ]
+   },
+   "examples": {
+    "matches": [
+     "phone +1 415 555 0132",
+     "+44 20 7946 0958"
+    ]
+   }
+  },
+  {
+   "id": "personal.bank-card",
+   "kind": "BANK_CARD",
+   "regex": "[3-6][0-9]{3}(?:[ -]?[0-9]{4}){2,3}(?:[ -]?[0-9]{1,3})?",
+   "bound": "[0-9]",
+   "unless": [
+    "after_digit_dot",
+    "before_dot_digit",
+    "json_number_field",
+    "json_number_list"
+   ],
+   "checksum": {
+    "algorithm": "luhn",
+    "confirmed": "high"
+   },
+   "examples": {
+    "matches": [
+     "card 4111111111111111",
+     "card 4111 1111 1111 1111"
+    ],
+    "ignores": [
+     "4111111111111112"
+    ]
+   }
+  },
+  {
+   "id": "personal.iban",
+   "kind": "IBAN",
+   "regex": "\\b[A-Z]{2}[0-9]{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\\b",
+   "checksum": {
+    "algorithm": "iban",
+    "confirmed": "high"
+   },
+   "examples": {
+    "matches": [
+     "IBAN GB82WEST12345698765432",
+     "DE89 3704 0044 0532 0130 00"
+    ],
+    "ignores": [
+     "GB00WEST12345698765432"
+    ]
+   }
+  },
+  {
+   "id": "personal.passport",
+   "kind": "PASSPORT",
+   "regex": "\\b(?:[EGDSP][0-9]{8}|E[A-Z][0-9]{7}|[A-Z]{1,2}[0-9]{6,8})\\b",
+   "context": {
+    "words": [
+     "护照",
+     "護照",
+     "passport",
+     "旅券",
+     "여권"
+    ],
+    "required": true
+   },
+   "examples": {
+    "matches": [
+     "护照号码 E12345678",
+     "passport no. K12345678"
+    ],
+    "ignores": [
+     "build E12345678 done"
+    ]
+   }
+  },
+  {
+   "id": "personal.hk-id",
+   "kind": "ID_CARD",
+   "regex": "\\b[A-Z]{1,2}[0-9]{6}\\([0-9A]\\)",
+   "context": {
+    "words": [
+     "身份证",
+     "身份證",
+     "hkid",
+     "id card",
+     "证件"
+    ],
+    "required": true
+   },
+   "examples": {
+    "matches": [
+     "香港身份證 A123456(3)"
+    ]
+   }
+  },
+  {
+   "id": "personal.tw-id",
+   "kind": "ID_CARD",
+   "regex": "\\b[A-Z][12][0-9]{8}\\b",
+   "context": {
+    "words": [
+     "身分證",
+     "身份证",
+     "身份證",
+     "統一編號",
+     "id"
+    ],
+    "required": true
+   },
+   "examples": {
+    "matches": [
+     "身分證字號 A123456789"
+    ]
+   }
+  },
+  {
+   "id": "personal.cn-plate",
+   "kind": "PLATE",
+   "confidence": "low",
+   "regex": "[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼][A-HJ-NP-Z][ ·]?(?:[A-HJ-NP-Z0-9]{5}|[DF][A-HJ-NP-Z0-9]{5}|[A-HJ-NP-Z0-9]{5}[DF])",
+   "context": {
+    "words": [
+     "车牌",
+     "車牌",
+     "车号",
+     "plate"
+    ]
+   },
+   "examples": {
+    "matches": [
+     "车牌 京A12345",
+     "沪A·D12345"
+    ]
+   }
+  },
+  {
+   "id": "personal.wechat",
+   "kind": "SOCIAL",
+   "regex": "(?i)(?:微信号?|wechat(?: id)?|weixin|vx)[ \\t]*[:：]?[ \\t]*(wxid_[A-Za-z0-9]{8,}|[A-Za-z][A-Za-z0-9_-]{5,19})",
+   "keywords": [
+    "微信",
+    "wechat",
+    "weixin",
+    "vx"
+   ],
+   "unless": [
+    {
+     "value": "^(?i:id|account|number|official)$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "微信：zhang_san88",
+     "WeChat ID wxid_abcd1234efgh"
+    ]
+   }
+  },
+  {
+   "id": "personal.qq",
+   "kind": "SOCIAL",
+   "regex": "(?i)\\bqq(?:号|號|号码| number| id)?[ \\t]*[:：]?[ \\t]*([1-9][0-9]{4,10})\\b",
+   "keywords": [
+    "qq"
+   ],
+   "examples": {
+    "matches": [
+     "QQ：12345678",
+     "qq号 987654321"
+    ],
+    "ignores": [
+     "qq music 2024"
+    ]
+   }
+  },
+  {
+   "id": "personal.birthday",
+   "kind": "BIRTHDAY",
+   "regex": "(?i)(?:生日|出生日期|出生于|出生於|birthday|date of birth|\\bdob)[ \\t]*[:：是为]?[ \\t]*((?:19|20)[0-9]{2}[-/.年](?:0?[1-9]|1[0-2])[-/.月](?:0?[1-9]|[12][0-9]|3[01])日?)",
+   "keywords": [
+    "生日",
+    "出生",
+    "birth",
+    "dob"
+   ],
+   "examples": {
+    "matches": [
+     "生日：1990-01-01",
+     "date of birth 1985/12/31"
+    ]
+   }
+  },
+  {
+   "id": "personal.btc",
+   "kind": "CRYPTO_WALLET",
+   "regex": "\\bbc1[ac-hj-np-z02-9]{11,71}\\b",
+   "keywords": [
+    "bc1"
+   ],
+   "unless": [
+    {
+     "value": "^[0-9]+$"
+    }
+   ],
+   "checksum": {
+    "algorithm": "bech32"
+   },
+   "examples": {
+    "matches": [
+     "send to bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+    ]
+   }
+  },
+  {
+   "id": "personal.btc-legacy",
+   "kind": "CRYPTO_WALLET",
+   "regex": "(?:^|[^A-Za-z0-9])([13][1-9A-HJ-NP-Za-km-z]{25,34})(?:[^A-Za-z0-9]|$)",
+   "keywords": [],
+   "unless": [
+    {
+     "value": "^[0-9]+$"
+    }
+   ],
+   "checksum": {
+    "algorithm": "base58check"
+   },
+   "examples": {
+    "matches": [
+     "wallet 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
+    ],
+    "ignores": [
+     "wallet 1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN3"
+    ]
+   },
+   "context": {
+    "words": [
+     "wallet",
+     "address",
+     "btc",
+     "bitcoin",
+     "钱包",
+     "地址",
+     "转账"
+    ],
+    "required": true
+   }
+  },
+  {
+   "id": "personal.eth",
+   "kind": "CRYPTO_WALLET",
+   "confidence": "low",
+   "regex": "\\b0x[a-fA-F0-9]{40}\\b",
+   "keywords": [
+    "0x"
+   ],
+   "context": {
+    "words": [
+     "wallet",
+     "address",
+     "钱包",
+     "地址",
+     "eth",
+     "usdt",
+     "转账"
+    ],
+    "required": true
+   },
+   "examples": {
+    "matches": [
+     "钱包地址 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+    ],
+    "ignores": [
+     "hash 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+    ]
+   }
+  },
+  {
+   "id": "network.ipv4",
+   "kind": "IP",
+   "confidence": "low",
+   "regex": "\\b(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}\\b",
+   "keywords": [
+    "."
+   ],
+   "bound": "[0-9.]",
+   "unless": [
+    {
+     "value": "^(?:10\\.|127\\.|0\\.|169\\.254\\.|192\\.168\\.|172\\.(?:1[6-9]|2[0-9]|3[01])\\.|100\\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.|192\\.0\\.2\\.|198\\.51\\.100\\.|203\\.0\\.113\\.|22[4-9]\\.|2[3-5][0-9]\\.)"
+    },
+    {
+     "before": "(?i)\\b(?:version|ver|v)[ \\t]*$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "server 8.8.4.4 down"
+    ],
+    "ignores": [
+     "host 192.168.1.10",
+     "127.0.0.1",
+     "version 1.2.3.4"
+    ]
+   }
+  },
+  {
+   "id": "network.ipv6",
+   "kind": "IP",
+   "confidence": "low",
+   "regex": "\\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\\b",
+   "keywords": [
+    ":"
+   ],
+   "unless": [
+    {
+     "value": "^(?i:fe80|fc|fd|0{1,4}:)"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "addr 2001:4860:4860:0000:0000:0000:0000:8888"
+    ]
+   }
+  },
+  {
+   "id": "network.mac",
+   "kind": "MAC",
+   "confidence": "low",
+   "regex": "\\b[0-9A-Fa-f]{2}(?:(?::[0-9A-Fa-f]{2}){5}|(?:-[0-9A-Fa-f]{2}){5})\\b",
+   "keywords": [
+    ":",
+    "-"
+   ],
+   "unless": [
+    {
+     "value": "(?i)^(?:ff[:-]){5}ff$|^(?:00[:-]){5}00$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "ether 3c:22:fb:12:34:56"
+    ],
+    "ignores": [
+     "ff:ff:ff:ff:ff:ff"
+    ]
+   }
+  }
+ ],
+ "fields": [
+  {
+   "id": "personal.name-field",
+   "kind": "PERSON",
+   "key": "(?:full_?name|real_?name|first_?name|last_?name|recipient|receiver|consignee|contact_?name|holder_?name|cardholder|姓名|收件人|收货人|联系人|持卡人|真实姓名|氏名|성명|이름)",
+   "text": true,
+   "unless": [
+    "a_variable",
+    {
+     "value": "^.{0,1}$"
+    },
+    {
+     "value": "^.{41,}$"
+    },
+    {
+     "value": "[0-9@/\\\\{}<>]"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "收件人: 王小明",
+     "full_name: Jane Roe"
+    ],
+    "ignores": [
+     "first_name: {{name}}"
+    ]
+   }
+  },
+  {
+   "id": "personal.address-field",
+   "kind": "ADDRESS",
+   "key": "(?:address|addr|street|street_?address|home_?address|shipping_?address|billing_?address|mailing_?address|地址|住址|收货地址|收件地址|联系地址|家庭住址|通讯地址|住所|주소)",
+   "text": true,
+   "unless": [
+    "a_variable",
+    {
+     "value": "^.{0,5}$"
+    },
+    {
+     "value": "^(?:0x[0-9a-fA-F]+|[0-9.:]+|[a-z0-9_-]+)$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "收货地址: 北京市朝阳区建国路88号",
+     "address: 221B Baker Street, London"
+    ],
+    "ignores": [
+     "address: 0x7ffd5a3c",
+     "address: 10.0.0.1"
+    ]
+   }
+  },
+  {
+   "id": "personal.phone-field",
+   "kind": "PHONE",
+   "key": "(?:phone|phone_?number|mobile|cellphone|tel|telephone|电话|手机|手机号|联系电话|電話)",
+   "unless": [
+    "a_variable"
+   ],
+   "when": [
+    {
+     "value": "^\\+?[0-9(][0-9 ().-]{6,18}[0-9]$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "phone: (555) 010-0199"
+    ],
+    "ignores": [
+     "phone: yes"
+    ]
+   }
+  },
+  {
+   "id": "personal.id-field",
+   "kind": "ID_CARD",
+   "key": "(?:id_?card|id_?number|national_?id|ssn|social_?security(?:_number)?|身份证|身份证号|身份證|证件号|证件号码)",
+   "unless": [
+    "a_variable",
+    {
+     "value": "^.{0,4}$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "ssn: 123-45-6789"
+    ]
+   }
+  },
+  {
+   "id": "personal.passport-field",
+   "kind": "PASSPORT",
+   "key": "(?:passport|passport_?(?:no|number)|护照|护照号|護照)",
+   "unless": [
+    "a_variable",
+    {
+     "value": "^.{0,4}$"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "passport_no: K12345678"
+    ]
+   }
+  },
+  {
+   "id": "personal.birthday-field",
+   "kind": "BIRTHDAY",
+   "key": "(?:birthday|birth_?date|date_?of_?birth|dob|生日|出生日期)",
+   "unless": [
+    "a_variable"
+   ],
+   "when": [
+    {
+     "value": "[0-9]"
+    }
+   ],
+   "examples": {
+    "matches": [
+     "dob: 1990-01-01"
+    ]
+   }
+  }
+ ]
+}

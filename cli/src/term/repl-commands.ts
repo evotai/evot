@@ -361,6 +361,17 @@ export async function handleUpdateCommand(
   }
 }
 
+export async function handlePrivacyCommand(ctx: ReplCommandContext, args: string): Promise<void> {
+  const { runPrivacyCommand } = await import('../commands/privacy.js')
+  const { privacyStatus, privacySave } = await import('../native/index.js')
+  try {
+    ctx.commitSystem('sys-privacy', await runPrivacyCommand({ status: privacyStatus, save: privacySave }, args))
+  } catch (err) {
+    ctx.commitSystem('sys-privacy-err', failureText('privacy failed', err))
+  }
+  ctx.requestRender()
+}
+
 export async function handleEnvCommand(ctx: ReplCommandContext, args: string): Promise<void> {
   const { runEnvCommand, parseRevealTarget, renderRevealed, REVEAL_ERASE_MS } = await import('../commands/env.js')
   const port = {

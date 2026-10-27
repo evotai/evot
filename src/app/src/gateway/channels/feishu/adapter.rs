@@ -63,6 +63,26 @@ impl FeishuChannel {
         })
     }
 
+    /// The sink a reply goes out through: behind the privacy boundary, and
+    /// threaded under the message in a group.
+    fn reply_sink(
+        &self,
+        msg: &super::message::ParsedMessage,
+    ) -> crate::privacy::ScrubbingSink<FeishuMessageSink> {
+        let sink = FeishuMessageSink::new(
+            self.client.clone(),
+            self.token_cache.clone(),
+            self.config.app_id.clone(),
+            self.config.app_secret.clone(),
+        );
+        let sink = if msg.chat_type == "group" {
+            sink.with_reply_to(msg.message_id.clone())
+        } else {
+            sink
+        };
+        crate::privacy::ScrubbingSink::new(sink)
+    }
+
     async fn handle_message(
         self: &Arc<Self>,
         msg: super::message::ParsedMessage,
@@ -388,32 +408,12 @@ impl FeishuChannel {
             let request = QueryRequest::with_input(input).mode(ToolMode::Headless);
             match this.run_manager.send(&locator, request).await {
                 Ok(SendOutcome::Command(text)) => {
-                    let sink = FeishuMessageSink::new(
-                        this.client.clone(),
-                        this.token_cache.clone(),
-                        this.config.app_id.clone(),
-                        this.config.app_secret.clone(),
-                    );
-                    let sink = if msg.chat_type == "group" {
-                        sink.with_reply_to(msg.message_id.clone())
-                    } else {
-                        sink
-                    };
+                    let sink = this.reply_sink(&msg);
                     let _ =
                         crate::delivery::MessageSink::send_text(&sink, &msg.chat_id, &text).await;
                 }
                 Ok(SendOutcome::Started(mut run)) => {
-                    let sink = FeishuMessageSink::new(
-                        this.client.clone(),
-                        this.token_cache.clone(),
-                        this.config.app_id.clone(),
-                        this.config.app_secret.clone(),
-                    );
-                    let sink = if msg.chat_type == "group" {
-                        sink.with_reply_to(msg.message_id.clone())
-                    } else {
-                        sink
-                    };
+                    let sink = this.reply_sink(&msg);
                     let config = StreamDeliveryConfig::default();
                     if let Err(e) =
                         stream_delivery::deliver(&sink, &msg.chat_id, &mut run, &config).await
@@ -426,17 +426,7 @@ impl FeishuChannel {
                 }
                 Err(e) => {
                     tracing::error!(channel = "feishu", error = %e, "agent query failed");
-                    let sink = FeishuMessageSink::new(
-                        this.client.clone(),
-                        this.token_cache.clone(),
-                        this.config.app_id.clone(),
-                        this.config.app_secret.clone(),
-                    );
-                    let sink = if msg.chat_type == "group" {
-                        sink.with_reply_to(msg.message_id.clone())
-                    } else {
-                        sink
-                    };
+                    let sink = this.reply_sink(&msg);
                     let _ = crate::delivery::MessageSink::send_text(
                         &sink,
                         &msg.chat_id,
