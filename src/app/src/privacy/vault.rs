@@ -11,8 +11,6 @@
 //! value restored.
 use std::collections::BTreeSet;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 use aho_corasick::AhoCorasick;
@@ -24,8 +22,6 @@ use sha2::Sha256;
 
 use super::scan::Finder;
 use super::scan::Span;
-use super::state::EgressState;
-use super::state::TaintOrigin;
 use crate::error::EvotError;
 use crate::error::Result;
 
@@ -40,7 +36,6 @@ const B32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 pub(super) struct Vault {
     key: [u8; 32],
     state: RwLock<State>,
-    egress: EgressState,
 }
 
 #[derive(Default)]
@@ -58,7 +53,6 @@ impl Vault {
         Self {
             key,
             state: RwLock::new(State::default()),
-            egress: EgressState::default(),
         }
     }
 
@@ -111,36 +105,6 @@ impl Vault {
             return;
         }
         remember_locked(&mut self.state.write(), kind, value);
-    }
-
-    /// Remember that `path` (absolute) holds something secret, and why.
-    pub fn taint(&self, path: &str, origin: TaintOrigin) {
-        self.egress.taint(path, origin);
-    }
-
-    /// Forget that `path` (absolute) holds a secret. `true` when it was marked.
-    pub fn untaint(&self, path: &str) -> bool {
-        self.egress.untaint(path)
-    }
-
-    /// Why `path` is marked, when it is.
-    pub fn taint_origin(&self, path: &str) -> Option<TaintOrigin> {
-        self.egress.origin(path)
-    }
-
-    /// The file names of the tainted paths, to rule a word out before
-    /// resolving it as a path.
-    pub fn tainted_names(&self) -> Arc<HashSet<String>> {
-        self.egress.names()
-    }
-
-    /// Remember that the variable `name` holds a secret.
-    pub fn remember_env(&self, name: &str) {
-        self.egress.remember_env(name);
-    }
-
-    pub fn is_secret_env(&self, name: &str) -> bool {
-        self.egress.is_secret_env(name)
     }
 
     /// Where the known values are in `text`.

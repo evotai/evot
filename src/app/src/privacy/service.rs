@@ -15,7 +15,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
-use super::egress;
 use super::masker;
 use super::masker::Masker;
 use super::notice::blocked_message;
@@ -23,6 +22,7 @@ use super::notice::unavailable_message;
 use super::policy::PrivacySettings;
 use super::policy::SETTINGS_SCHEMA_VERSION;
 use super::record;
+use super::record::LiveNotice;
 use super::record::Record;
 use super::record::Summary;
 use super::record::Target;
@@ -264,12 +264,6 @@ pub async fn rules_status() -> Result<(Vec<KindInfo>, Vec<PackInfo>)> {
     Ok((masker.kinds(), masker.packs()))
 }
 
-/// In-memory candidate stricter decisions, for opt-in diagnostics. This is
-/// neither a persisted contract nor part of enforcement or upload records.
-pub async fn shadow_summary() -> Result<super::shadow::ShadowSummary> {
-    Ok(current_masker().await?.shadow_summary())
-}
-
 /// What was masked, warned of and blocked over the last `days` days.
 pub async fn summary(days: u32) -> Result<Summary> {
     blocking_io("privacy summary", move |_| {
@@ -299,29 +293,37 @@ where
     }
 }
 
-/// These environment variables hold secrets: the ones evot injects into
-/// the shell. A tool call naming one is judged as carrying a secret.
-pub fn remember_secret_env<I, S>(names: I)
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let vault = vault();
-    for name in names {
-        vault.remember_env(name.as_ref().trim());
-    }
-}
+/// The last records this process made, for the TUI to show as they happen.
+/// Bounded; a client that has not asked for a while sees the newest only.
+const LIVE_KEPT: usize = 64;
+static LIVE: Mutex<(u64, std::collections::VecDeque<LiveNotice>)> =
+    Mutex::new((0, std::collections::VecDeque::new()));
 
-/// `/privacy untaint PATH`: stop judging that file as holding a secret
-/// for the rest of this process. `path` is as the user typed it, against
-/// `cwd`. `true` when it was marked.
-pub fn untaint(path: &str, cwd: &Path) -> bool {
-    let path = egress::resolve(cwd, path.trim());
-    vault().untaint(&path.to_string_lossy())
+/// Records made after `after` (a `seq` from an earlier call; 0 for all
+/// kept), oldest first, with the newest `seq` to pass next time. In-memory
+/// and process-wide: nothing is read from disk.
+pub fn live_notices(after: u64) -> (u64, Vec<LiveNotice>) {
+    let live = LIVE.lock();
+    let notices = live
+        .1
+        .iter()
+        .filter(|notice| notice.seq > after)
+        .cloned()
+        .collect();
+    (live.0, notices)
 }
 
 /// Write `record` where `masker` keeps them; failing to is logged, never fatal.
 pub(super) async fn keep(masker: &Masker, record: Record) {
+    {
+        let mut live = LIVE.lock();
+        live.0 += 1;
+        let seq = live.0;
+        if live.1.len() >= LIVE_KEPT {
+            live.1.pop_front();
+        }
+        live.1.push_back(LiveNotice::of(seq, &record));
+    }
     let Some(dir) = masker.records().cloned() else {
         return;
     };

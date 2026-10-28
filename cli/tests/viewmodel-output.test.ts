@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from 'bun:test'
 import { buildOutputBlocks, THINKING_FOLD_ROWS } from '../src/term/viewmodel/output.js'
 import { blocksToLines, styledLineToAnsi, paintBackground, line, colored, dim } from '../src/term/viewmodel/types.js'
-import { buildUserMessage, buildAssistantLines, buildToolCard, buildEventCard, type OutputLine } from '../src/render/output.js'
+import { buildUserMessage, buildAssistantLines, buildToolCard, buildEventCard, buildPrivacyCard, buildPrivacyActionCard, buildPrivacyHappeningCard, type OutputLine } from '../src/render/output.js'
 import { getTheme } from '../src/render/theme/index.js'
 import { assistantMessageToOutputLines } from '../src/render/assistant.js'
 import { colorizeUnifiedDiff } from '../src/render/diff.js'
@@ -358,6 +358,26 @@ describe('buildOutputBlocks', () => {
     const lines = result.split('\n')
     const toolIdx = lines.findIndex(l => l.includes('bash'))
     expect(lines[toolIdx - 1]).toBe('')
+  })
+
+  test('a privacy card wears the accent rail on every row; a tool card keeps a blank border cell', () => {
+    const { accentHex, toolCardBg } = getTheme()
+    const tool = buildOutputBlocks(buildToolCard({ id: 't', name: 'bash', args: { command: 'ls' }, status: 'running' }), { columns: 60 })
+    for (const l of tool.flatMap(b => b.lines)) expect(l.spans[0]).toEqual({ text: ' ' })
+    const notice = buildOutputBlocks(buildPrivacyHappeningCard({ target: 'llm', reason: 'masked SECRET ×1' }, 1), { columns: 60 })
+    const rows = notice.flatMap(b => b.lines)
+    // Padding rows above and below are railed too, so the slab reads as one.
+    expect(rows.length).toBe(5)
+    for (const l of rows) {
+      expect(l.spans[0]).toEqual({ text: '┃', hex: accentHex })
+      expect(l.bg).toBe(toolCardBg)
+    }
+    // The glyph and status keep the shared scheme: the rail is the signal.
+    expect(rows[1]!.spans[2]).toMatchObject({ text: '⊘', fg: 'cyan' })
+    expect(rows[2]!.spans[2]).toMatchObject({ text: '  ✓', fg: 'green' })
+    // Stops and `/privacy` actions are notices as well.
+    expect(buildPrivacyCard({ kind: 'blocked', target: 'request', kinds: ['API_KEY'] })[0]!.toolCard?.tone).toBe('notice')
+    expect(buildPrivacyActionCard('term x', '  term added: x')[0]!.toolCard?.tone).toBe('notice')
   })
 
   test('jev prune card has space above it', () => {

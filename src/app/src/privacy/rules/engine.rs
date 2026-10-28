@@ -13,7 +13,6 @@ use serde::Serialize;
 
 use super::checksum;
 use super::decode;
-use super::egress::Egress;
 use super::pack::Category;
 use super::pack::Check;
 use super::pack::CheckRef;
@@ -45,12 +44,6 @@ const LICENSES: &[&str] = &[
 /// Kinds the engine itself produces: a user's term, a registered secret.
 pub(in crate::privacy) const TERM: &str = "TERM";
 const SECRET: &str = "SECRET";
-/// Kinds the egress guard reports: a secret variable named, a secrets file
-/// or the environment read, code that cannot be read before it runs.
-pub(in crate::privacy) const SECRET_ENV: &str = "SECRET_ENV";
-pub(in crate::privacy) const SECRET_FILE: &str = "SECRET_FILE";
-pub(in crate::privacy) const HIDDEN_CODE: &str = "HIDDEN_CODE";
-const EGRESS_KINDS: &[&str] = &[SECRET_ENV, SECRET_FILE, HIDDEN_CODE];
 const DEFAULT_CHECK_WINDOW: usize = 64;
 
 /// Where a text is being scanned.
@@ -144,7 +137,6 @@ pub(in crate::privacy) struct Engine {
     fields: Vec<Field>,
     pub sources: Sources,
     pub structure: StructureDef,
-    pub egress: Egress,
     decode: Option<(DecodeDef, decode::Patterns)>,
     pub known: KnownDef,
     packs: Vec<PackInfo>,
@@ -325,7 +317,6 @@ impl Engine {
         let mut structure = StructureDef::default();
         let mut decode_def = None;
         let mut known = None;
-        let mut egress_defs = Vec::new();
         let mut infos = Vec::new();
         for pack in packs {
             if pack.schema_version > PACK_SCHEMA_VERSION {
@@ -404,9 +395,6 @@ impl Engine {
                 ] {
                     to.extend(from.iter().cloned());
                 }
-            }
-            if let Some(e) = &pack.egress {
-                egress_defs.push(e);
             }
             if pack.decode.is_some() {
                 unique(decode_def.is_some(), "decode", "settings")?;
@@ -550,15 +538,6 @@ impl Engine {
         let prefilter = (!words.is_empty())
             .then(|| keywords_matcher(&words, MatchKind::Standard))
             .transpose()?;
-        let egress = Egress::compile(&egress_defs, &|p| compile(&names.expand(p)?), &|items| {
-            names.list(items)
-        })
-        .map_err(|e| err("*", format!("egress: {}", message(e))))?;
-        for kind in EGRESS_KINDS {
-            if !kinds.contains_key(*kind) {
-                return Err(err("*", format!("no pack defines kind {kind}")));
-            }
-        }
         let decode = match decode_def {
             Some(def) => Some((def, decode::Patterns::new()?)),
             None => None,
@@ -586,7 +565,6 @@ impl Engine {
                 commands: sources.commands.into_iter().collect(),
             },
             structure,
-            egress,
             decode,
             known: known.ok_or_else(|| err("*", "no pack sets known"))?,
             packs: infos,
@@ -715,20 +693,6 @@ impl Engine {
         set.into_iter().collect()
     }
 
-    /// The shell command a tool call runs (a `sources` tool's `command_arg`).
-    pub fn shell_command<'a>(
-        &self,
-        name: &str,
-        arguments: &'a serde_json::Value,
-    ) -> Option<&'a str> {
-        let name = name.to_ascii_lowercase();
-        self.sources
-            .tools
-            .iter()
-            .filter(|t| t.0 == name)
-            .find_map(|(_, _, command)| arguments.get(command.as_deref()?)?.as_str())
-    }
-
     /// A tool call whose output is a secrets file or the environment.
     pub fn sensitive_call(&self, name: &str, arguments: &serde_json::Value) -> bool {
         let name = name.to_ascii_lowercase();
@@ -826,7 +790,6 @@ impl Engine {
                     .map(|t| format!("{} takes {t:?}", field.id)),
             );
         }
-        failures.extend(self.egress.self_test());
         failures
     }
 }

@@ -1,17 +1,11 @@
 //! [`Masker`]: one policy over one vault, the unit every path uses.
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use evot_engine::provider::StreamConfig;
 use evot_engine::types::Message;
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
-use super::egress;
-use super::egress::TaintedFile;
-use super::notice::egress_blocked_message;
-use super::notice::EgressNotice;
 use super::policy::Action;
 use super::policy::Mode;
 use super::policy::Policy;
@@ -28,8 +22,6 @@ use super::scan;
 use super::scan::Hit;
 use super::scrub;
 use super::scrub::UploadContext;
-use super::shadow::ShadowCounters;
-use super::shadow::ShadowSummary;
 use super::stream::StreamRestorer;
 use super::vault::Vault;
 use crate::error::Result;
@@ -56,7 +48,6 @@ pub(super) fn engine(extra: &[Pack]) -> Result<Arc<Engine>> {
 pub struct Masker {
     policy: Policy,
     vault: Arc<Vault>,
-    shadow: ShadowCounters,
     /// Where records go; `None` keeps none.
     records: Option<PathBuf>,
 }
@@ -65,54 +56,11 @@ pub struct Masker {
 #[derive(Debug, Default)]
 pub struct Report {
     hits: Vec<Hit>,
-    /// The one remote host a tool call named, safe to show the user.
-    host: Option<String>,
-    /// The program that makes a shell command send (`node`, `curl`).
-    sender: Option<String>,
-    /// Files a tool call reads that an earlier call marked.
-    tainted: Vec<TaintedFile>,
-}
-
-impl From<egress::Verdict> for Report {
-    fn from(verdict: egress::Verdict) -> Self {
-        Self {
-            hits: verdict.hits,
-            host: verdict.host,
-            sender: verdict.sender,
-            tainted: verdict.tainted,
-        }
-    }
 }
 
 impl Report {
     fn of(hits: Vec<Hit>) -> Self {
-        Self {
-            hits,
-            host: None,
-            sender: None,
-            tainted: Vec::new(),
-        }
-    }
-
-    pub fn host(&self) -> Option<&str> {
-        self.host.as_deref()
-    }
-
-    pub fn sender(&self) -> Option<&str> {
-        self.sender.as_deref()
-    }
-
-    pub fn tainted(&self) -> &[TaintedFile] {
-        &self.tainted
-    }
-
-    /// What a refused tool call tells the model and the user.
-    pub fn egress_notice(&self, reason: &str) -> String {
-        egress_blocked_message(reason, &EgressNotice {
-            host: self.host(),
-            sender: self.sender(),
-            tainted: &self.tainted,
-        })
+        Self { hits }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -157,7 +105,6 @@ impl Masker {
         Ok(Self {
             policy: Policy::compile(settings, engine)?,
             vault,
-            shadow: ShadowCounters::default(),
             records,
         })
     }
@@ -217,65 +164,9 @@ impl Masker {
         Report::of(hits)
     }
 
-    /// Put the values back in a reply, tool-call arguments included: the
-    /// guard judges each call before it runs.
+    /// Put the values back in a reply, tool-call arguments included.
     pub fn restore_message(&self, message: &mut Message) {
         request::restore_message(&self.vault, message);
-    }
-
-    /// What a call to `tool` would send off the machine that it may not
-    /// (blocked) or that the user trusts it with (warned). It runs whether
-    /// or not model-request masking is on.
-    pub fn check_call(&self, tool: &str, arguments: &Value, cwd: &Path) -> Report {
-        egress::check(
-            &self.policy,
-            &self.vault,
-            &self.shadow,
-            tool,
-            arguments,
-            cwd,
-            None,
-        )
-        .into()
-    }
-
-    /// Observation only: no candidate stricter result changes execution.
-    pub fn shadow_summary(&self) -> ShadowSummary {
-        self.shadow.summary()
-    }
-
-    pub(super) fn check_call_cancellable(
-        &self,
-        tool: &str,
-        arguments: &Value,
-        cwd: &Path,
-        cancel: &CancellationToken,
-    ) -> Result<Report> {
-        let verdict = egress::check(
-            &self.policy,
-            &self.vault,
-            &self.shadow,
-            tool,
-            arguments,
-            cwd,
-            Some(cancel),
-        );
-        if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy egress"));
-        }
-        Ok(verdict.into())
-    }
-
-    /// Judge `name` as a variable holding a secret from now on.
-    pub fn remember_secret_env(&self, name: &str) {
-        self.vault.remember_env(name);
-    }
-
-    /// Stop judging the file at `path` (resolved against `cwd`) as holding
-    /// a secret. `true` when it was marked.
-    pub fn untaint(&self, path: &str, cwd: &Path) -> bool {
-        let path = egress::resolve(cwd, path);
-        self.vault.untaint(&path.to_string_lossy())
     }
 
     /// Put the values back in text; `escaped` for raw JSON.

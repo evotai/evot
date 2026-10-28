@@ -68,9 +68,6 @@ pub struct Pack {
     /// Upload JSON that is structure, not user text.
     #[serde(default)]
     pub structure: Option<StructureDef>,
-    /// Tools whose arguments leave the machine.
-    #[serde(default)]
-    pub egress: Option<EgressDef>,
     #[serde(default)]
     pub decode: Option<DecodeDef>,
     #[serde(default)]
@@ -294,78 +291,6 @@ pub struct StructureDef {
     /// Fields holding a tool call's arguments.
     #[serde(default)]
     pub call_args_keys: Vec<String>,
-}
-
-/// What a tool call can send off the machine, read before it runs. Every
-/// tool is checked; one not named `local` may send its arguments anywhere.
-/// A shell command (a `sources` tool with a `command_arg`) sends when a
-/// `senders` pattern matches it. Every pattern is a regex; `${VAR}` and
-/// `@{list}` expand as in rules.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EgressDef {
-    /// Tools that never send their arguments off the machine.
-    #[serde(default)]
-    pub local: Vec<String>,
-    /// Tools that write a file: what they write taints it.
-    #[serde(default)]
-    pub writers: Vec<WriterDef>,
-    /// A shell command that sends: a network program, or code it runs.
-    #[serde(default)]
-    pub senders: Vec<String>,
-    /// Decoding into execution: what it runs cannot be read, so it is
-    /// refused whatever it carries.
-    #[serde(default)]
-    pub hidden: Vec<String>,
-    /// Flags or settings that send through a host the text does not name.
-    #[serde(default)]
-    pub reroute: Vec<String>,
-    /// Files a shell command writes; group `path`.
-    #[serde(default)]
-    pub writes: Vec<String>,
-    /// Paths a write never taints (prefixes, after `~` and `cwd`).
-    #[serde(default)]
-    pub untainted: Vec<String>,
-    /// References to an environment variable; group `name`.
-    #[serde(default)]
-    pub env_refs: Vec<String>,
-    /// The whole environment printed or read at once (`env`, `os.environ`).
-    #[serde(default)]
-    pub env_dumps: Vec<String>,
-    /// A variable name holding a secret, and names that do not.
-    #[serde(default)]
-    pub secret_env: Vec<String>,
-    #[serde(default)]
-    pub secret_env_unless: Vec<String>,
-    /// Where a call sends to; group `host`.
-    #[serde(default)]
-    pub destinations: Vec<String>,
-    /// Hosts on this machine (`*.suffix` allowed): always fine.
-    #[serde(default)]
-    pub local_hosts: Vec<String>,
-    /// Regression examples, run by the tests for every pack.
-    #[serde(default)]
-    pub examples: EgressExamples,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WriterDef {
-    pub name: String,
-    /// Arguments naming the file; every other string is its content.
-    pub path_args: Vec<String>,
-}
-
-/// Shell commands and what the egress patterns must make of them.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EgressExamples {
-    #[serde(default)]
-    pub sends: Vec<String>,
-    #[serde(default)]
-    pub quiet: Vec<String>,
-    #[serde(default)]
-    pub hidden: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

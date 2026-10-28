@@ -596,7 +596,6 @@ fn notice_wording_is_the_cli_contract() {
         (Target::Task, "task"),
         (Target::TaskReport, "task report"),
         (Target::Delivery, "delivery"),
-        (Target::Egress, "tool call"),
     ] {
         assert_eq!(
             evot::privacy::blocked_message(target, &["API_KEY".into()]),
@@ -605,7 +604,7 @@ fn notice_wording_is_the_cli_contract() {
     }
     assert_eq!(
         evot::privacy::unavailable_message("privacy settings are invalid: x"),
-        "privacy masking is unavailable, so nothing was sent: privacy settings are invalid: x. Fix the settings or rule packs with /privacy (/privacy off disables request masking only after settings and packs load; uploads and tool checks stay protected)"
+        "privacy masking is unavailable, so nothing was sent: privacy settings are invalid: x. Fix the settings or rule packs with /privacy (/privacy off disables request masking only after settings and packs load; uploads stay protected)"
     );
 }
 
@@ -633,7 +632,6 @@ fn settings_contract() -> TestResult {
         "terms",
         "terms_any_case",
         "allow",
-        "egress_allow",
     ] {
         assert!(written.get(field).is_some(), "missing {field}");
     }
@@ -757,5 +755,46 @@ fn record_contract() -> TestResult {
     let masked = serde_json::to_value(&summary.recent[1])?;
     assert_eq!(masked["blocked"], json!(false));
     assert_eq!(masked["reason"], json!("masked EMAIL ×2"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn live_notices_report_each_record_as_it_is_made_without_values() -> TestResult {
+    // No records directory: the live feed does not depend on the day files.
+    let masker = Arc::new(masker()?);
+    let echo = Arc::new(Echo {
+        seen: Mutex::new(None),
+    });
+    let provider = MaskingProvider::with_masker(echo, masker);
+    let (before, _) = evot::privacy::live_notices(0);
+    let (tx, _rx) = mpsc::channel(16);
+    provider
+        .stream_bounded(
+            config(vec![user(&format!("deploy with {API_KEY} for {EMAIL}"))]),
+            tx,
+            CancellationToken::new(),
+        )
+        .await?;
+    let (cursor, notices) = evot::privacy::live_notices(before);
+    assert!(cursor > before);
+    // Other tests record concurrently; find ours.
+    let notice = notices
+        .iter()
+        .find(|n| n.event.target == Target::Llm && n.event.kinds == ["API_KEY", "EMAIL"])
+        .ok_or("no live notice for the masked request")?;
+    assert!(!notice.event.blocked);
+    assert_eq!(notice.event.reason, "masked API_KEY ×1 · EMAIL ×1");
+    assert_eq!(notice.tags.len(), 2, "one placeholder tag per value");
+    let text = serde_json::to_string(notice)?;
+    assert!(
+        !text.contains(API_KEY) && !text.contains(EMAIL),
+        "notices never hold values"
+    );
+    assert!(
+        text.contains("\"seq\"") && text.contains("\"target\":\"llm\""),
+        "flattened event: {text}"
+    );
+    // Asking from the newest cursor yields nothing new.
+    assert!(evot::privacy::live_notices(cursor).1.is_empty());
     Ok(())
 }

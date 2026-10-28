@@ -336,15 +336,24 @@ export interface ToolCardMembership {
   state: ToolCardState
   first: boolean
   last: boolean
+  /** `notice`: the product speaking (privacy), not a tool the model called.
+   * Painted as an accent border-left on every row, the way the user message
+   * carries the brand rail; the fill and ink stay those of any card. */
+  tone?: 'notice'
 }
 
 /** Stamp a finished card's lines with their shared state and edges. */
-function stampToolCard(lines: OutputLine[], state: ToolCardState): OutputLine[] {
+function stampToolCard(lines: OutputLine[], state: ToolCardState, tone?: ToolCardMembership['tone']): OutputLine[] {
   const last = lines.length - 1
   return lines.map((line, index) => ({
     ...line,
-    toolCard: { state, first: index === 0, last: index === last },
+    toolCard: { state, first: index === 0, last: index === last, ...(tone ? { tone } : {}) },
   }))
+}
+
+/** Every privacy card, whatever it says, wears the notice rail. */
+function stampPrivacyCard(lines: OutputLine[], state: ToolCardState): OutputLine[] {
+  return stampToolCard(lines, state, 'notice')
 }
 
 // ---------------------------------------------------------------------------
@@ -924,7 +933,48 @@ export function buildPrivacyCard(stop: PrivacyStop): OutputLine[] {
     const kind = row.tone === 'status' ? 'tool' : row.tone === 'error' ? 'error' : 'tool_result'
     lines.push({ id: genId(row.tone === 'status' ? 'tool' : 'tool-res'), kind, text: `  ${row.text}` })
   }
-  return stampToolCard(lines, 'error')
+  return stampPrivacyCard(lines, 'error')
+}
+
+const HAPPENING_TITLE: Record<string, string> = {
+  llm: 'masked request', share: 'scrubbed share', sync: 'scrubbed sync',
+  task: 'scrubbed task', task_report: 'scrubbed task report', delivery: 'scrubbed chat reply',
+}
+
+/**
+ * Something privacy just did, shown as it happens so the user knows at once:
+ *   ⊘ privacy  masked request
+ *     ✓ · masked SECRET ×1 · 1 value first seen now
+ *     The model saw placeholders; the reply was restored · /privacy shows the record
+ */
+export function buildPrivacyHappeningCard(notice: { target: string; reason: string }, fresh: number): OutputLine[] {
+  const title = HAPPENING_TITLE[notice.target] ?? `scrubbed ${notice.target}`
+  const status = ['✓', notice.reason]
+  if (fresh > 0) status.push(`${fresh} ${fresh === 1 ? 'value' : 'values'} first seen now`)
+  const hint = notice.target === 'llm'
+    ? 'The model saw placeholders; the reply was restored · /privacy shows the record'
+    : 'Masked values were scrubbed for good before upload · /privacy shows the record'
+  const lines: OutputLine[] = [
+    { id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${title}` },
+    { id: genId('tool'), kind: 'tool', text: `  ${status.join(' · ')}` },
+    { id: genId('tool-res'), kind: 'tool_result', text: `  ${hint}` },
+  ]
+  return stampPrivacyCard(lines, 'success')
+}
+
+/**
+ * A `/privacy` action the user ran, as the same kind of card as a stop, so
+ * what changed is as visible as what it answers:
+ *   ⊘ privacy  term Project Nightjar
+ *     term added: Project Nightjar
+ */
+export function buildPrivacyActionCard(args: string, text: string, state: ToolCardState = 'success'): OutputLine[] {
+  const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${args.trim().replace(/\s+/g, ' ')}` }]
+  for (const row of text.split('\n')) {
+    const body = row.trim()
+    if (body) lines.push({ id: genId('tool-res'), kind: state === 'error' ? 'error' : 'tool_result', text: `  ${body}` })
+  }
+  return stampPrivacyCard(lines, state)
 }
 
 export function buildError(message: string): OutputLine[] {

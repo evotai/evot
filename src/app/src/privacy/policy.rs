@@ -6,7 +6,6 @@ use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::rules::host_matches;
 use super::rules::Category;
 use super::rules::Confidence;
 use super::rules::Engine;
@@ -57,10 +56,6 @@ pub struct PrivacySettings {
     /// Whole values always sent as written, in any case.
     #[serde(default)]
     pub allow: Vec<String>,
-    /// Where a tool call may send a secret: a host, `*.suffix`, `tool:NAME`
-    /// for a tool whatever it sends to, or `*` to trust every call.
-    #[serde(default)]
-    pub egress_allow: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -79,7 +74,6 @@ impl Default for PrivacySettings {
             terms: Vec::new(),
             terms_any_case: true,
             allow: Vec::new(),
-            egress_allow: Vec::new(),
         }
     }
 }
@@ -119,7 +113,6 @@ pub(super) struct Policy {
     actions: BTreeMap<String, Action>,
     allow: Vec<String>,
     terms: Option<Regex>,
-    egress_allow: Vec<String>,
 }
 
 impl Policy {
@@ -159,12 +152,6 @@ impl Policy {
                 .filter(|v| !v.is_empty())
                 .collect(),
             terms,
-            egress_allow: settings
-                .egress_allow
-                .iter()
-                .map(|v| v.trim().trim_end_matches('.').to_ascii_lowercase())
-                .filter(|v| !v.is_empty())
-                .collect(),
         })
     }
 
@@ -207,27 +194,6 @@ impl Policy {
 
     pub fn is_secret(&self, kind: &str) -> bool {
         self.engine.category(kind) == Category::Secret
-    }
-
-    /// The user trusts every tool call with secrets.
-    pub fn egress_allows_all(&self) -> bool {
-        self.egress_allow.iter().any(|v| v == "*")
-    }
-
-    /// The user trusts `tool` with secrets, wherever it sends them.
-    pub fn egress_allows_tool(&self, tool: &str) -> bool {
-        let tool = tool.to_ascii_lowercase();
-        self.egress_allow
-            .iter()
-            .any(|v| v.strip_prefix("tool:") == Some(tool.as_str()))
-    }
-
-    /// The user trusts `host` with secrets.
-    pub fn egress_allows_host(&self, host: &str) -> bool {
-        self.egress_allow
-            .iter()
-            .filter(|v| !v.starts_with("tool:"))
-            .any(|pattern| host_matches(pattern, host))
     }
 
     pub fn allows(&self, value: &str) -> bool {

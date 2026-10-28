@@ -29,7 +29,6 @@ function status(settings: PrivacySettings = defaults): PrivacyStatus {
       by_target: { llm: { requests: 3, blocked: 1 }, sync: { requests: 1, blocked: 0 } },
       kinds: [{ kind: 'API_KEY', values: 2, verified: 1, masked: 3, warned: 0, blocked: 1 }],
       recent: [
-        { time: '2026-01-02T10:11:12+08:00', target: 'egress', session: 'abcdef123456', tool: 'bash', blocked: true, kinds: ['SECRET_ENV'], reason: 'names $OPENAI_API_KEY and sends it off the machine' },
         { time: '2026-01-02T10:05:00+08:00', target: 'llm', session: 'abcdef123456', blocked: false, kinds: ['API_KEY', 'EMAIL'], reason: 'masked API_KEY ×1 · EMAIL ×2' },
         { time: '2026-01-01T09:00:00+08:00', target: 'llm', session: 'abcdef123456', blocked: true, kinds: ['API_KEY'], reason: 'contains API_KEY ×1' },
       ],
@@ -37,17 +36,14 @@ function status(settings: PrivacySettings = defaults): PrivacyStatus {
   }
 }
 
-function port(initial = defaults): { port: PrivacyPort; saved: PrivacySettings[]; marked: Set<string> } {
+function port(initial = defaults): { port: PrivacyPort; saved: PrivacySettings[] } {
   const saved: PrivacySettings[] = []
-  const marked = new Set(['tests/pdf.test.js'])
   let current = initial
   return {
     saved,
-    marked,
     port: {
       status: async () => status(current),
       save: async (settings) => { saved.push(settings); current = settings; return settings },
-      untaint: (path) => marked.delete(path),
     },
   }
 }
@@ -60,12 +56,11 @@ describe('/privacy', () => {
       '',
       '  3 requests masked · 1 call blocked',
       '',
-      '  10:11        bash           ✗ names $OPENAI_API_KEY and sends it off the machine',
       '  10:05        model request  masked API_KEY ×1 · EMAIL ×2',
       '  01-01 09:00  model request  ✗ contains API_KEY ×1',
       '',
-      '  model requests masked · tool calls keep secrets on this machine',
-      '  /privacy trust HOST · /privacy term WORD',
+      '  model requests masked · uploads scrubbed',
+      '  /privacy term WORD',
     ].join('\n'))
     expect(await runPrivacyCommand(port().port, '')).toContain('  3 requests masked · 1 call blocked')
   })
@@ -82,38 +77,9 @@ describe('/privacy', () => {
     expect(await runPrivacyCommand(p, 'term')).toBe(USAGE)
   })
 
-  test('trust names the hosts tool calls may send secrets to; never all of them', async () => {
-    const { port: p, saved } = port()
-    const added = await runPrivacyCommand(p, 'trust API.OpenAI.com')
-    expect(saved.at(-1)?.egress_allow).toEqual(['api.openai.com'])
-    expect(added).toContain('tool calls may send secrets to api.openai.com')
-    await runPrivacyCommand(p, 'trust tool:slack_post')
-    expect(saved.at(-1)?.egress_allow).toEqual(['api.openai.com', 'tool:slack_post'])
-    expect(await runPrivacyCommand(p, 'trust api.openai.com')).toContain('already listed')
-    const removed = await runPrivacyCommand(p, 'trust rm api.openai.com')
-    expect(saved.at(-1)?.egress_allow).toEqual(['tool:slack_post'])
-    expect(removed).toContain('trusted host removed')
-    expect(await runPrivacyCommand(p, 'trust *')).toContain('would turn the check off')
-    expect(saved.at(-1)?.egress_allow).toEqual(['tool:slack_post'])
-    // Settings from before the guard have no list: nothing is trusted.
-    expect(await runPrivacyCommand(port().port, '7')).toContain('tool calls keep secrets on this machine')
-    expect(await runPrivacyCommand(p, 'trust')).toBe(USAGE)
-  })
-
-  test('untaint lifts the mark on one file for this run, and says when there was none', async () => {
-    const { port: p, saved, marked } = port()
-    expect(await runPrivacyCommand(p, 'untaint tests/pdf.test.js')).toContain('tests/pdf.test.js is no longer judged as holding a secret')
-    expect(marked.has('tests/pdf.test.js')).toBe(false)
-    expect(await runPrivacyCommand(p, 'untaint tests/pdf.test.js')).toContain('was not marked; nothing to lift')
-    expect(await runPrivacyCommand(p, 'untaint')).toBe(USAGE)
-    // Nothing is written: the mark lives in the running process only.
-    expect(saved).toHaveLength(0)
-    expect(USAGE).toContain('/privacy untaint FILE')
-  })
-
   test('nothing on the command line turns a check off', async () => {
     const { port: p, saved } = port()
-    for (const line of ['off', 'secrets off', 'personal off', 'network on', 'PRIVATE_KEY warn', 'allow add x', 'egress add *', 'kinds']) {
+    for (const line of ['off', 'secrets off', 'personal off', 'network on', 'PRIVATE_KEY warn', 'allow add x', 'trust api.example', 'untaint x.js', 'kinds']) {
       expect(await runPrivacyCommand(p, line)).toBe(USAGE)
     }
     expect(editSettings(defaults, 'on', [])).toBe(USAGE)

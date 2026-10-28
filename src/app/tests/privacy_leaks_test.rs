@@ -369,11 +369,12 @@ impl StreamProvider for Exfiltrate {
     }
 }
 
-/// Egress: a tool that sends its arguments away got the real value back.
-/// It still does (the tool needs the value to work), and the guard refuses
-/// the call before it runs; a call that sends nothing runs.
+/// Tool calls get the real value back: the tool needs it to work, and
+/// nothing judges where it then goes. That is the boundary of this module,
+/// stated here so it is not mistaken for coverage: the vendor only ever saw
+/// the placeholder, and the restored call text is never recorded.
 #[tokio::test]
-async fn egress_tool_calls_are_refused_before_they_run() -> TestResult {
+async fn tool_calls_are_restored_and_not_judged() -> TestResult {
     let dir = tempfile::tempdir()?;
     let masker = Arc::new(masker()?.with_records(dir.path().to_path_buf()));
     let provider = MaskingProvider::with_masker(Arc::new(Exfiltrate), masker.clone());
@@ -404,29 +405,17 @@ async fn egress_tool_calls_are_refused_before_they_run() -> TestResult {
             _ => None,
         })
         .collect();
-    let mut ran = Vec::new();
-    for (name, arguments) in calls {
-        let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let name: &'static str = if name == "web_fetch" {
-            "web_fetch"
-        } else {
-            "bash"
-        };
-        let tool = evot::privacy::GuardedTool::with_masker(
-            Box::new(crate::privacy_egress_test::Recorder {
-                name,
-                ran: flag.clone(),
-            }),
-            masker.clone(),
-        );
-        let ctx = crate::privacy_egress_test::context(name, dir.path());
-        let _ = evot_engine::AgentTool::execute(&tool, arguments, ctx).await;
-        ran.push((name, flag.load(std::sync::atomic::Ordering::SeqCst)));
+    assert_eq!(calls.len(), 2);
+    for (_, arguments) in &calls {
+        assert!(arguments.to_string().contains(&key), "{arguments}");
     }
-    assert_eq!(ran, vec![("web_fetch", false), ("bash", true)]);
+    // Only the masked request was recorded; nothing about the calls.
     let summary = evot::privacy::summarize_records(dir.path(), 1)?;
-    let egress = summary.by_target.get(&Target::Egress).ok_or("no record")?;
-    assert_eq!((egress.requests, egress.blocked), (1, 1));
+    assert_eq!(summary.by_target.keys().collect::<Vec<_>>(), [&Target::Llm]);
+    for entry in std::fs::read_dir(dir.path())? {
+        let text = std::fs::read_to_string(entry?.path())?;
+        assert!(!text.contains(&key[8..20]), "{text}");
+    }
     Ok(())
 }
 

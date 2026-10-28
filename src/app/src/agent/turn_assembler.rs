@@ -180,8 +180,6 @@ impl TurnAssembler {
                 .map(|(_, value)| value.as_str())
                 .chain([llm.api_key.as_str()]),
         );
-        // Their names too: a tool call can send a value by naming it.
-        crate::privacy::remember_secret_env(envs.iter().map(|(name, _)| name.as_str()));
         // System dirs cover skill scan directories and the builtin memory vault.
         let cwd = session.meta().await.cwd;
         let cwd_path = std::path::Path::new(&cwd);
@@ -234,9 +232,6 @@ impl TurnAssembler {
         if let Some(approver) = &approver {
             tools = super::tools::require_approval(tools, approver);
         }
-        // Every call is judged before it runs: one that would send a secret
-        // off the machine without the user's say-so fails instead.
-        let tools = crate::privacy::guard_tools(tools, Some(session_id.to_string()));
         let (mut system_prompt, mut sections) = self.build_system_prompt(mode, &cwd);
         if let Some(section) = skills_prompt_section(&skills) {
             let insert_at = sections

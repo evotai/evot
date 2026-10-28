@@ -218,7 +218,6 @@ impl Agent {
 
     pub fn with_variables(self: &Arc<Self>, variables: Arc<Variables>) -> Arc<Self> {
         crate::privacy::remember_secrets(variables.secret_values());
-        crate::privacy::remember_secret_env(variables.variable_names());
         *self.assembler.variables.write() = Some(variables);
         Arc::clone(self)
     }

@@ -73,10 +73,8 @@ mod model_spec_test;
 #[path = "orchestrator_compact_test.rs"]
 mod orchestrator_compact_test;
 mod orphaned_tasks_test;
-mod privacy_egress_test;
 mod privacy_leaks_test;
 mod privacy_packs_test;
-mod privacy_performance_test;
 mod privacy_runtime_test;
 mod privacy_test;
 mod process_registry_test;

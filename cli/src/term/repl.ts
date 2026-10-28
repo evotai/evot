@@ -24,12 +24,12 @@ import { backNotice, exitLineageHint, forkNotice, resolveBackTarget } from './ap
 import { createAppSelectorState, isCommandSelector, isBackgroundSelector, SELECTOR_OWNER } from './app/selector-identity.js'
 import { selectorExpandItems, selectorClearQuery, selectorReplaceItem, warmSearchableText, type SelectorItem, type SelectorState } from './selector.js'
 import { createAskState, handleAskKeyEvent, type AskQuestion } from './ask.js'
-import { buildAssistantLines, buildPrivacyCard, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
+import { buildAssistantLines, buildPrivacyCard, buildPrivacyHappeningCard, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
 import { manualCompactionLines } from './viewmodel/manual-compaction.js'
 import { wrapTextWithAnsi } from '../render/wrap.js'
 import { createHyperlink } from '../render/hyperlink.js'
 import { renderErrorNotice } from '../render/command-notice.js'
-import { Agent, QueryStream, fastExit, authNotices, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
+import { Agent, QueryStream, fastExit, authNotices, privacyLive, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
 import { createInitialState, type AppState } from './app/state.js'
 import { assistantToolCalls } from './app/assistant-content.js'
 import type { UIAssistantBlock } from './app/types.js'
@@ -111,6 +111,7 @@ import { askStateToResponse, prefixedAskLines } from './app/ask-user.js'
 import { RunOwnership } from './app/run-ownership.js'
 import { PromptSuggestion, SuggestionTicker, createSuggestionInput } from './app/suggestion.js'
 import { resolveComposerGuidance, allowedSuggestionCommand, type SuggestionTrigger } from './app/composer-guidance.js'
+import { PrivacyFeed } from './app/privacy-feed.js'
 import {
   composeExtensions,
   dispatchHostToolCall,
@@ -502,6 +503,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   let composerRevision = 0
   let suggestionContextId = 0
   const suggestionContext = new SuggestionContext()
+  // What masking did this process, shown as it happens.
+  const privacyFeed = new PrivacyFeed(privacyLive)
+  function commitPrivacyHappenings(): void {
+    for (const { notice, fresh } of privacyFeed.poll(sessionId)) commitLines(buildPrivacyHappeningCard(notice, fresh))
+  }
   let suggestionsReady = false
   let startupSuggestion: SuggestionTrigger | null = null
   function composerPolicy() {
@@ -2655,7 +2661,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             committer.commitDual(update.commitLines, update.commitLines)
           }
         }
-
+        // After this step's own lines, so a masked request's card follows the
+        // text it produced rather than splitting it.
+        if (['llm_call_completed', 'tool_finished', 'run_finished', 'error'].includes(event.kind)) commitPrivacyHappenings()
 
         // Reconcile against the native queue instead of draining the visible
         // copy wholesale: OneAtATime mode may consume only the first of several
@@ -3535,6 +3543,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       composerRevision++
       suggestionContextId++
       suggestionContext.clear()
+      privacyFeed.forget(sessionId)
       suggestions.cancel()
       taskSession.cancelFlow()
       loopSession.reset()
@@ -3567,6 +3576,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       composerRevision++
       suggestionContextId++
       suggestionContext.clear()
+      privacyFeed.forget(sessionId)
       suggestions.cancel()
       taskSession.cancelFlow()
       loopSession.reset()

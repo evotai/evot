@@ -8,9 +8,9 @@ import { shareCreated, shareList, type ShareNotice } from './contracts/share.js'
 import { cloudPushProgress, cloudPushResult, cloudPullResult, remoteSessions, type CloudPushProgress, type CloudPushResult, type CloudPullResult, type RemoteSession } from './contracts/cloud.js'
 export type { CloudPushProgress, CloudPushResult, CloudPullResult, RemoteSession } from './contracts/cloud.js'
 export type { CloudSync, CloudVisibility } from './contracts/results.js'
-export type { PrivacyAction, PrivacyEvent, PrivacyKind, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
+export type { PrivacyAction, PrivacyEvent, PrivacyKind, PrivacyLive, PrivacyLiveNotice, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
 // @ts-ignore — binding.js is generated
-import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, privacyUntaint as rawPrivacyUntaint, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
+import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, privacyLive as rawPrivacyLive, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
 
 import { QueryStream } from './query-stream.js'
 export { QueryStream } from './query-stream.js'
@@ -28,7 +28,7 @@ import type { NativeAgent, NativeCompaction, NativeForkedAgent } from './contrac
 import * as results from './contracts/results.js'
 import { decodeResult } from './contracts/results.js'
 import * as privacy from './contracts/privacy.js'
-import type { PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
+import type { PrivacyLive, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
 import type { SessionMeta, SessionWithText, TranscriptItem, VariableInfo, BackgroundProcess, ManualCompactionOutcome, CompactionPhase } from './contracts/results.js'
 export type { SessionMeta, SessionWithText, TranscriptItem, VariableInfo, BackgroundProcess, ManualCompactionOutcome, CompactionPhase } from './contracts/results.js'
 
@@ -619,9 +619,9 @@ export async function privacySave(settings: PrivacySettings): Promise<PrivacySet
   return decodeResult(await rawPrivacySave(JSON.stringify(settings)), privacy.privacySettings)
 }
 
-/** `/privacy untaint PATH`: stop judging that file as holding a secret for the rest of this process. True when it was marked. */
-export function privacyUntaint(path: string, cwd: string): boolean {
-  return Boolean(rawPrivacyUntaint(path, cwd))
+/** Records this process made after `after` (0 for all kept), oldest first; in-memory, no disk read. */
+export function privacyLive(after: number): PrivacyLive {
+  return decodeResult(rawPrivacyLive(after), privacy.privacyLive)
 }
 
 export const taskList = rawTaskList

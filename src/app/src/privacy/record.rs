@@ -37,9 +37,6 @@ pub enum Target {
     TaskReport,
     /// A reply sent to a chat channel (Feishu).
     Delivery,
-    /// A tool call that would send a secret off the machine: refused
-    /// before it ran, or let through to a host the user trusts (warned).
-    Egress,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,9 +51,6 @@ pub struct Record {
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
-    /// The tool whose call this was (an egress record).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<String>,
     #[serde(default)]
     pub blocked: bool,
     #[serde(default)]
@@ -111,7 +105,6 @@ impl Record {
             session: None,
             provider: None,
             model: None,
-            tool: None,
             blocked: values.iter().any(|v| v.action == Action::Block),
             values,
         }
@@ -138,8 +131,8 @@ impl Record {
         kinds.into_iter().map(str::to_string).collect()
     }
 
-    /// Why it was stopped (or, warned, let through), in one clause the
-    /// user reads: `names $OPENAI_API_KEY and sends it off the machine`.
+    /// What was found, in one clause the user reads: `masked API_KEY ×2 ·
+    /// EMAIL ×1`, or `contains …` when it was stopped.
     pub fn reason(&self) -> String {
         let values: Vec<&ValueRecord> = self
             .values
@@ -151,43 +144,22 @@ impl Record {
         } else {
             values
         };
-        if self.target != Target::Egress {
-            // `API_KEY ×2 · EMAIL ×1`, most places first.
-            let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-            for v in &values {
-                *counts.entry(v.kind.as_str()).or_default() += v.n;
-            }
-            let mut counts: Vec<(&str, usize)> = counts.into_iter().collect();
-            counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-            let kinds: Vec<String> = counts
-                .iter()
-                .map(|(kind, n)| format!("{kind} ×{n}"))
-                .collect();
-            return format!(
-                "{} {}",
-                if self.blocked { "contains" } else { "masked" },
-                kinds.join(" · ")
-            );
+        // `API_KEY ×2 · EMAIL ×1`, most places first.
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for v in &values {
+            *counts.entry(v.kind.as_str()).or_default() += v.n;
         }
-        let Some(first) = values.first() else {
-            return "sends a secret off the machine".to_string();
-        };
-        let note = first.note.as_deref();
-        let more = if values.len() > 1 {
-            format!(" (+{} more)", values.len() - 1)
-        } else {
-            String::new()
-        };
-        let what = match (first.rule.as_deref(), note) {
-            (Some("egress.hidden"), _) => {
-                return "runs decoded code, which cannot be checked before it sends".to_string()
-            }
-            (Some("egress.env"), Some(name)) => format!("names {name}"),
-            (Some("egress.environment"), _) => "reads the whole environment".to_string(),
-            (Some("egress.file"), Some(file)) => format!("reads {file}"),
-            _ => format!("holds a {}", first.kind),
-        };
-        format!("{what}{more} and sends it off the machine")
+        let mut counts: Vec<(&str, usize)> = counts.into_iter().collect();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+        let kinds: Vec<String> = counts
+            .iter()
+            .map(|(kind, n)| format!("{kind} ×{n}"))
+            .collect();
+        format!(
+            "{} {}",
+            if self.blocked { "contains" } else { "masked" },
+            kinds.join(" · ")
+        )
     }
 }
 
@@ -240,7 +212,7 @@ pub struct Summary {
     pub blocked: u64,
     pub by_target: BTreeMap<Target, TargetStats>,
     pub kinds: Vec<KindStats>,
-    /// The last few requests, uploads and tool calls that had anything
+    /// The last few requests and uploads that had anything
     /// found, newest first.
     pub recent: Vec<Event>,
 }
@@ -270,14 +242,53 @@ pub struct Event {
     pub target: Target,
     #[serde(default)]
     pub session: Option<String>,
-    /// The tool whose call it was (egress).
-    #[serde(default)]
-    pub tool: Option<String>,
     pub blocked: bool,
     /// The kinds that blocked it; every kind found, when nothing did.
     pub kinds: Vec<String>,
     /// One clause: what it did ([`Record::reason`]).
     pub reason: String,
+}
+
+impl Event {
+    pub(super) fn of(record: &Record) -> Self {
+        let kinds = if record.blocked {
+            record.blocked_kinds()
+        } else {
+            let found: BTreeSet<&str> = record.values.iter().map(|v| v.kind.as_str()).collect();
+            found.into_iter().map(str::to_string).collect()
+        };
+        Self {
+            time: record.time.clone(),
+            target: record.target,
+            session: record.session.clone(),
+            blocked: record.blocked,
+            kinds,
+            reason: record.reason(),
+        }
+    }
+}
+
+/// One record as the running process saw it, for a client that shows what
+/// just happened without reading the day files back. `tags` are the
+/// placeholders (never values): the same value keeps the same tag, so a
+/// client can tell a value first seen now from one masked every request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveNotice {
+    pub seq: u64,
+    #[serde(flatten)]
+    pub event: Event,
+    pub tags: Vec<String>,
+}
+
+impl LiveNotice {
+    pub(super) fn of(seq: u64, record: &Record) -> Self {
+        let tags: BTreeSet<&str> = record.values.iter().map(|v| v.tag.as_str()).collect();
+        Self {
+            seq,
+            event: Event::of(record),
+            tags: tags.into_iter().map(str::to_string).collect(),
+        }
+    }
 }
 
 pub fn summarize(dir: &Path, days: u32) -> Result<Summary> {
@@ -334,21 +345,7 @@ fn add(
     if summary.recent.len() >= RECENT {
         summary.recent.remove(0);
     }
-    let found = if record.blocked {
-        record.blocked_kinds()
-    } else {
-        let found: BTreeSet<&str> = record.values.iter().map(|v| v.kind.as_str()).collect();
-        found.into_iter().map(str::to_string).collect()
-    };
-    summary.recent.push(Event {
-        time: record.time.clone(),
-        target: record.target,
-        session: record.session.clone(),
-        tool: record.tool.clone(),
-        blocked: record.blocked,
-        kinds: found,
-        reason: record.reason(),
-    });
+    summary.recent.push(Event::of(&record));
     for value in record.values {
         let (stats, tags) = kinds.entry(value.kind.clone()).or_insert_with(|| {
             (

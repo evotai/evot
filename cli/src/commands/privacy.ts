@@ -3,18 +3,14 @@ import type { PrivacyEvent, PrivacySettings, PrivacyStatus } from '../native/ind
 export interface PrivacyPort {
   status: (days: number) => Promise<PrivacyStatus>
   save: (settings: PrivacySettings) => Promise<PrivacySettings>
-  /** Stop judging FILE as holding a secret for the rest of this process; true when it was marked. */
-  untaint: (path: string) => boolean
 }
 
-// Four verbs. Nothing here turns a check off: that stays out of the
+// Two verbs. Nothing here turns masking off: that stays out of the
 // command line (settings.json, by hand), so a slip cannot do it.
 export const USAGE = [
   '  /privacy                  what was masked or blocked',
-  '  /privacy trust HOST       let tool calls send secrets to HOST (*.suffix, or tool:NAME)',
   '  /privacy term WORD        always mask WORD: a name, a codename, a host',
-  '  /privacy untaint FILE     a file a tool wrote a secret-looking value into holds no real secret (this run only)',
-  '  Add rm to undo: /privacy trust rm HOST · /privacy term rm WORD',
+  '  /privacy term rm WORD     stop masking it',
 ].join('\n')
 
 const DEFAULT_DAYS = 30
@@ -35,19 +31,12 @@ function editList(list: string[], rest: string[], noun: string): { list: string[
   return { list: list.filter((item) => !same(item)), message: `${noun} removed: ${value}` }
 }
 
-/** The two things a user can change from here. */
+/** The one thing a user can change from here. */
 export function editSettings(settings: PrivacySettings, sub: string, rest: string[]): Edit {
   if (sub === 'term') {
     const edited = editList(settings.terms, rest, 'term')
     if (typeof edited === 'string') return edited
     return { settings: { ...settings, terms: edited.list }, message: edited.message }
-  }
-  if (sub === 'trust') {
-    const words = rest.map((word) => word.toLowerCase())
-    if (words.includes('*')) return '  Trusting every host would turn the check off. Name the host: /privacy trust api.example.com'
-    const edited = editList(settings.egress_allow ?? [], words, 'trusted host')
-    if (typeof edited === 'string') return edited
-    return { settings: { ...settings, egress_allow: edited.list }, message: edited.message }
   }
   return USAGE
 }
@@ -65,8 +54,7 @@ function localToday(): string {
 export function renderSettings(settings: PrivacySettings): string {
   const parts = [settings.enabled ? 'model requests masked' : 'model requests NOT masked (settings.json)']
   if (settings.terms.length > 0) parts.push(`${plural(settings.terms.length, 'term')} of yours`)
-  const trusted = settings.egress_allow ?? []
-  parts.push(trusted.length === 0 ? 'tool calls keep secrets on this machine' : `tool calls may send secrets to ${trusted.join(', ')}`)
+  parts.push('uploads scrubbed')
   return `  ${parts.join(' · ')}`
 }
 
@@ -78,14 +66,14 @@ function when(time: string, today: string): string {
 
 const GOING: Record<string, string> = { llm: 'model request', share: 'share', sync: 'sync', task: 'task', task_report: 'task report', delivery: 'chat reply' }
 
-/** Who did it: the tool, or where the request was going. */
-const actor = (event: PrivacyEvent) => event.tool ?? GOING[event.target] ?? event.target
+/** Where the request was going. */
+const actor = (event: PrivacyEvent) => GOING[event.target] ?? event.target
 
 /** The screen: one line of numbers, what just happened, what is on. */
 export function renderStatus({ settings, summary }: PrivacyStatus, today = localToday()): string {
   const lines = [`  Privacy ${settings.enabled ? 'on' : 'off'} · last ${plural(summary.days, 'day')}`, '']
   if (summary.requests === 0) {
-    lines.push('  Nothing sensitive was found. Model requests, uploads and tool calls are checked.')
+    lines.push('  Nothing sensitive was found. Model requests are masked and uploads scrubbed.')
   } else {
     const counts = [`${plural(summary.requests - summary.blocked, 'request')} masked`]
     if (summary.blocked > 0) counts.push(`${plural(summary.blocked, 'call')} blocked`)
@@ -101,7 +89,7 @@ export function renderStatus({ settings, summary }: PrivacyStatus, today = local
       lines.push(`  ${stamps[i]!.padEnd(stamp)}  ${actor(event).padEnd(width)}  ${event.blocked ? '✗ ' : ''}${event.reason}`)
     })
   }
-  lines.push('', renderSettings(settings), '  /privacy trust HOST · /privacy term WORD')
+  lines.push('', renderSettings(settings), '  /privacy term WORD')
   return lines.join('\n')
 }
 
@@ -111,13 +99,6 @@ export async function runPrivacyCommand(port: PrivacyPort, args: string): Promis
   if (!sub || /^\d+$/.test(sub)) {
     const days = sub ? Math.max(1, Number(sub)) : DEFAULT_DAYS
     return renderStatus(await port.status(days))
-  }
-  if (sub === 'untaint') {
-    const path = rest.join(' ').trim()
-    if (!path) return USAGE
-    return port.untaint(path)
-      ? `  ${path} is no longer judged as holding a secret; tool calls may read it again this run`
-      : `  ${path} was not marked; nothing to lift. The call was stopped for another reason (see its card)`
   }
   const status = await port.status(1)
   const edit = editSettings(status.settings, sub, rest)

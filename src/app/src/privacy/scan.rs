@@ -28,9 +28,6 @@ pub enum Finder {
     Field,
     /// A rule, inside a base64 or percent-encoded run.
     Decoded,
-    /// What a tool call would send off the machine: a secret variable, a
-    /// secrets file, the environment, code that cannot be read.
-    Egress,
     /// A finder a newer evot wrote.
     #[serde(other)]
     Other,

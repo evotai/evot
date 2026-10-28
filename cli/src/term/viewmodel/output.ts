@@ -351,13 +351,17 @@ function paintToolCard(
   rowBg?: string,
 ): void {
   const bg = toolCardBg(card.state)
+  // A notice (privacy) wears the accent rail on every row, padding included:
+  // the same device that says "you said this" on the user message says "evot
+  // is telling you this" here, and the rail column is what the eye scans.
+  const rail = card.tone === 'notice' ? getTheme().accentHex : undefined
   for (let index = from; index < blocks.length; index++) {
     const b = blocks[index]!
-    b.lines = b.lines.map(l => panelRow(l.spans, columns, rowBg ?? l.bg ?? bg))
+    b.lines = b.lines.map(l => panelRow(l.spans, columns, rowBg ?? l.bg ?? bg, rail))
     b.marginTop = index === from && card.first ? 1 : 0
   }
-  if (card.first) blocks[from]!.lines.unshift(panelRow([], columns, bg))
-  if (card.last) blocks[blocks.length - 1]!.lines.push(panelRow([], columns, bg))
+  if (card.first) blocks[from]!.lines.unshift(panelRow([], columns, bg, rail))
+  if (card.last) blocks[blocks.length - 1]!.lines.push(panelRow([], columns, bg, rail))
 }
 
 function buildToolBlock(text: string, columns?: number, maxRows?: number): ViewBlock {

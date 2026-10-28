@@ -31,9 +31,12 @@ pub async fn privacy_save(settings_json: String) -> NapiResult<String> {
     serde_json::to_string(&saved).map_err(failure)
 }
 
-/// `/privacy untaint PATH`: stop judging that file (against `cwd`) as
-/// holding a secret for the rest of this process. `true` when it was marked.
+/// Records this process made after `after` (a `cursor` from an earlier
+/// call; 0 for all kept), oldest first, as `{ cursor, notices }`. In-memory
+/// only: the TUI asks after each step to show masking as it happens.
 #[napi]
-pub fn privacy_untaint(path: String, cwd: String) -> bool {
-    evot::privacy::untaint(&path, std::path::Path::new(&cwd))
+pub fn privacy_live(after: u32) -> NapiResult<String> {
+    let (cursor, notices) = evot::privacy::live_notices(u64::from(after));
+    serde_json::to_string(&serde_json::json!({ "cursor": cursor, "notices": notices }))
+        .map_err(failure)
 }
