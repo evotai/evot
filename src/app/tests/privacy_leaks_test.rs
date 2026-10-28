@@ -219,6 +219,169 @@ fn p6_signed_thinking_never_carries_a_secret() -> TestResult {
     Ok(())
 }
 
+/// Known values can be ordinary protocol words (e.g. a password of "boolean").
+/// They must still be redacted in data, never in JSON Schema structure.
+#[test]
+fn tool_schema_structure_survives_known_value_masking() -> TestResult {
+    let masker = masker()?;
+    let schema = json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://example.com/tool-schema",
+        "$anchor": "tool-anchor",
+        "$dynamicAnchor": "dynamic-anchor",
+        "type": "object",
+        "required": ["command"],
+        "dependentRequired": {"command": ["background"]},
+        "properties": {
+            "command": {"type": "string", "pattern": "^[a-z]+$"},
+            "timeout": {"type": "number"},
+            "background": {"type": "boolean"},
+            "count": {"type": "integer"},
+            "optional": {"type": ["string", "null"]},
+            "list": {"type": "array", "items": {"$ref": "#/$defs/entry"}},
+            "email": {"type": "string", "format": "email"},
+            "encoded": {"type": "string", "contentEncoding": "base64",
+                        "contentMediaType": "text/plain"}
+        },
+        "$defs": {"entry": {"type": "string"}},
+        "allOf": [{"if": {"required": ["command"]}, "then": {"type": "object"},
+                   "else": {"not": {"type": "null"}}}],
+        "additionalProperties": false
+    });
+    for value in [
+        "object",
+        "string",
+        "number",
+        "boolean",
+        "integer",
+        "null",
+        "array",
+        "command",
+        "background",
+        "email",
+        "base64",
+        "text/plain",
+        "^[a-z]+$",
+        "https://json-schema.org/draft/2020-12/schema",
+        "https://example.com/tool-schema",
+        "tool-anchor",
+        "dynamic-anchor",
+        "#/$defs/entry",
+    ] {
+        masker.remember_secret(value);
+    }
+    let mut request = config(vec![]);
+    request.tools = vec![serde_json::from_value(json!({
+        "name": "bash", "description": "boolean", "parameters": schema
+    }))?];
+    // Repeat the request, as happens after switching providers.
+    for _ in 0..2 {
+        masker.mask_request(&mut request)?;
+        assert_eq!(request.tools[0].parameters, schema);
+        assert_ne!(request.tools[0].description, "boolean");
+    }
+    Ok(())
+}
+
+#[test]
+fn tool_schema_nested_annotations_are_redacted_without_changing_structure() -> TestResult {
+    let masker = masker()?;
+    let secret = random(24, 71);
+    masker.remember_secret(&secret);
+    // Each schema-bearing keyword must recurse with schema semantics, including
+    // maps whose property/definition names happen to be schema keywords.
+    let leaf = json!({"type": "boolean", "description": secret});
+    let mut schema = json!({
+        "type": "object",
+        "properties": {"type": leaf},
+        "patternProperties": {"^x": leaf},
+        "$defs": {"required": leaf},
+        "definitions": {"type": leaf},
+        "dependentSchemas": {"command": leaf},
+        "dependencies": {"command": leaf, "other": ["boolean"]}
+    });
+    for keyword in [
+        "additionalProperties",
+        "unevaluatedProperties",
+        "propertyNames",
+        "items",
+        "additionalItems",
+        "unevaluatedItems",
+        "contains",
+        "not",
+        "if",
+        "then",
+        "else",
+        "contentSchema",
+    ] {
+        schema[keyword] = leaf.clone();
+    }
+    for keyword in ["allOf", "anyOf", "oneOf", "prefixItems"] {
+        schema[keyword] = json!([leaf]);
+    }
+    masker.remember_secret("boolean");
+    let mut request = config(vec![]);
+    request.tools = vec![serde_json::from_value(json!({
+        "name": "nested", "description": "d", "parameters": schema
+    }))?];
+    masker.mask_request(&mut request)?;
+    let wire = serde_json::to_string(&request.tools)?;
+    assert!(!wire.contains(&secret), "nested annotation leaked: {wire}");
+    // Only descriptions may change. This also checks references/names are not
+    // treated as data, and dependencies' property-name arrays are preserved.
+    let placeholder = request.tools[0].parameters["properties"]["type"]["description"]
+        .as_str()
+        .ok_or("description is not a string")?;
+    assert!(
+        placeholder.starts_with("{{"),
+        "description was not redacted"
+    );
+    assert_eq!(masker.restore_text(placeholder, false), secret);
+    let expected: Value =
+        serde_json::from_str(&serde_json::to_string(&schema)?.replace(&secret, placeholder))?;
+    assert_eq!(request.tools[0].parameters, expected);
+
+    // Draft-07 tuple items are an array of schemas, not an array of data.
+    request.tools[0].parameters = json!({"type": "array", "items": [leaf, true, false]});
+    masker.mask_request(&mut request)?;
+    assert_eq!(request.tools[0].parameters["items"][0]["type"], "boolean");
+    assert_ne!(
+        request.tools[0].parameters["items"][0]["description"],
+        secret
+    );
+    assert_eq!(request.tools[0].parameters["items"][1], true);
+    assert_eq!(request.tools[0].parameters["items"][2], false);
+    Ok(())
+}
+
+#[test]
+fn tool_schema_literal_data_is_not_mistaken_for_schema_keywords() -> TestResult {
+    let masker = masker()?;
+    masker.remember_secret("boolean");
+    let literal = json!({"type": "boolean", "required": ["boolean"],
+                         "$ref": "boolean", "nested": {"format": "boolean"}});
+    let mut request = config(vec![]);
+    request.tools = vec![serde_json::from_value(json!({
+        "name": "literal", "description": "d",
+        "parameters": {"type": "object", "properties": {"password": {
+            "type": "string", "title": "boolean", "$comment": "boolean",
+            "description": "boolean", "default": literal,
+            "const": literal, "enum": [literal], "examples": [literal],
+            "x-custom-data": literal
+        }}}
+    }))?];
+    masker.mask_request(&mut request)?;
+    let property = &request.tools[0].parameters["properties"]["password"];
+    assert_eq!(property["type"], "string");
+    let mut data = property.clone();
+    data.as_object_mut()
+        .ok_or("property is not an object")?
+        .remove("type");
+    assert!(!data.to_string().contains("boolean"), "data leaked: {data}");
+    assert!(data.to_string().contains("{{"));
+    Ok(())
+}
+
 /// P7: MCP tool schemas carry defaults, enums and examples.
 #[test]
 fn p7_every_string_of_a_tool_schema_is_masked() -> TestResult {

@@ -1,8 +1,9 @@
 //! Masking a typed LLM request and restoring its typed reply.
 //!
 //! Every outgoing string is reached through [`walk`]: the system prompt,
-//! tool descriptions, message text, unsigned thinking and tool-call
-//! arguments (string values only). Ids, names, models and keys are left.
+//! tool descriptions and schema data, message text, unsigned thinking and
+//! tool-call arguments (string values only). Schema structure, ids, names,
+//! models and keys are left.
 //! Signed thinking (an Anthropic signature, a Responses item) is sent back
 //! byte for byte so its signature holds; if it holds a value the user's
 //! side sent, it is masked and sent as plain text without its signature.
@@ -117,8 +118,7 @@ fn walk(
     f(&mut config.system_prompt, inbound, None);
     for tool in &mut config.tools {
         f(&mut tool.description, inbound, None);
-        // Every string: MCP servers put defaults, enums and examples here.
-        walk_value(&mut tool.parameters, inbound, None, f);
+        walk_schema(&mut tool.parameters, inbound, f);
     }
     for message in &mut config.messages {
         let (content, slot) = match message {
@@ -152,6 +152,77 @@ fn walk(
                 Content::Image { .. } => {}
             }
         }
+    }
+}
+
+/// A schema mixes protocol syntax with user data. A known secret can be
+/// "boolean" or a property name: replacing it in `type`, `required` or a
+/// reference breaks the tool contract. Only recurse as a schema where the
+/// vocabulary says there is one; defaults/enums/examples are ordinary JSON
+/// even when their object keys look like schema keywords.
+fn walk_schema(
+    schema: &mut Value,
+    slot: Slot,
+    f: &mut dyn FnMut(&mut String, Slot, Option<&str>) -> bool,
+) {
+    match schema {
+        Value::Object(map) => {
+            for (keyword, value) in map.iter_mut() {
+                match keyword.as_str() {
+                    // Structural strings, references and validation syntax.
+                    "type" | "required" | "dependentRequired" | "$ref" | "$dynamicRef"
+                    | "$recursiveRef" | "$schema" | "$id" | "id" | "$anchor" | "$dynamicAnchor"
+                    | "pattern" | "format" | "contentEncoding" | "contentMediaType" => {}
+                    // Maps from property/definition names to schemas. Do not
+                    // interpret those names as keywords (e.g. a property `type`).
+                    "properties" | "patternProperties" | "$defs" | "definitions"
+                    | "dependentSchemas" => {
+                        if let Value::Object(schemas) = value {
+                            for schema in schemas.values_mut() {
+                                walk_schema(schema, slot, f);
+                            }
+                        }
+                    }
+                    // Older drafts mix schemas with arrays of property names.
+                    "dependencies" => {
+                        if let Value::Object(dependencies) = value {
+                            for dependency in dependencies.values_mut() {
+                                if dependency.is_object() {
+                                    walk_schema(dependency, slot, f);
+                                }
+                            }
+                        }
+                    }
+                    // Single schemas and arrays of schemas (including tuple
+                    // `items` from older drafts). Boolean schemas stay intact.
+                    "items"
+                    | "prefixItems"
+                    | "additionalItems"
+                    | "contains"
+                    | "unevaluatedItems"
+                    | "additionalProperties"
+                    | "unevaluatedProperties"
+                    | "propertyNames"
+                    | "allOf"
+                    | "anyOf"
+                    | "oneOf"
+                    | "not"
+                    | "if"
+                    | "then"
+                    | "else"
+                    | "contentSchema" => walk_schema(value, slot, f),
+                    // Annotations, literal constraints and extension data may
+                    // carry secrets. Keep scanning all their string values.
+                    _ => walk_value(value, slot, Some(keyword), f),
+                }
+            }
+        }
+        Value::Array(schemas) => {
+            for schema in schemas {
+                walk_schema(schema, slot, f);
+            }
+        }
+        _ => {}
     }
 }
 
