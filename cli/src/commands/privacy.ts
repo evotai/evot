@@ -5,12 +5,14 @@ export interface PrivacyPort {
   save: (settings: PrivacySettings) => Promise<PrivacySettings>
 }
 
-// Two verbs. Nothing here turns masking off: that stays out of the
-// command line (settings.json, by hand), so a slip cannot do it.
+// Three verbs. `off` is explicit and whole: it stops masking model
+// requests for this machine until `/privacy on`; there is no per-kind off.
 export const USAGE = [
   '  /privacy                  what was masked or blocked',
   '  /privacy term WORD        always mask WORD: a name, a codename, a host',
   '  /privacy term rm WORD     stop masking it',
+  '  /privacy off              stop masking model requests (uploads stay scrubbed)',
+  '  /privacy on               mask again',
 ].join('\n')
 
 const DEFAULT_DAYS = 30
@@ -31,8 +33,13 @@ function editList(list: string[], rest: string[], noun: string): { list: string[
   return { list: list.filter((item) => !same(item)), message: `${noun} removed: ${value}` }
 }
 
-/** The one thing a user can change from here. */
+/** Terms and the master switch; nothing else is editable from here. */
 export function editSettings(settings: PrivacySettings, sub: string, rest: string[]): Edit {
+  if ((sub === 'on' || sub === 'off') && rest.length === 0) {
+    const enabled = sub === 'on'
+    if (settings.enabled === enabled) return `  privacy is already ${sub}`
+    return { settings: { ...settings, enabled }, message: enabled ? 'model requests masked again' : 'model requests no longer masked; /privacy on to resume' }
+  }
   if (sub === 'term') {
     const edited = editList(settings.terms, rest, 'term')
     if (typeof edited === 'string') return edited
@@ -52,7 +59,7 @@ function localToday(): string {
 
 /** One line: what is on. */
 export function renderSettings(settings: PrivacySettings): string {
-  const parts = [settings.enabled ? 'model requests masked' : 'model requests NOT masked (settings.json)']
+  const parts = [settings.enabled ? 'model requests masked' : 'model requests NOT masked (/privacy on)']
   if (settings.terms.length > 0) parts.push(`${plural(settings.terms.length, 'term')} of yours`)
   parts.push('uploads scrubbed')
   return `  ${parts.join(' · ')}`
@@ -89,7 +96,7 @@ export function renderStatus({ settings, summary }: PrivacyStatus, today = local
       lines.push(`  ${stamps[i]!.padEnd(stamp)}  ${actor(event).padEnd(width)}  ${event.blocked ? '✗ ' : ''}${event.reason}`)
     })
   }
-  lines.push('', renderSettings(settings), '  /privacy term WORD')
+  lines.push('', renderSettings(settings), settings.enabled ? '  /privacy term WORD · /privacy off' : '  /privacy on')
   return lines.join('\n')
 }
 

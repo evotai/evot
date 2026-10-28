@@ -60,7 +60,7 @@ describe('/privacy', () => {
       '  01-01 09:00  model request  ✗ contains API_KEY ×1',
       '',
       '  model requests masked · uploads scrubbed',
-      '  /privacy term WORD',
+      '  /privacy term WORD · /privacy off',
     ].join('\n'))
     expect(await runPrivacyCommand(port().port, '')).toContain('  3 requests masked · 1 call blocked')
   })
@@ -77,12 +77,25 @@ describe('/privacy', () => {
     expect(await runPrivacyCommand(p, 'term')).toBe(USAGE)
   })
 
-  test('nothing on the command line turns a check off', async () => {
+  test('off and on flip only the master switch', async () => {
     const { port: p, saved } = port()
-    for (const line of ['off', 'secrets off', 'personal off', 'network on', 'PRIVATE_KEY warn', 'allow add x', 'trust api.example', 'untaint x.js', 'kinds']) {
+    const off = await runPrivacyCommand(p, 'off')
+    expect(saved.at(-1)).toEqual({ ...defaults, enabled: false })
+    expect(off).toContain('no longer masked')
+    expect(off).toContain('NOT masked (/privacy on)')
+    expect(await runPrivacyCommand(p, 'off')).toContain('already off')
+    const on = await runPrivacyCommand(p, 'on')
+    expect(saved.at(-1)).toEqual(defaults)
+    expect(on).toContain('masked again')
+    expect(renderStatus(status({ ...defaults, enabled: false }))).toContain('Privacy off')
+    expect(renderStatus(status({ ...defaults, enabled: false }))).toContain('  /privacy on')
+  })
+
+  test('only terms and the master switch are editable', async () => {
+    const { port: p, saved } = port()
+    for (const line of ['off now', 'secrets off', 'personal off', 'network on', 'PRIVATE_KEY warn', 'allow add x', 'trust api.example', 'untaint x.js', 'kinds']) {
       expect(await runPrivacyCommand(p, line)).toBe(USAGE)
     }
-    expect(editSettings(defaults, 'on', [])).toBe(USAGE)
     expect(saved).toHaveLength(0)
   })
 
