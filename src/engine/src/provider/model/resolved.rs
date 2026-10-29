@@ -45,7 +45,13 @@ pub struct ResolveModelRequest {
 
 impl ModelConfig {
     pub fn resolve(request: ResolveModelRequest) -> Self {
-        super::resolver::resolve(request)
+        Self::resolve_with_profile(request, None)
+    }
+
+    /// Resolve intrinsic capabilities by a published profile while retaining
+    /// the alias as the request model id. Explicit overrides still win.
+    pub fn resolve_with_profile(request: ResolveModelRequest, profile: Option<&str>) -> Self {
+        super::resolver::resolve(request, profile)
     }
 
     pub fn anthropic(id: impl Into<String>, _display_name: impl Into<String>) -> Self {

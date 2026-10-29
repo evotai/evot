@@ -32,6 +32,34 @@ pub(super) const STANDARD_REASONING: ReasoningProfile = ReasoningProfile {
     anthropic_wire: None,
 };
 
+/// Optimistic baseline for opaque cloud aliases and uncatalogued models.
+/// Keep the wire generic: capacity and selectable reasoning do not imply
+/// support for adaptive thinking, remote compaction, or verbosity extensions.
+const FALLBACK_REASONING: ReasoningProfile = ReasoningProfile {
+    levels: &[
+        (ThinkingLevel::Off, None),
+        (ThinkingLevel::Minimal, None),
+        (ThinkingLevel::Low, None),
+        (ThinkingLevel::Medium, None),
+        (ThinkingLevel::High, None),
+        (ThinkingLevel::Xhigh, None),
+        (ThinkingLevel::Max, None),
+    ],
+    default: ThinkingLevel::High,
+    anthropic_wire: None,
+};
+
+pub(in crate::provider::model) fn protocol_fallback(vision: bool) -> ModelCapabilities {
+    ModelProfile {
+        max_input_tokens: 1_000_000,
+        max_output_tokens: 128_000,
+        vision,
+        reasoning: FALLBACK_REASONING,
+        ..BASE
+    }
+    .capabilities()
+}
+
 pub(super) const NO_REASONING: ReasoningProfile = ReasoningProfile {
     levels: &[(ThinkingLevel::Off, None)],
     default: ThinkingLevel::Off,

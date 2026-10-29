@@ -116,6 +116,7 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
     let mut thinking_levels = std::collections::HashMap::new();
     let mut model_tiers = std::collections::HashMap::new();
     let mut model_sorts = std::collections::HashMap::new();
+    let mut model_capabilities = std::collections::HashMap::new();
     let context_windows = context_windows(&cache.response);
     let model_protocols = model_protocols(&cache.response);
     let judges: std::collections::HashSet<String> = judge_model_ids(&cache.response);
@@ -128,6 +129,13 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
             model_tiers.insert(model.id.clone(), model.tier.clone());
         }
         model_sorts.insert(model.id.clone(), model.sort_order);
+        model_capabilities.insert(
+            model.id.clone(),
+            crate::conf::config::CloudModelCapabilities {
+                profile: model.capability_profile.trim().to_string(),
+                max_output_tokens: model.max_output_tokens.filter(|value| *value > 0),
+            },
+        );
     }
     // Providers are stored in server rank order, so ties in catalog rank fall
     // back to the order the server wants its groups shown in.
@@ -197,6 +205,7 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
     config.cloud_thinking_levels = thinking_levels;
     config.cloud_model_tiers = model_tiers;
     config.cloud_context_windows = context_windows;
+    config.cloud_model_capabilities = model_capabilities;
     config.cloud_model_sorts = model_sorts;
     config.cloud_model_protocols = model_protocols;
     config.cloud_default_model =

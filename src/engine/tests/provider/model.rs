@@ -25,6 +25,68 @@ fn resolved(
 }
 
 #[test]
+fn capability_profiles_preserve_alias_route_and_apply_explicit_overrides_last() {
+    for (profile, expected_output, expected_reasoning) in [
+        (Some("  deepseek/deepseek-v4.1-flash  "), 384_000, true),
+        (Some("deepseek-chat"), 8192, false),
+        (Some("future-profile"), 128_000, true),
+        (None, 128_000, true),
+    ] {
+        let request = || ResolveModelRequest {
+            protocol: ApiProtocol::AnthropicMessages,
+            provider: "cloud".into(),
+            model_id: "evot-fast".into(),
+            base_url: "https://gateway.example.test/v1".into(),
+            headers: HashMap::from([("X-Test".into(), "header".into())]),
+            compat: None,
+            route_capabilities: RouteCapabilities::default(),
+            overrides: ModelOverrides::default(),
+        };
+        let model = ModelConfig::resolve_with_profile(request(), profile);
+        assert_eq!(model.id(), "evot-fast");
+        assert_eq!(model.provider(), "cloud");
+        assert_eq!(model.base_url(), "https://gateway.example.test/v1");
+        assert_eq!(
+            model.headers().get("X-Test").map(String::as_str),
+            Some("header")
+        );
+        assert_eq!(model.max_tokens(), expected_output);
+        assert_eq!(model.reasoning(), expected_reasoning);
+        let mut overridden = request();
+        overridden.overrides = ModelOverrides {
+            context_window: Some(64_000),
+            max_output_tokens: Some(2048),
+            supports_image: Some(false),
+            reasoning: Some(false),
+        };
+        let model = ModelConfig::resolve_with_profile(overridden, profile);
+        assert_eq!(model.context_window(), 64_000);
+        assert_eq!(model.max_tokens(), 2048);
+        assert!(!model.supports_image());
+        assert!(!model.reasoning());
+    }
+    // A newer server's unrecognized profile must not erase a known model.
+    let request = ResolveModelRequest {
+        protocol: ApiProtocol::AnthropicMessages,
+        provider: "cloud".into(),
+        model_id: "deepseek-chat".into(),
+        base_url: "https://gateway.example.test".into(),
+        headers: HashMap::new(),
+        compat: None,
+        route_capabilities: RouteCapabilities::default(),
+        overrides: ModelOverrides::default(),
+    };
+    assert_eq!(
+        ModelConfig::resolve_with_profile(request.clone(), Some("future-profile")).max_tokens(),
+        8192
+    );
+    assert_eq!(
+        ModelConfig::resolve_with_profile(request, Some("deepseek-v4.1-flash")).max_tokens(),
+        384_000
+    );
+}
+
+#[test]
 fn model_config_presets_resolve_expected_routes() {
     let anthropic = ModelConfig::anthropic("claude-sonnet-4-20250514", "Claude Sonnet 4");
     assert_eq!(anthropic.protocol(), ApiProtocol::AnthropicMessages);
@@ -246,7 +308,10 @@ fn gemini_4_argon_profile_matches_models_dev_contract() {
         Low, Medium, High
     ]);
     let legacy = ModelConfig::openai("gemini-3.5-flash", "Gemini 3.5 Flash");
-    assert!(!legacy.reasoning());
+    // No explicit Gemini 3 profile: use the generic modern baseline, not
+    // Argon's mandatory-thinking ladder or its smaller output limit.
+    assert_eq!(legacy.max_tokens(), 128_000);
+    assert!(legacy.can_disable_thinking());
 }
 
 #[test]
@@ -787,11 +852,41 @@ fn glm_and_deepseek_profiles_are_explicit() {
 }
 
 #[test]
-fn unknown_models_do_not_inherit_protocol_reasoning() {
-    let config = ModelConfig::local("http://localhost:11434/v1", "some/model");
-    assert!(!config.reasoning());
-    assert_eq!(config.supported_thinking_levels(), vec![ThinkingLevel::Off]);
-    assert_eq!(config.default_thinking_level(), ThinkingLevel::Off);
+fn an_unconfigured_model_does_not_offer_reasoning_controls() {
+    let model = ModelConfig::anthropic("", "");
+    assert!(!model.reasoning());
+    assert_eq!(model.default_thinking_level(), ThinkingLevel::Off);
+    assert_eq!(model.supported_thinking_levels(), vec![ThinkingLevel::Off]);
+}
+
+#[test]
+fn unknown_models_use_modern_capacity_and_route_safe_reasoning() {
+    use evotengine::ThinkingLevel::*;
+
+    for config in [
+        ModelConfig::anthropic("evot-fast", "Fast"),
+        ModelConfig::openai("opaque-alias", "Alias"),
+        ModelConfig::openai_responses("opaque-alias", "Alias"),
+        ModelConfig::local("http://localhost:11434/v1", "some/model"),
+    ] {
+        assert_eq!(config.context_window(), 1_000_000);
+        assert_eq!(config.max_tokens(), 128_000);
+        assert!(config.reasoning());
+        assert_eq!(config.default_thinking_level(), High);
+        assert!(!config.can_remote_compact());
+        assert_eq!(config.effective_verbosity(), None);
+        if config.honors_reasoning_effort() {
+            assert_eq!(config.supported_thinking_levels(), vec![
+                Off, Minimal, Low, Medium, High, Xhigh, Max
+            ]);
+            assert_eq!(config.effective_thinking_level(Max), Max);
+            assert_eq!(config.effective_thinking_level(Off), Off);
+        } else {
+            // Unknown local transports must not invent an effort extension.
+            assert!(config.supported_thinking_levels().is_empty());
+            assert_eq!(config.effective_thinking_level(Max), Off);
+        }
+    }
 }
 
 #[test]

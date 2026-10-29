@@ -75,6 +75,13 @@ pub struct FreeModelOption {
     /// own per-model default.
     #[serde(default)]
     pub context_window: u32,
+    /// Public capability profile id, independent of the private upstream route.
+    /// Empty on historical catalogs: resolve the wire id or use the fallback.
+    #[serde(default)]
+    pub capability_profile: String,
+    /// Independent output limit; absent/zero leaves the profile's limit intact.
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
     #[serde(flatten, default)]
     pub extra: ExtraFields,
 }

@@ -5,6 +5,39 @@ use evotengine::types::*;
 
 use super::super::fixtures::stream_config::*;
 
+#[test]
+fn opaque_alias_uses_modern_output_budget_and_generic_thinking_wire() {
+    for level in [ThinkingLevel::Off, ThinkingLevel::Max] {
+        let config = StreamConfigBuilder::anthropic()
+            .model("evot-fast")
+            .model_config(ModelConfig::anthropic("evot-fast", "Fast"))
+            .thinking(level)
+            .no_max_tokens()
+            .build();
+        let body = build_request_body(&config, false);
+        assert_eq!(body["model"], "evot-fast");
+        assert_eq!(body["max_tokens"], 128_000);
+        if level == ThinkingLevel::Off {
+            assert_eq!(body["thinking"], serde_json::json!({"type": "disabled"}));
+        } else {
+            assert_eq!(body["thinking"]["type"], "enabled");
+            assert_eq!(body["thinking"]["budget_tokens"], 16_384);
+        }
+        assert!(body.get("output_config").is_none());
+    }
+}
+
+#[test]
+fn opaque_alias_explicit_output_cap_is_preserved() {
+    let config = StreamConfigBuilder::anthropic()
+        .model("opaque-alias")
+        .model_config(ModelConfig::anthropic("opaque-alias", "Alias"))
+        .thinking(ThinkingLevel::Off)
+        .max_tokens(4096)
+        .build();
+    assert_eq!(build_request_body(&config, false)["max_tokens"], 4096);
+}
+
 /// Helper: assistant message with text content.
 fn assistant(text: &str) -> Message {
     Message::Assistant {

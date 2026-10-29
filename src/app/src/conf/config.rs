@@ -75,6 +75,33 @@ pub fn resolve_model_config(
     max_tokens: Option<u32>,
     supports_image: Option<bool>,
 ) -> evot_engine::provider::ModelConfig {
+    resolve_model_config_with_capabilities(
+        protocol,
+        provider,
+        model,
+        base_url,
+        compat_caps,
+        route_capabilities,
+        context_window,
+        max_tokens,
+        supports_image,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_model_config_with_capabilities(
+    protocol: Protocol,
+    provider: &str,
+    model: &str,
+    base_url: Option<&str>,
+    compat_caps: CompatCaps,
+    route_capabilities: RouteCapabilityOverrides,
+    context_window: Option<u32>,
+    max_tokens: Option<u32>,
+    supports_image: Option<bool>,
+    capabilities: Option<&CloudModelCapabilities>,
+) -> evot_engine::provider::ModelConfig {
     use evot_engine::provider::default_base_url;
     use evot_engine::provider::ApiProtocol;
     use evot_engine::provider::ModelOverrides;
@@ -101,21 +128,25 @@ pub fn resolve_model_config(
     let route_capabilities =
         RouteCapabilities::for_route(api, provider, &resolved_base, route_capabilities);
 
-    evot_engine::provider::ModelConfig::resolve(ResolveModelRequest {
-        protocol: api,
-        provider: provider.to_string(),
-        model_id: model.to_string(),
-        base_url: resolved_base,
-        headers: Default::default(),
-        compat,
-        route_capabilities,
-        overrides: ModelOverrides {
-            context_window,
-            max_output_tokens: max_tokens,
-            supports_image,
-            reasoning: None,
+    evot_engine::provider::ModelConfig::resolve_with_profile(
+        ResolveModelRequest {
+            protocol: api,
+            provider: provider.to_string(),
+            model_id: model.to_string(),
+            base_url: resolved_base,
+            headers: Default::default(),
+            compat,
+            route_capabilities,
+            overrides: ModelOverrides {
+                context_window,
+                max_output_tokens: max_tokens
+                    .or_else(|| capabilities.and_then(|c| c.max_output_tokens)),
+                supports_image,
+                reasoning: None,
+            },
         },
-    })
+        capabilities.map(|c| c.profile.as_str()),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +265,8 @@ pub struct Config {
     /// `_CONTEXT_WINDOW` wins over it; the engine's per-model default is the
     /// fallback when neither is set.
     pub cloud_context_windows: HashMap<String, u32>,
+    /// Intrinsic alias capabilities, applied only to server-owned providers.
+    pub cloud_model_capabilities: HashMap<String, CloudModelCapabilities>,
     /// Catalog display rank per cloud model id (higher shows earlier).
     pub cloud_model_sorts: HashMap<String, i64>,
     /// Wire protocol per cloud model id. A cloud group is named by tier and
@@ -248,6 +281,13 @@ pub struct Config {
     /// about the conversation and drives lossless context pruning. Never a
     /// chat provider; never in the picker.
     pub judge: Option<JudgeEndpoint>,
+}
+
+/// Server-owned alias metadata, separate from user provider overrides.
+#[derive(Debug, Clone, Default)]
+pub struct CloudModelCapabilities {
+    pub profile: String,
+    pub max_output_tokens: Option<u32>,
 }
 
 /// Where a judge model lives. It rides on the cloud gateway like any other
@@ -279,6 +319,7 @@ impl Config {
             cloud_thinking_levels: HashMap::new(),
             cloud_model_tiers: HashMap::new(),
             cloud_context_windows: HashMap::new(),
+            cloud_model_capabilities: HashMap::new(),
             cloud_model_sorts: HashMap::new(),
             cloud_model_protocols: HashMap::new(),
             cloud_default_model: None,
@@ -373,7 +414,12 @@ impl Config {
         let model = model_override.unwrap_or_else(|| profile.model().to_string());
         let protocol = self.protocol_for(provider_name, profile, &model);
         let compat_caps = self.compat_caps_for(provider_name, profile, &protocol);
-        let model_config = resolve_model_config(
+        let cloud_capabilities = self
+            .cloud_providers
+            .contains(provider_name)
+            .then(|| self.cloud_model_capabilities.get(&model))
+            .flatten();
+        let model_config = resolve_model_config_with_capabilities(
             protocol.clone(),
             provider_name,
             &model,
@@ -385,6 +431,7 @@ impl Config {
                 .or_else(|| self.cloud_context_windows.get(&model).copied()),
             profile.max_tokens,
             profile.supports_image,
+            cloud_capabilities,
         );
         let requested_level = profile
             .thinking_level

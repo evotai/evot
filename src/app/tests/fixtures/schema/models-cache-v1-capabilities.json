@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "synced_at": 123,
+  "response": {
+    "version": 7,
+    "default_model": "",
+    "providers": [{
+      "name": "evot-free", "label": "Evot Free", "sort_order": 0,
+      "protocol": "anthropic", "base_url": "https://auto.evot.ai/v1/llm",
+      "api_key": "evot.fixture.key", "default_model": "evot-fast",
+      "models": ["evot-fast", "opaque-alias", "limited-alias", "future-alias"]
+    }],
+    "models": [
+      {"id": "evot-fast", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "thinking_level": "max", "capability_profile": "deepseek-v4.1-flash", "max_output_tokens": 256000},
+      {"id": "opaque-alias", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "thinking_level": "max"},
+      {"id": "limited-alias", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "capability_profile": "deepseek-chat", "max_output_tokens": 4096},
+      {"id": "future-alias", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "capability_profile": "future-model-profile", "max_output_tokens": 0}
+    ],
+    "notices": []
+  }
+}
