@@ -24,16 +24,49 @@ use crate::types::ListTranscriptEntries;
 use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 
-/// One step of a push, reported after each batch the server acknowledged
-/// (and once before the first, so a caller can draw an empty bar at once).
-/// Entry counts are what a reader sees as progress; batch numbers are what
-/// a log wants.
+/// One step of a push. Reported while preparing, a few times a second
+/// while a batch goes up, and after each batch the server acknowledged.
+/// Bytes are what a progress bar draws from, since one batch can take a
+/// while on a slow uplink; entry and batch counts are what a log wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PushProgress {
+    /// Entries the server has acknowledged.
     pub uploaded_entries: usize,
     pub total_entries: usize,
+    /// Batches acknowledged, of `batches`.
     pub batch: usize,
     pub batches: usize,
+    /// Bytes that have left for the server, including the batch in flight.
+    pub sent_bytes: u64,
+    /// Bytes the whole push sends. An estimate until each batch is scrubbed,
+    /// then exact; 0 while preparing.
+    pub total_bytes: u64,
+    pub phase: PushPhase,
+}
+
+/// What the push is doing right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushPhase {
+    /// Reading the session and scrubbing it before anything is sent.
+    Preparing,
+    Uploading,
+    /// A batch is fully sent; waiting for the server to acknowledge it.
+    Confirming,
+    /// The server asked to slow down; the batch goes again after `retry_in`.
+    RateLimited {
+        retry_in: std::time::Duration,
+    },
+}
+
+impl PushPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Preparing => "preparing",
+            Self::Uploading => "uploading",
+            Self::Confirming => "confirming",
+            Self::RateLimited { .. } => "rate_limited",
+        }
+    }
 }
 
 /// Where a push reports its progress. `&|_| {}` for callers that do not care.
@@ -124,6 +157,16 @@ pub async fn push_session(
     let Some(cloud) = meta.cloud.clone() else {
         return Ok(PushOutcome::NotShared);
     };
+    // Reading and scrubbing a long session takes a moment; say so first.
+    on_progress(PushProgress {
+        uploaded_entries: 0,
+        total_entries: 0,
+        batch: 0,
+        batches: 0,
+        sent_bytes: 0,
+        total_bytes: 0,
+        phase: PushPhase::Preparing,
+    });
     let all = storage
         .list_entries(ListTranscriptEntries {
             session_id: session_id.to_string(),
@@ -176,18 +219,36 @@ pub async fn push_session(
     let batches = split_batches(entries);
     let batch_count = batches.len();
     let last = batch_count.saturating_sub(1);
+    // Bytes per batch: estimated from the entries (the viewer rides on the
+    // last one), replaced by the scrubbed body's real size as each is built.
+    let viewer_bytes = match &viewer {
+        Some(viewer) => serde_json::to_vec(viewer)?.len() as u64,
+        None => 0,
+    };
+    let sizes = std::sync::Mutex::new(
+        batches
+            .iter()
+            .enumerate()
+            .map(|(index, (_, bytes))| *bytes as u64 + if index == last { viewer_bytes } else { 0 })
+            .collect::<Vec<u64>>(),
+    );
+    let total_bytes = || sizes.lock().map(|sizes| sizes.iter().sum()).unwrap_or(0);
     let mut cloud = cloud;
     let mut expected_seq = after_seq;
     let mut uploaded = 0usize;
-    // Only the first batch may replace: a `force` on every batch would wipe
-    // the ones already appended. Compare-and-append carries the rest.
+    let mut acknowledged_bytes = 0u64;
     on_progress(PushProgress {
         uploaded_entries: 0,
         total_entries: pushed,
         batch: 0,
         batches: batch_count,
+        sent_bytes: 0,
+        total_bytes: total_bytes(),
+        phase: PushPhase::Uploading,
     });
-    for (index, batch) in batches.into_iter().enumerate() {
+    // Only the first batch may replace: a `force` on every batch would wipe
+    // the ones already appended. Compare-and-append carries the rest.
+    for (index, (batch, _)) in batches.into_iter().enumerate() {
         let is_last = index == last;
         let batch_len = batch.len();
         let payload = SyncPush {
@@ -203,7 +264,38 @@ pub async fn push_session(
             viewer: if is_last { viewer.clone() } else { None },
             keep_viewer: !is_last,
         };
-        match client::push(state, &payload, &context).await? {
+        let tick = |sent_bytes: u64, phase: PushPhase| {
+            on_progress(PushProgress {
+                uploaded_entries: uploaded,
+                total_entries: pushed,
+                batch: index,
+                batches: batch_count,
+                sent_bytes,
+                total_bytes: total_bytes(),
+                phase,
+            })
+        };
+        let batch_bytes = || sizes.lock().map(|sizes| sizes[index]).unwrap_or(0);
+        let on_event = |event: client::UploadEvent| match event {
+            client::UploadEvent::Prepared { bytes } => {
+                if let Ok(mut sizes) = sizes.lock() {
+                    sizes[index] = bytes;
+                }
+                tick(acknowledged_bytes, PushPhase::Uploading);
+            }
+            client::UploadEvent::Sending { sent } => {
+                tick(acknowledged_bytes + sent, PushPhase::Uploading)
+            }
+            client::UploadEvent::Confirming => {
+                tick(acknowledged_bytes + batch_bytes(), PushPhase::Confirming)
+            }
+            // The batch is sent again from its start.
+            client::UploadEvent::RateLimited { retry_in } => {
+                tick(acknowledged_bytes, PushPhase::RateLimited { retry_in })
+            }
+        };
+        let response = client::push(state, &payload, &context, &on_event).await?;
+        match response {
             PushResponse::Acked(ack) => {
                 // Record every acknowledged batch, so an interrupted upload
                 // resumes after the last one that landed instead of starting over.
@@ -211,11 +303,15 @@ pub async fn push_session(
                 expected_seq = ack.seq;
                 force = false;
                 uploaded += batch_len;
+                acknowledged_bytes += batch_bytes();
                 on_progress(PushProgress {
                     uploaded_entries: uploaded,
                     total_entries: pushed,
                     batch: index + 1,
                     batches: batch_count,
+                    sent_bytes: acknowledged_bytes,
+                    total_bytes: total_bytes(),
+                    phase: PushPhase::Uploading,
                 });
             }
             PushResponse::Conflict { remote_seq } => {
@@ -236,9 +332,10 @@ const BATCH_BYTES: usize = 4 * 1024 * 1024;
 /// Entries per request; the server bounds the list length of one push.
 const BATCH_ENTRIES: usize = 5_000;
 
-/// Cut the entries into consecutive batches. Always at least one batch, even
-/// when empty: a metadata-only push (rename, turn count) must still go up.
-fn split_batches(entries: Vec<TranscriptEntry>) -> Vec<Vec<TranscriptEntry>> {
+/// Cut the entries into consecutive batches, each with its serialized size.
+/// Always at least one batch, even when empty: a metadata-only push (rename,
+/// turn count) must still go up.
+fn split_batches(entries: Vec<TranscriptEntry>) -> Vec<(Vec<TranscriptEntry>, usize)> {
     let mut batches = Vec::new();
     let mut current = Vec::new();
     let mut current_bytes = 0usize;
@@ -249,13 +346,13 @@ fn split_batches(entries: Vec<TranscriptEntry>) -> Vec<Vec<TranscriptEntry>> {
         let full = !current.is_empty()
             && (current_bytes + size > BATCH_BYTES || current.len() >= BATCH_ENTRIES);
         if full {
-            batches.push(std::mem::take(&mut current));
+            batches.push((std::mem::take(&mut current), current_bytes));
             current_bytes = 0;
         }
         current_bytes += size;
         current.push(entry);
     }
-    batches.push(current);
+    batches.push((current, current_bytes));
     batches
 }
 

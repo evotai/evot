@@ -1133,8 +1133,8 @@ async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> Test
             .await;
     }
 
-    // Progress: one tick before the first batch, then one per acknowledged
-    // batch, in entries so a UI can draw a bar from them.
+    // Progress: preparing first, then bytes while each batch goes up and one
+    // tick per acknowledged batch.
     let ticks = std::sync::Mutex::new(Vec::new());
     let outcome = sync::share_session(
         &state,
@@ -1155,10 +1155,16 @@ async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> Test
     assert_eq!(pushed, 3);
     assert_eq!(cloud.synced_seq, 3);
     let ticks = ticks.into_inner().map_err(|_| "poisoned")?;
-    let seen: Vec<(usize, usize, usize, usize)> = ticks
+    assert_eq!(
+        ticks.first().map(|t| t.phase),
+        Some(sync::PushPhase::Preparing)
+    );
+    let mut seen: Vec<(usize, usize, usize, usize)> = ticks
         .iter()
+        .skip(1)
         .map(|t| (t.uploaded_entries, t.total_entries, t.batch, t.batches))
         .collect();
+    seen.dedup();
     assert_eq!(seen, vec![
         (0, 3, 0, 3),
         (1, 3, 1, 3),
@@ -1167,6 +1173,27 @@ async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> Test
     ]);
     let requests = server.received_requests().await.ok_or("missing requests")?;
     assert_eq!(requests.len(), 3);
+    // Bytes never run past the total, and end exactly at what was sent.
+    let sent: u64 = requests
+        .iter()
+        .map(|request| request.body.len() as u64)
+        .sum();
+    let last = ticks.last().ok_or("no ticks")?;
+    assert_eq!((last.sent_bytes, last.total_bytes), (sent, sent));
+    assert!(ticks
+        .iter()
+        .all(|t| t.sent_bytes <= t.total_bytes.max(t.sent_bytes)));
+    assert!(ticks.iter().skip(1).all(|t| t.total_bytes > 0));
+    for request in &requests {
+        // Streamed for progress, but with its length declared, never chunked.
+        let length = request
+            .headers
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok());
+        assert_eq!(length, Some(request.body.len()));
+        assert!(request.headers.get("transfer-encoding").is_none());
+    }
     for (index, request) in requests.iter().enumerate() {
         let body: serde_json::Value = serde_json::from_slice(&request.body)?;
         let is_last = index == 2;
@@ -1272,13 +1299,18 @@ async fn a_rate_limited_batch_is_retried_after_the_server_says_so() -> TestResul
         .mount(&server)
         .await;
     let started = std::time::Instant::now();
+    let phases = std::sync::Mutex::new(Vec::new());
     let outcome = sync::share_session(
         &state,
         &storage,
         "s1",
         Some(CloudAccess::Private),
         "test",
-        &|_| {},
+        &|progress| {
+            if let Ok(mut phases) = phases.lock() {
+                phases.push(progress.phase);
+            }
+        },
     )
     .await?;
     let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
@@ -1290,6 +1322,58 @@ async fn a_rate_limited_batch_is_retried_after_the_server_says_so() -> TestResul
         started.elapsed() >= std::time::Duration::from_secs(1),
         "honoured Retry-After"
     );
+    // The wait is reported, so a stalled bar says why.
+    let phases = phases.into_inner().map_err(|_| "poisoned")?;
+    assert!(phases.contains(&sync::PushPhase::RateLimited {
+        retry_in: std::time::Duration::from_secs(1)
+    }));
+    Ok(())
+}
+
+/// A slow server answer shows as "sent, waiting for the server", with the
+/// bytes already counted, rather than as a bar stuck where it started.
+#[tokio::test]
+async fn a_sent_batch_waiting_for_the_server_reports_confirming() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"seq": 1, "visibility": "private"}))
+                .set_delay(std::time::Duration::from_millis(700)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let ticks = std::sync::Mutex::new(Vec::new());
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Private),
+        "test",
+        &|progress| {
+            if let Ok(mut ticks) = ticks.lock() {
+                ticks.push(progress);
+            }
+        },
+    )
+    .await?;
+    let ticks = ticks.into_inner().map_err(|_| "poisoned")?;
+    let confirming = ticks
+        .iter()
+        .find(|t| t.phase == sync::PushPhase::Confirming)
+        .ok_or("no confirming tick")?;
+    assert_eq!(confirming.sent_bytes, confirming.total_bytes);
+    assert_eq!(confirming.uploaded_entries, 0);
+    server.verify().await;
     Ok(())
 }
 

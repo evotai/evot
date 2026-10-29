@@ -277,12 +277,6 @@ export function formatShotModelLabel(header?: ShotHeaderMeta): string {
   return model ? `${model} · ${level}` : level
 }
 
-function shortenHomePath(path: string): string {
-  const home = process.env.HOME || process.env.USERPROFILE || ''
-  if (home && path.startsWith(home)) return '~' + path.slice(home.length)
-  return path
-}
-
 /** Compact local time for the header (e.g. 2026-07-14 11:15). */
 export function formatShotTimestamp(isoOrLogTs?: string, now = new Date()): string {
   const d = isoOrLogTs ? new Date(isoOrLogTs.replace(' ', 'T')) : now

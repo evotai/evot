@@ -47,13 +47,42 @@ async function withUploadProgress(
     return { result, finish: show }
   }
   try {
-    const result = await upload(progress => bar.set(progress.uploaded_entries, progress.total_entries))
+    const result = await upload(progress => paintUploadProgress(bar, progress))
     return { result, finish: text => bar.finish(text) }
   } catch (error) {
     // The row must not stay at 40% forever; the error line follows it.
     bar.finish(`${label} — failed`)
     throw error
   }
+}
+
+/**
+ * Draw one push tick. Bytes move while a batch is still going up, so they
+ * drive the bar; addons that predate byte progress report entries only, per
+ * acknowledged batch. Preparing keeps the pending text until there is a size.
+ */
+export function paintUploadProgress(bar: ProgressBar, progress: CloudPushProgress, now = Date.now): void {
+  const total = progress.total_bytes ?? 0
+  if (progress.phase === 'preparing' || (progress.phase !== undefined && total === 0)) return
+  if (progress.sent_bytes === undefined || total === 0) {
+    bar.set(progress.uploaded_entries, progress.total_entries)
+    return
+  }
+  const sent = Math.min(progress.sent_bytes, total)
+  const count = `${formatMegabytes(sent)} / ${formatMegabytes(total)} MB`
+  if (progress.phase === 'rate_limited') {
+    const retryAt = now() + (progress.retry_in_ms ?? 0)
+    bar.set(sent, total, { count, note: () => `server busy · retrying in ${Math.max(0, Math.ceil((retryAt - now()) / 1000))}s` })
+  } else if (progress.phase === 'confirming') {
+    bar.set(sent, total, { count, note: 'waiting for the server' })
+  } else {
+    bar.set(sent, total, { count })
+  }
+}
+
+/** `3.1`, `19.1`, `0.4`: one decimal, so a slow upload still visibly moves. */
+function formatMegabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1)
 }
 
 /** A pasted share page, as opposed to a visibility word or a local id. */

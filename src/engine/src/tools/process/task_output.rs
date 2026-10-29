@@ -116,12 +116,6 @@ impl TaskOutputTool {
         self
     }
 
-    /// Disable stall detection entirely, restoring the unbounded wait.
-    pub fn without_stall_detection(mut self) -> Self {
-        self.stall_policy = None;
-        self
-    }
-
     /// Bound the blocking wait, which is unbounded by default.
     ///
     /// This is configured by the host rather than exposed in the tool schema.

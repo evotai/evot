@@ -2,7 +2,7 @@ import { dirname } from 'path'
 
 import { readSourceRecord } from './install.js'
 import { readSkillDisplay } from './display.js'
-import { builtinSkillsRoot, resolveSkillsDirs, skillsRoot } from './paths.js'
+import { builtinSkillsRoot, resolveSkillsDirs } from './paths.js'
 import { renderSkillList, tildify, type SkillListView, type SkillUnitView } from './render.js'
 import { getSkillEntries, type SkillEntry } from './scan.js'
 import { isOfficialRepo, type SourceRecord } from './source.js'

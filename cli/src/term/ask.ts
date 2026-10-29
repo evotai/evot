@@ -110,11 +110,6 @@ function inOther(state: AskState): boolean {
   return getUIState(state, state.currentTab).inOtherMode
 }
 
-/** Current tab's otherText */
-function otherText(state: AskState): string {
-  return getUIState(state, state.currentTab).otherText
-}
-
 /** Whether the current tab already has a submitted answer */
 function hasAnswer(state: AskState): boolean {
   const answer = state.answers[state.currentTab]

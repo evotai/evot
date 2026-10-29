@@ -128,11 +128,6 @@ pub fn resolve_engine_context_with_state(
     (messages, state)
 }
 
-/// Resolve only the Engine context at the latest control point.
-pub fn resolve_engine_context(entries: &[TranscriptEntry]) -> Vec<evot_engine::AgentMessage> {
-    resolve_engine_context_with_state(entries).0
-}
-
 /// Enforce compaction summary bounds before an atomic compact item is persisted
 /// and published. Retained real user messages are not modified.
 pub(crate) fn normalize_compact_item(

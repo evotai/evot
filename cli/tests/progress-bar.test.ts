@@ -67,3 +67,25 @@ describe('createProgressBar', () => {
     expect(updates.length).toBe(painted)
   })
 })
+
+describe('progress detail', () => {
+  test('a custom count replaces the units and a note follows the percentage', () => {
+    expect(formatProgressCount(1, 4, 'entries', '3.1 / 12.4 MB')).toBe('3.1 / 12.4 MB · 25%')
+    const row = strip(renderProgressBar({ label: 'Sharing', unit: 'entries' },
+      { done: 1, total: 4, detail: { count: '3.1 / 12.4 MB', note: 'waiting for the server' } }, 0))
+    expect(row).toContain('3.1 / 12.4 MB · 25% · waiting for the server')
+  })
+
+  test('a note function is re-read on every redraw', () => {
+    const { line, updates } = recordingLine()
+    let clock = 0
+    let left = 3
+    const bar = createProgressBar(line, { label: 'Sharing', now: () => clock, tickMs: 0 })
+    bar.set(1, 2, { note: () => `retrying in ${left}s` })
+    left = 2
+    clock = 1000
+    bar.set(1, 2, { note: () => `retrying in ${left}s` })
+    expect(updates.at(-2)).toContain('retrying in 3s')
+    expect(updates.at(-1)).toContain('retrying in 2s')
+  })
+})

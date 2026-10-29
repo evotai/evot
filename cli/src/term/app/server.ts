@@ -97,17 +97,6 @@ export async function stopOwnedServer(): Promise<void> {
   await stopServerBackground()
 }
 
-export function formatUptime(startedAt: number): string {
-  const elapsed = Math.floor((Date.now() - startedAt) / 1000)
-  if (elapsed < 60) return `${elapsed}s`
-  const minutes = Math.floor(elapsed / 60)
-  const seconds = elapsed % 60
-  if (minutes < 60) return `${minutes}m${seconds.toString().padStart(2, '0')}s`
-  const hours = Math.floor(minutes / 60)
-  const remainMinutes = minutes % 60
-  return `${hours}h${remainMinutes.toString().padStart(2, '0')}m`
-}
-
 export function ownedDashboardPort(state: ServerState | null): number | null {
   return state?.owned ? state.port : null
 }

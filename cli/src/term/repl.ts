@@ -12,7 +12,7 @@ import {
 } from './input.js'
 import { TerminalInputBuffer } from './input/buffer.js'
 import { schemeFromRgbColor } from './terminal-colors.js'
-import { getTheme, setDetectedThemeScheme } from '../render/theme/index.js'
+import { setDetectedThemeScheme } from '../render/theme/index.js'
 import { compactionToolName, createSpinnerState, advanceSpinner, formatSpinnerLine, setSpinnerPhase, spinnerStatsFromLastUsage } from './spinner.js'
 import { carryModelEfforts, createModelWindow, createResumeWindow } from './app/selector-windows.js'
 import { buildShellFrame } from './viewmodel/shell.js'
@@ -21,12 +21,11 @@ import type { PreviewViewport } from './preview-scroll.js'
 import { promptFromSnapshot } from './viewmodel/prompt-snapshot.js'
 import { forkTrailTitles } from './viewmodel/fork-trail.js'
 import { backNotice, exitLineageHint, forkNotice, resolveBackTarget } from './app/fork-nav.js'
-import { createAppSelectorState, isCommandSelector, isBackgroundSelector, SELECTOR_OWNER } from './app/selector-identity.js'
+import { isCommandSelector, isBackgroundSelector, SELECTOR_OWNER } from './app/selector-identity.js'
 import { selectorExpandItems, selectorClearQuery, selectorReplaceItem, warmSearchableText, type SelectorItem, type SelectorState } from './selector.js'
 import { createAskState, handleAskKeyEvent, type AskQuestion } from './ask.js'
-import { buildAssistantLines, buildPrivacyCard, buildPrivacyHappeningCard, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
+import { buildPrivacyCard, buildPrivacyHappeningCard, buildUserMessage, messagesToOutputLines, type OutputLine } from '../render/output.js'
 import { manualCompactionLines } from './viewmodel/manual-compaction.js'
-import { wrapTextWithAnsi } from '../render/wrap.js'
 import { createHyperlink } from '../render/hyperlink.js'
 import { renderErrorNotice } from '../render/command-notice.js'
 import { Agent, QueryStream, fastExit, authNotices, privacyLive, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
@@ -39,7 +38,7 @@ import { ScreenLog } from './diagnostics/screen-log.js'
 import { formatMemoryLine, memorySnapshot } from './diagnostics/memory.js'
 import { SessionHook } from '../session/hook.js'
 import { RendererTrace } from './diagnostics/renderer-trace.js'
-import { findLastAssistantMarkdown, findLastAssistantTurn } from '../session/assistant-markdown.js'
+import { findLastAssistantMarkdown } from '../session/assistant-markdown.js'
 import { isSlashCommand, resolveCommand, buildHardenPrompt } from '../commands/index.js'
 import { BannerCache } from './banner-cache.js'
 import {
@@ -134,7 +133,6 @@ import { tryStartServer, registerDashboard, stopOwnedServer, ownedDashboardPort,
 import { BackgroundScheduler } from '../background/scheduler.js'
 import { inspectConsole } from '../channels/console-client.js'
 import {
-  RESUME_SELECTOR_TITLE,
   applySessionText,
   formatRankedSessionItems,
   formatSessionItems,
@@ -3059,10 +3057,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     requestRender: () => renderer.requestRender(),
   })
   const {
-    managedQueueEntries,
     openQueueSelector,
     editQueuedPrompt,
-    finishQueueEdit,
     cancelQueueEdit,
     saveQueueEdit,
     removeQueuedPrompt,

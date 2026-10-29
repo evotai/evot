@@ -33,10 +33,6 @@ function parseOscHexChannel(channel: string): number | undefined {
   return Math.round((parseInt(channel, 16) / max) * 255)
 }
 
-export function isOsc11BackgroundColorResponse(data: string): boolean {
-  return OSC11_BACKGROUND_COLOR_RESPONSE_PATTERN.test(data)
-}
-
 export function parseOsc11BackgroundColor(data: string): RgbColor | undefined {
   const match = data.match(OSC11_BACKGROUND_COLOR_RESPONSE_PATTERN)
   if (!match) return undefined

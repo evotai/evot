@@ -12,8 +12,12 @@ use serde_json::json;
 
 use crate::agent::NapiAgent;
 
-/// `(progressJson: string) => void`, called after each uploaded batch. Wire
-/// shape: `{ "uploaded_entries", "total_entries", "batch", "batches" }`.
+/// `(progressJson: string) => void`, called while preparing, a few times a
+/// second while a batch uploads, and after each acknowledged batch. Wire
+/// shape: `{ "uploaded_entries", "total_entries", "batch", "batches" }`, plus
+/// the additive `sent_bytes`, `total_bytes`, `phase`
+/// (`preparing` | `uploading` | `confirming` | `rate_limited`) and
+/// `retry_in_ms` (rate-limited only, else null).
 /// napi builds the threadsafe wrapper at the call boundary, so the handle is
 /// `Send` and can ride along into the async push.
 type ProgressCallback = ThreadsafeFunction<String, ErrorStrategy::Fatal>;
@@ -28,6 +32,14 @@ fn report(
             "total_entries": progress.total_entries,
             "batch": progress.batch,
             "batches": progress.batches,
+            // Additive: older hosts read only the fields above.
+            "sent_bytes": progress.sent_bytes,
+            "total_bytes": progress.total_bytes,
+            "phase": progress.phase.as_str(),
+            "retry_in_ms": match progress.phase {
+                evot::api::sync::PushPhase::RateLimited { retry_in } => Some(retry_in.as_millis() as u64),
+                _ => None,
+            },
         });
         // A dropped progress tick is harmless; the next one carries the total.
         callback.call(payload.to_string(), ThreadsafeFunctionCallMode::NonBlocking);

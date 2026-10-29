@@ -102,13 +102,6 @@ export function renderMarkdownCached(text: string): string {
   return result
 }
 
-export function renderThinkingMarkdownCached(text: string): string {
-  if (!text || text.trim().length === 0) return text
-  // Thinking uses compact block spacing and therefore cannot share the normal
-  // markdown cache entry for the same source string.
-  return renderMarkdown(text, { blockSpacing: 'compact' })
-}
-
 /** Clear the render cache (for tests). */
 export function clearRenderCache(): void {
   renderCache.clear()

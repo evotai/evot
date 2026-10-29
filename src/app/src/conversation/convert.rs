@@ -329,23 +329,3 @@ fn parse_stop_reason(s: &str) -> evot_engine::StopReason {
         _ => evot_engine::StopReason::Stop,
     }
 }
-
-pub fn transcript_from_assistant_completed_with_usage(
-    content: &[AssistantBlock],
-    stop_reason: &str,
-    usage: UsageSummary,
-    model: String,
-    provider: String,
-    timestamp: u64,
-    error_message: Option<String>,
-) -> TranscriptItem {
-    TranscriptItem::Assistant {
-        content: content.to_vec(),
-        stop_reason: stop_reason.to_string(),
-        usage,
-        model,
-        provider,
-        timestamp,
-        error_message,
-    }
-}

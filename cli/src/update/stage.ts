@@ -79,9 +79,7 @@ function assetName(version: string, target: string): string {
  * startup path can call it unconditionally. Deeper checks (checksum ran during
  * staging; binary provenance was proven then too) are not repeated.
  */
-export function readStaged(
-  env: Record<string, string | undefined> = process.env,
-): StagedUpdate | null {
+export function readStaged(): StagedUpdate | null {
   const target = currentTarget()
   if (!target) return null
   try {
@@ -152,11 +150,3 @@ export async function stageUpdate(
   }
 }
 
-/** Size of the staged archive, for progress display. Zero when absent. */
-export function stagedBytes(update: StagedUpdate): number {
-  try {
-    return statSync(update.assetPath).size
-  } catch {
-    return 0
-  }
-}

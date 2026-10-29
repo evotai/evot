@@ -185,23 +185,6 @@ function highlightJsonCode(text: string): string {
   return text.split(EOL).map(highlightJsonLine).join(EOL)
 }
 
-/**
- * Highlight a complete source fragment while preserving cross-line grammar
- * state (block comments, template strings, heredocs, etc.). Used for complete
- * Markdown code blocks.
- */
-export function highlightCode(text: string, lang: string | undefined): string {
-  const resolved = resolveLanguage(lang)
-  if (resolved === 'json') return highlightJsonCode(text)
-  if (!highlighter || !resolved || resolved === 'plaintext') return text
-  try {
-    if (!highlighter.supportsLanguage(resolved)) return text
-    return highlighter.highlight(text, { language: resolved })
-  } catch {
-    return text
-  }
-}
-
 type LineCommentMarker = '--' | '//' | '#'
 
 interface TrailingCodeComment {

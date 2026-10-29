@@ -35,40 +35,49 @@ export interface ProgressBarOptions {
   tickMs?: number
 }
 
+/** How one `set` reads beyond the bar itself. */
+export interface ProgressDetail {
+  /** Replaces the counted units (`3.1 / 19.1 MB`); the percentage still follows. */
+  count?: string
+  /** What the operation is doing now, after the percentage. A function is
+   *  re-read on every redraw, so a countdown keeps moving between updates. */
+  note?: string | (() => string)
+}
+
 export interface ProgressBar {
   /** Report `done` of `total` units. `total <= 0` draws an empty bar. */
-  set: (done: number, total: number) => void
+  set: (done: number, total: number, detail?: ProgressDetail) => void
   /** Replace the row with the result and stop the clock. */
   finish: (text: string) => void
 }
 
 /** `12,000 / 32,000 entries · 37%`; omits the unit when there is none. */
-export function formatProgressCount(done: number, total: number, unit?: string): string {
+export function formatProgressCount(done: number, total: number, unit?: string, count?: string): string {
   const fmt = (n: number): string => n.toLocaleString('en-US')
   const percent = total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0
-  const count = `${fmt(done)} / ${fmt(total)}${unit ? ` ${unit}` : ''}`
-  return `${count} · ${percent}%`
+  return `${count ?? `${fmt(done)} / ${fmt(total)}${unit ? ` ${unit}` : ''}`} · ${percent}%`
 }
 
 /** The row text for one state. Exported so the rendering can be tested without a clock. */
 export function renderProgressBar(
   options: Pick<ProgressBarOptions, 'label' | 'unit' | 'pending' | 'width'>,
-  state: { done: number; total: number } | null,
+  state: { done: number; total: number; detail?: ProgressDetail } | null,
   elapsedMs: number,
 ): string {
   const muted = (text: string): string => chalk.hex(SECTION_MUTED)(text)
   const width = options.width ?? 20
   const elapsed = elapsedMs >= 1000 ? ` · ${formatElapsed(elapsedMs)}` : ''
+  const note = typeof state?.detail?.note === 'function' ? state.detail.note() : state?.detail?.note
   const body = state === null
     ? `${options.pending ?? 'preparing…'}${elapsed}`
-    : `${renderBar(state.done, state.total, width)}  ${formatProgressCount(state.done, state.total, options.unit)}${elapsed}`
+    : `${renderBar(state.done, state.total, width)}  ${formatProgressCount(state.done, state.total, options.unit, state.detail?.count)}${note ? ` · ${note}` : ''}${elapsed}`
   return renderCommandNotice({ state: 'progress', message: `${options.label}  ${muted(body)}` })
 }
 
 export function createProgressBar(line: ProgressLine, options: ProgressBarOptions): ProgressBar {
   const now = options.now ?? Date.now
   const startedAt = now()
-  let state: { done: number; total: number } | null = null
+  let state: { done: number; total: number; detail?: ProgressDetail } | null = null
   let finished = false
   const paint = (): void => {
     if (finished) return
@@ -81,8 +90,8 @@ export function createProgressBar(line: ProgressLine, options: ProgressBarOption
   // some other way (an uncaught error path that never reached `finish`).
   timer?.unref?.()
   return {
-    set: (done, total) => {
-      state = { done, total }
+    set: (done, total, detail) => {
+      state = { done, total, detail }
       paint()
     },
     finish: text => {

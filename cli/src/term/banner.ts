@@ -1,5 +1,4 @@
 import { existsSync } from 'fs'
-import { homedir } from 'os'
 import { join } from 'path'
 import chalk from 'chalk'
 import { renderSkillStartupLines, skillListView } from '../commands/skill.js'

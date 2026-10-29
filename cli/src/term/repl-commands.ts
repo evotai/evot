@@ -1,4 +1,3 @@
-import chalk from 'chalk'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'

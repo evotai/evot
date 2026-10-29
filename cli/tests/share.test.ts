@@ -1,5 +1,5 @@
-import { test, expect } from 'bun:test'
-import { isShareLink, runShareCommand, type ShareContext } from '../src/commands/share.js'
+import { describe, test, expect } from 'bun:test'
+import { isShareLink, paintUploadProgress, runShareCommand, type ShareContext } from '../src/commands/share.js'
 import type { CloudPushResult, SessionMeta } from '../src/native/index.js'
 
 function synced(visibility: 'private' | 'public', seq = 3): CloudPushResult {
@@ -209,4 +209,49 @@ test('task links and local ids are not treated as session imports', async () => 
   expect(isShareLink('abcdefghijklmnopqrstuv')).toBe(false)
   expect(isShareLink('abc12345')).toBe(false)
   expect(isShareLink('public')).toBe(false)
+})
+
+describe('paintUploadProgress', () => {
+  const MB = 1024 * 1024
+  function recorder() {
+    const calls: { done: number; total: number; count?: string; note?: string }[] = []
+    const bar = {
+      set: (done: number, total: number, detail?: { count?: string; note?: string | (() => string) }) => {
+        const note = typeof detail?.note === 'function' ? detail.note() : detail?.note
+        calls.push({ done, total, ...(detail?.count ? { count: detail.count } : {}), ...(note ? { note } : {}) })
+      },
+      finish: () => {},
+    }
+    return { bar, calls }
+  }
+  const tick = (extra: Record<string, unknown>) => ({ uploaded_entries: 0, total_entries: 900, batch: 0, batches: 3, ...extra })
+
+  test('bytes drive the bar while a batch is still going up', () => {
+    const { bar, calls } = recorder()
+    paintUploadProgress(bar, tick({ phase: 'preparing', sent_bytes: 0, total_bytes: 0 }))
+    paintUploadProgress(bar, tick({ phase: 'uploading', sent_bytes: 3.1 * MB, total_bytes: 19.1 * MB }))
+    paintUploadProgress(bar, tick({ phase: 'confirming', sent_bytes: 4 * MB, total_bytes: 19.1 * MB }))
+    // Preparing keeps the pending text; there is no size to draw yet.
+    expect(calls).toEqual([
+      { done: 3.1 * MB, total: 19.1 * MB, count: '3.1 / 19.1 MB' },
+      { done: 4 * MB, total: 19.1 * MB, count: '4.0 / 19.1 MB', note: 'waiting for the server' },
+    ])
+  })
+
+  test('a rate-limited batch says when it goes again', () => {
+    const { bar, calls } = recorder()
+    let clock = 10_000
+    paintUploadProgress(bar, tick({ phase: 'rate_limited', sent_bytes: 4 * MB, total_bytes: 8 * MB, retry_in_ms: 12_000 }), () => clock)
+    expect(calls[0]!.note).toBe('server busy · retrying in 12s')
+    clock += 5_000
+    const { bar: again, calls: later } = recorder()
+    paintUploadProgress(again, tick({ phase: 'rate_limited', sent_bytes: 4 * MB, total_bytes: 8 * MB, retry_in_ms: 7_000 }), () => clock)
+    expect(later[0]!.note).toBe('server busy · retrying in 7s')
+  })
+
+  test('older addons without bytes still count entries', () => {
+    const { bar, calls } = recorder()
+    paintUploadProgress(bar, { uploaded_entries: 300, total_entries: 900, batch: 1, batches: 3 })
+    expect(calls).toEqual([{ done: 300, total: 900 }])
+  })
 })

@@ -17,6 +17,7 @@ pub use push::share_session;
 pub use push::unshare_session;
 pub use push::ProgressSink;
 pub use push::PushOutcome;
+pub use push::PushPhase;
 pub use push::PushProgress;
 pub use types::PushResponse;
 pub use types::RemoteIndex;

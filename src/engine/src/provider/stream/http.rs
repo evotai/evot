@@ -5,8 +5,6 @@
 //! need to handle non-SSE JSON fallback.
 
 use futures::StreamExt;
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 use crate::provider::error::ProviderError;
 
@@ -437,36 +435,4 @@ fn json_error_evidence(value: &serde_json::Value) -> String {
 pub fn classify_json_error(value: &serde_json::Value) -> ProviderError {
     let message = extract_json_error_message(value).unwrap_or_else(|| value.to_string());
     crate::provider::error::classify_stream_error(&message, Some(value))
-}
-
-// ---------------------------------------------------------------------------
-// SSE from reqwest::Response
-// ---------------------------------------------------------------------------
-
-/// Drive SSE parsing from a raw `reqwest::Response` byte stream.
-///
-/// Parses standard SSE frames (`event:`, `data:`) and sends them through
-/// the channel as [`SseEvent`]s. Returns when the stream ends, errors,
-/// or is cancelled.
-pub async fn drive_sse_response(
-    response: reqwest::Response,
-    tx: mpsc::UnboundedSender<SseEvent>,
-    cancel: CancellationToken,
-) -> Result<(), String> {
-    // Compatibility entry point. Built-in providers consume SseReader directly.
-    let mut reader = super::sse::SseReader::new(response);
-    loop {
-        let event = tokio::select! {
-            _ = tx.closed() => return Ok(()),
-            event = reader.next(&cancel) => event?,
-        };
-        match event {
-            Some(event) => {
-                if tx.send(event).is_err() {
-                    return Ok(());
-                }
-            }
-            None => return Ok(()),
-        }
-    }
 }

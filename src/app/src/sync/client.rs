@@ -1,6 +1,9 @@
 //! HTTP client for `/v1/sessions`. Same auth and transport rules as shares:
 //! bearer `cli_token`, no redirects, no local upload size ceiling.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -24,6 +27,26 @@ const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(5);
 /// Best-effort connection reuse must not make ignored response bodies stall a
 /// successful delete or extend the server's retry delay.
 const DISCARD_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a running upload reports bytes sent.
+const PROGRESS_TICK: Duration = Duration::from_millis(200);
+/// Body slice handed to the connection at a time; also the progress grain.
+const SEND_CHUNK: usize = 64 * 1024;
+
+/// What one batch's request is doing, so a caller can show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadEvent {
+    /// The scrubbed body is ready; this many bytes will go up.
+    Prepared { bytes: u64 },
+    /// This many of the body's bytes have gone to the connection.
+    Sending { sent: u64 },
+    /// The whole body is out; waiting for the server's answer.
+    Confirming,
+    /// The server asked to slow down; the same body goes again after `retry_in`.
+    RateLimited { retry_in: Duration },
+}
+
+/// Where a request reports [`UploadEvent`]s. `&|_| {}` for callers that do not care.
+pub type UploadSink<'a> = dyn Fn(UploadEvent) + Sync + 'a;
 
 /// Push one batch. `context` is the session's whole local history (see
 /// [`crate::privacy::upload_context`]), so a batch holding only part of the
@@ -32,6 +55,7 @@ pub async fn push(
     state: &AuthState,
     payload: &SyncPush,
     context: &crate::privacy::UploadContext,
+    on_event: &UploadSink<'_>,
 ) -> Result<PushResponse> {
     check_id(&payload.meta.session_id)?;
     // The cloud copy never holds a secret: scrubbed for good before upload.
@@ -42,6 +66,9 @@ pub async fn push(
         Some(context),
     )
     .await?;
+    on_event(UploadEvent::Prepared {
+        bytes: body.len() as u64,
+    });
     let suffix = format!("/{}", payload.meta.session_id);
     // A chunked upload is many PUTs in a row, and the server's per-minute
     // cap on uploads sees each one. It answers 429 with `Retry-After`; wait
@@ -50,7 +77,7 @@ pub async fn push(
     // so nothing is resent on retry.
     let deadline = tokio::time::Instant::now() + RETRY_BUDGET;
     let response = loop {
-        let response = send(state, reqwest::Method::PUT, &suffix, Some(body.clone())).await?;
+        let response = send_tracked(state, &suffix, &body, on_event).await?;
         if response.status().as_u16() != 429 {
             break response;
         }
@@ -59,6 +86,7 @@ pub async fn push(
         if retry_at > deadline {
             return Err(explain_failure(response, "too many sync requests; try again later").await);
         }
+        on_event(UploadEvent::RateLimited { retry_in: wait });
         discard_body(response, retry_at).await;
         tokio::time::sleep_until(retry_at).await;
     };
@@ -106,6 +134,60 @@ pub async fn delete(state: &AuthState, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// PUT `body`, reporting bytes as the connection takes them and then the
+/// wait for the server's answer. The body is streamed in slices, with its
+/// length declared up front, so progress moves while one large batch is
+/// still going up instead of only after the server acknowledged it.
+async fn send_tracked(
+    state: &AuthState,
+    suffix: &str,
+    body: &[u8],
+    on_event: &UploadSink<'_>,
+) -> Result<reqwest::Response> {
+    let total = body.len() as u64;
+    let sent = Arc::new(AtomicU64::new(0));
+    let counter = sent.clone();
+    let slices: Vec<Vec<u8>> = body.chunks(SEND_CHUNK).map(<[u8]>::to_vec).collect();
+    // `map` runs as the connection pulls each slice, so the counter follows
+    // what actually left for the socket.
+    let stream = futures::stream::iter(slices.into_iter().map(move |slice| {
+        counter.fetch_add(slice.len() as u64, Ordering::Relaxed);
+        Ok::<_, std::io::Error>(slice)
+    }));
+    let request = send(
+        state,
+        reqwest::Method::PUT,
+        suffix,
+        Some(RequestBody {
+            body: reqwest::Body::wrap_stream(stream),
+            len: body.len(),
+        }),
+    );
+    tokio::pin!(request);
+    let mut tick = tokio::time::interval(PROGRESS_TICK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            response = &mut request => return response,
+            _ = tick.tick() => {
+                let sent = sent.load(Ordering::Relaxed).min(total);
+                on_event(if sent >= total {
+                    UploadEvent::Confirming
+                } else {
+                    UploadEvent::Sending { sent }
+                });
+            }
+        }
+    }
+}
+
+/// A request body and its length, which is always declared: the server's
+/// size checks and proxies in front of it expect `Content-Length`.
+struct RequestBody {
+    body: reqwest::Body,
+    len: usize,
+}
+
 /// One request where a 429 is a failure like any other; only `push` retries.
 async fn send_once(
     state: &AuthState,
@@ -113,6 +195,10 @@ async fn send_once(
     suffix: &str,
     body: Option<Vec<u8>>,
 ) -> Result<reqwest::Response> {
+    let body = body.map(|bytes| RequestBody {
+        len: bytes.len(),
+        body: reqwest::Body::from(bytes),
+    });
     let response = send(state, method, suffix, body).await?;
     if response.status().as_u16() == 429 {
         return Err(explain_failure(response, "too many sync requests; try again later").await);
@@ -150,7 +236,7 @@ async fn send(
     state: &AuthState,
     method: reqwest::Method,
     suffix: &str,
-    body: Option<Vec<u8>>,
+    body: Option<RequestBody>,
 ) -> Result<reqwest::Response> {
     let mut request = crate::http::no_redirect_client()?
         .request(
@@ -161,10 +247,11 @@ async fn send(
             ),
         )
         .bearer_auth(&state.cli_token)
-        .timeout(upload_timeout(body.as_ref().map_or(0, Vec::len)));
-    if let Some(body) = body {
+        .timeout(upload_timeout(body.as_ref().map_or(0, |body| body.len)));
+    if let Some(RequestBody { body, len }) = body {
         request = request
             .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::CONTENT_LENGTH, len)
             .body(body);
     }
     let response = request

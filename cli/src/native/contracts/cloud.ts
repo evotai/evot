@@ -13,15 +13,26 @@ export const cloudPushResult = tagged('kind', {
   not_shared: object({ kind: oneOf('not_shared') }),
 }) as import('./schema.js').Schema<CloudPushResult>
 
-/** One tick of a long push: after each batch the server acknowledged. */
+/** One tick of a long push: while preparing, while a batch uploads, and after each acknowledged batch. */
+export type CloudPushPhase = 'preparing' | 'uploading' | 'confirming' | 'rate_limited'
 export interface CloudPushProgress {
   uploaded_entries: number
   total_entries: number
   batch: number
   batches: number
+  /** Bytes sent so far, including the batch in flight. Absent from older addons. */
+  sent_bytes?: number
+  /** Bytes the whole push sends; 0 while preparing. Absent from older addons. */
+  total_bytes?: number
+  phase?: CloudPushPhase
+  /** Wait before the rate-limited batch goes again; null otherwise. */
+  retry_in_ms?: number | null
 }
 export const cloudPushProgress = object({
   uploaded_entries: uint, total_entries: uint, batch: uint, batches: uint,
+  sent_bytes: optional(uint), total_bytes: optional(uint),
+  phase: optional(oneOf('preparing', 'uploading', 'confirming', 'rate_limited')),
+  retry_in_ms: optional(nullable(uint)),
 }) as import('./schema.js').Schema<CloudPushProgress>
 
 export type CloudPullResult =

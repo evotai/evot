@@ -75,13 +75,6 @@ pub fn prepare_input_with_options(
     }
 }
 
-/// Serialize messages while preserving the initial goal and favoring recent
-/// progress within a strict byte budget. The output is plain summarizer input,
-/// so omitting whole middle messages cannot break provider tool-call pairing.
-pub fn serialize_messages_bounded(messages: &[AgentMessage], max_bytes: usize) -> String {
-    serialize_messages_bounded_with_options(messages, max_bytes, SerializationOptions::default())
-}
-
 pub fn serialize_messages_bounded_with_options(
     messages: &[AgentMessage],
     max_bytes: usize,

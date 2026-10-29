@@ -180,10 +180,8 @@ export function createQueueEdit(deps: QueueEditDeps) {
 
   return {
     editingEntry,
-    managedQueueEntries,
     openQueueSelector,
     editQueuedPrompt,
-    finishQueueEdit,
     cancelQueueEdit,
     saveQueueEdit,
     removeQueuedPrompt,

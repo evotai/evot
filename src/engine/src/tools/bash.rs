@@ -17,9 +17,6 @@ use super::process::PROGRESS_INTERVAL;
 use super::process::UPDATE_INTERVAL;
 use crate::types::*;
 
-/// Type alias for command confirmation callback.
-pub type ConfirmFn = Box<dyn Fn(&str) -> bool + Send + Sync>;
-
 /// Max lines to include in the final tool result.
 const MAX_DISPLAY_LINES: usize = 2000;
 /// Max bytes to include in the final tool result.
@@ -54,8 +51,6 @@ pub struct BashTool {
     pub max_output_bytes: usize,
     /// Commands/patterns that are always blocked.
     pub deny_patterns: Vec<String>,
-    /// Optional callback for confirming dangerous commands.
-    pub confirm_fn: Option<ConfirmFn>,
     /// Environment variables injected into every bash subprocess.
     pub envs: Vec<(String, String)>,
     /// Directories the OS sandbox allows the child process to access.
@@ -79,7 +74,6 @@ impl Default for BashTool {
                 "dd if=".into(),
                 ":(){:|:&};:".into(),
             ],
-            confirm_fn: None,
             envs: Vec::new(),
             sandbox_dirs: None,
             process_manager: Arc::new(ProcessManager::new()),
@@ -106,16 +100,6 @@ impl BashTool {
 
     pub fn with_max_timeout(mut self, max_timeout: Duration) -> Self {
         self.max_timeout = max_timeout;
-        self
-    }
-
-    pub fn with_deny_patterns(mut self, patterns: Vec<String>) -> Self {
-        self.deny_patterns = patterns;
-        self
-    }
-
-    pub fn with_confirm(mut self, f: impl Fn(&str) -> bool + Send + Sync + 'static) -> Self {
-        self.confirm_fn = Some(Box::new(f));
         self
     }
 
@@ -270,13 +254,6 @@ impl AgentTool for BashTool {
                 return Err(ToolError::Failed(format!(
                     "Command blocked by safety policy: contains '{pattern}'. This pattern is denied for safety."
                 )));
-            }
-        }
-        if let Some(confirm) = &self.confirm_fn {
-            if !confirm(command_text) {
-                return Err(ToolError::Failed(
-                    "Command was not confirmed by the user.".into(),
-                ));
             }
         }
         if ctx.cancel.is_cancelled() {

@@ -188,11 +188,6 @@ impl CompactionController {
         report
     }
 
-    pub fn with_prune_options(mut self, options: PruneOptions) -> Self {
-        self.prune_options = options;
-        self
-    }
-
     /// Seed cross-compaction state (e.g. restored from a persisted session).
     pub fn with_state(mut self, state: CompactionState) -> Self {
         self.last_compaction_ts = (state.timestamp > 0).then_some(state.timestamp);
