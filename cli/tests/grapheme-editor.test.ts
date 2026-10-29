@@ -122,6 +122,61 @@ describe('grapheme-safe editor', () => {
     expect(state.cursorCol).toBe(7)
   })
 
+  test('moves past short word-wrapped rows without getting stuck at their end', () => {
+    let state = insertText(createEditorState(), 'abc defghij')
+    state = { ...state, cursorCol: 8 }
+
+    state = moveUp(state, 6)
+    expect(state.cursorCol).toBe(3)
+    state = moveDown(state, 6)
+    expect(state.cursorCol).toBe(8)
+  })
+
+  test.each([32, 120, 200])('traverses padded terminal lines in both directions at width %i', (width) => {
+    const lines = [
+      'Log: /tmp/session.screen.log 分析最后的错误',
+      ' '.repeat(204),
+      '  ✦ llm  test-model'.padEnd(204),
+      '    ✗ · turn 1 · 2.2s'.padEnd(204),
+      '    Invalid request',
+    ]
+    const text = lines.join('\n')
+    let state = insertText(createEditorState(), text)
+    for (let step = 0; step < 40; step++) {
+      const next = moveUp(state, width)
+      if (next === state) break
+      expect([next.cursorLine, next.cursorCol]).not.toEqual([state.cursorLine, state.cursorCol])
+      state = next
+    }
+    expect(state.cursorLine).toBe(0)
+    for (let step = 0; step < 40; step++) {
+      const next = moveDown(state, width)
+      if (next === state) break
+      expect([next.cursorLine, next.cursorCol]).not.toEqual([state.cursorLine, state.cursorCol])
+      state = next
+    }
+    expect(state.cursorLine).toBe(lines.length - 1)
+    expect(getEditorText(state)).toBe(text)
+  })
+
+  test('skips wrapped reference rows with no legal cursor boundary', () => {
+    const ref = '[Pasted text #4 +12 lines]'
+    let state = insertText(createEditorState(), `a${ref}b`)
+    state = moveUp(state, 6)
+    expect(state.cursorCol).toBe(1)
+    state = moveDown(state, 6)
+    expect(state.cursorCol).toBe(2 + ref.length)
+  })
+
+  test('clamps to a grapheme boundary before a shared wrap boundary', () => {
+    let state = insertText(createEditorState(), '你好abcdef')
+    state = { ...state, cursorCol: 6 }
+    state = moveUp(state, 5)
+    expect(state.cursorCol).toBe(1)
+    state = moveDown(state, 5)
+    expect(state.cursorCol).toBe(6)
+  })
+
   test('navigates the fresh cursor row after an exact-width line', () => {
     let state = insertText(createEditorState(), 'abcd')
     state = moveUp(state, 4)
