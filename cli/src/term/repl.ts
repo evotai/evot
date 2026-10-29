@@ -869,6 +869,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     return createResumeWindow(items, initialQuery, true)
   }
 
+  /** The `/share` list keeps its details pane: the link it is opened for lives there. */
+  function cloudSelectorState(items: SelectorItem[]): SelectorState {
+    return createResumeWindow(items, undefined, true, true)
+  }
+
   function currentResumeCommandWindowState(generation: number): SelectorState | null {
     if (generation !== commandWindowPreviewGeneration) return null
     if (
@@ -965,7 +970,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             : 'No sessions found',
         }
     const applied = updateResumeCommandWindow(generation, next)
-    if (applied) loadFocusedResumePreview(next)
+    if (applied) {
+      loadFocusedResumePreview(next)
+    }
     return applied
   }
 
@@ -1171,7 +1178,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function loadFocusedResumePreview(state: SelectorState): void {
     if (state.rename) return
     const focused = state.items[state.focusIndex]
-    if (!focused || focused.header || !focused.id) return
+    // One-line rows have no pane to fill; skip the transcript read.
+    if (!focused || focused.header || !focused.id || !focused.preview) return
     const id = focused.id
     void resumeCache.loadSessionText(id).then(text => {
       if (!text) return
@@ -1274,7 +1282,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       commandWindowPreview = {
         kind: 'selector', trigger, sourceText, generation,
         state: {
-          ...resumeSelectorState([]), title: 'Cloud sessions', sessionScope: 'cloud', listFocused: false,
+          ...cloudSelectorState([]), title: 'Cloud sessions', sessionScope: 'cloud', listFocused: false,
           emptyMessage: 'Loading sessions…',
         },
       }
@@ -1382,7 +1390,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     renderer.requestRender()
     if (preview.trigger === 'resume') {
       scheduleFocusedResumeEnrichment(preview.generation)
-      if (overlay.kind === 'selector') loadFocusedResumePreview(overlay.state)
+      if (overlay.kind === 'selector') {
+        loadFocusedResumePreview(overlay.state)
+      }
     }
     if (preview.trigger === 'share' && overlay.kind === 'selector') {
       loadFocusedResumePreview(overlay.state)
@@ -4045,18 +4055,21 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
    */
   async function handleSessionSearch(args: string) {
     await runQuery(`/sessions ${args.trim()}`)
-    const ids = parseSessionSearchResults(lastAssistantText(appState.messages))
-    if (ids.length === 0) return
+    const results = parseSessionSearchResults(lastAssistantText(appState.messages))
+    if (results.length === 0) return
     const allSessions = await resumeCache.all()
-    const ranked = ids
-      .map(id => allSessions.find(s => s.session_id === id))
+    const ranked = results
+      .map(result => allSessions.find(s => s.session_id === result.sessionId))
       .filter((s): s is SessionMeta => s !== undefined && isInteractiveSession(s))
     if (ranked.length === 0) return
-    const items = formatRankedSessionItems(ranked, agent.cwd, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel)
+    // Each row shows the summary the search model wrote for that session.
+    const summaries = new Map(results.map(result => [result.sessionId, result.summary]))
+    const items = formatRankedSessionItems(ranked, id => resumeCache.sessionText(id), sessionId, sessionCloudLabel, summaries)
     invalidateExplicitResumeSelector()
     overlay = {
       kind: 'selector',
-      state: resumeSelectorState(items),
+      // Summaries may take two lines so they can say what each session did.
+      state: { ...resumeSelectorState(items), title: 'Session search results', labelLines: 2 },
     }
     renderer.requestRender()
   }
@@ -4068,7 +4081,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function openResumeSelector(initialQuery?: string, options: { cloudOnly?: boolean; includeAutomation?: boolean } = {}) {
     const generation = ++explicitResumeSelectorGeneration
     const cached = resumeCache.withText ?? resumeCache.metadata
-    const shape = { showOtherCwds: Boolean(options.cloudOnly || options.includeAutomation), cloudFirst: Boolean(options.cloudOnly) }
+    const shape = {
+      showOtherCwds: Boolean(options.cloudOnly || options.includeAutomation),
+      cloudFirst: Boolean(options.cloudOnly),
+    }
     const rows = (sessions: SessionMeta[]) => {
       const merged = mergeRemoteSessions(sessions, cloudSessions.remoteSessions)
       return options.cloudOnly
@@ -4081,7 +4097,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     overlay = {
       kind: 'selector',
       state: {
-        ...resumeSelectorState(items, initialQuery),
+        ...(options.cloudOnly ? cloudSelectorState(items) : resumeSelectorState(items, initialQuery)),
         ...(options.cloudOnly ? { title: 'Cloud sessions', sessionScope: 'cloud' as const } : {}),
         ...(options.includeAutomation ? { title: 'All sessions · including task runs' } : {}),
         ...(cached === null ? { emptyMessage: 'Loading sessions…' } : {}),

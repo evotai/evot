@@ -10,8 +10,15 @@ use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 use crate::types::TranscriptItem;
 
-const SESSION_CHARS: usize = 3_000;
-const COMPACT_CHARS: usize = 1_200;
+/// Budgets measured on real sessions: two compacts' key sections plus the
+/// prioritized messages describe a session's main work and where it stopped,
+/// while full compact text grew digests 3-10x and biased them toward the end.
+const SESSION_CHARS: usize = 6_000;
+/// Per compact; the two newest non-empty compacts are included.
+const COMPACT_CHARS: usize = 2_000;
+const COMPACTS: usize = 2;
+const USER_CHARS: usize = 500;
+const ASSISTANT_CHARS: usize = 400;
 
 /// Ephemeral prompt data, not a persistent or addon contract.
 #[derive(Debug, Serialize)]
@@ -20,8 +27,9 @@ pub struct SessionDigest {
     pub title: String,
     pub updated_at: String,
     pub project: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub compact: Option<String>,
+    /// Key sections of the newest compacts, oldest first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub compacts: Vec<String>,
     pub messages: Vec<MessageExcerpt>,
     pub omitted_messages: usize,
 }
@@ -40,19 +48,22 @@ impl SessionDigest {
         {
             return None;
         }
-        let compact =
-            entries
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(index, entry)| match &entry.item {
-                    TranscriptItem::Compact {
-                        summary, messages, ..
-                    } if !summary.trim().is_empty() => {
-                        Some((index, summary.as_str(), messages.as_slice()))
-                    }
-                    _ => None,
-                });
+        // Newest first; the first one anchors which messages are "new".
+        let mut found: Vec<(usize, &str, &[TranscriptItem])> = entries
+            .iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(index, entry)| match &entry.item {
+                TranscriptItem::Compact {
+                    summary, messages, ..
+                } if !summary.trim().is_empty() => {
+                    Some((index, summary.as_str(), messages.as_slice()))
+                }
+                _ => None,
+            })
+            .take(COMPACTS)
+            .collect();
+        let compact = found.first().copied();
         let start = compact.map_or(0, |(index, _, _)| index + 1);
         // Compaction can leave a real conversation tail outside its summary.
         // Include that retained tail before newly appended messages, skipping
@@ -72,7 +83,13 @@ impl SessionDigest {
             title: excerpt(session.display_title().unwrap_or("Untitled"), 200),
             updated_at: session.updated_at.clone(),
             project: excerpt(project, 100),
-            compact: compact.map(|(_, summary, _)| compact_excerpt(summary)),
+            compacts: {
+                found.reverse();
+                found
+                    .iter()
+                    .map(|(_, summary, _)| compact_excerpt(summary))
+                    .collect()
+            },
             messages: Vec::new(),
             omitted_messages: excerpts.len(),
         };
@@ -153,7 +170,7 @@ fn message_excerpt(item: &TranscriptItem) -> Option<MessageExcerpt> {
     if let Some(text) = real_user_text(item) {
         return Some(MessageExcerpt {
             role: "user",
-            text: excerpt(&text, 300),
+            text: excerpt(&text, USER_CHARS),
         });
     }
     let TranscriptItem::Assistant { content, .. } = item else {
@@ -166,7 +183,7 @@ fn message_excerpt(item: &TranscriptItem) -> Option<MessageExcerpt> {
         .join("\n");
     (!text.trim().is_empty()).then(|| MessageExcerpt {
         role: "assistant",
-        text: excerpt(&text, 200),
+        text: excerpt(&text, ASSISTANT_CHARS),
     })
 }
 

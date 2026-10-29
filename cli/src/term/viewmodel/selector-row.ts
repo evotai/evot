@@ -1,7 +1,7 @@
 import { getTheme } from '../../render/theme/index.js'
 import type { SelectorItem } from '../selector.js'
 import { colored, dim, line, plain, type StyledLine, type StyledSpan } from './types.js'
-import { spansWidth, truncateSpansToWidth, truncateToWidth } from './width.js'
+import { spansWidth, truncateSpansToWidth, truncateToWidth, wrapTextByWidth } from './width.js'
 
 const ROW_MARKER = '·'
 
@@ -113,6 +113,104 @@ export function buildBrowseRow(item: SelectorItem, options: SelectorRowOptions, 
     spans: bottom.map(span => ({ ...span, ...(bg ? { bg } : {}) })),
     ...(bg ? { bg } : {}),
   }]
+}
+
+/** Narrowest summary column worth sharing a line with a full session id. */
+export const SESSION_LINE_MIN_LABEL = 20
+/** Widest id column: a UUID. Longer ids extend only their own row. */
+export const SESSION_ID_COLUMN = 36
+
+function sessionLineRight(item: SelectorItem, secondaryHex: string): StyledSpan[] {
+  const status = item.status
+  return [
+    ...(item.badge ? [{ text: item.badge, hex: secondaryHex }] : []),
+    ...(status ? [
+      ...(item.badge ? [plain(' ')] : []),
+      status.tone === 'active' ? colored(status.text, 'cyan') : { text: status.text, hex: secondaryHex },
+    ] : []),
+  ]
+}
+
+interface SessionLineLayout {
+  /** The label sits under the id: the list is too narrow to share a line. */
+  under: boolean
+  /** Columns before the label on its first line. */
+  lead: number
+  /** The label split into the lines it occupies, the last cut with `…`. */
+  lines: string[]
+}
+
+/**
+ * Where a session row's label goes and how it wraps. Shared by the renderer
+ * and the row budget, so a row is drawn in exactly the rows it was given.
+ * `labelLines` caps the label: the plain list keeps one line, search results
+ * give the summary room for two.
+ */
+function sessionLineLayout(item: SelectorItem, width: number, idWidth: number, labelLines: number): SessionLineLayout {
+  const right = sessionLineRight(item, '')
+  const rightWidth = right.length ? spansWidth(right) + 2 : 0
+  const lead = 2 + Math.max(idWidth, spansWidth([plain(item.id ?? '')])) + 2
+  const under = width - lead - rightWidth < SESSION_LINE_MIN_LABEL
+  const room = Math.max(1, under ? width - 2 - rightWidth : width - lead - rightWidth)
+  const ranges = wrapTextByWidth(item.label, room)
+  const max = Math.max(1, labelLines)
+  const lines = ranges.slice(0, max).map(range => item.label.slice(range.start, range.end).trim())
+  if (ranges.length > max) {
+    const rest = item.label.slice(ranges[max - 1]!.start).trim()
+    lines[max - 1] = truncateToWidth(rest, room)
+  }
+  return { under, lead: under ? 2 : lead, lines: lines.length ? lines : [''] }
+}
+
+/** Rows one session entry occupies, including the id line when the label sits under it. */
+export function sessionLineHeight(item: SelectorItem, width: number, idWidth: number, labelLines = 1): number {
+  const layout = sessionLineLayout(item, width, idWidth, labelLines)
+  return layout.lines.length + (layout.under ? 1 : 0)
+}
+
+/**
+ * Session row: `· <full id>  <label>  <badge> <status>`. The id column has a
+ * fixed width so labels align; the label takes what is left, wraps onto at
+ * most `labelLines` lines aligned under itself, and is cut with `…`. When the
+ * list is too narrow for both, the label moves under the id instead of
+ * cutting the id.
+ */
+export function buildSessionLineRow(item: SelectorItem, options: SelectorRowOptions, width: number, idWidth: number, labelLines = 1): StyledLine[] {
+  const { brandHex, mutedHex, selectionBgHex, selectionMutedHex } = getTheme()
+  const { highlighted, query = '' } = options
+  const bg = highlighted ? selectionBgHex : undefined
+  const secondaryHex = highlighted ? selectionMutedHex : mutedHex
+  const withBg = (spans: StyledSpan[]) => spans.map(span => ({ ...span, ...(bg ? { bg } : {}) }))
+  const id = item.id ?? ''
+  const idSpans = highlightSelectorMatches(id, query, { hex: secondaryHex })
+  const labelSpans = (text: string): StyledSpan[] => highlighted
+    ? [{ text, hex: brandHex, bold: true }]
+    : highlightSelectorMatches(text, query, {})
+  const right = sessionLineRight(item, secondaryHex)
+  const fill = (spans: StyledSpan[]): StyledLine => {
+    const cut = truncateSpansToWidth(spans, width)
+    cut.push({ text: ' '.repeat(Math.max(0, width - spansWidth(cut))) })
+    return { spans: withBg(cut), ...(bg ? { bg } : {}) }
+  }
+  const marker = rowMarker(highlighted, bg)
+  const layout = sessionLineLayout(item, width, idWidth, labelLines)
+  const withRight = (spans: StyledSpan[], used: number): StyledSpan[] => right.length
+    ? [...spans, plain(' '.repeat(Math.max(2, width - used - spansWidth(spans) - spansWidth(right)))), ...right]
+    : spans
+  const indent = plain(' '.repeat(layout.lead))
+  const [first = '', ...rest] = layout.lines
+  if (layout.under) {
+    return [
+      fill([marker, ...idSpans]),
+      fill([indent, ...withRight(labelSpans(first), layout.lead)]),
+      ...rest.map(text => fill([indent, ...labelSpans(text)])),
+    ]
+  }
+  const pad = plain(' '.repeat(Math.max(0, layout.lead - spansWidth([marker]) - spansWidth(idSpans))))
+  return [
+    fill([marker, ...idSpans, pad, ...withRight(labelSpans(first), layout.lead)]),
+    ...rest.map(text => fill([indent, ...labelSpans(text)])),
+  ]
 }
 
 /** Highlight every filter-token occurrence without changing the source text. */

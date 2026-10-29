@@ -92,7 +92,7 @@ describe('rename effects and search caches', () => {
     }, token, token.text)
     expect(current?.rename).toBeUndefined()
     expect(current?.query).toBe('Production')
-    expect(current?.items.find(item => item.id === 's1')?.preview?.[0]).toBe(token.text)
+    expect(current?.items.find(item => item.id === 's1')?.label).toBe(token.text)
     expect(cache.metadata?.[0]?.custom_title).toBe(token.text)
     expect((await cache.text())[0]?.search_text).toContain(token.text)
   })

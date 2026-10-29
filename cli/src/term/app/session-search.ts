@@ -10,14 +10,33 @@
 
 import type { UIMessage } from './types.js'
 
-/** Session ids from `- <id> — <title> — <reason>` lines, in answer order. */
-export function parseSessionSearchResults(text: string): string[] {
-  const ids: string[] = []
+export interface SessionSearchResult {
+  sessionId: string
+  /** What the session roughly did; the line its result row shows. */
+  summary: string
+}
+
+/** Keep the search explanation, not just the id, in the agent's ranked order. */
+export function parseSessionSearchResults(text: string): SessionSearchResult[] {
+  const results: SessionSearchResult[] = []
+  const seen = new Set<string>()
   for (const line of text.split('\n')) {
-    const match = /^\s*[-*]\s*`?([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})`?\s+[—–-]\s+/i.exec(line)
-    if (match && !ids.includes(match[1]!)) ids.push(match[1]!)
+    const match = /^\s*[-*]\s*`?([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|ch_[0-9a-f]{32})`?\s+[—–-]\s+(.+)$/i.exec(line)
+    if (!match) continue
+    const sessionId = match[1]!
+    if (seen.has(sessionId)) continue
+    // `<date> — <summary>`. Answers from older prompts put a title before
+    // the date; the summary is still what follows the date.
+    const parts = match[2]!.trim().split(/\s+[—–-]\s+/)
+    const date = parts.findIndex(part => /^\d{4}-\d{2}-\d{2}$/.test(part.trim()))
+    const tail = date >= 0 && date < parts.length - 1 ? parts.slice(date + 1) : parts.filter((_, at) => at !== date)
+    // A list row reads as a phrase; a closing period only takes width.
+    const summary = tail.join(' — ').trim().replace(/[。.]$/, '')
+    if (!summary) continue
+    seen.add(sessionId)
+    results.push({ sessionId, summary })
   }
-  return ids
+  return results
 }
 
 /** Text of the last assistant message, or '' when the run produced none. */

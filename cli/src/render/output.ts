@@ -29,7 +29,7 @@ function toolGlyph(name: string): ToolGlyph {
   switch (name.toLowerCase()) {
     case 'bash': return { icon: '⌘' }
     case 'read': case 'read_code': return { icon: '◫' }
-    case 'grep': case 'glob': case 'find': case 'search': return { icon: '⌕' }
+    case 'grep': case 'glob': case 'find': case 'search': case 'session_search': return { icon: '⌕' }
     case 'web_fetch': case 'webfetch': return { icon: '⊕' }
     case 'edit': case 'file_edit': case 'write': case 'file_write': return { icon: '✎' }
     // Background task tools act on a shell, so they share the bash glyph
@@ -45,6 +45,7 @@ function toolDisplayName(name: string): string {
   switch (name.toLowerCase()) {
     case 'task_output': case 'taskoutput': return 'background shell'
     case 'task_stop': case 'taskstop': return 'stop background shell'
+    case 'session_search': return 'search sessions'
     default: return name
   }
 }
@@ -116,6 +117,8 @@ function toolPrimaryArg(
     if (!command) return ''
     return formatBashCommandDisplay(command, expanded, true).headline
   }
+
+  if (n === 'session_search') return sessionSearchScope(args)
 
   const { display: pathDisplay } = toolPathArg(args)
   if (n === 'edit' || n === 'file_edit') {
@@ -651,6 +654,7 @@ function runningStatusParts(name: string, args: Record<string, unknown>): string
     return [blocking ? 'waiting for task' : 'checking task']
   }
   if (n === 'task_stop' || n === 'taskstop') return ['stopping task']
+  if (n === 'session_search') return ['reading sessions']
   return ['running']
 }
 
@@ -711,6 +715,8 @@ export function buildToolResult(
   const diff = args?.diff as string | undefined
   const hasDiff = !isError && typeof diff === 'string' && diff.length > 0
   const body = !result ? ''
+    // The page is JSON working data for the model; people see which sessions it read.
+    : !isError && name.toLowerCase() === 'session_search' ? sessionSearchBody(result)
     : !expanded && !isError && isTaskTool(name) ? taskOutputBody(result)
     : !expanded && !isError && (details.backgrounded === true || hasDiff) ? ''
     : result
@@ -734,7 +740,7 @@ export function buildToolResult(
       : [summary, duration].filter(Boolean)
   // `read` says `3 lines` and `grep` says `2 matches` already; a status that
   // counts its result in any unit skips the line count and keeps the hint.
-  const counted = /\b\d+ (line|match|hit|file|director|result|entr)/
+  const counted = /\b\d+ (line|match|hit|file|director|result|entr|session)/
   const foldParts = folded && !statusParts.some(part => counted.test(part)) ? [plural(bodyRows.length, 'line')] : []
   const mark = isError || taskFailed ? '✗' : backgrounded || stillRunning ? '●' : '✓'
   const lines: OutputLine[] = [toolStatusLine(mark, [...statusParts, ...foldParts], folded ? EXPAND_HINT : '')]
@@ -1518,6 +1524,11 @@ function toolResultSummary(
     if (parts.length > 0) return parts.join(' · ')
   }
 
+  if (normalizedName === 'session_search') {
+    const coverage = sessionSearchCoverage(args, details)
+    if (coverage) return coverage
+  }
+
   if (normalizedName === 'search') {
     const hits = detailNumber(details, 'hits')
     if (hits !== undefined) return plural(hits, 'hit')
@@ -1544,6 +1555,58 @@ function toolResultSummary(
       : plural(lines, 'line')
   }
   return result ? humanBytes(Buffer.byteLength(result, 'utf-8')) : ''
+}
+
+// ---------------------------------------------------------------------------
+// session_search — `/sessions <request>` pages through the archive. The card
+// says what was searched and how much of it was covered, not the JSON size.
+// ---------------------------------------------------------------------------
+
+const SESSION_SEARCH_KEYWORDS_SHOWN = 4
+
+/** `last 7 days · 向量, vector, benchmark +2 · from #21` */
+function sessionSearchScope(args: Record<string, unknown>): string {
+  const days = typeof args.since_days === 'number' ? args.since_days : undefined
+  const keywords = Array.isArray(args.keywords)
+    ? args.keywords.filter((word): word is string => typeof word === 'string' && word.trim() !== '').map(word => word.trim())
+    : []
+  const shown = keywords.slice(0, SESSION_SEARCH_KEYWORDS_SHOWN).join(', ')
+  const more = keywords.length > SESSION_SEARCH_KEYWORDS_SHOWN ? ` +${keywords.length - SESSION_SEARCH_KEYWORDS_SHOWN}` : ''
+  const cursor = typeof args.cursor === 'number' && args.cursor > 0 ? `from #${args.cursor + 1}` : ''
+  return [days === undefined ? 'all time' : `last ${plural(days, 'day')}`, shown ? `${shown}${more}` : '', cursor]
+    .filter(Boolean).join(' · ')
+}
+
+/** `read 21–28 of 141 sessions · 3 keyword hits`, or `read all 12 sessions`. */
+function sessionSearchCoverage(args: Record<string, unknown>, details: Record<string, unknown>): string {
+  const total = detailNumber(details, 'sessions_in_window')
+  const returned = detailNumber(details, 'returned')
+  if (total === undefined || returned === undefined) return ''
+  if (total === 0) return 'no sessions in range'
+  const start = typeof args.cursor === 'number' ? args.cursor : 0
+  const end = start + returned
+  const hits = detailNumber(details, 'keyword_hits') ?? 0
+  const read = start === 0 && end >= total ? `read all ${plural(total, 'session')}`
+    : returned === 0 ? `nothing past #${start} of ${plural(total, 'session')}`
+      : `read ${start + 1}–${end} of ${plural(total, 'session')}`
+  return [read, hits > 0 ? plural(hits, 'keyword hit') : ''].filter(Boolean).join(' · ')
+}
+
+/** One row per session the page returned: when, what, and which keywords hit. */
+function sessionSearchBody(result: string): string {
+  const json = result.slice(result.indexOf('\n') + 1)
+  let page: unknown
+  try { page = JSON.parse(json) } catch { return '' }
+  const sessions = (page as { sessions?: unknown }).sessions
+  if (!Array.isArray(sessions)) return ''
+  return sessions.flatMap(session => {
+    if (!session || typeof session !== 'object') return []
+    const row = session as Record<string, unknown>
+    const date = typeof row.updated_at === 'string' ? row.updated_at.slice(0, 10) : ''
+    const title = typeof row.title === 'string' ? truncate(row.title.replace(/\s+/g, ' ').trim(), 100) : ''
+    const hits = Array.isArray(row.matched_keywords) ? row.matched_keywords.filter(word => typeof word === 'string') : []
+    return [[date, title, hits.length ? `· ${hits.join(', ')}` : ''].filter(Boolean).join('  ')]
+  }).join('\n')
 }
 
 function formatToolResultContent(content: string): string {

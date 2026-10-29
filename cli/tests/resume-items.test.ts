@@ -120,7 +120,7 @@ test('task-run sessions wear a task badge and say so in the preview', async () =
   const items = formatSessionItems([run, chat] as never, '/work')
   const row = items.find(item => item.id === run.session_id)
   expect(row?.label).toBe('Daily HN digest')
-  expect(row?.detail).toContain(' · task · ')
+  expect(row?.badge).toBe('task')
   expect(row?.searchText).toContain('task')
   expect(sessionPreviewLines(run as never)[1]).toBe('task run · kimi-k3 · 0 turns')
 })

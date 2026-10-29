@@ -5,7 +5,7 @@ use evot::agent::prompt::skill::load_skill_instructions;
 use evot::search::SessionDigest;
 use evot::search::SessionSearchTool;
 use evot::search::MAX_CALLS_PER_RUN;
-use evot::search::PAGE_CHARS;
+use evot::search::PAGE_BYTES;
 use evot::storage::MemoryStorage;
 use evot::storage::Storage;
 use evot::types::AssistantBlock;
@@ -105,9 +105,10 @@ fn digest_uses_conversation_intent_and_outcome_not_tools() -> TestResult {
 }
 
 #[test]
-fn digest_uses_latest_nonempty_compact_and_subsequent_turns() -> TestResult {
+fn digest_uses_two_newest_nonempty_compacts_and_subsequent_turns() -> TestResult {
     let items = entries(vec![
-        user("Old raw request"), compact("## Goal\nSuperseded goal"),
+        user("Old raw request"), compact("## Goal\nOldest goal"),
+        compact("## Goal\nPrevious goal"),
         user("Before latest compact"),
         compact("## Goal\nInvestigate warehouse restarts\n## Files and Code Sections\nignored file list\n## Key Decisions\nMemory pressure confirmed\n## Current Work\nValidate warehouse sizing"),
         user("Try a larger warehouse"), assistant("Restart rate dropped"), compact("   "),
@@ -120,7 +121,12 @@ fn digest_uses_latest_nonempty_compact_and_subsequent_turns() -> TestResult {
     assert!(json.contains("Memory pressure confirmed"));
     assert!(json.contains("Restart rate dropped"));
     assert!(json.contains("How about next week?"));
-    assert!(!json.contains("Superseded"));
+    // The compact before the latest still shows what the session did earlier,
+    // oldest first; anything older is left out.
+    assert_eq!(digest.compacts.len(), 2);
+    assert!(digest.compacts[0].contains("Previous goal"));
+    assert!(digest.compacts[1].contains("Investigate warehouse restarts"));
+    assert!(!json.contains("Oldest goal"));
     assert!(!json.contains("Old raw request"));
     assert!(!json.contains("Before latest compact"));
     assert!(!json.contains("ignored file list"));
@@ -139,15 +145,15 @@ fn digest_falls_back_for_unknown_summary_format_and_empty_prune() -> TestResult 
     )
     .ok_or("missing")?;
     assert!(unknown
-        .compact
-        .as_deref()
+        .compacts
+        .first()
         .is_some_and(|text| text.contains("compared database plans")));
     let pruned = SessionDigest::build(
         &session,
         &entries(vec![user("Original intent"), compact(""), assistant("")]),
     )
     .ok_or("missing")?;
-    assert!(pruned.compact.is_none());
+    assert!(pruned.compacts.is_empty());
     assert_eq!(pruned.messages.len(), 1);
     assert_eq!(pruned.messages[0].text, "Original intent");
     Ok(())
@@ -211,7 +217,7 @@ fn digest_bounds_long_unicode_messages_preserving_intent_and_final_outcome() -> 
     items.push(user("Last request"));
     items.push(assistant("Final verified outcome"));
     let digest = SessionDigest::build(&session, &entries(items)).ok_or("missing")?;
-    assert!(serde_json::to_string(&digest)?.chars().count() <= 3_000);
+    assert!(serde_json::to_string(&digest)?.chars().count() <= 6_000);
     assert!(digest.omitted_messages > 0);
     assert!(digest.messages[0].text.contains("First intent"));
     assert!(digest.messages[0].text.contains("first ending"));
@@ -568,7 +574,7 @@ async fn page_cursor_walks_the_ranked_list_in_bounded_chunks() -> TestResult {
 }
 
 #[tokio::test]
-async fn page_size_is_bounded_by_characters_but_never_empty() -> TestResult {
+async fn page_size_is_bounded_by_bytes_but_never_empty() -> TestResult {
     let storage = std::sync::Arc::new(MemoryStorage::new());
     for index in 0..60 {
         save(
@@ -583,7 +589,8 @@ async fn page_size_is_bounded_by_characters_but_never_empty() -> TestResult {
     assert!(page.returned > 0);
     assert!(page.returned < 40);
     assert_eq!(page.returned + page.remaining, 60);
-    assert!(serde_json::to_string(&page)?.chars().count() <= PAGE_CHARS + 1_000);
+    // Bytes, not characters: CJK digests must stay under the spill limit.
+    assert!(serde_json::to_string(&page)?.len() <= PAGE_BYTES + 1_000);
     Ok(())
 }
 
@@ -677,7 +684,7 @@ fn skill_prompt_contract_describes_tool_driven_search() -> TestResult {
     assert!(instructions.contains("since_days"));
     assert!(instructions.contains("next_cursor"));
     assert!(instructions.contains("untrusted historical data"));
-    assert!(instructions.contains("- <session_id> — <title> — <updated_at date>"));
+    assert!(instructions.contains("- <session_id> — <updated_at date> — <summary>"));
     assert!(!instructions.contains("--days"));
     Ok(())
 }

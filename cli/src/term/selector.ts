@@ -138,6 +138,12 @@ export interface SelectorState {
   /** Model selection and live background output use dedicated editor-replacement
    * presentations instead of the generic titled selector. */
   presentation?: 'model' | 'skill' | 'background-list' | 'background-output' | 'browser'
+  /** Browser rows drawn as one line each, `<full id>  <label>`, with no
+   *  details pane. Session lists use it; absent keeps two-line entries. */
+  rowLayout?: 'session-line'
+  /** Lines a `session-line` label may wrap onto; absent means one. Search
+   *  results give their summaries two. */
+  labelLines?: number
   /** Ephemeral state for an output detail: undefined offset follows the tail. */
   outputView?: {
     scrollOffset?: number

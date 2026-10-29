@@ -72,14 +72,16 @@ describe('repl resume helpers', () => {
     ])
     expect(items[0]).toMatchObject({ header: true, focusable: false, group: 'current-cwd' })
     expect(items[1]).toMatchObject({ id: sessions[0]!.session_id, group: 'current-cwd' })
-    // Sources differ across rows (`local` vs none), so the column is shown.
-    expect(items[1]!.detail).toContain('local')
+    // Sources differ across rows (`local` vs none), so the badge is shown.
+    expect(items[1]!.badge).toBe('local')
     expect(items[1]!.label).toBe('cwd session')
-    expect(items[1]!.detail).toContain('3 turns')
-    expect(items[1]!.detail).not.toContain('[3 turns]')
+    // One line per session: no metadata line, no side pane.
+    expect(items[1]!.detail).toBeUndefined()
+    expect(items[1]!.preview).toBeUndefined()
     expect(items[1]!.searchText).toContain('/work')
+    expect(items[1]!.searchText).toContain(sessions[0]!.session_id)
     expect(items[3]).toMatchObject({ id: sessions[1]!.session_id, group: 'other-cwd' })
-    expect(items[3]!.detail).toContain('/other')
+    expect(items[3]!.searchText).toContain('/other')
   })
 
   test('formatSessionItems marks other cwd as search-only when current cwd has sessions', () => {
@@ -108,7 +110,8 @@ describe('repl resume helpers', () => {
       { ...sessions[0]!, session_id: '01a069e9-4d40-7883-a488-480d11386234' },
       { ...sessions[0]!, session_id: '01a069f0-1234-7000-8000-000000000000' },
     ]
-    const labels = formatSessionItems(colliding, '/work')
+    // Only the shared list still shows short ids; session lines show full ids.
+    const labels = formatSessionItems(colliding, '/work', undefined, null, undefined, { cloudFirst: true })
       .filter(item => !item.header)
       .map(item => item.detail?.split(' · ').at(-1))
 
@@ -137,13 +140,13 @@ describe('repl resume helpers', () => {
     const items = formatSessionItems(withText, '/work', id => byId.get(id))
     expect(items[1]!.searchText).toContain('current full text body')
     expect(items[3]!.searchText).toContain('other full text body')
-    expect(items[3]!.contextPrefix).toBe('/other · ')
   })
 
-  test('session rows carry a preview for the side pane', () => {
-    const items = formatSessionItems(sessions, '/work')
-    expect(items[1]!.preview?.[0]).toBe('cwd session')
-    expect(items[0]!.preview).toBeUndefined()
+  test('only the shared list rows carry a preview for the side pane', () => {
+    expect(formatSessionItems(sessions, '/work')[1]!.preview).toBeUndefined()
+    const shared = formatSessionItems(sessions, '/work', undefined, null, undefined, { cloudFirst: true })
+    expect(shared[1]!.preview?.[0]).toBe('cwd session')
+    expect(shared[0]!.preview).toBeUndefined()
   })
 
   test('sessionPreviewLines states identity on one line', () => {
@@ -256,7 +259,7 @@ describe('repl resume helpers', () => {
   test('formatSessionItems hides the source column when every row shares one source', () => {
     const same = sessions.map(session => ({ ...session, source: 'tui' }))
     const items = formatSessionItems(same, '/work')
-    expect(items[1]!.detail).not.toContain('tui')
+    expect(items[1]!.badge).toBeUndefined()
     expect(items[1]!.label).toBe('cwd session')
   })
 
@@ -302,8 +305,16 @@ describe('repl resume helpers', () => {
     expect(sanitizeSessionTitle(null)).toBe('(untitled)')
   })
 
+  test('applySessionText only refreshes the searchable text of a one-line row', () => {
+    const [, row] = formatSessionItems(sessions, '/work')
+    const patched = applySessionText(row!, text(sessions[0]!, { search_text: 'full body' }), '/work')
+    expect(patched.searchText).toContain('full body')
+    expect(patched.preview).toBeUndefined()
+    expect(patched.label).toBe(row!.label)
+  })
+
   test('applySessionText fills the focused row and leaves its neighbours alone', () => {
-    const items = formatSessionItems(sessions, '/work')
+    const items = formatSessionItems(sessions, '/work', undefined, null, undefined, { cloudFirst: true })
     const loaded = text(sessions[0]!, {
       search_text: 'full body',
       first_prompt: 'ask',
@@ -326,7 +337,7 @@ describe('repl resume helpers', () => {
   })
 
   test('applySessionText shows the cwd only for a session from another directory', () => {
-    const items = formatSessionItems(sessions, '/work')
+    const items = formatSessionItems(sessions, '/work', undefined, null, undefined, { cloudFirst: true })
     const other = applySessionText(items[3]!, text(sessions[1]!, { user_prompts: ['ask'] }), '/work')
     expect(other.preview?.[1]).toEndWith(' \u00b7 /other')
   })
@@ -345,9 +356,10 @@ describe('repl resume helpers', () => {
     const open = items.find(item => item.id === sessions[0]!.session_id)!
     const other = items.find(item => item.id === sessions[1]!.session_id)!
     expect(open.status).toEqual({ text: '● open', tone: 'active' })
-    expect(other.status?.text).not.toContain('● open')
-    expect(open.preview?.[1]).toContain('this session')
-    expect(other.preview?.[1]).not.toContain('this session')
+    expect(other.status).toEqual({ text: 'just now', tone: 'muted' })
+    const pane = formatSessionItems(sessions, '/work', () => undefined, sessions[0]!.session_id, undefined, { cloudFirst: true })
+    expect(pane.find(item => item.id === sessions[0]!.session_id)?.preview?.[1]).toContain('this session')
+    expect(pane.find(item => item.id === sessions[1]!.session_id)?.preview?.[1]).not.toContain('this session')
   })
 
 })

@@ -64,21 +64,21 @@ test('list labels spell out who can read the session', () => {
 test('the sessions list shows a cloud column only when some row is on the cloud', () => {
   const rows = (items: ReturnType<typeof formatSessionItems>) => items.filter(item => item.id)
   const plain = rows(formatSessionItems([meta('a'), meta('b')], '/w'))
-  expect(plain[0]!.detail ?? '').not.toContain('☁')
+  expect(plain[0]!.badge).toBeUndefined()
   const synced = meta('a', { cloud: { visibility: 'private', synced_seq: 5, synced_at: '2024-01-03T00:00:00Z' } })
   const items = rows(formatSessionItems([synced, meta('b')], '/w', () => undefined, null,
     s => s.session_id === 'a' ? 'team' : ''))
   // Titles lead; provenance is compact metadata, not a padded column.
   expect(items[0]!.label).toBe('t-a')
   expect(items[1]!.label).toBe('t-b')
-  expect(items[0]!.detail).toContain(' · team · ')
-  expect(items[1]!.detail).not.toContain('team')
+  expect(items[0]!.badge).toBe('team')
+  expect(items[1]!.badge).toBeUndefined()
   expect(items[0]!.cloud).toBe(true)
   expect(items[1]!.cloud).toBeUndefined()
   // Remote rows name their origin so the user knows which machine they came from.
   const remoteRow = mergeRemoteSessions([], [remote('z', 4)])
   const remoteItems = formatSessionItems(remoteRow, '/w', () => undefined, null, () => 'private ⇣')
-  expect(remoteItems.find(item => item.id === 'z')?.detail).toContain('(macbook)')
+  expect(remoteItems.find(item => item.id === 'z')?.badge).toContain('(macbook)')
 })
 
 test('the shared list shows sessions from every cwd; resume keeps other cwds for search', () => {
@@ -90,7 +90,7 @@ test('the shared list shows sessions from every cwd; resume keeps other cwds for
   // /resume: other projects are reachable by search, not listed up front.
   expect(hidden(formatSessionItems([here, elsewhere], '/w'))).toEqual(['Other cwd', 'b'])
   // /share: everything shared is listed, with its cwd on the row.
-  const shared = formatSessionItems([here, elsewhere], '/w', () => undefined, null, () => 'team', { showOtherCwds: true })
+  const shared = formatSessionItems([here, elsewhere], '/w', () => undefined, null, () => 'team', { showOtherCwds: true, cloudFirst: true })
   expect(hidden(shared)).toEqual([])
   expect(shared.map(item => item.header ? item.label.split(' · ')[0] : item.id)).toEqual(['Current cwd', 'a', 'Other cwd', 'b'])
   expect(shared.find(item => item.id === 'b')?.detail).toContain('/home/ubuntu/other')
@@ -140,10 +140,10 @@ test('the share list leads with the link; the sessions list keeps it after the t
   expect(row?.detail).toEndWith(' · a · https://evot.ai/share/x')
   expect(row?.searchText).toContain('https://evot.ai/share/x')
   const [team] = formatSessionItems([meta('t', { cloud: { ...cloud, visibility: 'private', team: true, team_url: 'https://evot.ai/team/y' } })],
-    '/w', () => undefined, null, () => 'team').filter(item => item.id)
+    '/w', () => undefined, null, () => 'team', { cloudFirst: true }).filter(item => item.id)
   expect(team?.detail).toEndWith(' · https://evot.ai/team/y')
-  const [synced] = formatSessionItems([meta('s', { cloud: { ...cloud, visibility: 'private' } })], '/w', () => undefined, null, () => 'private')
-    .filter(item => item.id)
+  const [synced] = formatSessionItems([meta('s', { cloud: { ...cloud, visibility: 'private' } })], '/w', () => undefined, null, () => 'private',
+    { cloudFirst: true }).filter(item => item.id)
   expect(synced?.detail).toEndWith(' · s')
   expect(row?.hints?.map(hint => hint.action)).toContain('unshare')
   expect(applySessionText(row!, text, '/w', null, true).preview?.[3]).toBe('# Public link · anyone with it can read')

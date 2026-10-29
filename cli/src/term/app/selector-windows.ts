@@ -70,10 +70,13 @@ export function createResumeWindow(
   items: SelectorItem[],
   initialQuery?: string,
   listFocused = false,
+  detailPane = false,
 ): SelectorState {
   const state = createAppSelectorState('resume', RESUME_SELECTOR_TITLE, items, items, initialQuery)
   return {
     ...browseWindow(state, listFocused),
+    // The `/share` list keeps its pane: the link it is opened for lives there.
+    ...(detailPane ? {} : { rowLayout: 'session-line' as const }),
     ...(state.query.length === 0 && state.items.length === 0 && state.allItems.some(item => !item.header)
       ? { emptyMessage: listFocused
         ? 'No sessions in current cwd · press / to search all sessions'

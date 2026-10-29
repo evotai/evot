@@ -1,8 +1,9 @@
+import stringWidth from 'string-width'
 import type { SelectorState } from '../selector.js'
 import { selectorPreviewGeometry } from '../preview-scroll.js'
 import { splitPaneHints } from '../split-pane.js'
 import { CURSOR_MARKER } from '../render-frame.js'
-import { buildBrowseRow, buildSelectorHeader } from './selector-row.js'
+import { buildBrowseRow, buildSelectorHeader, buildSessionLineRow, SESSION_ID_COLUMN, sessionLineHeight } from './selector-row.js'
 import { selectorColumns, selectorHints, selectorSearch, selectorTitle } from './selector-chrome.js'
 import { scrollPreview } from './scroll-preview.js'
 import { confirmationHint } from './confirmation-hint.js'
@@ -13,8 +14,18 @@ import { finiteSize, truncateSpansToWidth } from './width.js'
 export function buildBrowseSelectorLines(state: SelectorState, columns: number, rows: number, active: boolean): string[] {
   const width = Math.max(1, finiteSize(columns, 80) - 1)
   const geometry = selectorPreviewGeometry(state, columns, rows)
-  const listWidth = geometry.paneWidth ? width - geometry.paneWidth - 4 : width
-  const listHeight = geometry.paneWidth ? geometry.height : Math.min(4, geometry.height)
+  // One-line session rows take the full width; there is no details pane.
+  const lineRows = state.rowLayout === 'session-line'
+  const paneWidth = lineRows ? 0 : geometry.paneWidth
+  const listWidth = paneWidth ? width - paneWidth - 4 : width
+  const listHeight = paneWidth || lineRows ? geometry.height : Math.min(4, geometry.height)
+  // Align labels after the ids in view. Ids longer than a UUID (some task
+  // runs) push only their own row, so one outlier cannot shove every label right.
+  let idWidth = 0
+  if (lineRows) {
+    for (const item of state.items) if (!item.header) idWidth = Math.max(idWidth, stringWidth(item.id ?? ''))
+    idWidth = Math.min(idWidth, SESSION_ID_COLUMN)
+  }
   const count = state.items.filter(item => !item.header).length
   const total = state.allItems.filter(item => !item.header).length
   const lines: StyledLine[] = [selectorTitle(state.title, state.query ? `${count} / ${total}` : `${count}`, width)]
@@ -28,7 +39,11 @@ export function buildBrowseSelectorLines(state: SelectorState, columns: number, 
   lines.push(line(plain('')))
 
   const selected = state.items[state.focusIndex]
-  const cost = (at: number) => state.items[at]?.header ? 1 : 2
+  const cost = (at: number) => {
+    const item = state.items[at]
+    if (!item || item.header) return 1
+    return lineRows ? sessionLineHeight(item, listWidth, idWidth, state.labelLines) : 2
+  }
   let start = Math.max(0, Math.min(state.scrollOffset, state.focusIndex))
   // Pixel/row budgeting instead of item count: two-line entries and headings
   // must both fit, even when the generic navigator uses a ten-item viewport.
@@ -42,14 +57,16 @@ export function buildBrowseSelectorLines(state: SelectorState, columns: number, 
     const item = state.items[end]!
     // Never leave a heading stranded at the bottom without its first entry.
     if (item.header && end + 1 < state.items.length && list.length + 1 + cost(end + 1) > listHeight) break
+    const highlighted = end === state.focusIndex
     list.push(...(item.header ? [buildSelectorHeader(item.label, item.headerCount)]
-      : buildBrowseRow(item, { highlighted: end === state.focusIndex, query: state.query }, listWidth)))
+      : lineRows ? buildSessionLineRow(item, { highlighted, query: state.query }, listWidth, idWidth, state.labelLines)
+        : buildBrowseRow(item, { highlighted, query: state.query }, listWidth)))
   }
   if (!state.items.length) list.push(line(dim(state.query ? 'No matches · Esc clears search' : state.emptyMessage ?? 'No items yet')))
   while (list.length < listHeight) list.push(line(plain('')))
-  const preview = selected?.preview ?? []
-  if (geometry.paneWidth) {
-    lines.push(...selectorColumns(list, scrollPreview(preview, geometry.paneWidth, listHeight, state.previewPane?.offset ?? 0), listWidth))
+  const preview = lineRows ? [] : selected?.preview ?? []
+  if (paneWidth) {
+    lines.push(...selectorColumns(list, scrollPreview(preview, paneWidth, listHeight, state.previewPane?.offset ?? 0), listWidth))
   } else {
     lines.push(...list)
     if (preview.length) lines.push(line(plain('')), ...scrollPreview(preview, width, geometry.height, state.previewPane?.offset ?? 0))

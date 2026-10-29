@@ -35,9 +35,15 @@ Respond in the language of the request. Start with one short summary line statin
 
 Then output one line per match in exactly this shape:
 
-- <session_id> — <title> — <updated_at date> — <one sentence describing the work and why it matches>
+- <session_id> — <updated_at date> — <summary>
 
-Use a concise single-line title and description, with no extra UUIDs or entries elsewhere. Nothing follows the result lines.
+Each result row shows only the summary, on one line beside the full session id. The user compares the rows side by side to pick the session to continue their current intent in, so write the summaries as a set that tells them apart:
+- Say what the session roughly did or produced, leading with what is unique to it, usually its deliverable or kind of work and the specific subject.
+- Leave out the topic every result shares; the user searched for it. No two summaries may start the same way.
+- Mention where it stopped only when that matters for picking it up again. Not a step-by-step log.
+- At most two terminal lines beside the id: about 200 columns, where a full-width character takes two. Use the room for concrete content, not filler.
+
+Write each summary in the language the user mainly wrote in during that session. No preamble such as "This session" or "The user", and do not restate the request. Keep each result on one line, with no extra UUIDs or entries elsewhere. Nothing follows the result lines.
 
 If no fetched session convincingly matches, say so, naming the range and coverage. If you did not widen the range, suggest a wider one in the user's own terms. End with exactly:
 

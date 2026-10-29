@@ -28,10 +28,10 @@ use crate::types::ListTranscriptEntries;
 use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 
-/// Characters of digest JSON per page. Well under the engine's spill
-/// threshold so results never get truncated or pushed to disk, and small
-/// enough that a few pages fit in a modest context window.
-pub const PAGE_CHARS: usize = 24_000;
+/// UTF-8 bytes of digest JSON per page. Measured in bytes because the
+/// engine spills tool results over `MAX_TOOL_RESULT_BYTES` (100 KB) to disk,
+/// and CJK text takes three bytes per character. Holds about seven digests.
+pub const PAGE_BYTES: usize = 80_000;
 /// Hard cap on sessions per page even when digests are tiny.
 pub const MAX_PAGE_SESSIONS: usize = 40;
 const DEFAULT_PAGE_SESSIONS: usize = 20;
@@ -197,18 +197,18 @@ impl SessionSearchTool {
         ranked
             .sort_by_key(|(order, item)| (std::cmp::Reverse(item.matched_keywords.len()), *order));
 
-        let mut chars = 1_000;
+        let mut bytes = 1_000;
         let mut index = cursor.min(ranked.len());
         let end = ranked.len();
         for (_, item) in ranked.drain(..).skip(cursor) {
             if page.sessions.len() >= limit {
                 break;
             }
-            let next_chars = serde_json::to_string(&item)?.chars().count() + 1;
-            if !page.sessions.is_empty() && chars + next_chars > PAGE_CHARS {
+            let next_bytes = serde_json::to_string(&item)?.len() + 1;
+            if !page.sessions.is_empty() && bytes + next_bytes > PAGE_BYTES {
                 break;
             }
-            chars += next_chars;
+            bytes += next_bytes;
             if !item.matched_keywords.is_empty() {
                 page.keyword_hits += 1;
             }

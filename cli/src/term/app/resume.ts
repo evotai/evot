@@ -306,13 +306,68 @@ const SESSION_HINTS = [
 const CLOUD_SESSION_HINTS = SESSION_HINTS.flatMap(hint =>
   hint.keys === 'd' ? [{ keys: 'u', action: 'unshare' }, hint] : [hint])
 
+/** One-line rows have no details pane, so `tab` offers nothing. */
+const LINE_SESSION_HINTS = SESSION_HINTS.filter(hint => hint.keys !== 'tab')
+const LINE_CLOUD_SESSION_HINTS = CLOUD_SESSION_HINTS.filter(hint => hint.keys !== 'tab')
+
 /** How the list shapes its rows beyond ordering. */
 export interface SessionListOptions {
   /** List other projects up front instead of hiding them behind search. The
    *  shared list does: a shared session is as likely to come from elsewhere. */
   showOtherCwds?: boolean
-  /** The `/share` list: every pane leads with where the session is shared. */
+  /** The `/share` list: every pane leads with where the session is shared.
+   *  It keeps the details pane, since the link lives there. */
   cloudFirst?: boolean
+}
+
+const AGE_RELATIVE_DAYS = 7
+
+/**
+ * Recent activity reads best as an age (`3h ago`); past a week a date is
+ * easier to place. The year shows only when it is not this one.
+ */
+export function sessionAge(iso: string, now = new Date()): string {
+  const date = new Date(iso)
+  if (isNaN(date.getTime())) return ''
+  const mins = Math.floor((now.getTime() - date.getTime()) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h ago`
+  if (mins < AGE_RELATIVE_DAYS * 24 * 60) return `${Math.floor(mins / (24 * 60))}d ago`
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const day = `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}-${day}`
+}
+
+/**
+ * One-line row: full session id and the line that identifies the session,
+ * the name the user chose or else the automatic title.
+ */
+function formatSessionLine(
+  s: SessionMeta,
+  text: SessionWithText | undefined,
+  open: boolean,
+  edge: string,
+  cloud: string,
+  showSource: boolean,
+): SelectorItem {
+  const badge = sessionSourceBadge(s.source)
+  const host = s.cloud?.origin_host && cloud.includes('⇣') ? ` (${s.cloud.origin_host})` : ''
+  const chosen = s.custom_title?.trim()
+  const label = (chosen || sanitizeSessionTitle(s.title)).replace(/\s+/g, ' ')
+  const marks = [`${cloud}${host}`, showSource ? badge : ''].filter(Boolean).join(' · ')
+  return {
+    label: `${edge}${label}`,
+    id: s.session_id,
+    renameTitle: s.custom_title ?? s.title ?? '',
+    hints: cloud ? LINE_CLOUD_SESSION_HINTS : LINE_SESSION_HINTS,
+    // When it last moved, at the end of the row; the open session says so instead.
+    status: open ? { text: '● open', tone: 'active' as const } : { text: sessionAge(s.updated_at), tone: 'muted' as const },
+    ...(marks ? { badge: marks } : {}),
+    ...(cloud ? { cloud: true } : {}),
+    searchText: `${s.session_id} ${s.custom_title ?? ''} ${s.title ?? ''} ${badge} ${text?.search_text
+      ?? `${s.cwd} ${s.source} ${s.provider ?? ''} ${s.model}`}`,
+  }
 }
 
 function formatSessionItem(
@@ -366,18 +421,29 @@ type SessionRowFormatter = (session: SessionMeta, otherCwd: boolean, edge: strin
 /**
  * Shared per-row rendering for every session list. Precomputes the list-wide
  * facts (id label width, mixed sources, cloud badges) once so the list shapes
- * below only decide ordering and grouping.
+ * below only decide ordering and grouping. The `/share` list keeps its
+ * details pane; every other list draws one line per session.
  */
 function sessionRowFormatter(
   sessions: SessionMeta[],
   sessionText: (sessionId: string) => SessionWithText | undefined,
   openSessionId: string | null | undefined,
   cloudBadge: (session: SessionMeta) => string,
-  cloudFirst = false,
+  options: SessionListOptions = {},
 ): SessionRowFormatter {
-  const labels = sessionIdLabels(sessions)
   const showSource = mixedSources(sessions)
   const badges = new Map(sessions.map(session => [session.session_id, cloudBadge(session)]))
+  if (!options.cloudFirst) {
+    return (session, _otherCwd, edge) => formatSessionLine(
+      session,
+      sessionText(session.session_id),
+      session.session_id === openSessionId,
+      edge,
+      badges.get(session.session_id) ?? '',
+      showSource,
+    )
+  }
+  const labels = sessionIdLabels(sessions)
   return (session, otherCwd, edge) => formatSessionItem(
     session,
     labels.get(session.session_id) ?? session.session_id,
@@ -387,14 +453,14 @@ function sessionRowFormatter(
     session.session_id === openSessionId,
     edge,
     badges.get(session.session_id) ?? '',
-    cloudFirst,
+    true,
   )
 }
 
 /**
  * The resume list. `sessionText` supplies whatever text has been loaded, so
- * one formatter covers the metadata-only first paint, the focused row whose
- * transcript just arrived, and the fully loaded catalog behind a typed filter.
+ * one formatter covers the metadata-only first paint and the fully loaded
+ * catalog behind a typed filter.
  */
 export function formatSessionItems(
   sessions: SessionMeta[],
@@ -404,23 +470,30 @@ export function formatSessionItems(
   cloudBadge: (session: SessionMeta) => string = () => '',
   options: SessionListOptions = {},
 ): SelectorItem[] {
-  const row = sessionRowFormatter(sessions, sessionText, openSessionId, cloudBadge, options.cloudFirst)
+  const row = sessionRowFormatter(sessions, sessionText, openSessionId, cloudBadge, options)
   return groupedSessionItems(sessions, currentCwd, row, options.showOtherCwds)
 }
 
 /**
  * Search results in ranked order. No cwd grouping and no search-only hiding:
  * a semantic hit from another workspace is the whole point of the query.
+ * Each row shows the summary the search model wrote for it, which describes
+ * the session better than its stored title or a chosen name.
  */
 export function formatRankedSessionItems(
   sessions: SessionMeta[],
-  currentCwd: string,
   sessionText: (sessionId: string) => SessionWithText | undefined = () => undefined,
   openSessionId?: string | null,
   cloudBadge: (session: SessionMeta) => string = () => '',
+  summaries: ReadonlyMap<string, string> = new Map(),
 ): SelectorItem[] {
   const row = sessionRowFormatter(sessions, sessionText, openSessionId, cloudBadge)
-  return sessions.map(session => row(session, session.cwd !== currentCwd, ''))
+  return sessions.map(session => {
+    const item = row(session, false, '')
+    const summary = summaries.get(session.session_id)
+    if (!summary) return item
+    return { ...item, label: summary, searchText: `${summary} ${item.searchText ?? ''}` }
+  })
 }
 
 /**
@@ -428,7 +501,8 @@ export function formatRankedSessionItems(
  *
  * Patching the single row keeps the other rows' object identity, which the
  * selector's lowercased-search cache is keyed on: rebuilding the whole list
- * would throw that away on every focus move.
+ * would throw that away on every focus move. One-line rows have no pane, so
+ * only their searchable text changes.
  */
 export function applySessionText(
   item: SelectorItem,
@@ -437,6 +511,9 @@ export function applySessionText(
   openSessionId?: string | null,
   cloudFirst = false,
 ): SelectorItem {
+  if (!item.preview) {
+    return { ...item, searchText: `${text.session_id} ${item.label} ${text.custom_title ?? ''} ${text.title ?? ''} ${text.search_text}` }
+  }
   return {
     ...item,
     searchText: `${text.custom_title ?? ''} ${text.title ?? ''} ${text.search_text}`,
