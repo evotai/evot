@@ -11,6 +11,9 @@ export interface WorkflowRuntime {
   queued: number
   background: number
   activities?: SuggestionWorkflow['runtime']['activities']
+  /** Host-only: a live tool call holds the turn on a background task. Never
+   * serialized; `waiting` alone also covers parked loops and idle tasks. */
+  toolWait?: boolean
 }
 export const IDLE_WORKFLOW: WorkflowRuntime = { execution: 'idle', mode: 'normal', queued: 0, background: 0 }
 export interface SuggestionSnapshot {
@@ -99,9 +102,12 @@ export class SuggestionContext {
     }
     const recovering = runtime.execution === 'idle' && !runtime.queued && !runtime.background && !runtime.activities?.length
       && (workflow.pending_tools > 0 || ['unfinished', 'interrupted', 'failed'].includes(this.turn))
+    // Stale pending calls from an interrupted turn must not qualify merely
+    // because an idle background task or parked loop also reads as waiting.
+    const waitingForTools = runtime.toolWait === true && workflow.pending_tools > 0
     return { messages, workflow, answered: this.hasAnswer,
       automatic: messages.some(message => message.role === 'user')
-        && (recovering || (this.replyAvailable && ['answered', 'unknown'].includes(this.turn) && messages.at(-1)?.role === 'assistant')),
+        && (recovering || waitingForTools || (this.replyAvailable && ['answered', 'unknown'].includes(this.turn) && messages.at(-1)?.role === 'assistant')),
     }
   }
 

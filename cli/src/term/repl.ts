@@ -107,7 +107,7 @@ import {
 import { handleSlashCommand } from './app/commands.js'
 import { askStateToResponse, prefixedAskLines } from './app/ask-user.js'
 import { RunOwnership } from './app/run-ownership.js'
-import { PromptSuggestion, SuggestionTicker, createSuggestionInput } from './app/suggestion.js'
+import { PromptSuggestion, SuggestionTicker, TaskWaitSuggestion, createSuggestionInput } from './app/suggestion.js'
 import { resolveComposerGuidance, allowedSuggestionCommand, type SuggestionTrigger } from './app/composer-guidance.js'
 import { PrivacyFeed } from './app/privacy-feed.js'
 import {
@@ -519,8 +519,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       && !editor.completion && !pendingImages.awaiting
   }
   function automaticSuggestionEligible(): boolean {
-    return !isLoading && (!loopSession.active || loopSession.waiting) && composerPolicy().allowSuggestion
-      && queuedUserMessages.length === 0 && queuedCompactionSubmissions.length === 0
+    // Run interaction distinguishes active work from a blocking tool wait;
+    // isLoading alone cannot, since both still own the same agent turn.
+    // A loop between its timer and its run is neither parked nor waiting.
+    return (isLoading || !loopSession.active || loopSession.waiting) && composerPolicy().allowSuggestion
   }
   function suggestionInventory(): CommandInventory {
     return {
@@ -565,6 +567,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     unauthorized: () => commitSystem('sys-suggestion-auth',
       chalk.dim('  Inline suggestions paused: the suggestion service rejected its key. /login refreshes it; ⇥ retries.')),
   })
+  const suggestionTaskWait = new TaskWaitSuggestion(suggestions)
   const suggestionInput = createSuggestionInput({
     controller: suggestions,
     eligible: suggestionInputReady,
@@ -1997,8 +2000,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function liveWorkflowRuntime(): WorkflowRuntime {
     const background = backgroundTerminals.runningProcesses()
     const loop = loopSession.snapshot
+    const toolWait = isLoading && runInteraction.snapshot(runInteractionInput()).kind === 'waiting-task'
     return {
-      execution: isLoading ? (['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
+      toolWait,
+      execution: isLoading ? (toolWait ? 'waiting'
+        : ['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
         : loop?.active || background.length > 0 ? 'waiting' : 'idle',
       mode: logMode ? 'log' : 'normal',
       queued: queuedUserMessages.length + queuedCompactionSubmissions.length,
@@ -2417,6 +2423,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   function refreshBackgroundProcesses(): void {
     backgroundTerminals.refresh()
+    // The native blocking-wait count is already polled here. Entering a wait
+    // offers steering without a final answer; leaving it cancels only that
+    // wait's automatic request, never explicit Tab assistance.
+    suggestionTaskWait.sync(runInteraction.snapshot(runInteractionInput()).kind === 'waiting-task')
     // Track the idle wait alongside the poll that discovers it. A live
     // background task will wake the agent when it finishes, so while one is
     // running the agent is genuinely parked rather than done.
@@ -2651,6 +2661,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         isLoading = false
         streamMachine = null
         stopSpinner()
+        // The run no longer holds a wait; do not leave its suggestion until the next poll.
+        suggestionTaskWait.sync(false)
         if (!completed) suggestions.cancelAutomatic()
         if (loopRun) loopSession.endRun(completed ? 'ok' : 'error')
         else if (completed && suggestionContext.hasAnswer) requestProductSuggestion('answer')

@@ -113,6 +113,53 @@ fn workflow_recovery_can_use_a_trailing_user_without_fabricating_an_assistant_an
 }
 
 #[test]
+fn automatic_tool_wait_can_use_a_user_goal_without_a_final_assistant_answer() -> TestResult {
+    let messages = vec![SuggestionMessage {
+        role: "user".into(),
+        text: "Run the benchmark and report the results".into(),
+    }];
+    let mut state = workflow()?;
+    state.session = "active".into();
+    state.last_turn = "unfinished".into();
+    state.pending_tools = 1;
+    state.runtime.execution = "waiting".into();
+    state.runtime.background_tasks = 1;
+    let mut hints = SuggestionHints {
+        workflow: Some(state),
+        ..Default::default()
+    };
+    assert!(!hints.is_explicit());
+    let config = prompt_config(&endpoint(), &messages, &hints).ok_or("missing tool wait prompt")?;
+    // Keep the actual user goal plus the prediction instruction, not a fabricated answer.
+    assert_eq!(config.messages.len(), 2);
+    assert!(config
+        .messages
+        .iter()
+        .all(|message| matches!(message, Message::User { .. })));
+    let instruction = match config.messages.last() {
+        Some(Message::User { content, .. }) => content.iter().find_map(|block| match block {
+            Content::Text { text } => Some(text),
+            _ => None,
+        }),
+        _ => None,
+    }
+    .ok_or("missing instruction")?;
+    assert_eq!(
+        workflow_facts(instruction)?,
+        serde_json::to_value(&hints.workflow)?
+    );
+    assert!(prompt_config(&endpoint(), &[], &hints).is_none());
+    let state = hints.workflow.as_mut().ok_or("missing workflow")?;
+    state.runtime.execution = "running".into();
+    assert!(prompt_config(&endpoint(), &messages, &hints).is_none());
+    let state = hints.workflow.as_mut().ok_or("missing workflow")?;
+    state.runtime.execution = "waiting".into();
+    state.pending_tools = 0;
+    assert!(prompt_config(&endpoint(), &messages, &hints).is_none());
+    Ok(())
+}
+
+#[test]
 fn workflow_request_preserves_legacy_fields_and_rejects_future_versions() -> TestResult {
     #[derive(serde::Deserialize)]
     struct LegacyRequest {

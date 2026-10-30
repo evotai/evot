@@ -19,18 +19,20 @@ function rendered(kind: RunInteractionState['kind'], suggestion = '') {
 }
 
 test('sampling and display share one state and mode matrix', () => {
-  for (const state of ['idle', 'waiting-loop', 'waiting-background'] as const) {
+  for (const state of ['idle', 'waiting-loop', 'waiting-background', 'waiting-task'] as const) {
     expect(policy(state).allowSuggestion).toBe(true)
     expect(policy(state, 'log').allowSuggestion).toBe(false)
   }
-  for (const state of ['active', 'retrying', 'compacting', 'local-operation', 'waiting-task'] as const) {
+  for (const state of ['active', 'retrying', 'compacting', 'local-operation'] as const) {
     for (const mode of ['normal', 'log'] as const) expect(policy(state, mode).allowSuggestion).toBe(false)
   }
   expect(policy('idle', 'normal', 1).allowSuggestion).toBe(false)
+  expect(policy('waiting-task', 'normal', 1).allowSuggestion).toBe(false)
 })
 
 test('waiting, compaction, retries and local operations describe actual input behavior', () => {
   expect(rendered('active')).toContain('Guide the agent while it works')
+  expect(rendered('waiting-task')).toContain('Guide the agent while it works')
   expect(rendered('compacting')).toContain('input queues for after compaction')
   expect(rendered('retrying')).toContain('input queues for recovery')
   expect(rendered('local-operation')).toContain('Local operation in progress')
@@ -44,6 +46,8 @@ test('ghost text never removes loop controls', () => {
   expect(loop).toContain('Run the targeted tests')
   expect(loop).toContain('esc twice to stop')
   expect(loop).toContain('/loop 15m')
+  expect(rendered('waiting-task', 'Show partial results')).toContain('Show partial results')
+  expect(rendered('active', 'stale suggestion')).not.toContain('stale suggestion')
   expect(rendered('retrying', 'stale suggestion')).not.toContain('stale suggestion')
   expect(rendered('compacting', 'stale suggestion')).not.toContain('stale suggestion')
 })

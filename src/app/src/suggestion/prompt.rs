@@ -75,11 +75,13 @@ pub fn prompt_config(
     }) {
         return None;
     }
-    let recovering = hints
-        .workflow
-        .as_ref()
-        .is_some_and(|workflow| workflow.recoverable());
-    if !hints.is_explicit() && !recovering && messages.last()?.role != "assistant" {
+    // Recovery and a live tool wait can both have a tool-only assistant turn.
+    // Use workflow evidence rather than inventing an authored answer.
+    let open_exchange = hints.workflow.as_ref().is_some_and(|workflow| {
+        workflow.recoverable()
+            || (workflow.runtime.execution == "waiting" && workflow.pending_tools > 0)
+    });
+    if !hints.is_explicit() && !open_exchange && messages.last()?.role != "assistant" {
         return None;
     }
     if messages
@@ -145,7 +147,7 @@ pub fn prompt_config(
     };
     let recent = recent_context(messages, budget)?;
     if !hints.is_explicit()
-        && ((!recovering && !recent.iter().any(|message| message.role == "assistant"))
+        && ((!open_exchange && !recent.iter().any(|message| message.role == "assistant"))
             || !recent.iter().any(|message| message.role == "user"))
     {
         return None;

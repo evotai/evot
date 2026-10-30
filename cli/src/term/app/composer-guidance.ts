@@ -1,6 +1,6 @@
 import { resolveCommand } from '../../commands/index.js'
 import type { RunInteractionState } from './run-interaction.js'
-export type SuggestionTrigger = 'answer' | 'resume' | 'mode_changed' | 'loop_waiting'
+export type SuggestionTrigger = 'answer' | 'resume' | 'mode_changed' | 'loop_waiting' | 'task_waiting'
 export type ComposerMode = 'normal' | 'log'
 export const MODE_HINTS = {
   normal: { hint: 'Enter a coding task or / for commands', shortHint: 'Enter a coding task' },
@@ -31,7 +31,7 @@ export function resolveComposerGuidance(input: {
   const base = MODE_HINTS[mode]
   const guidance: ComposerGuidance = {
     mode, state, placeholder: base.hint, shortPlaceholder: base.shortHint,
-    allowSuggestion: mode !== 'log' && ['idle', 'waiting-loop', 'waiting-background'].includes(state),
+    allowSuggestion: mode !== 'log' && ['idle', 'waiting-loop', 'waiting-background', 'waiting-task'].includes(state),
     allowedCommands: mode === 'normal' ? [] : ['/done'],
   }
   if (state === 'waiting-loop') {

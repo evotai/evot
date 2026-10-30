@@ -7,11 +7,12 @@ import { suggestionCommand } from './command.js'
 import { readSuggestion } from './request.js'
 import { SuggestionCache } from './cache.js'
 
-interface Intent { key: string; context: SuggestionSnapshot; draft: string; cursor: number }
+interface Intent { key: string; context: SuggestionSnapshot; draft: string; cursor: number; trigger?: SuggestionTrigger }
 
-/** Owns one cancellable side request and its result. Automatic triggers need
- * a completed answer; explicit Tab can follow interruption or start a new
- * session. Empty-composer batches survive temporary typing; draft completions
+/** Owns one cancellable side request and its result. It does not decide when
+ * a state begins; triggers call `start` and may withdraw only their own work.
+ * Explicit Tab can follow interruption or start a new session. Empty-composer
+ * batches survive temporary typing; draft completions
  * remain bound to their exact text and cursor. */
 export class PromptSuggestion {
   private generation = 0
@@ -73,9 +74,12 @@ export class PromptSuggestion {
     else this.cancel()
   }
 
-  /** Background task transitions only invalidate speculative suggestions. */
-  cancelAutomatic(): void {
-    if (!this.explicit) this.cancel()
+  /** Background task transitions only invalidate speculative suggestions.
+   * With a trigger, only automatic work started by that trigger is withdrawn. */
+  cancelAutomatic(trigger?: SuggestionTrigger): void {
+    if (this.explicit) return
+    if (trigger && this.intent?.trigger !== trigger) return
+    this.cancel()
   }
 
   /** Keys changed (login, model reload): automatic sampling may resume. */
@@ -83,21 +87,24 @@ export class PromptSuggestion {
     this.credentialsRejected = false
   }
 
-  start(trigger: SuggestionTrigger = 'answer'): void {
-    if (this.explicit && this.valid()) return
-    if (this.credentialsRejected) return
-    if (!this.host.eligible() || this.host.automaticEligible?.() === false || (this.host.draft?.() ?? '')) return
+  /** Returns whether this state is handled: sampled now, already sampled, or
+   * owned by explicit input. False means ineligible now; callers may retry. */
+  start(trigger: SuggestionTrigger = 'answer'): boolean {
+    if (this.explicit && this.valid()) return true
+    if (this.credentialsRejected) return false
+    if (!this.host.eligible() || this.host.automaticEligible?.() === false || (this.host.draft?.() ?? '')) return false
     const context = this.host.context()
-    if (!context.automatic || (trigger === 'answer' && !context.answered)) return
+    if (!context.automatic || (trigger === 'answer' && !context.answered)) return false
     const lastUser = context.messages.findLast(message => message.role === 'user')
-    if (trigger === 'answer' && lastUser?.text.trimStart().startsWith('/')) return
+    if (trigger === 'answer' && lastUser?.text.trimStart().startsWith('/')) return false
     const key = this.host.key()
     const attempt = JSON.stringify([key, trigger, context])
-    if (attempt === this.lastAutomaticAttempt) return
+    if (attempt === this.lastAutomaticAttempt) return true
     this.cancel()
     this.lastAutomaticAttempt = attempt
-    this.intent = { key, context, draft: '', cursor: 0 }
+    this.intent = { key, context, draft: '', cursor: 0, trigger }
     this.launch(false)
+    return true
   }
 
   /** Explicit requests need neither a draft nor a final assistant answer.
