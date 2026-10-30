@@ -19,7 +19,6 @@ fn mode_label(mode: ToolMode) -> &'static str {
     match mode {
         ToolMode::Interactive => "Interactive",
         ToolMode::Headless => "Headless",
-        ToolMode::Planning => "Planning",
         ToolMode::Readonly => "Readonly",
         ToolMode::Chat => "Chat",
     }

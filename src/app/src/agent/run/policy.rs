@@ -2,7 +2,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolAccess {
     Full,
-    Planning,
     Readonly,
     /// No model-callable tools at all: built-in, host, or run-scoped.
     None,

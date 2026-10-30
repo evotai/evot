@@ -29,8 +29,8 @@ accepted.
 
 The subject of hardening is one of:
 
-- the currently-proposed plan, strategy, or conclusion from the previous turn,
-  plan mode, or the user's message. This is the default subject for a bare
+- the currently-proposed plan, strategy, or conclusion from the previous turn
+  or the user's message. This is the default subject for a bare
   `/harden` request;
 - the current git changes, when the user explicitly asks to harden local work
   (for example, `harden changes` or `/harden changes`). Inspect staged and

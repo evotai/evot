@@ -270,12 +270,6 @@ fn interactive_mode_adds_language_section_only() {
 }
 
 #[test]
-fn planning_mode_adds_planning_section_only() {
-    let sections = dynamic_sections(&ctx(PromptMode::Planning));
-    assert_eq!(names(&sections), vec!["planning_mode"]);
-}
-
-#[test]
 fn headless_and_readonly_add_no_mode_section() {
     assert!(dynamic_sections(&ctx(PromptMode::Headless)).is_empty());
     assert!(dynamic_sections(&ctx(PromptMode::Readonly)).is_empty());

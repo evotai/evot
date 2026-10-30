@@ -5,6 +5,7 @@ export interface SuggestionImage { id: number; media_type: string; data: string 
 /** Evidence about an exchange, not a claim that the whole user goal is done. */
 export type SuggestionTurn = 'none' | 'unfinished' | 'interrupted' | 'failed' | 'answered' | 'unknown'
 export interface SuggestionTasks {
+  /** `plan` is retained for legacy payloads; current writers use checklists only. */
   source: 'checklist' | 'plan'
   pending: number
   in_progress: number
@@ -61,6 +62,7 @@ export interface SuggestionWorkflow {
   thread?: SuggestionExchange[]
   runtime: {
     execution: 'idle' | 'running' | 'waiting' | 'retrying'
+    /** `plan` is retained for legacy payloads; the CLI no longer enters it. */
     mode: 'normal' | 'plan' | 'log'
     queued_inputs: number
     background_tasks: number

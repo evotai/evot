@@ -27,7 +27,6 @@ function defaultInput(overrides: Partial<PromptVMInput> = {}): PromptVMInput {
     model: 'claude-sonnet',
     provider: '',
     thinkingLevel: '',
-    planning: false,
     logMode: false,
     dashboardUrl: null,
     exitHint: false,
@@ -131,12 +130,12 @@ describe('prompt editor', () => {
   })
 
   test('renders input and known command styling', () => {
-    const input = defaultInput({ lines: ['/plan remove unwraps'], cursorCol: 5, placeholder: false })
+    const input = defaultInput({ lines: ['/model sonnet'], cursorCol: 6, placeholder: false })
     // The cursor is mid-line, so the character it sits on becomes a block; the
     // rest of the text is contiguous.
-    expect(renderPlain(input)).toContain('/plan remove unwraps')
+    expect(renderPlain(input)).toContain('/model sonnet')
     // Known commands share the frame's brand hue rather than a fixed ANSI cyan.
-    expect(render(input)).toContain(chalk.bold(chalk.hex('#b5bcf9')('/plan')))
+    expect(render(input)).toContain(chalk.bold(chalk.hex('#b5bcf9')('/model')))
   })
 
   test('does not style unknown slash text as a command', () => {
@@ -477,11 +476,11 @@ describe('prompt frame', () => {
 
   test('an active mode colours its label only; rules and caret keep their tones', () => {
     const { accentHex, brandHex, subtleHex } = getTheme()
-    const rows = renderLines(defaultInput({ planning: true }))
-    const top = rows.find(row => stripAnsi(row).includes('(plan)'))
+    const rows = renderLines(defaultInput({ logMode: true }))
+    const top = rows.find(row => stripAnsi(row).includes('(log)'))
     expect(top).toBeDefined()
     // The mode word is the one accent-coloured thing on the rule.
-    expect(top).toContain(chalk.hex(accentHex)(' (plan) '))
+    expect(top).toContain(chalk.hex(accentHex)(' (log) '))
     expect(top).not.toContain(chalk.hex(accentHex)('──'))
     // Dashes on either side stay subtle, so the whole frame does not turn yellow
     // for a fact one word already states.
@@ -494,10 +493,8 @@ describe('prompt frame', () => {
   test('names the mode at the right end of the top rule, not just by hue', () => {
     // Colour alone fails on monochrome terminals and for colour-blind users.
     // Right-aligned so it does not compete with the caret for where reading starts.
-    const plan = renderPlain(defaultInput({ planning: true })).split('\n').find(row => row.includes('(plan)'))
-    expect(plan).toBe('─'.repeat(80 - ' (plan) '.length - 1) + ' (plan) ─')
-    expect(renderPlain(defaultInput({ logMode: true }))).toContain(' (log) ─')
-    expect(renderPlain(defaultInput({ logMode: true, planning: true }))).toContain(' (log · plan) ─')
+    const log = renderPlain(defaultInput({ logMode: true })).split('\n').find(row => row.includes('(log)'))
+    expect(log).toBe('─'.repeat(80 - ' (log) '.length - 1) + ' (log) ─')
   })
 
   test('pushes an unfocused draft into the background', () => {
@@ -536,14 +533,14 @@ describe('prompt frame', () => {
     const plain = renderPlain(defaultInput({
       columns: 60,
       rows: 20,
-      planning: true,
+      logMode: true,
       placeholder: false,
       lines: Array.from({ length: 12 }, (_, index) => `line ${index + 1}`),
       cursorLine: 11,
       cursorCol: 7,
     }))
     const top = plain.split('\n').find(row => row.includes('↑'))
-    expect(top).toMatch(/^── ↑ \d+ lines ─+ \(plan\) ─$/)
+    expect(top).toMatch(/^── ↑ \d+ lines ─+ \(log\) ─$/)
     expect(top!.length).toBe(60)
   })
 
@@ -551,10 +548,10 @@ describe('prompt frame', () => {
     const hint = (input: Partial<PromptVMInput>) =>
       interiorRows(defaultInput(input)).map(row => stripAnsi(row).replaceAll(CURSOR_MARKER, '')).find(row => row.startsWith('❭ '))
     expect(hint({})).toBe('❭ Enter a coding task or / for commands')
-    expect(hint({ planning: true })).toBe('❭ Describe what to plan · no edits · /done to return')
+    expect(hint({ logMode: true })).toBe('❭ Ask about these logs · /done to return')
     // While a turn runs, typing steers it: say so, whatever mode the next turn starts in.
     expect(hint({ busy: true })).toBe('❭ Guide the agent while it works')
-    expect(hint({ busy: true, planning: true })).toBe('❭ Guide the agent while it works')
+    expect(hint({ busy: true, logMode: true })).toBe('❭ Guide the agent while it works')
     expect(hint({ busy: true, queuedCount: 1 })).toBe('❭ 1 message queued · Ctrl+G to manage')
     expect(hint({ busy: true, queuedCount: 2 })).toBe('❭ 2 messages queued · Ctrl+G to manage')
     // A queue with nothing running is stale state, not a prompt to manage it.
@@ -837,7 +834,6 @@ describe('prompt overflow guards', () => {
 describe('prompt footer', () => {
   test('renders repository state and model identity', () => {
     const plain = renderPlain(defaultInput({
-      planning: true,
       logMode: true,
       provider: 'anthropic',
       thinkingLevel: 'xhigh',
@@ -845,9 +841,8 @@ describe('prompt footer', () => {
     }))
     // The top rule names the modes, so the footer drops its own prefix rather
     // than repeating the same words two rows apart.
-    expect(plain).toContain(' (log · plan) ─')
+    expect(plain).toContain(' (log) ─')
     expect(plain).not.toContain('[log]')
-    expect(plain).not.toContain('[plan]')
     expect(plain).toContain('/Users/test/project (main)')
     expect(plain).toContain('claude-sonnet • xhigh')
     expect(plain).not.toContain('@anthropic')
@@ -856,17 +851,17 @@ describe('prompt footer', () => {
   test('footer keeps the mode prefix when no border carries it', () => {
     // Below the rule threshold nothing above the footer names the mode, so
     // the footer stays authoritative.
-    const plain = renderPlain(defaultInput({ planning: true, logMode: true, rows: 9, columns: 160 }))
+    const plain = renderPlain(defaultInput({ logMode: true, rows: 9, columns: 160 }))
     expect(plain).not.toContain('╭')
-    expect(plain).toContain('[log] [plan]')
+    expect(plain).toContain('[log]')
   })
 
   test('footer keeps the mode prefix when asked directly, as overlays do', () => {
     // Selector and ask overlays replace the composer but keep the footer, so
     // the default must carry the mode.
-    const footer = blocksToLines(buildPromptFooterBlocks(defaultInput({ planning: true, columns: 160 })))
+    const footer = blocksToLines(buildPromptFooterBlocks(defaultInput({ logMode: true, columns: 160 })))
       .map(stripAnsi)[0]!
-    expect(footer).toContain('[plan]')
+    expect(footer).toContain('[log]')
   })
 
   test('labels disabled thinking', () => {

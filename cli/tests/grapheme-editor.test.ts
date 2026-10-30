@@ -33,7 +33,6 @@ function promptInput(text: string, cursorCol: number, columns = 20): PromptVMInp
     model: 'test-model',
     provider: '',
     thinkingLevel: '',
-    planning: false,
     logMode: false,
     dashboardUrl: null,
     exitHint: false,

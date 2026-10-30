@@ -91,11 +91,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
     assert!(
         matches!(turn.input.as_slice(), [evot_engine::Content::Text { text }] if text == "hello")
     );
-    for mode in [
-        ToolMode::Headless,
-        ToolMode::Interactive,
-        ToolMode::Planning,
-    ] {
+    for mode in [ToolMode::Headless, ToolMode::Interactive] {
         let prepared = assembler
             .build_turn(
                 &llm,
@@ -114,7 +110,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 },
             )
             .await?;
-        let interactive = matches!(mode, ToolMode::Interactive | ToolMode::Planning);
+        let interactive = matches!(mode, ToolMode::Interactive);
         assert_eq!(prepared.options.process_manager.is_some(), interactive);
         assert_eq!(prepared.options.limits.is_none(), interactive);
         assert!(

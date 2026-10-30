@@ -6,7 +6,7 @@ import { createInitialState } from '../src/term/app/state.js'
 function snapshot(): PromptSnapshot {
   return {
     editor: createEditorState(), session: createInitialState('shared', '/work'),
-    active: true, planning: false, logMode: false,
+    active: true, logMode: false,
     dashboardUrl: null, exitHint: false, columns: 80, rows: 24, gitBranch: 'main', backgroundProcessCount: 2,
     config: {
       provider: 'second', protocol: 'openai', envPath: '', hasApiKey: true, baseUrl: null, thinkingLevel: 'high',

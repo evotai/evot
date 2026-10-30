@@ -245,7 +245,6 @@ describe('formatSpinnerLine', () => {
       ['edit', 'Applying changes…'],
       ['write', 'Writing file…'],
       ['web_fetch', 'Fetching…'],
-      ['plan', 'Planning…'],
       ['skill', 'Loading skill…'],
       ['ask_user', 'Waiting for you…'],
       ['some_unknown_tool', 'Working…'],

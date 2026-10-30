@@ -3,16 +3,13 @@ use evot::agent::run::policy::ToolAccess;
 use evot::agent::ToolMode;
 
 #[test]
-fn interactive_presets_are_unbounded_and_can_background() {
-    for mode in [ToolMode::Interactive, ToolMode::Planning] {
-        let policy = mode.policy();
-        assert_eq!(policy.budget, ExecutionBudget::Unbounded);
-        assert!(policy.background_processes);
-        assert!(policy.host_tools);
-        assert!(policy.web_fetch);
-    }
-    assert_eq!(ToolMode::Interactive.policy().tools, ToolAccess::Full);
-    assert_eq!(ToolMode::Planning.policy().tools, ToolAccess::Planning);
+fn interactive_preset_is_unbounded_and_can_background() {
+    let policy = ToolMode::Interactive.policy();
+    assert_eq!(policy.budget, ExecutionBudget::Unbounded);
+    assert!(policy.background_processes);
+    assert!(policy.host_tools);
+    assert!(policy.web_fetch);
+    assert_eq!(policy.tools, ToolAccess::Full);
 }
 
 #[test]

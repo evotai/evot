@@ -18,7 +18,6 @@ describe('term commands', () => {
         { provider: 'p2', model: 'shared', spec: 'p2:shared' },
       ],
     },
-    planning: false,
   })
 
   test('/help opens overlay', () => {
@@ -26,9 +25,12 @@ describe('term commands', () => {
     expect(result.overlay?.kind).toBe('help')
   })
 
-  test('/plan toggles planning', () => {
-    const result = handleSlashCommand('/plan', mkCtx())
-    expect(result.planning).toBe(true)
+  test('/plan is rejected without changing conversation state', () => {
+    const ctx = mkCtx()
+    const result = handleSlashCommand('/plan', ctx)
+    expect(result.appState).toBe(ctx.appState)
+    expect(result.systemLines[0]?.text).toContain('Unknown command: /plan')
+    expect(result.overlay).toBeUndefined()
   })
 
   test('/model updates model and reports its resolved provider', () => {

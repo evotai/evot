@@ -14,7 +14,7 @@ pub struct PromptDump {
     pub evot_version: String,
     /// Working directory at dump time.
     pub cwd: String,
-    /// Active tool mode (e.g. "Interactive", "Planning", "Readonly").
+    /// Active tool mode (e.g. "Interactive", "Headless", "Readonly").
     pub mode: String,
     /// Model name evot would call.
     pub model: String,

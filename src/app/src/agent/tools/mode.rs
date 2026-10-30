@@ -8,7 +8,6 @@ use crate::agent::run::policy::ToolAccess;
 pub enum ToolMode {
     Interactive,
     Headless,
-    Planning,
     Readonly,
     /// Tool-free conversation for embedding clients that only want an answer.
     Chat,
@@ -30,13 +29,6 @@ impl ToolMode {
                 host_tools: true,
                 background_processes: false,
                 web_fetch: false,
-            },
-            Self::Planning => RunPolicy {
-                tools: ToolAccess::Planning,
-                budget: ExecutionBudget::Unbounded,
-                host_tools: true,
-                background_processes: true,
-                web_fetch: true,
             },
             Self::Readonly => RunPolicy {
                 tools: ToolAccess::Readonly,

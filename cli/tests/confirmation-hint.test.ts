@@ -70,7 +70,7 @@ test('delete confirmation colors the action and subtitle but not cancel; Esc cle
 
 test('background stop styling depends on state, not wording', () => {
   const input: PromptFooterVM = {
-    columns: 160, model: '', provider: '', thinkingLevel: '', planning: false, logMode: false,
+    columns: 160, model: '', provider: '', thinkingLevel: '', logMode: false,
     dashboardUrl: null, cwd: '/work', gitBranch: null, contextTokens: 0, contextWindow: 0,
     backgroundProcessCount: 2, backgroundPanelDownAvailable: true,
     backgroundStopHint: 'stop these jobs', backgroundStopPending: true,

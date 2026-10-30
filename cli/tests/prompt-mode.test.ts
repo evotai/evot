@@ -3,40 +3,26 @@ import { promptMode, promptModeLabels, promptModeStyle } from '../src/term/viewm
 import { getTheme } from '../src/render/theme/index.js'
 
 describe('promptMode', () => {
-  test('defaults when no mode is active', () => {
-    expect(promptMode({ planning: false, logMode: false })).toBe('default')
+  test('defaults when log mode is inactive', () => {
+    expect(promptMode({ logMode: false })).toBe('default')
+    expect(promptModeLabels({ logMode: false })).toEqual([])
   })
 
-  test('reports the single active mode', () => {
-    expect(promptMode({ planning: true, logMode: false })).toBe('plan')
-    expect(promptMode({ planning: false, logMode: true })).toBe('log')
-  })
-
-  test('log wins for hue and placeholder when both are set', () => {
-    // Log forks a separate agent, so it is the narrower description of what
-    // submitting will do.
-    expect(promptMode({ planning: true, logMode: true })).toBe('log')
-  })
-})
-
-describe('promptModeLabels', () => {
-  test('lists every active mode, so neither is silently dropped', () => {
-    expect(promptModeLabels({ planning: true, logMode: true })).toEqual(['log', 'plan'])
-    expect(promptModeLabels({ planning: true, logMode: false })).toEqual(['plan'])
-    expect(promptModeLabels({ planning: false, logMode: false })).toEqual([])
+  test('names the forked log conversation', () => {
+    expect(promptMode({ logMode: true })).toBe('log')
+    expect(promptModeLabels({ logMode: true })).toEqual(['log'])
   })
 })
 
 describe('promptModeStyle', () => {
-  test('recolours the frame away from brand only for real modes', () => {
+  test('uses the accent for log mode only', () => {
     const { brandHex, accentHex } = getTheme()
     expect(promptModeStyle('default').hex).toBe(brandHex)
-    expect(promptModeStyle('plan').hex).toBe(accentHex)
     expect(promptModeStyle('log').hex).toBe(accentHex)
   })
 
   test('every mode carries a short hint that is actually shorter', () => {
-    for (const mode of ['default', 'plan', 'log'] as const) {
+    for (const mode of ['default', 'log'] as const) {
       const { hint, shortHint } = promptModeStyle(mode)
       expect(hint.length).toBeGreaterThan(0)
       expect(shortHint.length).toBeGreaterThan(0)
@@ -44,7 +30,7 @@ describe('promptModeStyle', () => {
     }
   })
 
-  test('plan says what it withholds, not just that it is plan mode', () => {
-    expect(promptModeStyle('plan').hint).toContain('no edits')
+  test('log mode explains how to return to the main conversation', () => {
+    expect(promptModeStyle('log').hint).toContain('/done to return')
   })
 })

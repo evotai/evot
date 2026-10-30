@@ -3,8 +3,8 @@
 //! The engine builds one `HostTool` per [`HostToolSpec`] the host registers.
 //! Its `execute` forwards the call over the [`HostBridge`] and maps the
 //! [`HostToolResponse`] back into a [`ToolResult`]. This is the single,
-//! reusable mechanism behind every host-owned tool (ask_user, plan, and any
-//! future domain tool) — the engine holds no tool-specific logic.
+//! reusable mechanism behind every host-owned tool (ask_user and any future
+//! domain tool) — the engine holds no tool-specific logic.
 
 use async_trait::async_trait;
 

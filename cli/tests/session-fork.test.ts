@@ -63,7 +63,7 @@ describe('fork trail row', () => {
     const input: PromptVMInput = {
       lines: [''], cursorLine: 0, cursorCol: 0, active: true, completion: null, ghostHint: '',
       columns: 120, rows: 24, placeholder: true, exitHint: false,
-      model: 'sonnet', provider: '', thinkingLevel: '', planning: false, logMode: false,
+      model: 'sonnet', provider: '', thinkingLevel: '', logMode: false,
       dashboardUrl: null, cwd: '/work', gitBranch: 'main', contextTokens: 0, contextWindow: 0,
       backgroundProcessCount: 0, backgroundPanelDownAvailable: false, ...overrides,
     }

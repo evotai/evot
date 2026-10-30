@@ -24,7 +24,7 @@ function snapshot(columns: number, rows: number): ShellSnapshot {
     overlay: { kind: 'none' }, preview: null, commandFocused: false,
     prompt: promptFromSnapshot({
       editor: createEditorState(), session: createInitialState('model', '/work'),
-      active: true, planning: false, logMode: false, dashboardUrl: null,
+      active: true, logMode: false, dashboardUrl: null,
       exitHint: false, columns, rows, gitBranch: null, backgroundProcessCount: 0,
     }),
   }

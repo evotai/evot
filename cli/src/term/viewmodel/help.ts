@@ -33,7 +33,6 @@ const COMMANDS: Entry[] = [
   ['/model <name>', 'Switch model'],
   ['/resume, /sessions', 'Resume session or find one by description'],
   ['/new', 'Start new session'],
-  ['/plan', 'Toggle planning mode'],
   ['/compact', 'Compact session context'],
   ['/clear', 'Clear session context'],
   ['/env', 'Manage variables'],

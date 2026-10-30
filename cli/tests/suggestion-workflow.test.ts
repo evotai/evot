@@ -65,14 +65,13 @@ test('checklists ignore examples and quotes, retain completed counts, and bound 
   expect(flow.snapshot(idle).workflow.tasks).toBeUndefined()
 })
 
-test('plan and execution facts come from the current runtime, not saved task wording', () => {
+test('execution facts come from the current runtime, not saved task wording', () => {
   const flow = new SuggestionContext()
   flow.restore([user, reply('A worker was running yesterday', 'aborted')])
   expect(flow.snapshot(idle).workflow.runtime.background_tasks).toBe(0)
-  const active = flow.snapshot({ ...idle, execution: 'waiting', mode: 'plan', queued: 2, background: 1, plan: [{ text: 'Review before approval' }] }).workflow
-  expect(active.runtime).toEqual({ execution: 'waiting', mode: 'plan', queued_inputs: 2, background_tasks: 1 })
-  expect(active.tasks).toMatchObject({ source: 'plan', next: [{ text: 'Review before approval', status: 'pending' }] })
-  active.tasks?.next.push({ text: 'mutated', status: 'pending' })
+  const active = flow.snapshot({ ...idle, execution: 'waiting', queued: 2, background: 1 }).workflow
+  expect(active.runtime).toEqual({ execution: 'waiting', mode: 'normal', queued_inputs: 2, background_tasks: 1 })
+  expect(active.tasks).toBeUndefined()
   expect(flow.snapshot(idle).workflow.tasks).toBeUndefined()
 })
 

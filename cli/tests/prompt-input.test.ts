@@ -27,7 +27,6 @@ function defaultPromptVM(overrides?: Partial<PromptVMInput>): PromptVMInput {
     model: 'test-model',
     provider: '',
     thinkingLevel: '',
-    planning: false,
     logMode: false,
     dashboardUrl: null,
     exitHint: false,

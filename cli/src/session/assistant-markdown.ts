@@ -1,6 +1,6 @@
 /**
  * Shared helpers for locating the most recent assistant markdown source
- * from committed OutputLines. Used by /clip copy, plan review, and /log shot.
+ * from committed OutputLines. Used by /clip copy and /log shot.
  */
 
 export interface AssistantMarkdownLine {

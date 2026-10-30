@@ -11,7 +11,7 @@
  * Colour follows attention. The rules are separators, so they take the subtle
  * border hue and stay out of the way. The caret is where you type, so it
  * carries the brand colour. A mode label on the top rule takes the mode's own
- * hue, so "plan" reads as plan without the whole frame turning yellow.
+ * hue, so "log" reads as log without recolouring the whole frame.
  *
  * A frame owns one invariant: every rule it emits is exactly `columns` wide,
  * and every content row indents by the same prefix width. Callers get
@@ -34,7 +34,7 @@ export interface RuleLabels {
   /** Leads the rule: `── ↑ 3 lines ────`. Muted, like the rule itself. */
   lead?: string
   /**
-   * Trails the rule in parentheses: `──── (plan) ─`. Carries `hex`, the
+   * Trails the rule in parentheses: `──── (log) ─`. Carries `hex`, the
    * mode's own colour, so the mode is legible without recolouring the frame.
    */
   mode?: { text: string; hex: string }

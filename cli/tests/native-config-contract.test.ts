@@ -9,6 +9,38 @@ import { decodeConfigInfo } from '../src/native/contracts/config-info.js'
 // Explicit opt-in: run against a freshly built addon, never a developer's HOME.
 const integration = process.env.EVOT_TEST_NATIVE_CONTRACT === '1' ? describe : describe.skip
 integration('live NAPI ConfigInfo contract', () => {
+  test('retired planning modes fail before starting a run', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'evot-retired-planning-'))
+    let child: ReturnType<typeof Bun.spawn> | undefined
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    try {
+      seedSmokeHome(home)
+      child = Bun.spawn([process.execPath, '--eval', `
+        const { NapiAgent } = await import('./src/native/binding.js');
+        const agent = await NapiAgent.create(null, null);
+        for (const mode of ['planning', 'planning_interactive']) {
+          try {
+            await agent.query('must not run', null, mode, null, null);
+            throw new Error('retired mode started a run');
+          } catch (error) {
+            if (!String(error).includes('Planning mode has been removed')) throw error;
+          }
+        }
+        console.log('rejected');
+      `], { cwd: join(import.meta.dir, '..'), env: smokeEnvironment(home), stdout: 'pipe', stderr: 'pipe' })
+      const handle = child
+      deadline = setTimeout(() => handle.kill(), 10_000)
+      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+      expect(code, stderr).toBe(0)
+      expect(stdout.trim()).toBe('rejected')
+      expect(stdout + stderr).not.toContain('smoke-test-key')
+    } finally {
+      if (deadline) clearTimeout(deadline)
+      if (child) { child.kill(); await child.exited }
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 15_000)
+
   for (const hostTool of [false, true]) test(`real native streaming decodes ${hostTool ? 'host tool round-trip' : 'text completion'} using a local provider`, async () => {
     const home = mkdtempSync(join(tmpdir(), 'evot-run-contract-'))
     let requests = 0

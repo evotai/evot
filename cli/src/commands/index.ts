@@ -39,14 +39,11 @@ export const COMMANDS: SlashCommand[] = [
 
 /** Hidden commands — recognised but not shown in the bare `/` ghost hint */
 export const HIDDEN_COMMANDS: SlashCommand[] = [
-  // Planning mode is a toggle the model is steered into, not a destination the
-  // user reaches for from the prompt; /help still documents it.
-  { name: '/plan', description: 'Toggle planning mode', handler: 'builtin' },
   { name: '/restart', description: 'Restart evot in place', handler: 'builtin', minPrefixLength: 5 },
   { name: '/update', description: 'Update evot to latest version', handler: 'builtin' },
   { name: '/version', description: 'Show current version', handler: 'builtin', runSafe: true },
   { name: '/exit', aliases: ['/quit', '/q'], description: 'Exit the REPL', handler: 'builtin' },
-  { name: '/done', description: 'Exit log/plan mode', handler: 'builtin' },
+  { name: '/done', description: 'Exit log mode', handler: 'builtin' },
   { name: '/harden', description: 'Stress-test the previous plan or current changes', usage: '/harden [plan | changes | arch | subject]', handler: 'builtin' },
   { name: '/skill', description: 'Manage skills', usage: '/skill [list | install [name | source] | update [name] | remove <name>]', handler: 'builtin' },
   { name: '/clip', description: 'Clip last reply to the memory vault; all = distill session; copy = clipboard', usage: '/clip [all | copy]', handler: 'builtin' },

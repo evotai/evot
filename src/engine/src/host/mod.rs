@@ -1,7 +1,7 @@
 //! Host delegation: the engine's boundary to an out-of-core host process.
 //!
-//! The engine core is domain-agnostic. Capabilities like `ask_user`, `plan`,
-//! or any future domain tool are owned by the host (the TypeScript CLI). This
+//! The engine core is domain-agnostic. Capabilities like `ask_user` and any
+//! future domain tool are owned by the host (the TypeScript CLI). This
 //! module defines the single, reusable contract for that boundary:
 //!
 //! - [`HostToolSpec`] — how the host describes a tool it owns.

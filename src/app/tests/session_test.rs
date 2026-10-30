@@ -2057,73 +2057,21 @@ async fn stats_after_compact_filtered_on_resume() -> TestResult {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Planning mode — user input must not be polluted by planning prompt
-// ---------------------------------------------------------------------------
-
-/// The old bug: planning prompt was prepended to user input and stored as a
-/// single User transcript item. `first_user_title` then picked up the planning
-/// prompt as the session title. This test reproduces the old bug scenario and
-/// proves that a polluted User message yields a wrong title.
-#[tokio::test]
-async fn title_is_wrong_when_planning_prompt_pollutes_user_message() -> TestResult {
-    let dir = TempDir::new()?;
-    let storage = open_storage(&StorageConfig::fs(dir.path().to_path_buf()))?;
-
-    let session = Session::new(
-        "sess-old-bug".into(),
-        "/tmp".into(),
-        "claude-sonnet".into(),
-        storage.clone(),
-    )
-    .await?;
-
-    // Reproduce the OLD behavior: planning prompt + user input in one message.
-    let polluted = format!(
-        "You are in planning mode\n\nUser task:\n{}",
-        "refactor the auth module to use JWT"
-    );
-    session
-        .write_items(vec![TranscriptItem::User {
-            provenance: None,
-            text: polluted,
-            content: vec![],
-        }])
-        .await?;
-    session.save().await?;
-
-    let loaded = Session::open("sess-old-bug", storage.clone())
-        .await?
-        .ok_or_else(|| missing_error("missing session"))?;
-    let title = loaded
-        .meta()
-        .await
-        .title
-        .ok_or_else(|| missing_error("missing title"))?;
-
-    // Title starts with planning prompt — this is the bug we fixed.
-    assert!(title.starts_with("You are in planning mode"));
-    assert_ne!(title, "refactor the auth module to use JWT");
-    Ok(())
-}
-
-/// After the fix, planning prompt lives in system_prompt, not in the user
-/// message. When run_loop stores only the raw user input, `first_user_title`
-/// derives the correct title.
+/// Session titles come from raw user input, not assistant commentary.
 #[tokio::test]
 async fn title_is_correct_when_user_message_is_clean() -> TestResult {
     let dir = TempDir::new()?;
     let storage = open_storage(&StorageConfig::fs(dir.path().to_path_buf()))?;
 
     let session = Session::new(
-        "sess-plan".into(),
+        "sess-clean-title".into(),
         "/tmp".into(),
         "claude-sonnet".into(),
         storage.clone(),
     )
     .await?;
 
-    // The NEW behavior: only raw user input in the transcript.
+    // Store only raw user input in the transcript.
     session
         .write_items(vec![
             TranscriptItem::User {
@@ -2133,7 +2081,7 @@ async fn title_is_correct_when_user_message_is_clean() -> TestResult {
             },
             TranscriptItem::Assistant {
                 content: vec![AssistantBlock::Text {
-                    text: "planning".into(),
+                    text: "I will inspect the auth module.".into(),
                 }],
                 stop_reason: "stop".into(),
                 usage: UsageSummary::default(),
@@ -2146,9 +2094,9 @@ async fn title_is_correct_when_user_message_is_clean() -> TestResult {
         .await?;
     session.save().await?;
 
-    let loaded = Session::open("sess-plan", storage.clone())
+    let loaded = Session::open("sess-clean-title", storage.clone())
         .await?
-        .ok_or_else(|| missing_error("missing planning session"))?;
+        .ok_or_else(|| missing_error("missing session"))?;
     let title = loaded
         .meta()
         .await

@@ -3,15 +3,14 @@ import type { SuggestionExchange, SuggestionMessage, SuggestionTasks, Suggestion
 import { runContextEvent, transcriptContextEvents, type ContextEvent } from './events.js'
 import { recentHistory } from './history.js'
 import { SuggestionProgressLedger } from './progress.js'
-import { checklistTasks, taskLabel } from './tasks.js'
+import { checklistTasks } from './tasks.js'
 
 export interface WorkflowRuntime {
   execution: SuggestionWorkflow['runtime']['execution']
-  mode: SuggestionWorkflow['runtime']['mode']
+  mode: 'normal' | 'log'
   queued: number
   background: number
   activities?: SuggestionWorkflow['runtime']['activities']
-  plan?: readonly { text: string }[]
 }
 export const IDLE_WORKFLOW: WorkflowRuntime = { execution: 'idle', mode: 'normal', queued: 0, background: 0 }
 export interface SuggestionSnapshot {
@@ -82,11 +81,7 @@ export class SuggestionContext {
   }
 
   snapshot(runtime: WorkflowRuntime = IDLE_WORKFLOW): SuggestionSnapshot {
-    const plan = runtime.mode === 'plan' ? runtime.plan : undefined
-    const tasks = this.tasks ?? (plan?.length ? {
-      source: 'plan' as const, pending: plan.length, in_progress: 0, completed: 0,
-      next: plan.slice(0, 6).map(item => ({ text: taskLabel(item.text), status: 'pending' as const })),
-    } : undefined)
+    const tasks = this.tasks
     const progress = this.progress.snapshot()
     // Only exchanges older than the verbatim window add information.
     const messages = recentHistory(this.messages)

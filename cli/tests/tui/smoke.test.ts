@@ -1317,16 +1317,14 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('resume and plan transitions keep product guidance local and model input recent-only', async () => {
+  test('removed /plan leaves resumed suggestions in normal conversation mode', async () => {
     const contexts: string[] = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as { model: string; messages: { content: string }[] }
       expect(body.model).toBe('suggestion-fixture')
-      const instruction = suggestionInstructions(body)
-      contexts.push(instruction)
-      const text = contexts.length === 2 ? '/done' : 'Continue the login tests'
+      contexts.push(suggestionInstructions(body))
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0,
-        delta: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
+        delta: { role: 'assistant', content: 'Continue the login tests' }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
     let session: Session | undefined
@@ -1336,18 +1334,14 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write(`/resume ${SEEDED_SESSION_ID}\x0d`)
       await session.waitForScreen(/Continue the login tests\s+⇥/)
       expect(contexts).toHaveLength(1)
-      session.write('/plan\x0d')
-      const screen = await session.waitForScreen(/\/done\s+⇥/)
-      expect(screen).toContain('no edits')
-      expect(contexts[1]).toContain('"mode":"plan"')
       expect(contexts[0]).toContain('"mode":"normal"')
-      session.write('/done\x0d')
-      await session.waitForScreen(/Continue the login tests\s+⇥/)
-      expect(contexts).toHaveLength(3)
-      expect(contexts[2]).toBe(contexts[0])
+      session.write('/plan\x0d')
+      const screen = await session.waitForScreen(/Unknown command: \/plan/)
+      expect(screen).not.toContain('(plan)')
+      expect(screen).not.toContain('no edits')
       session.write('\x1b')
       await session.waitForScreen(/Enter a coding task/)
-      expect(contexts).toHaveLength(3)
+      expect(contexts).toHaveLength(1)
     } finally {
       if (session) await session.kill()
       await server.stop(true)
@@ -1786,53 +1780,31 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('Esc on an idle ask overlay releases the tab title for the next overlay', async () => {
-    // The plan review is an ask overlay with no stream behind it, exactly like
-    // the /task confirmations: Esc goes through close-overlay, not cancel-ask.
-    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => {
-      const chunk = {
-        id: 'fixture',
-        model: 'smoke-model',
-        choices: [{ index: 0, delta: { role: 'assistant', content: 'Plan:\n1. Read the config loader\n2. Add the missing field\n' }, finish_reason: 'stop' }],
-      }
+  test('an assistant plan stays ordinary conversation without a review overlay', async () => {
+    let requests = 0
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { tools?: unknown[] }
+      // Suggestions and title generation share the mock provider but must not
+      // count as conversation turns or put ghost text over the idle prompt.
+      const codingRun = Boolean(body.tools?.length)
+      if (codingRun) requests++
+      const content = !codingRun ? '[]' : requests === 1
+        ? 'Plan:\n1. Read the config loader\n2. Add the missing field\n'
+        : 'Validation complete'
+      const chunk = { id: 'fixture', model: 'smoke-model', choices: [{ index: 0,
+        delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
-    const titles = (raw: string) => [...raw.matchAll(/\x1b\]0;([^\x07]*)\x07/g)].map(match => match[1] ?? '')
-    // Title writes and frame writes are separate stdout writes, so a frame can
-    // be observed a tick before the title that accompanies it.
-    const waitForTitle = async (current: Session, prefix: string): Promise<string[]> => {
-      const deadline = Date.now() + 5_000
-      for (;;) {
-        const seen = titles(current.outputSince())
-        if (seen.at(-1)?.startsWith(prefix)) return seen
-        if (Date.now() >= deadline) throw new Error(`no title starting with ${JSON.stringify(prefix)}; saw ${JSON.stringify(seen)}`)
-        await Bun.sleep(50)
-      }
-    }
     let session: Session | undefined
     try {
       session = await startEvot(true, false, false, `http://127.0.0.1:${server.port}/v1`)
-      session.write('/plan\x0d')
-      await session.waitFor('plan mode', 5_000).catch(() => {})
-      session.checkpoint()
-      session.write('plan the config change\x0d')
-      await session.waitFor('Plan mode - what next?')
-      await waitForTitle(session, '? evot')
-
-      session.checkpoint()
-      session.write('\x1b')
-      await session.waitFor('Describe what to plan')
-      // Leaving the ask must hand the title back: no '?' may survive it.
-      await waitForTitle(session, '✳ evot')
-
-      // And a later overlay is free to repaint it. Before the fix the title
-      // stayed frozen on '?' for the rest of the process.
-      session.checkpoint()
-      session.write('/sessions\x0d')
-      await session.waitFor('smoke resume fixture')
-      session.write('\x1b')
-      await session.waitFor('Describe what to plan')
-      expect(titles(session.outputSince()).every(title => !title.startsWith('?'))).toBe(true)
+      session.write('Suggest steps for the config change\x0d')
+      const screen = await session.waitForScreen(/Add the missing field/)
+      expect(screen).not.toContain('Plan mode - what next?')
+      await session.waitForScreen(/Enter a coding task/)
+      session.write('Continue with validation\x0d')
+      await session.waitForScreen(/Validation complete/)
+      expect(requests).toBe(2)
     } finally {
       if (session) await session.kill()
       await server.stop(true)

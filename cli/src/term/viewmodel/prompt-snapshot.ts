@@ -13,7 +13,6 @@ export interface PromptSnapshot {
   session: Pick<AppState, 'model' | 'cwd' | 'sessionTokens'> & Partial<Pick<AppState, 'forkTrail' | 'cloudBadge'>>
   config?: ConfigInfo
   active: boolean
-  planning: boolean
   logMode: boolean
   dashboardUrl: string | null
   exitHint: boolean
@@ -58,7 +57,6 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     active: input.active,
     model: session.model,
     provider: providerDisplayName(active, config?.provider ?? ''),
-    planning: input.planning,
     logMode: input.logMode,
     dashboardUrl: input.dashboardUrl,
     exitHint: input.exitHint,
@@ -80,7 +78,7 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     busy: input.busy ?? false,
     guidance: resolveComposerGuidance({
       interaction: input.interaction ?? resolveRunInteraction({ active: input.busy ?? false, owner: null, loopParked: input.loopParked }),
-      mode: input.logMode ? 'log' : input.planning ? 'plan' : 'normal',
+      mode: input.logMode ? 'log' : 'normal',
       queuedCount: input.queuedCount,
     }),
     ...(input.suggestion ? { suggestion: input.suggestion } : {}),

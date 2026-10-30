@@ -1,10 +1,9 @@
 import { resolveCommand } from '../../commands/index.js'
 import type { RunInteractionState } from './run-interaction.js'
 export type SuggestionTrigger = 'answer' | 'resume' | 'mode_changed' | 'loop_waiting'
-export type ComposerMode = 'normal' | 'plan' | 'log'
+export type ComposerMode = 'normal' | 'log'
 export const MODE_HINTS = {
   normal: { hint: 'Enter a coding task or / for commands', shortHint: 'Enter a coding task' },
-  plan: { hint: 'Describe what to plan · no edits · /done to return', shortHint: 'Describe what to plan · /done' },
   log: { hint: 'Ask about these logs · /done to return', shortHint: 'Ask about logs · /done' },
 } as const
 
@@ -34,13 +33,11 @@ export function resolveComposerGuidance(input: {
     mode, state, placeholder: base.hint, shortPlaceholder: base.shortHint,
     allowSuggestion: mode !== 'log' && ['idle', 'waiting-loop', 'waiting-background'].includes(state),
     allowedCommands: mode === 'normal' ? [] : ['/done'],
-    operationHint: mode === 'plan' ? 'Plan only · no edits · /done to return' : undefined,
   }
   if (state === 'waiting-loop') {
     guidance.placeholder = 'Loop waiting · type to act now · /loop 15m to change pace · esc twice to stop'
     guidance.shortPlaceholder = 'Loop waiting · type · /loop 15m · esc twice'
     guidance.operationHint = 'esc twice to stop · type to act now · /loop 15m to change pace'
-    if (mode === 'plan') guidance.operationHint = 'esc twice to stop · no edits · /done · /loop 15m'
     guidance.allowedCommands.push('/loop 15m', '/loop stop')
   } else if (state === 'compacting') {
     guidance.placeholder = 'Compacting context · input queues for after compaction'

@@ -16,12 +16,10 @@ export interface CommandContext {
   agent: CommandModelClient
   appState: AppState
   configInfo?: ConfigInfo
-  planning: boolean
 }
 
 export interface CommandResult {
   appState: AppState
-  planning: boolean
   overlay?: OverlayState
   clearContext?: boolean
   newSession?: boolean
@@ -67,15 +65,6 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
 
     case '/restart':
       return { ...baseResult(ctx), restart: true }
-
-    case '/plan': {
-      const planning = !ctx.planning
-      return {
-        ...baseResult(ctx),
-        planning,
-        systemLines: [{ id: 'sys-p', kind: 'system', text: `  plan mode: ${planning ? 'on · no edits · /done to return' : 'off · normal conversation'}` }],
-      }
-    }
 
     case '/model': {
       if (args === 'n') {
@@ -134,7 +123,6 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
 function baseResult(ctx: CommandContext): CommandResult {
   return {
     appState: ctx.appState,
-    planning: ctx.planning,
     systemLines: [],
   }
 }

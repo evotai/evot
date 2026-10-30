@@ -42,7 +42,7 @@ describe('replaceOrPushStatusLine', () => {
   })
 
   test('does not treat other system ids as status slots', () => {
-    const lines = [sys('sys-plan', '  plan mode: on')]
+    const lines = [sys('sys-log-mode', '  log mode: on')]
     expect(replaceOrPushStatusLine(lines, sys('sys-model', '  Model → a'))).toBe(false)
     expect(lines).toHaveLength(2)
   })

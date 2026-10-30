@@ -107,11 +107,16 @@ describe('resolveCommand', () => {
   })
 
   test('returns ambiguous for multiple prefix matches', () => {
-    // `/s` still spans several commands. `/p` no longer does: it used to collide
-    // with the background `/ps`, and now resolves straight to `/plan`.
+    // `/s` still spans several commands. Retired /plan no longer owns /p.
     const result = resolveCommand('/s')
     expect(result.kind).toBe('ambiguous')
-    expect(resolveCommand('/p')).toEqual({ kind: 'resolved', name: '/plan', args: '' })
+    expect(resolveCommand('/p')).toEqual({ kind: 'unknown' })
+  })
+
+  test('routes removed /plan command to the unknown-command handler', () => {
+    expect(resolveCommand('/plan')).toEqual({ kind: 'unknown' })
+    expect(resolveCommand('/plan review changes')).toEqual({ kind: 'unknown' })
+    expect(isSlashCommand('/plan')).toBe(true)
   })
 
   test('routes removed /history command to the unknown-command handler', () => {

@@ -100,7 +100,7 @@ function overflowLabel(arrow: '↑' | '↓', count: number): string | undefined 
 /**
  * The top rule carries two labels at opposite ends: scroll overflow on the
  * left where reading starts, and the mode on the right in the mode's own hue
- * (`── ↑ 3 lines ──────── (plan) ─`). The mode is text, not just colour —
+ * (`── ↑ 3 lines ──────── (log) ─`). The mode is text, not just colour —
  * colour alone fails on monochrome terminals and for colour-blind users.
  */
 function topLabels(modes: string[], modeHex: string, overflow: string | undefined): RuleLabels {
@@ -118,7 +118,7 @@ function topLabels(modes: string[], modeHex: string, overflow: string | undefine
 function composerGuidance(input: PromptVMInput): ComposerGuidance {
   return input.guidance ?? resolveComposerGuidance({
     interaction: resolveRunInteraction({ active: input.busy ?? false, owner: null, loopParked: input.loopParked }),
-    mode: input.logMode ? 'log' : input.planning ? 'plan' : 'normal',
+    mode: input.logMode ? 'log' : 'normal',
     queuedCount: input.queuedCount,
   })
 }

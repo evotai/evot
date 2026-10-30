@@ -38,7 +38,6 @@ import { ScreenLog } from './diagnostics/screen-log.js'
 import { formatMemoryLine, memorySnapshot } from './diagnostics/memory.js'
 import { SessionHook } from '../session/hook.js'
 import { RendererTrace } from './diagnostics/renderer-trace.js'
-import { findLastAssistantMarkdown } from '../session/assistant-markdown.js'
 import { isSlashCommand, resolveCommand, buildHardenPrompt } from '../commands/index.js'
 import { BannerCache } from './banner-cache.js'
 import {
@@ -119,7 +118,6 @@ import {
   type AskUserParams,
   type HostToolExtension,
 } from './host-tools.js'
-import { extractPlanItems, type PlanModeItem } from './plan-mode.js'
 import { currentModelSpec, formatModelLabel, formatModelOptionLabel, hasPremiumModel, isCloudModel, modelOptions, modelSelectorItems, selectModelOption } from './app/provider.js'
 import chalk from 'chalk'
 import {
@@ -511,7 +509,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function composerPolicy() {
     const interaction = runInteraction.snapshot(runInteractionInput())
     return resolveComposerGuidance({ interaction,
-      mode: logMode ? 'log' : planning ? 'plan' : 'normal',
+      mode: logMode ? 'log' : 'normal',
       queuedCount: queuedUserMessages.length + queuedCompactionSubmissions.length })
   }
   // Explicit Tab can wait for referenced image bytes without blocking input.
@@ -542,7 +540,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const suggestions = new PromptSuggestion({
     // Only session/mode/composer changes invalidate explicit input assistance;
     // foreground run ownership and progress are deliberately not part of it.
-    key: () => `${suggestionContextId}:${planning}:${!!logMode}`,
+    key: () => `${suggestionContextId}:${!!logMode}`,
     eligible: suggestionInputReady,
     automaticEligible: automaticSuggestionEligible,
     context: () => suggestionContext.snapshot(liveWorkflowRuntime()),
@@ -587,7 +585,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   /** Fork ancestry of the current session, root → current; for exit hints. */
   let lastLineage: SessionMeta[] = []
   let nextBackgroundLineId = 1
-  let planning = false
   let logMode: import('../native/index.js').ForkedAgent | null = null
   let exitHint = false
   let exitHintTimer: ReturnType<typeof setTimeout> | null = null
@@ -618,10 +615,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   let explicitResumeSelectorGeneration = 0
   // Assigned after configInfo below, which decides the premium intake filter.
   let adSlot: AdSlotState
-  // Promise-based bridge for the ask-user overlay. Both the `ask_user` host
-  // tool and the plan-review flow present questions through the same overlay
-  // and await the user's answers here. Resolves with the collected answers, or
-  // null when the user cancels/skips.
+  // Promise-based bridge for ask-user overlays (host tools and task actions).
+  // Resolves with the collected answers, or null when the user cancels/skips.
   let pendingAsk: ((answers: AskUserAnswer[] | null) => void) | null = null
   let pendingTaskModel: ((selection: TaskModelSelection | null) => void) | null = null
 
@@ -658,7 +653,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     return new Promise(resolve => { pendingTaskModel = resolve })
   }
 
-  /** Resolve any awaiting ask/plan-review overlay as cancelled. Safe to call
+  /** Resolve any awaiting ask-user overlay as cancelled. Safe to call
    *  on every teardown path (interrupt, cancel, overlay close, re-present) so a
    *  suspended host-tool dispatch never strands the run loop. */
   function resolvePendingAsk() {
@@ -698,76 +693,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       })),
     )
 
-  // Plan-mode state (pi-style): `/plan` enters read-only planning, the model
-  // writes a `Plan:` section, and after the turn the extracted steps drive an
-  // Execute / Stay / Refine review. Progress is not rendered as a sticky
-  // checklist (it only advances on turn-end [DONE:n] tags and is easy to stick
-  // when a step is never tagged). The review overlay owns the plan display.
-  let planModeItems: PlanModeItem[] = []
-  let lastReviewedPlanMarkdown = ''
-
-  function latestAssistantMarkdown(): string | null {
-    return findLastAssistantMarkdown(compactLines)?.rawMarkdown ?? null
-  }
-
-  async function maybeReviewPlanAfterTurn(): Promise<void> {
-    if (!planning) return
-    const markdown = latestAssistantMarkdown()
-    if (!markdown || markdown === lastReviewedPlanMarkdown) return
-    const extracted = extractPlanItems(markdown)
-    if (extracted.length === 0) return
-
-    lastReviewedPlanMarkdown = markdown
-    planModeItems = extracted
-    renderer.requestRender()
-
-    const planList = planModeItems.map(item => `${item.step}. ☐ ${item.text}`).join('\n')
-    const answers = await presentAskQuestions([
-      {
-        header: 'Plan',
-        question: `Plan mode - what next?\n${planList}\n\nChoose an action, or type refinement feedback as custom text.`,
-        options: [
-          { label: 'Execute the plan', description: 'Leave plan mode and restore write tools.' },
-          { label: 'Stay in plan mode', description: 'Keep planning without executing yet.' },
-          { label: 'Refine the plan', description: 'Return to the prompt to enter refinement feedback.' },
-        ],
-      },
-    ], 'idle')
-    if (!answers || answers.length === 0) return
-
-    const choice = answers[0]!.answer
-    if (choice === 'Execute the plan') {
-      planning = false
-      commitSystem('sys-plan-exec', '  plan mode: off · executing plan')
-      const remaining = planModeItems
-        .map(item => `${item.step}. ${item.text}`)
-        .join('\n')
-      // Drop the sticky checklist for execution: it only advanced on turn-end
-      // [DONE:n] tags and stuck when a step was never tagged.
-      planModeItems = []
-      const execMessage = `Execute the plan.\n\nRemaining steps:\n${remaining}\n\nExecute each step in order.`
-      commitUserMessage(execMessage)
-      await runQuery(execMessage)
-      return
-    }
-
-    if (choice === 'Stay in plan mode' || choice === 'Skipped') {
-      commitSystem('sys-plan-stay', '  plan mode: on · no edits · /done to return')
-      requestProductSuggestion('mode_changed')
-      renderer.requestRender()
-      return
-    }
-
-    if (choice === 'Refine the plan') {
-      editor = insertText(clearEditor(editor), 'Refine the plan: ')
-      commitSystem('sys-plan-refine', '  plan mode: on · enter refinement feedback')
-      renderer.requestRender()
-      return
-    }
-
-    commitUserMessage(choice)
-    await runQuery(choice)
-  }
   let streamMachine: StreamMachineState | null = null
   // Messages sent mid-stream: held in the prompt zone (pi-style ❯ queue) and
   // committed to history when steering consumes them at the next safe boundary,
@@ -1731,7 +1656,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       session: appState,
       config: configInfo,
       active: overlay.kind === 'none',
-      planning,
       logMode: logMode !== null,
       dashboardUrl: serverState?.address ?? null,
       exitHint,
@@ -2076,9 +2000,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     return {
       execution: isLoading ? (['retrying', 'quota_waiting', 'outage_waiting'].includes(spinnerState.phase) ? 'retrying' : 'running')
         : loop?.active || background.length > 0 ? 'waiting' : 'idle',
-      mode: logMode ? 'log' : planning ? 'plan' : 'normal',
+      mode: logMode ? 'log' : 'normal',
       queued: queuedUserMessages.length + queuedCompactionSubmissions.length,
-      background: background.length, plan: planModeItems,
+      background: background.length,
       activities: activeWork(background, loop, loopSession.runInFlight),
     }
   }
@@ -2297,10 +2221,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       const { transcriptToMessages } = await import('../session/transcript.js')
       const messages = transcriptToMessages(transcript)
       suggestionContext.restore(transcript)
-      // A resumed session starts with no active plan; plan mode is re-entered
-      // via /plan on the live conversation.
-      planModeItems = []
-      lastReviewedPlanMarkdown = ''
       renderer.clearScreen()
       compactLines.length = 0
       expandedLines.length = 0
@@ -2585,7 +2505,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     let completed = false
     try {
       const stream = prebuiltStream
-        ?? await agent.query(text, sessionId ?? undefined, planning ? 'planning_interactive' : 'interactive', contentJson, hostToolExtension?.specsJson ?? HOST_TOOL_SPECS_JSON)
+        ?? await agent.query(text, sessionId ?? undefined, 'interactive', contentJson, hostToolExtension?.specsJson ?? HOST_TOOL_SPECS_JSON)
       if (!ownsRun(generation)) {
         stream.abort()
         return
@@ -2753,7 +2673,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // observe those values even if some background consumer repopulated a
     // snapshot while the run was active.
     invalidateResumeSessionCache()
-    await maybeReviewPlanAfterTurn()
   }
 
   function handleKey(event: KeyEvent) {
@@ -2964,7 +2883,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         return true
       }
       case 'exit-log-mode':
-        leaveSpecialMode()
+        leaveLogMode()
         renderer.requestRender()
         return true
       case 'selector-key':
@@ -3492,21 +3411,15 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     }
   }
 
-  function leaveSpecialMode(): void {
-    if (!logMode && !planning) {
+  function leaveLogMode(): void {
+    if (!logMode) {
       commitSystem('sys-mode', '  already in normal conversation mode')
       return
     }
     composerRevision++
     suggestions.cancel()
-    if (logMode) {
-      logMode = null
-      commitSystem('sys-log-exit', planning ? '  log mode: off · returned to plan mode · no edits' : '  log mode: off · normal conversation')
-    } else {
-      planning = false
-      planModeItems = []
-      commitSystem('sys-act', '  plan mode: off · normal conversation')
-    }
+    logMode = null
+    commitSystem('sys-log-exit', '  log mode: off · normal conversation')
     requestProductSuggestion('mode_changed')
   }
 
@@ -3535,7 +3448,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         agent,
         appState,
         configInfo,
-        planning,
       })
     } catch (err) {
       commitSystem('sys-command-err', renderErrorNotice(`Command failed: ${errorText(err)}`))
@@ -3543,7 +3455,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       return
     }
     appState = result.appState
-    planning = result.planning
     if (result.overlay) overlay = result.overlay
     if (result.clearContext) {
       composerRevision++
@@ -3567,8 +3478,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       }
       sessionHook.endSession('context_cleared')
       sessionId = null
-      planModeItems = []
-      lastReviewedPlanMarkdown = ''
       appState = { ...createInitialState(appState.model, agent.cwd) }
       gitInfo.setCwd(agent.cwd)
       renderer.clearScreen()
@@ -3598,8 +3507,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         stopSpinner()
         runStartedAt = null
       }
-      planModeItems = []
-      lastReviewedPlanMarkdown = ''
       // Leave the session unbound until the first real prompt. The query path
       // creates and returns the session id, so abandoning /new no longer leaves
       // an empty, untitled session in persistent storage or /resume.
@@ -3632,15 +3539,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       // The current-model suggestion route now carries this provider's key.
       suggestions.credentialsChanged()
       appState = { ...appState, model: agent.model }
-    }
-
-    if (name === '/plan') {
-      composerRevision++
-      suggestions.cancel()
-      requestProductSuggestion('mode_changed')
-      planModeItems = []
-      lastReviewedPlanMarkdown = ''
-      renderer.requestRender()
     }
 
     if (name === '/task') {
@@ -3752,7 +3650,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         }
       }
     } else if (name === '/done') {
-      leaveSpecialMode()
+      leaveLogMode()
     } else if (name === '/_mem') {
       commitSystem('sys-mem', `  ${memoryLine()}`)
     } else if (name === '/_dump') {
@@ -3760,7 +3658,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         const outcome = await agent.submit(
           `/_dump${args ? ' ' + args : ''}`,
           sessionId ?? undefined,
-          planning ? 'planning_interactive' : 'interactive',
+          'interactive',
         )
         if (outcome.kind === 'command') {
           const lines = (outcome.message ?? '').split('\n').map((line, i) => ({

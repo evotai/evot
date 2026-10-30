@@ -440,7 +440,7 @@ test('busy input never starts an early speculative sample', async () => {
 })
 
 test('local command allowlist governs both receipt and acceptance without model metadata', async () => {
-  const guidance = resolveComposerGuidance({ interaction: resolveRunInteraction({ active: false, owner: null, loopParked: true }), mode: 'plan' })
+  const guidance = resolveComposerGuidance({ interaction: resolveRunInteraction({ active: false, owner: null, loopParked: true }), mode: 'normal' })
   let actions = guidance.allowedCommands
   const h = harness({ allowsCommand: text => allowedSuggestionCommand(text, actions) })
   h.start(messages(), 'loop_waiting')

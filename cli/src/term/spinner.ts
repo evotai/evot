@@ -115,7 +115,6 @@ export function toolActionLabel(toolName: string): string {
     case 'write': case 'file_write': return 'Writing file'
     case 'bash': return 'Running command'
     case 'web_fetch': case 'webfetch': return 'Fetching'
-    case 'plan': return 'Planning'
     case 'skill': return 'Loading skill'
     case 'compact': return 'Compacting'
     case 'compact_prune': return 'Asking judge which tool calls still matter'

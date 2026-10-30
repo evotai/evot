@@ -88,7 +88,7 @@ impl NapiAgent {
     /// Send a prompt and get a stream of events.
     ///
     /// `host_specs_json` is a JSON array of host tool specs the TS side
-    /// registered (ask_user, plan, extension tools). When present and the mode
+    /// registered (ask_user, extension tools). When present and the mode
     /// permits, these are attached to the run and their execution is delegated
     /// back to JS via `host_tool_call` events.
     #[napi]
@@ -105,14 +105,12 @@ impl NapiAgent {
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
 
         let mode = match tool_mode.as_deref() {
-            Some("interactive") | Some("planning_interactive") => {
-                if tool_mode.as_deref() == Some("planning_interactive") {
-                    ToolMode::Planning
-                } else {
-                    ToolMode::Interactive
-                }
+            Some("interactive") => ToolMode::Interactive,
+            Some("planning" | "planning_interactive") => {
+                return Err(Error::from_reason(
+                    "Planning mode has been removed. Use interactive mode instead.",
+                ));
             }
-            Some("planning") => ToolMode::Planning,
             Some("readonly") => ToolMode::Readonly,
             _ => ToolMode::Headless,
         };

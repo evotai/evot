@@ -7,12 +7,12 @@ import { createEditorState } from '../src/term/input/editor.js'
 import { createInitialState } from '../src/term/app/state.js'
 
 const interaction = (kind: RunInteractionState['kind']) => ({ ...resolveRunInteraction({ active: false, owner: null }), kind })
-const policy = (kind: RunInteractionState['kind'], mode: 'normal' | 'plan' | 'log' = 'normal', queuedCount = 0) =>
+const policy = (kind: RunInteractionState['kind'], mode: 'normal' | 'log' = 'normal', queuedCount = 0) =>
   resolveComposerGuidance({ interaction: interaction(kind), mode, queuedCount })
 
-function rendered(kind: RunInteractionState['kind'], planning = false, suggestion = '') {
+function rendered(kind: RunInteractionState['kind'], suggestion = '') {
   const vm = promptFromSnapshot({ editor: createEditorState(), session: createInitialState('test', '/tmp'),
-    active: true, planning, logMode: false, dashboardUrl: null, exitHint: false,
+    active: true, logMode: false, dashboardUrl: null, exitHint: false,
     columns: 180, rows: 32, gitBranch: null, backgroundProcessCount: 0,
     interaction: interaction(kind), suggestion })
   return buildPromptBlocks(vm).flatMap(block => block.lines).map(line => line.spans.map(span => span.text).join('')).join('\n')
@@ -21,11 +21,10 @@ function rendered(kind: RunInteractionState['kind'], planning = false, suggestio
 test('sampling and display share one state and mode matrix', () => {
   for (const state of ['idle', 'waiting-loop', 'waiting-background'] as const) {
     expect(policy(state).allowSuggestion).toBe(true)
-    expect(policy(state, 'plan').allowSuggestion).toBe(true)
     expect(policy(state, 'log').allowSuggestion).toBe(false)
   }
   for (const state of ['active', 'retrying', 'compacting', 'local-operation', 'waiting-task'] as const) {
-    for (const mode of ['normal', 'plan', 'log'] as const) expect(policy(state, mode).allowSuggestion).toBe(false)
+    for (const mode of ['normal', 'log'] as const) expect(policy(state, mode).allowSuggestion).toBe(false)
   }
   expect(policy('idle', 'normal', 1).allowSuggestion).toBe(false)
 })
@@ -40,21 +39,17 @@ test('waiting, compaction, retries and local operations describe actual input be
   expect(policy('active', 'normal', 2).placeholder).toContain('Ctrl+G')
 })
 
-test('ghost text never removes loop controls or the plan no-edit warning', () => {
-  const loop = rendered('waiting-loop', false, 'Run the targeted tests')
+test('ghost text never removes loop controls', () => {
+  const loop = rendered('waiting-loop', 'Run the targeted tests')
   expect(loop).toContain('Run the targeted tests')
   expect(loop).toContain('esc twice to stop')
   expect(loop).toContain('/loop 15m')
-  const plan = rendered('idle', true, 'Review the design')
-  expect(plan).toContain('Review the design')
-  expect(plan).toContain('no edits')
-  expect(plan).toContain('/done')
-  expect(rendered('retrying', false, 'stale suggestion')).not.toContain('stale suggestion')
-  expect(rendered('compacting', false, 'stale suggestion')).not.toContain('stale suggestion')
+  expect(rendered('retrying', 'stale suggestion')).not.toContain('stale suggestion')
+  expect(rendered('compacting', 'stale suggestion')).not.toContain('stale suggestion')
 })
 
 test('only exact registered actions exposed by the current state are acceptable', () => {
-  const actions = policy('waiting-loop', 'plan').allowedCommands
+  const actions = policy('waiting-loop', 'log').allowedCommands
   for (const command of ['/done', '/loop 15m', '/loop stop']) expect(allowedSuggestionCommand(command, actions)).toBe(true)
   for (const command of ['/new', '/loop stop; rm -rf .', '/loop 15m extra', '/done\n/new']) {
     expect(allowedSuggestionCommand(command, actions)).toBe(false)
@@ -65,6 +60,6 @@ test('only exact registered actions exposed by the current state are acceptable'
 
 test('product guidance and allowed actions remain local state, independent of model input', () => {
   expect(policy('waiting-loop').allowedCommands).toEqual(['/loop 15m', '/loop stop'])
-  expect(policy('idle', 'plan').allowedCommands).toEqual(['/done'])
+  expect(policy('idle', 'log').allowedCommands).toEqual(['/done'])
   expect(policy('retrying').allowSuggestion).toBe(false)
 })

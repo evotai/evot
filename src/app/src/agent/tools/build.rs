@@ -106,14 +106,8 @@ pub(crate) fn build_tools(
         }
     }
 
-    if policy.tools == ToolAccess::Planning {
-        let msg = "Not allowed in planning mode. Use /act to switch.";
-        t.push(Box::new(EditFileTool::new().disallow(msg)));
-        t.push(Box::new(WriteFileTool::new().disallow(msg)));
-    } else {
-        t.push(Box::new(EditFileTool::new()));
-        t.push(Box::new(WriteFileTool::new()));
-    }
+    t.push(Box::new(EditFileTool::new()));
+    t.push(Box::new(WriteFileTool::new()));
 
     // evot-specific tools, appended after the pi-aligned core set.
     #[cfg(feature = "web")]

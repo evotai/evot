@@ -24,7 +24,6 @@ export interface PromptFooterVM {
   thinkingLevel: string
   /** The active model's effort ladder; with it the footer draws a gauge. */
   thinkingLevels?: readonly string[]
-  planning: boolean
   logMode: boolean
   dashboardUrl: string | null
   cwd: string
@@ -50,7 +49,7 @@ export interface PromptFooterVM {
 export interface PromptFooterOptions {
   /**
    * True when the composer border above already names the input mode. The
-   * footer then drops its `[plan]` prefix rather than repeating the same word
+   * footer then drops its `[log]` prefix rather than repeating the same word
    * two rows apart. It stays authoritative whenever nothing above it carries
    * the mode: overlays replace the composer, and short terminals drop the
    * border entirely.
@@ -166,9 +165,7 @@ function buildBackgroundChip(
 
 function buildFooter(input: PromptFooterVM, columns: number, modeShownAbove: boolean): ViewBlock {
   const cloud = input.cloudBadge ? `${input.cloudBadge} ` : ''
-  const modeWords = modeShownAbove
-    ? ''
-    : `${input.logMode ? '[log] ' : ''}${input.planning ? '[plan] ' : ''}`
+  const modeWords = !modeShownAbove && input.logMode ? '[log] ' : ''
   const mode = `${cloud}${modeWords}`
   const cwd = compactCwd(input.cwd)
   const contextPercent = input.contextWindow > 0
