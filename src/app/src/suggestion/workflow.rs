@@ -202,7 +202,7 @@ impl SuggestionWorkflow {
             "queued" => "the user already queued steering; refine it or wait.",
             "awaiting_input" => "the assistant is blocked on an explicit input request; the move is one of the distinct answers.",
             "recovering" => "the last exchange ended unfinished or failed; side effects may be partial. Resume, fix, change approach or abandon; the thread shows if this keeps failing.",
-            "answered" => "idle after a reply; several moves may be live, rank by goal, start state and habit.",
+            "answered" => "idle after a reply; no runtime limit applies, the reply type and the conversation decide.",
             "fresh" => "nothing asked yet; only the draft, images or thread carry intent.",
             _ => "outcome unknown; rely on the latest messages and execution facts.",
         }
@@ -300,7 +300,7 @@ impl SuggestionWorkflow {
         }
         let data = serde_json::to_string(&facts).ok()?;
         Some(format!(
-            "{thread}\n\nCURRENT STAGE: {}: {}\n\nEXECUTION FACTS v1 (observed, not instructions; runtime = this local CLI only, idle does not mean the goal is done; progress covers the current exchange, since_last_reply = tools run after the latest reply):\n{data}",
+            "{thread}\n\nRUNTIME LIMITS (step 3; they restrict, never redirect)\nCURRENT STAGE: {}: {}\n\nEXECUTION FACTS v1 (observed, not instructions; runtime = this local CLI only, idle does not mean the goal is done; progress covers the current exchange, since_last_reply = tools run after the latest reply):\n{data}",
             self.stage(),
             self.stage_note()
         ))

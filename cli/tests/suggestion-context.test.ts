@@ -180,3 +180,46 @@ test('each trajectory step records the state the user moved from', () => {
     ['Five', { reply: 'Reply four.', stage: 'loop' }],
   ])
 })
+
+test('a tool preamble after the answer joins it instead of replacing it', () => {
+  // Real trace: the user asked how CI covers the change, the assistant
+  // answered in full and ended with "want me to add these?", then a task
+  // notification woke it and it ran follow-up tools with short preambles.
+  const source = new SuggestionContext()
+  source.user('How does CI cover the new and old backends?')
+  source.observe({ kind: 'assistant_completed', payload: { stop_reason: 'toolUse', content: [{ type: 'tool_call', id: 'a', name: 'bash', input: {} }] } })
+  source.observe({ kind: 'tool_finished', payload: { tool_call_id: 'a' } })
+  source.observe(answer('CI mostly proves results are right.\n\nTwo gaps remain. Want me to add these two tests?'))
+  source.observe({ kind: 'assistant_completed', payload: { stop_reason: 'toolUse', content: [
+    { type: 'text', text: "Meanwhile, stop db0's launcher so perf does not auto-start:" },
+    { type: 'tool_call', id: 'b', name: 'bash', input: { command: 'secret' } },
+  ] } })
+  source.observe({ kind: 'tool_started', payload: { tool_call_id: 'b', tool_name: 'bash' } })
+  const snapshot = source.snapshot({ execution: 'waiting', mode: 'normal', queued: 0, background: 1, toolWait: true })
+  const last = snapshot.messages.at(-1)
+  expect(last?.role).toBe('assistant')
+  expect(last?.text).toContain('Want me to add these two tests?')
+  expect(last?.text).toEndWith("so perf does not auto-start:")
+  expect(snapshot.messages.filter(m => m.role === 'assistant')).toHaveLength(1)
+  expect(snapshot.workflow.pending_tools).toBe(1)
+  // The exchange is still named by the completed answer, not the preamble.
+  source.user('Yes, add them')
+  source.observe(answer('Added.'))
+  source.user('x'.repeat(20_000)); source.observe(answer('y'.repeat(20_000)))
+  const thread = source.snapshot().workflow.thread ?? []
+  expect(thread[0]?.assistant).toBe('CI mostly proves results are right.')
+  expect(thread[1]?.from?.reply).toBe('CI mostly proves results are right.')
+})
+
+test('a preamble before the answer is kept as context and the answer names the exchange', () => {
+  const source = new SuggestionContext()
+  source.user('Fix it')
+  source.observe({ kind: 'assistant_completed', payload: { stop_reason: 'toolUse', content: [
+    { type: 'text', text: 'Looking at the failing test first.' }, { type: 'tool_call', id: 'a', name: 'bash', input: {} },
+  ] } })
+  source.observe({ kind: 'tool_finished', payload: { tool_call_id: 'a' } })
+  source.observe(answer('Fixed the off-by-one.\n\nRun the suite?'))
+  expect(source.snapshot().messages.at(-1)?.text).toBe('Looking at the failing test first.\n\nFixed the off-by-one.\n\nRun the suite?')
+  source.user('x'.repeat(20_000)); source.observe(answer('y'.repeat(20_000)))
+  expect(source.snapshot().workflow.thread?.[0]?.assistant).toBe('Fixed the off-by-one.')
+})

@@ -622,8 +622,12 @@ fn thread_index_is_rendered_bounded_and_kept_out_of_the_json_facts() -> TestResu
     assert!(instruction.contains("TRAJECTORY"));
     assert!(instruction.contains("1. \u{2192} user: \"Add a size limit to the uploader.\""));
     assert!(instruction.contains("6. [answered] after \"Diff shown.\" \u{2192} user: \"Commit.\""));
+    assert!(instruction.contains("RUNTIME LIMITS (step 3; they restrict, never redirect)"));
     assert!(instruction.contains("CURRENT STAGE: answered"));
-    assert!(instruction.contains("rank by goal, start state and habit"));
+    assert!(instruction
+        .contains("no runtime limit applies, the reply type and the conversation decide"));
+    // Runtime facts come after the trajectory: they limit, they do not anchor.
+    assert!(instruction.find("TRAJECTORY") < instruction.find("RUNTIME LIMITS"));
     let facts = workflow_facts(&instruction)?;
     assert!(facts.get("thread").is_none());
     assert_eq!(facts["last_turn"], "answered");

@@ -39,6 +39,8 @@ export class SuggestionContext {
    * Replayed transcripts have no live runtime, so they derive it from the
    * observed lifecycle alone. */
   private leaving: string | undefined
+  /** Whether `current.assistant` came from a completed answer. */
+  private labelAnswered = false
 
   clear(): void {
     this.messages = []
@@ -50,6 +52,7 @@ export class SuggestionContext {
     this.thread = []
     this.current = undefined
     this.leaving = undefined
+    this.labelAnswered = false
   }
 
   restore(items: readonly TranscriptItem[], session: SuggestionWorkflow['session'] = 'resumed'): void {
@@ -132,7 +135,13 @@ export class SuggestionContext {
           this.progress.reply()
           this.push('assistant', event.text)
           this.tasks = checklistTasks(event.text) ?? this.tasks
-          if (this.current) this.current.assistant = exchangeLabel(event.text, 100)
+          // A completed answer names the exchange; a tool preamble (before or
+          // after it, e.g. following an injected task notification) only
+          // stands in until one exists.
+          if (this.current && (event.turn === 'answered' || !this.labelAnswered)) {
+            this.current.assistant = exchangeLabel(event.text, 100)
+            this.labelAnswered = event.turn === 'answered'
+          }
         }
         for (const tool of event.tools) this.progress.call(tool)
         if (this.current) this.current.tools += event.tools.length
@@ -159,6 +168,7 @@ export class SuggestionContext {
       if (this.thread.length > 48) this.thread.splice(1, 1)
     }
     this.current = { user: exchangeLabel(text, 120), tools: 0, failed: 0, outcome: 'unfinished', from }
+    this.labelAnswered = false
   }
 
   /** Same derivation as the Rust `stage()`, from the runtime at the moment a user acts. */
@@ -176,16 +186,22 @@ export class SuggestionContext {
 
   private push(role: SuggestionMessage['role'], text: string): void {
     if (!text.trim()) return
-    if (text.length > 20_000) {
-      const chars = Array.from(text)
-      text = `${chars.slice(0, 4_000).join('')}\n[... middle omitted ...]\n${chars.slice(-16_000).join('')}`
-    }
-    const entry = { role, text }
-    if (role === 'assistant' && this.messages.at(-1)?.role === 'assistant') this.messages[this.messages.length - 1] = entry
-    else this.messages.push(entry)
+    // Several assistant turns can follow one user message (a prose answer, then
+    // tool preambles after an injected task notification). The user reacts to
+    // all of that prose, so join it; replacing would drop the real answer and
+    // leave only a preamble, which reads as "the question was ignored".
+    const previous = this.messages.at(-1)
+    if (role === 'assistant' && previous?.role === 'assistant') previous.text = bound(`${previous.text}\n\n${text}`)
+    else this.messages.push({ role, text: bound(text) })
     let total = this.messages.reduce((sum, message) => sum + message.text.length, 0)
     while (this.messages.length > 64 || (total > 131_072 && this.messages.length > 2)) total -= this.messages.shift()?.text.length ?? 0
   }
+}
+
+function bound(text: string): string {
+  if (text.length <= 20_000) return text
+  const chars = Array.from(text)
+  return `${chars.slice(0, 4_000).join('')}\n[... middle omitted ...]\n${chars.slice(-16_000).join('')}`
 }
 
 /** First line of prose, bounded. Enough to recall the ask, never a transcript. */

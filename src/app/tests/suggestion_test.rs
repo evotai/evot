@@ -254,7 +254,7 @@ fn prompt_anchors_latest_user_language_even_when_assistant_changes_language() ->
 }
 
 #[test]
-fn every_prediction_mode_keeps_one_concern_and_advances_one_phase() -> TestResult {
+fn every_prediction_mode_decides_reply_type_then_conversation_then_runtime() -> TestResult {
     let messages = history(
         "Review the upload change",
         "Found a race, a missing test and a typo.",
@@ -268,18 +268,38 @@ fn every_prediction_mode_keeps_one_concern_and_advances_one_phase() -> TestResul
     for hints in [SuggestionHints::default(), draft("Fix the"), rewrite] {
         let config = prompt_config(&endpoint(), &messages, &hints).ok_or("no config")?;
         let text = instructions(&config).ok_or("missing instructions")?;
-        assert!(text.contains("each suggestion asks one question or requests one action"));
-        assert!(text.contains("Several live issues become separate alternatives"));
-        assert!(text.contains("WORK PHASES (not CURRENT STAGE"));
-        assert!(text.contains("use phase information the context carries"));
-        assert!(text.contains("a reply saying what is done and what comes next"));
-        assert!(text.contains("Never invent phases or assume a generic pipeline"));
-        assert!(text.contains("without such information, skip this"));
-        assert!(text.contains("Focus on the current phase first"));
-        assert!(text.contains("Only when it looks settled, place where the context has reached"));
-        assert!(text.contains("a question it raises"));
-        assert!(text.contains("one short question whether to start it, naming both phases"));
-        assert!(text.contains("One phase at a time"));
+        // The last reply is the anchor; the conversation corrects; runtime only limits.
+        let classify = text.find("1. CLASSIFY THE LAST REPLY").ok_or("no step 1")?;
+        let correct = text
+            .find("2. CORRECT WITH THE CONVERSATION")
+            .ok_or("no step 2")?;
+        let limits = text.find("3. APPLY RUNTIME LIMITS").ok_or("no step 3")?;
+        assert!(classify < correct && correct < limits);
+        // The last reply is the primary signal; earlier user questions are
+        // background and are never re-asked once the reply addresses them.
+        assert!(text.contains("it is the primary signal"));
+        assert!(text.contains("Earlier user messages are background only"));
+        assert!(text.contains("Never suggest re-asking or restating an earlier user question"));
+        assert!(text.contains("even when follow-up tool work came after the answer"));
+        assert!(text.contains("classify the answer, not the preamble"));
+        assert!(text.contains("reports a failure or surfaces an anomaly -> pursue that problem"));
+        assert!(text.contains("reports work in progress or started -> status or partial results"));
+        assert!(text.contains("They restrict, never redirect"));
+        // Conversation corrections each name their evidence.
+        assert!(text.contains("deferral: the user said"));
+        assert!(text.contains("phases: the context spells out phases"));
+        assert!(text.contains("settle the current phase first"));
+        assert!(
+            text.contains("Never invent phases or assume a generic pipeline; one phase at a time")
+        );
+        assert!(text.contains("habit: in TRAJECTORY"));
+        // One concern per suggestion applies in all modes.
+        assert!(
+            text.contains("ONE CONCERN each: one question or one action, never bundled or chained")
+        );
+        assert!(
+            text.contains("several live issues become separate alternatives, most pressing first")
+        );
     }
     Ok(())
 }
@@ -299,7 +319,7 @@ fn bounded_context_and_small_windows_fail_silently() -> TestResult {
         .filter_map(message_text)
         .map(evot_engine::context::estimate_tokens)
         .sum();
-    assert!(tokens < 4700);
+    assert!(tokens < 4900);
     for message in &config.messages[..config.messages.len() - 1] {
         assert!(messages
             .iter()
