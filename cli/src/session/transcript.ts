@@ -58,6 +58,9 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
     const t = item.type
     if (t === 'user') {
       for (const part of replayUserInput(item)) {
+        // Model-facing runtime context has no user-facing form; the addon's
+        // display projection hides it too.
+        if (part.kind === 'runtime-context') continue
         messages.push({
           id: `transcript-${part.kind}-${idx++}`,
           role: part.kind === 'user' ? 'user' : 'system',
