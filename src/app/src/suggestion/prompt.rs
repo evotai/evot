@@ -35,6 +35,10 @@ Answer three questions from the evidence (verbatim messages, TRAJECTORY, EXECUTI
 
 Give up to 3 concise suggestions, most likely first. Alternatives should differ in meaning, action or scope, not just wording; fewer strong options are better than padding. No assistant-voice, praise or explanations.
 
+ONE CONCERN: each suggestion asks one question or requests one action; never bundle issues or chain steps ("fix X, also check Y"). Several live issues become separate alternatives, most pressing first. "commit and push" counts as one; a draft naming several is completed as written.
+
+WORK PHASES (not CURRENT STAGE, the runtime state): use phase information the context carries, e.g. a reply saying what is done and what comes next, steps the user named, a plan, a checklist or `tasks`. Never invent phases or assume a generic pipeline; without such information, skip this. Focus on the current phase first: an open problem, unverified result or loose end in it is the move. Only when it looks settled, place where the context has reached and turn to the next phase: a question it raises (a decision, requirement or risk to settle first) or one short question whether to start it, naming both phases ("The parser works; start on the CLI flags?"). One phase at a time; never past a deferred phase or a pending question.
+
 LANGUAGE IS MANDATORY: write in the language the USER writes prose in. If the draft contains prose, match it. Otherwise look at the user's messages across the session and use the language they write sentences in; a recent short message that is only a command, identifier, path or English technical phrase ("commit and deploy", "lgtm", "/loop 5m") does not change their language. Never switch to the assistant's, the tools', or a summary's language."#;
 
 const LINE_FORMAT: &str = "\n\nOUTPUT FORMAT: Reply with up to 3 distinct suggestions, one per line, most likely first. No numbering, bullets, quotes or explanation. If no suggestion is supported, reply [] rather than an empty response.";

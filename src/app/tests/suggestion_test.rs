@@ -254,6 +254,37 @@ fn prompt_anchors_latest_user_language_even_when_assistant_changes_language() ->
 }
 
 #[test]
+fn every_prediction_mode_keeps_one_concern_and_advances_one_phase() -> TestResult {
+    let messages = history(
+        "Review the upload change",
+        "Found a race, a missing test and a typo.",
+    );
+    let rewrite = SuggestionHints {
+        explicit: true,
+        draft: Some("Fix the ".into()),
+        suffix: Some("race".into()),
+        ..Default::default()
+    };
+    for hints in [SuggestionHints::default(), draft("Fix the"), rewrite] {
+        let config = prompt_config(&endpoint(), &messages, &hints).ok_or("no config")?;
+        let text = instructions(&config).ok_or("missing instructions")?;
+        assert!(text.contains("each suggestion asks one question or requests one action"));
+        assert!(text.contains("Several live issues become separate alternatives"));
+        assert!(text.contains("WORK PHASES (not CURRENT STAGE"));
+        assert!(text.contains("use phase information the context carries"));
+        assert!(text.contains("a reply saying what is done and what comes next"));
+        assert!(text.contains("Never invent phases or assume a generic pipeline"));
+        assert!(text.contains("without such information, skip this"));
+        assert!(text.contains("Focus on the current phase first"));
+        assert!(text.contains("Only when it looks settled, place where the context has reached"));
+        assert!(text.contains("a question it raises"));
+        assert!(text.contains("one short question whether to start it, naming both phases"));
+        assert!(text.contains("One phase at a time"));
+    }
+    Ok(())
+}
+
+#[test]
 fn bounded_context_and_small_windows_fail_silently() -> TestResult {
     let mut messages = Vec::new();
     for _ in 0..30 {
