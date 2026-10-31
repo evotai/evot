@@ -14,9 +14,11 @@ import type { LoopTask } from './parser.js'
  */
 export const BUILTIN_LOOP_PROMPT = [
   'Keep the work in this conversation moving. On the first wakeup, read the',
-  'transcript and decide what the job is; write that in your cursor and hold',
-  'to it on later wakeups rather than re-deriving it from the checkout, which',
-  'other work may have moved. Don\'t switch a branch someone else is using.',
+  'transcript and decide what the job is; record it with `loop_plan` as the',
+  'rules describe, including every verification step this conversation',
+  'already ran for this work, and hold to it on later wakeups rather than',
+  're-deriving it from the checkout, which other work may have moved. Don\'t',
+  'switch a branch someone else is using.',
   '',
   'If the conversation is driving a pull request, move it toward merge:',
   '- Review feedback. Many repos use an automated reviewer such as Codex: it',
@@ -47,9 +49,9 @@ export const BUILTIN_LOOP_PROMPT = [
   'last timestamp, last reviewer comment, open items) so you can tell what',
   'changed.',
   '',
-  'Stop (`schedule_wakeup` with `stop: true`) when the job is done, the PR is',
-  'merged or closed, or you\'re confident things are settled and a wait found',
-  'nothing new. If unsure, wait once more rather than stop.',
+  'Stop (`schedule_wakeup` with `stop: true`) when every checklist item is',
+  'done, the PR is merged or closed, or you\'re confident things are settled',
+  'and a wait found nothing new. If unsure, wait once more rather than stop.',
 ].join('\n')
 
 export const BUILTIN_LOOP_TASK: LoopTask = { prompt: BUILTIN_LOOP_PROMPT, label: 'continue this work' }

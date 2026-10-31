@@ -15,6 +15,7 @@ import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
 import { formatCompactionCompleted } from './verbose.js'
 import { earlyWakeFromResult } from '../loop/early-wake.js'
+import { countPlan, formatPlanCounts, formatPlanRows, parsePlanRecord, planProgressFromResult } from '../loop/plan.js'
 import type { UICompaction, UIMessage, UIToolCall } from '../term/app/types.js'
 
 // ---------------------------------------------------------------------------
@@ -517,6 +518,7 @@ export function buildToolCard(call: UIToolCall, expanded?: boolean, _now = Date.
   // tool card duplicates that UI with an unhelpful `ready/running` card.
   if (isAskUserTool(call.name)) return []
   if (isScheduleWakeupTool(call.name)) return buildLoopCard(call, _now)
+  if (isLoopPlanTool(call.name)) return buildLoopPlanCard(call, expanded)
 
   const details = asDetails(call.details)
   const diff = typeof details.diff === 'string' ? details.diff : undefined
@@ -1232,6 +1234,37 @@ function isScheduleWakeupTool(name: string): boolean {
   return name.toLowerCase().replace(/_/g, '') === 'schedulewakeup'
 }
 
+function isLoopPlanTool(name: string): boolean {
+  return name.toLowerCase().replace(/_/g, '') === 'loopplan'
+}
+
+/**
+ * The loop's checklist as the host recorded it. The headline counts the
+ * buckets; the rows mark what moved this tick. Between the first plan and
+ * the stop, unchanged done rows fold into one count (ctrl+o expands) so a
+ * long loop's card stays the size of its open work.
+ */
+function buildLoopPlanCard(call: UIToolCall, expanded?: boolean): OutputLine[] {
+  const line = (text: string): OutputLine => ({ id: genId('loop-plan'), kind: 'tool', text })
+  if (call.status === 'queued' || call.status === 'running') {
+    return stampToolCard([line('▤ loop plan · recording…')], 'pending')
+  }
+  const record = typeof call.result === 'string' ? parsePlanRecord(call.result) : null
+  if (call.status === 'error' || !record) {
+    const lines = [line('✗ loop plan · not recorded')]
+    const detail = typeof call.result === 'string' ? call.result.trim() : ''
+    if (detail && !record) lines.push(line(`  ${detail}`))
+    return stampToolCard(lines, 'error')
+  }
+  const head = `▤ loop plan · ${formatPlanCounts(countPlan(record.items))}`
+  const rows = formatPlanRows(record.items, {
+    changed: record.first ? [] : record.changed,
+    fold: !record.first && !expanded,
+    foldHint: EXPAND_HINT,
+  })
+  return stampToolCard([line(head), ...rows.map(line)], 'success')
+}
+
 function buildLoopCard(call: UIToolCall, now: number): OutputLine[] {
   const args = call.args
   const reason = typeof args.reason === 'string' ? args.reason.trim() : ''
@@ -1249,9 +1282,10 @@ function buildLoopCard(call: UIToolCall, now: number): OutputLine[] {
     return stampToolCard(lines, 'error')
   }
 
+  const progress = typeof call.result === 'string' ? planProgressFromResult(call.result) : null
   const head = stop
     ? '⏹ loop · stopping'
-    : `◌ loop${quiet ? ' · quiet' : ''} · ${loopNextWakeup(args, call.startedAt ?? now)}`
+    : `◌ loop${quiet ? ' · quiet' : ''}${progress ? ` · ${progress}` : ''} · ${loopNextWakeup(args, call.startedAt ?? now)}`
   const lines = [line(head)]
   if (reason) lines.push(line(`  ${reason}`))
   // The host wrote the result; it knows which shells were running at the time.

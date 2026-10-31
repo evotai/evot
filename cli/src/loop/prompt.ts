@@ -12,12 +12,15 @@ export interface RunningBackgroundTask {
 }
 
 const SHARED_RULES = [
+  'On the first pass, before doing anything else, call `loop_plan` with the checklist of what "done" means for this task. Read the task text broadly, not literally: include every kind of verification this conversation already established for this work (for example, if earlier rounds ran correctness tests and a performance comparison, both are items), and name each one. The user reads this card to correct the scope early, so record it before the first action.',
+  'Call `loop_plan` again, with the whole list, whenever an item changes state (todo, doing, done, blocked, deferred) or a new item appears from a review finding or a failure. Never silently drop an item; mark it deferred with a one-line note the user can see. Do not repeat the checklist in your reply: the card shows it.',
   'Prefer event-driven waiting over polling: when something external must happen (CI, a review, a deploy), start one background shell command that blocks until the condition changes and exits. Its completion wakes you immediately, so you never need a short wakeup to check on it.',
   'Arm a watcher once. Each wakeup lists the background shells still running; trust that list, not your memory. Never report a watcher as running unless it appears there, and do not start a second one for the same condition.',
   'When woken by a background shell finishing, handle that event first, then decide whether to keep waiting.',
   'When nothing actionable happened, reply in one short line; do not restate the checks you performed.',
   'Keep a running cursor (last review id, last commit, last timestamp) in your reply so later wakeups can compare against it.',
   'Tell the user in one line when the loop is newly blocked on a decision only they can make, or when something landed that they would want to act on now.',
+  'Before `stop: true`, re-read the `loop_plan` checklist. Stop only when every item is done or deferred with its note shown; if any item is still todo or doing, keep working on it or keep waiting. If you are unsure whether an item belongs in scope, ask the user in one line and wait rather than stop. Never stop with a summary that admits something was left undone.',
 ]
 
 /** Largest delay that resumes on a warm cache; `clampDelaySeconds` snaps
@@ -103,6 +106,6 @@ export function buildLoopWakeupPrompt(
   return buildCommandPrompt({
     name: 'loop-wakeup',
     input: `loop wakeup #${snapshot.tick} (${time})${streak}`,
-    instructions: `/loop wakeup #${snapshot.tick} (${time})${streak}. ${describeBackground(background)} Continue: ${snapshot.task.label}${tail}`,
+    instructions: `/loop wakeup #${snapshot.tick} (${time})${streak}. ${describeBackground(background)} Continue: ${snapshot.task.label}. Pick up from your last checklist; do not narrow it.${tail}`,
   })
 }

@@ -1,4 +1,5 @@
 import type { LoopMode, LoopTask } from './parser.js'
+import { changedIndices, type PlanItem, type PlanRecord } from './plan.js'
 
 export const MIN_DELAY_SECONDS = 60
 export const MAX_DELAY_SECONDS = 3600
@@ -22,6 +23,8 @@ export interface LoopSnapshot {
   noopStreak: number
   /** When the current quiet streak began; null while it is zero. */
   streakStartedAt: number | null
+  /** The checklist the agent recorded with `loop_plan`; empty until then. */
+  plan: PlanItem[]
 }
 
 export interface ScheduleInput {
@@ -68,7 +71,7 @@ export class LoopController {
   }
 
   get snapshot(): LoopSnapshot | null {
-    return this.#state ? { ...this.#state } : null
+    return this.#state ? { ...this.#state, plan: this.#state.plan.map(item => ({ ...item })) } : null
   }
 
   get isDynamic(): boolean {
@@ -86,10 +89,24 @@ export class LoopController {
       tick: 0,
       noopStreak: 0,
       streakStartedAt: null,
+      plan: [],
     }
     this.#keepalivesUsed = 0
     this.#rescheduledThisRun = false
     this.#consecutiveErrors = 0
+  }
+
+  /** Record the agent's checklist. Returns what changed against the previous
+   *  plan so the card can mark this tick's movement; null when no loop runs.
+   *  The snapshot keeps a copy, so later mutation by the caller is harmless. */
+  setPlan(items: readonly PlanItem[]): PlanRecord | null {
+    const state = this.#state
+    if (!state?.active) return null
+    const first = state.plan.length === 0
+    const next = items.map(item => ({ ...item }))
+    const changed = first ? next.map((_, index) => index) : changedIndices(state.plan, next)
+    state.plan = next
+    return { tick: state.tick, items: next.map(item => ({ ...item })), changed, first }
   }
 
   stop(cause: StopCause): LoopSnapshot | null {

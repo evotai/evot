@@ -13,7 +13,8 @@ import {
   MAX_CONSECUTIVE_ERRORS,
   type StopCause,
 } from '../src/loop/controller.js'
-import { createLoopExtension, SCHEDULE_WAKEUP_SPEC } from '../src/loop/host-tool.js'
+import { createLoopExtension, LOOP_PLAN_SPEC, SCHEDULE_WAKEUP_SPEC } from '../src/loop/host-tool.js'
+import { changedIndices, formatPlanRows, parsePlanItems, parsePlanRecord, planProgressFromResult } from '../src/loop/plan.js'
 import { buildLoopStartPrompt, buildLoopWakeupPrompt } from '../src/loop/prompt.js'
 import type { HostToolExtension } from '../src/term/host-tools.js'
 import { LoopSession } from '../src/loop/session.js'
@@ -286,6 +287,124 @@ describe('schedule_wakeup host tool', () => {
   })
 })
 
+describe('loop plan', () => {
+  const items = [
+    { text: 'Codex review converged', state: 'done' },
+    { text: 'CI green on head', state: 'done' },
+    { text: 'db0 release build', state: 'doing' },
+    { text: 'TPC-DS main vs shared', state: 'todo' },
+    { text: 'soak run', state: 'deferred', note: 'this round asked for perf and correctness only' },
+  ]
+  const planCall = (list: unknown): HostToolCall => call({ items: list }, 'loop_plan')
+
+  test('the extension advertises loop_plan and claims both spellings', () => {
+    const { c } = controller()
+    const ext = createLoopExtension(c)
+    expect(JSON.parse(ext.specsJson).map((spec: { name: string }) => spec.name)).toEqual(['ask_user', 'loop_plan', 'schedule_wakeup'])
+    expect(ext.handles('loop_plan')).toBe(true)
+    expect(ext.handles('LoopPlan')).toBe(true)
+    expect(LOOP_PLAN_SPEC.description).toContain('before any other action')
+    expect(LOOP_PLAN_SPEC.description).toContain('Do not repeat the checklist in your reply')
+  })
+
+  test('items are validated; blocked and deferred need a note', () => {
+    expect(parsePlanItems([])).toEqual({ error: 'items must be a non-empty array.' })
+    expect(parsePlanItems([{ text: '', state: 'todo' }])).toEqual({ error: 'items[0].text is required.' })
+    expect(parsePlanItems([{ text: 'x', state: 'later' }])).toEqual({ error: 'items[0].state must be one of todo, doing, done, blocked, deferred.' })
+    expect(parsePlanItems([{ text: 'x', state: 'blocked' }])).toEqual({ error: 'items[0] is blocked: note (one line the user reads) is required.' })
+    expect(parsePlanItems([{ text: ' x ', state: 'todo', note: '' }])).toEqual({ items: [{ text: 'x', state: 'todo' }] })
+  })
+
+  test('the host records the plan, marks what moved, and the wakeup result carries progress', async () => {
+    const { c } = controller()
+    c.start({ kind: 'dynamic' }, userTask('p'), 0)
+    const ext = createLoopExtension(c)
+    expect((await ext.dispatch(planCall([{ text: 'x', state: 'maybe' }]))).is_error).toBe(true)
+
+    const first = parsePlanRecord((await ext.dispatch(planCall(items))).content[0]?.text ?? '')
+    expect(first?.first).toBe(true)
+    expect(first?.changed).toEqual([0, 1, 2, 3, 4])
+    expect(c.snapshot?.plan).toHaveLength(5)
+
+    const moved = items.map(item => item.text === 'db0 release build' ? { ...item, state: 'done' } : item)
+    const second = parsePlanRecord((await ext.dispatch(planCall(moved))).content[0]?.text ?? '')
+    expect(second?.first).toBe(false)
+    expect(second?.changed).toEqual([2])
+
+    const wake = await ext.dispatch(call({ delay_seconds: 270, reason: 'x', noop: false }))
+    expect(wake.content[0]?.text).toContain(' Plan: 3/5 done.')
+    expect(planProgressFromResult(wake.content[0]?.text ?? '')).toBe('3/5')
+  })
+
+  test('no plan recorded: the wakeup result says nothing about progress', async () => {
+    const { c } = controller()
+    c.start({ kind: 'dynamic' }, userTask('p'), 0)
+    const wake = await createLoopExtension(c).dispatch(call({ delay_seconds: 270, reason: 'x', noop: false }))
+    expect(wake.content[0]?.text).not.toContain('Plan:')
+  })
+
+  test('changed indices match by text, so reordering is not a change and rewording is', () => {
+    const before = [{ text: 'a', state: 'todo' }, { text: 'b', state: 'doing' }] as const
+    expect(changedIndices(before, [{ text: 'b', state: 'doing' }, { text: 'a', state: 'todo' }])).toEqual([])
+    expect(changedIndices(before, [{ text: 'a', state: 'done' }, { text: 'b2', state: 'doing' }])).toEqual([0, 1])
+  })
+
+  test('rows: glyph per state, notes inline, moved marker, done rows fold', () => {
+    const list = parsePlanItems(items)
+    if ('error' in list) throw new Error(list.error)
+    const plain = formatPlanRows(list.items).map(stripAnsi)
+    expect(plain).toEqual([
+      '  ✓ Codex review converged',
+      '  ✓ CI green on head',
+      '  ◐ db0 release build',
+      '  ○ TPC-DS main vs shared',
+      '  – soak run · deferred: this round asked for perf and correctness only',
+    ])
+    const folded = formatPlanRows(list.items, { changed: [1], fold: true, foldHint: '(ctrl+o)' }).map(stripAnsi)
+    expect(folded).toEqual([
+      '  ✓ 1 done (ctrl+o)',
+      '  ✓ CI green on head  ← this tick',
+      '  ◐ db0 release build',
+      '  ○ TPC-DS main vs shared',
+      '  – soak run · deferred: this round asked for perf and correctness only',
+    ])
+  })
+
+  test('the plan card counts the buckets and folds only after the first plan', async () => {
+    const { c } = controller()
+    c.start({ kind: 'dynamic' }, userTask('p'), 0)
+    const ext = createLoopExtension(c)
+    const base = { id: 't', name: 'loop_plan', status: 'success', startedAt: 0, durationMs: 1, args: { items } }
+    const card = (result: string, expanded?: boolean) =>
+      buildToolCard({ ...base, result } as never, expanded).map(line => stripAnsi(line.text))
+
+    const first = card((await ext.dispatch(planCall(items))).content[0]?.text ?? '')
+    expect(first[0]).toBe('▤ loop plan · 2/5 done · 1 doing · 1 todo · 1 deferred')
+    expect(first).toHaveLength(6)
+    expect(first.some(row => row.includes('← this tick'))).toBe(false)
+
+    const moved = items.map(item => item.text === 'db0 release build' ? { ...item, state: 'done' } : item)
+    const result = (await ext.dispatch(planCall(moved))).content[0]?.text ?? ''
+    const second = card(result)
+    expect(second[0]).toBe('▤ loop plan · 3/5 done · 1 todo · 1 deferred')
+    expect(second[1]).toBe('  ✓ 2 done (ctrl+o)')
+    expect(second[2]).toBe('  ✓ db0 release build  ← this tick')
+    expect(card(result, true)).toHaveLength(6)
+
+    expect(buildToolCard({ ...base, status: 'running' } as never).map(line => line.text)).toEqual(['▤ loop plan · recording…'])
+    const failed = buildToolCard({ ...base, status: 'error', result: 'items[0].text is required.' } as never).map(line => line.text)
+    expect(failed).toEqual(['✗ loop plan · not recorded', '  items[0].text is required.'])
+  })
+
+  test('the wakeup card shows progress when the result carries it', () => {
+    const base = { id: 't', name: 'ScheduleWakeup', status: 'success', startedAt: 0, durationMs: 1,
+      args: { delay_seconds: 270, reason: 'Waiting for db0', noop: false } }
+    const head = (result: string) => stripAnsi(buildToolCard({ ...base, result } as never)[0]?.text ?? '')
+    expect(head('Next wakeup in 4m30s at 00:11:01. Plan: 4/9 done.')).toMatch(/^◌ loop · 4\/9 · next wakeup in 4m 30s/)
+    expect(head('Next wakeup in 4m30s at 00:11:01.')).toMatch(/^◌ loop · next wakeup in 4m 30s/)
+  })
+})
+
 describe('early wake from a running background shell', () => {
   const shells = [{ taskId: '3ecbfd4f-1234-5678', command: 'sleep 30', elapsedMs: 5000 }]
 
@@ -402,6 +521,24 @@ describe('prompts', () => {
     }
   })
 
+  test('both modes scope the task as a checklist and gate stop on it', () => {
+    // A loop once stopped as "goal reached" after narrowing "run tests" to
+    // cargo test and skipping the performance comparison the conversation
+    // had been running. The scope must be written out first so the user can
+    // correct it, and stop must be checked against that list.
+    for (const mode of [{ kind: 'dynamic' } as const, { kind: 'fixed', intervalMs: 60_000 } as const]) {
+      const text = buildLoopStartPrompt(mode, 'watch')
+      expect(text).toContain('call `loop_plan` with the checklist')
+      expect(text).toContain('Read the task text broadly, not literally')
+      expect(text).toContain('every kind of verification this conversation already established')
+      expect(text).toContain('Before `stop: true`, re-read the `loop_plan` checklist')
+      expect(text).toContain('Never stop with a summary that admits something was left undone')
+    }
+    expect(SCHEDULE_WAKEUP_SPEC.description).toContain('only when every loop_plan item is done or deferred')
+    expect(BUILTIN_LOOP_PROMPT).toContain('record it with `loop_plan`')
+    expect(BUILTIN_LOOP_PROMPT).toContain('when every checklist item is')
+  })
+
   test('the start prompt states the live background list too', () => {
     // A loop started right after a restart must not inherit the old
     // process's watchers from the transcript; the first turn already says
@@ -417,7 +554,7 @@ describe('prompts', () => {
 
   const snapshot = (over: Partial<Parameters<typeof buildLoopWakeupPrompt>[0]> = {}) => ({
     active: true, mode: { kind: 'dynamic' } as const, task: userTask('x'.repeat(200)), startedAt: 0,
-    nextFireAt: null, reason: null, tick: 7, noopStreak: 0, streakStartedAt: null, ...over,
+    nextFireAt: null, reason: null, tick: 7, noopStreak: 0, streakStartedAt: null, plan: [], ...over,
   })
 
   test('wakeup prompt is short, tick-numbered, and states no watcher is running', () => {
