@@ -18,7 +18,7 @@ export const SCHEDULE_WAKEUP_SPEC = {
   label: 'Schedule Wakeup',
   description: [
     'Schedule when the current /loop resumes, or stop it. Write your status line first, then call this exactly once as the final action of the turn; the turn ends when it returns.',
-    'When a background shell exits you are re-invoked automatically, so the delay is only a fallback in case it hangs. Default to about 270s (5 minutes; 300s exactly is snapped down to stay on the warm prompt cache). Use 1200s or more only when the wait is known to be long (a CI pipeline, a human review, a multi-hour run) and a watcher is armed for it. For external state the host cannot see with no watcher on it, pick a delay matched to how fast that state actually changes.',
+    'When a background shell exits you are re-invoked automatically, so the delay is only a fallback in case it hangs. Use 270s (5 minutes; 300s exactly is snapped down to stay on the warm prompt cache) every time, for long waits too (a CI pipeline, a human review, a multi-hour run). Do not lengthen it on your own; only the user changes the pace.',
     'To end the loop, pass stop: true and omit the other fields; the loop stops immediately and does not fire again. Do this when the goal is reached, or when the loop cannot move further without the user.',
     'noop is required unless stop is true: true when you checked and nothing changed, false when you edited files, pushed, commented, advanced state, or surfaced a finding. Consecutive noop ticks are tracked as a streak and shown to you at the next wakeup, so a long quiet wait stays legible without re-reading the transcript.',
     'reason is required: one specific sentence ("watching CI run 39", not "waiting"). It is shown to the user.',
