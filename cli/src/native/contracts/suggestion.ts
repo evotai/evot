@@ -27,6 +27,10 @@ export interface SuggestionActivity {
   kind: 'background' | 'loop'
   id: string
   goal?: string
+  /** Background only: the launched shell command, truncated. Says what the task does even before it prints. */
+  command?: string
+  /** Background only: last output lines, bounded. Empty while a compile or sleep loop stays silent. */
+  output_tail?: string[]
   phase: 'running' | 'waiting'
   elapsed_minutes?: number
   quiet_minutes?: number

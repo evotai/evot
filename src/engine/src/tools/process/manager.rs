@@ -28,6 +28,8 @@ use super::types::ProcessSnapshot;
 use super::types::ProcessStatus;
 use super::types::ProcessSummary;
 use super::types::StartProcess;
+use super::types::SUMMARY_OUTPUT_BYTES;
+use super::types::SUMMARY_OUTPUT_LINES;
 use crate::types::ToolError;
 
 const IO_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -224,6 +226,26 @@ impl ProcessOutput {
 
     fn text(&self) -> String {
         String::from_utf8_lossy(&self.tail).to_string()
+    }
+
+    /// Trailing lines for a listing: scans only the last
+    /// `SUMMARY_OUTPUT_BYTES` of the tail, so cost does not grow with output.
+    fn recent_lines(&self) -> Vec<String> {
+        let start = self.tail.len().saturating_sub(SUMMARY_OUTPUT_BYTES);
+        let window = String::from_utf8_lossy(&self.tail[start..]);
+        let mut lines = window
+            .lines()
+            .map(str::trim_end)
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        // The first line of a mid-buffer window is usually cut; drop it.
+        if start > 0 && lines.len() > 1 {
+            lines.remove(0);
+        }
+        let keep = lines.len().saturating_sub(SUMMARY_OUTPUT_LINES);
+        lines.drain(..keep);
+        lines
     }
 
     fn total_lines(&self) -> usize {
@@ -964,6 +986,7 @@ impl ProcessTask {
             task_id: self.id.clone(),
             command: self.command.clone(),
             description: self.description.clone(),
+            recent_output: output.recent_lines(),
             quiet_for: self.quiet_for(&state, &output),
             cwd: self.cwd.clone(),
             output_path: self.output_path.clone(),

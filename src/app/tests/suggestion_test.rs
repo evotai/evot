@@ -283,11 +283,14 @@ fn every_prediction_mode_decides_reply_type_then_conversation_then_runtime() -> 
         assert!(text.contains("even when follow-up tool work came after the answer"));
         assert!(text.contains("classify the answer, not the preamble"));
         // An already-diagnosed and restarted failure is not a topic to probe;
-        // suggestions stay on the session goal and may be none while waiting.
+        // suggestions stay on the session goal; while work runs, a progress
+        // check ranks first and [] is reserved for a truly idle session.
         assert!(text.contains("if the reply already explains the cause and has restarted or fixed it, there is nothing left to probe"));
         assert!(text.contains("STAY ON THE GOAL"));
         assert!(text.contains("probing it is drift unless it blocks the goal"));
-        assert!(text.contains("waiting is the natural move: return []"));
+        assert!(text.contains("a short progress check is the natural move"));
+        assert!(text.contains("return [] only when nothing runs and nothing needs steering"));
+        assert!(text.contains("a progress check ranks first"));
         assert!(
             text.contains("reports a failure or surfaces an anomaly -> if unexplained, pursue it")
         );

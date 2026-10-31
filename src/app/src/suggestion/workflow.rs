@@ -105,6 +105,10 @@ pub struct SuggestionActivity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_tail: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_minutes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quiet_minutes: Option<u64>,
@@ -130,6 +134,20 @@ fn read_version<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8,
         )));
     }
     Ok(version)
+}
+
+/// Like `limit`, but keeps line breaks: a script's structure is its meaning.
+fn limit_lines(text: &mut String, lines: usize, chars: usize) {
+    *text = text
+        .lines()
+        .map(|line| line.chars().filter(|c| !c.is_control()).collect::<String>())
+        .filter(|line| !line.trim().is_empty())
+        .take(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .chars()
+        .take(chars)
+        .collect();
 }
 
 fn limit(text: &mut String, chars: usize) {
@@ -197,7 +215,7 @@ impl SuggestionWorkflow {
     fn stage_note(&self) -> &'static str {
         match self.stage() {
             "loop" => "a /loop is active (see activities). Waiting between checks is normal; ask what it found, adjust or stop it, never restart it.",
-            "background" => "a background task is running (see activities). If the reply just reported its status, do not ask again; steer it, work on the goal meanwhile, or wait ([]). Silence is not failure, do not re-run it.",
+            "background" => "a background task is running (see activities). Read three things together: the last assistant reply (the plan and what it promised to report), the task's command (the script: which steps run in what order, what it waits for), and output_tail with quiet_minutes (which step it is on, how long it has been silent). A concrete progress check ranks first: name the step this evidence implies (what has finished, what it is on, failures so far), then steering it or other work on the goal. An empty tail during a compile or sleep loop is normal, not a stall; do not re-run it.",
             "foreground_running" => "the agent is executing now; typed text is queued as steering. Add a constraint or correction, do not propose the work in flight.",
             "queued" => "the user already queued steering; refine it or wait.",
             "awaiting_input" => "the assistant is blocked on an explicit input request; the move is one of the distinct answers.",
@@ -288,6 +306,13 @@ impl SuggestionWorkflow {
                 .flatten()
             {
                 limit(text, 120);
+            }
+            if let Some(command) = &mut activity.command {
+                limit_lines(command, 12, 600);
+            }
+            activity.output_tail.truncate(8);
+            for line in &mut activity.output_tail {
+                limit(line, 160);
             }
             limit(&mut activity.kind, 20);
             limit(&mut activity.phase, 20);

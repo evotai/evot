@@ -99,15 +99,25 @@ pub struct ProcessSnapshot {
     pub stopped_by_user: bool,
 }
 
-/// Listing-only view of a task. Deliberately excludes the captured output so
-/// polling callers (the TUI footer) never copy megabytes of rolling tail just
-/// to count what is running.
+/// Last lines of captured output kept on a listing. Small enough that pollers
+/// pay a fixed cost per task, large enough to say which step a script is on.
+pub const SUMMARY_OUTPUT_LINES: usize = 8;
+pub const SUMMARY_OUTPUT_BYTES: usize = 800;
+
+/// Listing-only view of a task. Deliberately excludes the full captured output
+/// so polling callers (the TUI footer) never copy megabytes of rolling tail
+/// just to count what is running; only a bounded `recent_output` is kept.
 #[derive(Debug, Clone)]
 pub struct ProcessSummary {
     pub task_id: String,
     pub command: String,
     /// Launch purpose, without needing to read captured output.
     pub description: Option<String>,
+    /// Up to `SUMMARY_OUTPUT_LINES` trailing lines, each already trimmed and
+    /// never longer than `SUMMARY_OUTPUT_BYTES` in total. Empty when the task
+    /// has printed nothing yet (a compile, a sleep loop): absence of lines is
+    /// not a stall, see `quiet_for`.
+    pub recent_output: Vec<String>,
     pub quiet_for: Duration,
     pub cwd: PathBuf,
     pub output_path: PathBuf,

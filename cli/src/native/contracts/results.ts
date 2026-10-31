@@ -48,6 +48,8 @@ export interface BackgroundProcess {
   task_id: string
   command: string
   description?: string | null
+  /** Bounded trailing output lines (≤ 8); empty until the task prints. Older addons omit it. */
+  recent_output?: string[]
   quiet_for_ms?: number
   cwd: string
   output_path: string

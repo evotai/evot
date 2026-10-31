@@ -407,6 +407,54 @@ async fn explicit_background_returns_task_and_persists_output() -> Result<(), Bo
 }
 
 #[tokio::test]
+async fn summary_recent_output_is_a_bounded_tail_and_empty_while_silent(
+) -> Result<(), Box<dyn Error>> {
+    let dir = tempfile::tempdir()?;
+    let manager = Arc::new(ProcessManager::new());
+    let bash = BashTool::new().with_process_manager(manager.clone());
+
+    // Silent task: a listing shows no lines; that is not a stall signal.
+    let silent = bash
+        .execute(
+            serde_json::json!({ "command": "sleep 5", "run_in_background": true }),
+            context("bash", dir.path()),
+        )
+        .await?;
+    let silent_id = task_id(&silent)?;
+    let listing = manager.summary(silent_id).ok_or("missing listing")?;
+    assert!(listing.recent_output.is_empty());
+    manager.stop(silent_id).await;
+
+    // Chatty task: only the last few lines survive, each trimmed, blanks dropped.
+    let chatty = bash
+        .execute(
+            serde_json::json!({
+                "command": "for i in $(seq 1 500); do echo \"step $i  \"; echo; done",
+                "run_in_background": true
+            }),
+            context("bash", dir.path()),
+        )
+        .await?;
+    let chatty_id = task_id(&chatty)?;
+    manager
+        .wait(chatty_id, Duration::from_secs(10))
+        .await
+        .ok_or("task disappeared")?;
+    let listing = manager.summary(chatty_id).ok_or("missing listing")?;
+    assert_eq!(listing.recent_output.len(), 8);
+    assert_eq!(
+        listing.recent_output.last().map(String::as_str),
+        Some("step 500")
+    );
+    assert!(listing
+        .recent_output
+        .iter()
+        .all(|line| line.starts_with("step ")));
+    assert!(listing.recent_output.iter().map(String::len).sum::<usize>() <= 800);
+    Ok(())
+}
+
+#[tokio::test]
 async fn background_output_file_is_capped_but_tail_remains_available() -> Result<(), Box<dyn Error>>
 {
     let dir = tempfile::tempdir()?;

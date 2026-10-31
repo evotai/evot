@@ -735,6 +735,7 @@ fn process_summary_json(summary: &evot_engine::tools::ProcessSummary) -> serde_j
         "task_id": summary.task_id,
         "command": summary.command,
         "description": summary.description,
+        "recent_output": summary.recent_output,
         "quiet_for_ms": summary.quiet_for.as_millis(),
         "cwd": summary.cwd,
         "output_path": summary.output_path,

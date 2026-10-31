@@ -322,6 +322,78 @@ fn active_work_targets_live_tasks_not_restart_or_unrelated_followups() -> TestRe
 }
 
 #[test]
+fn background_command_and_output_tail_reach_the_prompt_bounded_and_optional() -> TestResult {
+    // Legacy fixture: no command or tail; the current reader still accepts it
+    // and the writer does not invent the new keys.
+    let legacy: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-active-work.json"
+    ))?;
+    let legacy = legacy.into_parts().1.workflow.ok_or("missing workflow")?;
+    let first = legacy
+        .runtime
+        .activities
+        .first()
+        .ok_or("missing activity")?;
+    assert!(first.command.is_none());
+    assert!(first.output_tail.is_empty());
+    let serialized = serde_json::to_value(first)?;
+    assert!(serialized.get("command").is_none());
+    assert!(serialized.get("output_tail").is_none());
+
+    let request: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-background-output.json"
+    ))?;
+    let (messages, hints) = request.into_parts();
+    let mut state = hints.workflow.clone().ok_or("missing workflow")?;
+    assert_eq!(state.stage(), "background");
+    let instruction = state.instruction().ok_or("missing prompt")?;
+    let facts = workflow_facts(&instruction)?;
+    assert_eq!(facts, serde_json::to_value(&state)?);
+    let watcher = &facts["runtime"]["activities"][0];
+    assert!(watcher["command"]
+        .as_str()
+        .is_some_and(|command| command.contains("release build ok|FAILED")));
+    assert_eq!(watcher["output_tail"][0], "[cache] 48/48 passed");
+    // A silent compile carries its command and quiet time but no tail key.
+    let compile = &facts["runtime"]["activities"][1];
+    assert_eq!(compile["command"], "cargo build --release");
+    assert!(compile.get("output_tail").is_none());
+    assert_eq!(compile["quiet_minutes"], 4);
+    // The stage note tells the model how to read the three signals together.
+    assert!(instruction.contains("the last assistant reply (the plan and what it promised to report), the task's command (the script"));
+    assert!(
+        instruction.contains("An empty tail during a compile or sleep loop is normal, not a stall")
+    );
+    assert!(prompt_config(&endpoint(), &messages, &hints).is_some());
+
+    // Direct addon callers are bounded independently of the CLI.
+    for activity in &mut state.runtime.activities {
+        activity.command = Some(
+            (0..40)
+                .map(|_| "c".repeat(100))
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+        activity.output_tail = (0..40).map(|_| "t".repeat(2000)).collect();
+    }
+    let bounded = workflow_facts(&state.instruction().ok_or("missing prompt")?)?;
+    let activity = &bounded["runtime"]["activities"][0];
+    // A script keeps its line structure: 12 lines, blanks dropped, 600 chars.
+    let command = activity["command"].as_str().ok_or("missing command")?;
+    assert_eq!(command.len(), 600);
+    assert_eq!(command.lines().count(), 6);
+    assert!(command
+        .lines()
+        .all(|line| line.len() == 100 || line.len() == 95));
+    let tail = activity["output_tail"].as_array().ok_or("missing tail")?;
+    assert_eq!(tail.len(), 8);
+    assert!(tail
+        .iter()
+        .all(|line| line.as_str().map(str::len) == Some(160)));
+    Ok(())
+}
+
+#[test]
 fn active_work_is_an_optional_addition_to_the_existing_workflow_schema() -> TestResult {
     #[derive(serde::Deserialize)]
     struct LegacyRuntime {
@@ -591,6 +663,8 @@ fn stage_is_derived_from_runtime_facts_in_priority_order() -> TestResult {
             id: "loop:1".into(),
             phase: "waiting".into(),
             goal: None,
+            command: None,
+            output_tail: Vec::new(),
             elapsed_minutes: None,
             quiet_minutes: None,
             iteration: Some(2),
