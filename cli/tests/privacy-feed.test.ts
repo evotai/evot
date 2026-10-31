@@ -92,3 +92,38 @@ test('a /privacy action renders as a card titled with the command', () => {
   const refused = buildPrivacyActionCard('term rm x', '  no such term', 'error')
   expect(refused[1]!.kind).toBe('error')
 })
+
+test('the addon payload decodes the record detail, and older payloads without it', () => {
+  const raw = JSON.stringify({ cursor: 1, notices: [{ seq: 1, time: 't', target: 'llm', session: 's', blocked: true, kinds: ['PRIVATE_KEY'], reason: 'contains PRIVATE_KEY ×1',
+    provider: 'p', model: 'm', rules: [{ rule: 'secrets.ssh-private-key', values: 1 }], origins: [{ at: 'Bash result', label: 'cat ~/.ssh/id_ed25519', n: 1 }], tags: ['PRIVATE_KEY_a'] }] })
+  const live = decodeResult(raw, schema)
+  expect(live.notices[0]!.origins).toEqual([{ at: 'Bash result', label: 'cat ~/.ssh/id_ed25519', n: 1 }])
+  expect(live.notices[0]!.model).toBe('m')
+  // No detail at all is still a valid notice.
+  expect(() => decodeResult(JSON.stringify({ cursor: 1, notices: [notice({})] }), schema)).not.toThrow()
+})
+
+test('a block is kept for its error card, per session, and does not earn a happening card', () => {
+  const n = native()
+  const feed = new PrivacyFeed(n.live)
+  n.push(notice({ blocked: true, kinds: ['PRIVATE_KEY'], reason: 'contains PRIVATE_KEY ×1', origins: [{ at: 'Bash result', label: 'cat key', n: 1 }] }))
+  n.push(notice({ session: 's2', blocked: true, reason: 'contains API_KEY ×1' }))
+  expect(feed.poll('s1')).toEqual([])
+  // Asked without a poll in between: the block raised a moment ago still counts.
+  expect(feed.lastBlocked('s1')?.reason).toBe('contains PRIVATE_KEY ×1')
+  expect(feed.lastBlocked('s2')).toBeUndefined() // filtered: not s1's poll
+  const other = new PrivacyFeed(n.live)
+  expect(other.lastBlocked('s2')?.reason).toBe('contains API_KEY ×1')
+  feed.forget('s1')
+  expect(feed.lastBlocked('s1')).toBeUndefined()
+})
+
+test('seeded tags from earlier records are not reported as first seen after resume', () => {
+  const n = native()
+  const feed = new PrivacyFeed(n.live)
+  feed.seed('s1', ['SECRET_a', 'SECRET_b'])
+  n.push(notice({ tags: ['SECRET_a', 'SECRET_b'] }))
+  expect(feed.poll('s1')).toEqual([])
+  n.push(notice({ tags: ['SECRET_a', 'SECRET_c'] }))
+  expect(feed.poll('s1').map(h => h.fresh)).toEqual([1])
+})

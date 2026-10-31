@@ -302,6 +302,12 @@ describe('renderPrompt', () => {
     expect(render({ suggestionStatus: 'timed_out' })).toContain('suggestion timed out · ⇥ retry')
     expect(render({ suggestionStatus: 'unavailable' })).toContain('suggestions unavailable · ⇥ retry')
     expect(render({ lines: [''], cursorCol: 0, placeholder: true, suggestionStatus: 'failed' })).toContain('suggestion failed · ⇥ retry')
+    // Automatic "nothing to suggest" keeps the placeholder and adds a faint marker; never with a draft.
+    const quiet = render({ lines: [''], cursorCol: 0, placeholder: true, suggestionStatus: 'quiet' })
+    expect(quiet).toContain('Enter a coding task or / for commands · no suggestion')
+    expect(quiet).not.toContain('⇥ retry')
+    expect(render({ suggestionStatus: 'quiet' })).not.toContain('no suggestion')
+    expect(render({ lines: [''], cursorCol: 0, placeholder: true, suggestionStatus: 'quiet', busy: true })).not.toContain('no suggestion')
     expect(render({})).not.toContain('suggesting')
     expect(render({ suggestionStatus: 'pending', busy: true })).not.toContain('suggesting')
     expect(render({ suggestionStatus: 'pending', busy: true, suggestionExplicit: true })).toContain('suggesting…')

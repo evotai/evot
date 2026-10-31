@@ -9,7 +9,7 @@
  */
 
 import { providerFailurePresentation } from '../provider/error-presentation.js'
-import { parsePrivacyStop, privacyCard, type PrivacyStop } from '../privacy/notice.js'
+import { parsePrivacyStop, privacyCard, privacyDestination, privacyOriginsRow, privacyRulesRow, type PrivacyDetail, type PrivacyStop } from '../privacy/notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
@@ -823,7 +823,7 @@ export function isVisibleEvent(text: string): boolean {
  *     <error message>
  * Falls back to plain verbose lines if the text isn't in the expected shape.
  */
-export function buildLlmCard(text: string): OutputLine[] {
+export function buildLlmCard(text: string, privacyDetail?: () => PrivacyDetail | undefined): OutputLine[] {
   const rawLines = text.split('\n')
   const head = (rawLines[0] ?? '').match(/^\[LLM\]\s+([↻✗⚠])\s*·?\s*(.*)$/u)
   if (!head) return buildVerboseEvent(text)
@@ -837,7 +837,7 @@ export function buildLlmCard(text: string): OutputLine[] {
 
   // Privacy stopped the request before it left: say that, not "invalid request".
   const privacy = mark === '✗' ? parsePrivacyStop(body.join(' ')) : null
-  if (privacy) return buildPrivacyCard(privacy)
+  if (privacy) return buildPrivacyCard(privacy, privacyDetail?.())
 
   const lines: OutputLine[] = []
   if (isRetry) {
@@ -892,7 +892,7 @@ function eventContextRow(line: string): OutputLine {
   return { id: genId('tool-res'), kind: 'tool_result', text: `  ${body}` }
 }
 
-export function buildEventCard(text: string): OutputLine[] {
+export function buildEventCard(text: string, privacyDetail?: () => PrivacyDetail | undefined): OutputLine[] {
   if (text.startsWith('[JEV]')) {
     // Judge prune: the header and the context line are the card; per-call
     // verdicts stay in the verbose log where they can be studied.
@@ -923,7 +923,7 @@ export function buildEventCard(text: string): OutputLine[] {
     }
     return stampToolCard(lines, 'success')
   }
-  return buildLlmCard(text)
+  return buildLlmCard(text, privacyDetail)
 }
 
 /**
@@ -932,8 +932,8 @@ export function buildEventCard(text: string): OutputLine[] {
  *     ✗ · nothing was sent to the model · PRIVATE_KEY
  *     <why> / <the command that undoes it>
  */
-export function buildPrivacyCard(stop: PrivacyStop): OutputLine[] {
-  const card = privacyCard(stop)
+export function buildPrivacyCard(stop: PrivacyStop, detail?: PrivacyDetail): OutputLine[] {
+  const card = privacyCard(stop, detail)
   const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${card.title}` }]
   for (const row of card.rows) {
     const kind = row.tone === 'status' ? 'tool' : row.tone === 'error' ? 'error' : 'tool_result'
@@ -949,12 +949,14 @@ const HAPPENING_TITLE: Record<string, string> = {
 
 /**
  * Something privacy just did, shown as it happens so the user knows at once:
- *   ⊘ privacy  masked request
- *     ✓ · masked SECRET ×1 · 1 value first seen now
+ *   ⊘ privacy  masked request → claude-opus-5.5 · evot-pro-anthropic
+ *     ✓ · masked SECRET ×233 · 97 values first seen now
+ *     in: Bash result "ssh db0-aws 'cat ~/perf/config.toml'" ×224 · user ×9
+ *     by rule: core.file-assignment 87 · known 9 · secrets.bare-key-field
  *     The model saw placeholders; the reply was restored · /privacy shows the record
  */
-export function buildPrivacyHappeningCard(notice: { target: string; reason: string }, fresh: number): OutputLine[] {
-  const title = HAPPENING_TITLE[notice.target] ?? `scrubbed ${notice.target}`
+export function buildPrivacyHappeningCard(notice: { target: string; reason: string } & PrivacyDetail, fresh: number): OutputLine[] {
+  const title = `${HAPPENING_TITLE[notice.target] ?? `scrubbed ${notice.target}`}${privacyDestination(notice)}`
   const status = ['✓', notice.reason]
   if (fresh > 0) status.push(`${fresh} ${fresh === 1 ? 'value' : 'values'} first seen now`)
   const hint = notice.target === 'llm'
@@ -963,8 +965,11 @@ export function buildPrivacyHappeningCard(notice: { target: string; reason: stri
   const lines: OutputLine[] = [
     { id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${title}` },
     { id: genId('tool'), kind: 'tool', text: `  ${status.join(' · ')}` },
-    { id: genId('tool-res'), kind: 'tool_result', text: `  ${hint}` },
   ]
+  for (const row of [privacyOriginsRow(notice), privacyRulesRow(notice)]) {
+    if (row) lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${row}` })
+  }
+  lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${hint}` })
   return stampPrivacyCard(lines, 'success')
 }
 

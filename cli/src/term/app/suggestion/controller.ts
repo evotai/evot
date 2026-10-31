@@ -62,7 +62,8 @@ export class PromptSuggestion {
   /** Dismiss only a visible suggestion/notice or an explicit pending request.
    * An invisible automatic request must not swallow the task's Esc key. */
   dismiss(): boolean {
-    if (!this.valid() || (!this.text() && this.feedback() === undefined)) return false
+    // The quiet marker is not interactive; Esc must keep its normal meaning.
+    if (!this.valid() || (!this.text() && (this.feedback() === undefined || this.feedback() === 'quiet'))) return false
     this.cancel()
     return true
   }
@@ -201,7 +202,10 @@ export class PromptSuggestion {
           if (outcome.status === 'ready') this.cache.put(cacheKey, this.batch.values())
         } else {
           this.batch = null
-          if (this.explicit) this.notice = outcome.status === 'ready' || outcome.status === 'empty' ? 'none' : outcome.status
+          // Automatic sampling stays silent on failures; an honest "nothing to
+          // suggest" is worth a faint marker so idle is not mistaken for broken.
+          if (outcome.status === 'ready' || outcome.status === 'empty') this.notice = this.explicit ? 'none' : 'quiet'
+          else this.notice = this.explicit ? outcome.status : undefined
         }
         this.waitingForNext = false
         this.host.changed()

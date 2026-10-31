@@ -77,6 +77,24 @@ pub(super) struct Hit {
     /// A safe label for `/privacy`: a variable's name, a file's name. Never
     /// a piece of the value.
     pub note: Option<String>,
+    /// Where in the request it sat; `None` for uploads.
+    pub origin: Option<Origin>,
+}
+
+/// Where a found value sat in a request. `label` is taken from the masked
+/// request after the pass, so it can never hold a value: a bash command's
+/// description or head, a path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Origin {
+    /// `system prompt`, `tool description`, `user`, `assistant`,
+    /// `thinking`, `Bash call`, `Bash result`.
+    pub at: String,
+    /// The tool call this belongs to (a call's arguments or its result), so
+    /// the label can be filled in once the request is masked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// What the packs and the user's terms find in `text`. `field` is the JSON
@@ -164,6 +182,7 @@ pub(super) fn try_apply<E>(
             action,
             len: value.chars().count(),
             note: None,
+            origin: None,
         });
         if action == Action::Warn {
             continue;

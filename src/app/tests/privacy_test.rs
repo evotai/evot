@@ -755,6 +755,38 @@ fn record_contract() -> TestResult {
     let masked = serde_json::to_value(&summary.recent[1])?;
     assert_eq!(masked["blocked"], json!(false));
     assert_eq!(masked["reason"], json!("masked EMAIL ×2"));
+    // Old lines have no origins; events built from them say so, not `null`.
+    assert!(written.get("origins").is_none() && written.get("model").is_none());
+
+    // A record written now still reads as the v1 shape a strict older reader
+    // knows, with `origins` an extra it ignores.
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyRecord {
+        v: u32,
+        time: String,
+        target: Target,
+        session: Option<String>,
+        provider: Option<String>,
+        model: Option<String>,
+        blocked: bool,
+        values: Vec<evot::privacy::ValueRecord>,
+        #[serde(default)]
+        origins: serde_json::Value,
+    }
+    let masker = masker()?;
+    let mut config = self::config(vec![user(&format!("mail {EMAIL}"))]);
+    let record = masker.mask_request(&mut config)?.record(Target::Llm);
+    let line = serde_json::to_string(&record)?;
+    let legacy: LegacyRecord = serde_json::from_str(&line)?;
+    assert_eq!(
+        (legacy.v, legacy.target, legacy.blocked),
+        (1, Target::Llm, false)
+    );
+    assert_eq!(legacy.values.len(), 1);
+    assert!(legacy.session.is_none() && legacy.provider.is_none() && legacy.model.is_none());
+    assert_eq!(legacy.time, record.time);
+    assert_eq!(legacy.origins[0]["at"], json!("user"));
     Ok(())
 }
 
@@ -796,5 +828,162 @@ async fn live_notices_report_each_record_as_it_is_made_without_values() -> TestR
     );
     // Asking from the newest cursor yields nothing new.
     assert!(evot::privacy::live_notices(cursor).1.is_empty());
+    Ok(())
+}
+
+#[test]
+fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> TestResult {
+    let masker = masker()?;
+    let call = Content::ToolCall {
+        id: "call-1".into(),
+        name: "Bash".into(),
+        arguments: json!({
+            "command": format!("ssh db0 'cat ~/.env'  # {API_KEY}\nsecond line"),
+            "description": "Read the env file"
+        }),
+        metadata: None,
+    };
+    let mut config = config(vec![
+        user(&format!("my key is {API_KEY}")),
+        assistant(vec![call]),
+        Message::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: "Bash".into(),
+            content: vec![Content::Text {
+                text: format!("TOKEN={API_KEY}\nMAIL={EMAIL}\n"),
+            }],
+            is_error: false,
+            timestamp: 0,
+            retention: Default::default(),
+        },
+    ]);
+    config.system_prompt = format!("never print {EMAIL}");
+    let report = masker.mask_request(&mut config)?;
+    let mut record = report.record(Target::Llm);
+    record.provider = Some("p".into());
+    record.model = Some("m".into());
+
+    // Every place, most first; the tool call's label names the call, by its
+    // description rather than its command, and holds no value.
+    let origins: Vec<(&str, Option<&str>, usize)> = record
+        .origins
+        .iter()
+        .map(|o| (o.at.as_str(), o.label.as_deref(), o.n))
+        .collect();
+    assert_eq!(origins, vec![
+        ("Bash result", Some("Read the env file"), 2),
+        ("Bash call", Some("Read the env file"), 1),
+        ("system prompt", None, 1),
+        ("user", None, 1),
+    ]);
+    // Rules: distinct values per rule, most first. The `NAME=value` lines
+    // of the result are values of their own (kind SECRET), so the
+    // assignment rule has two and the bare key and email one each.
+    let counted = record.rules();
+    let rules: Vec<(&str, usize)> = counted
+        .iter()
+        .map(|r| (r.rule.as_str(), r.values))
+        .collect();
+    assert_eq!(rules, vec![
+        ("core.file-assignment", 2),
+        ("personal.email", 1),
+        ("secrets.sk-key", 1)
+    ]);
+    let written = serde_json::to_string(&record)?;
+    assert!(!written.contains(API_KEY) && !written.contains(EMAIL));
+    assert!(written.contains("\"origins\""));
+
+    // The live event carries the same, and old events without it still read.
+    let event = serde_json::to_value(evot::privacy::Event::of(&record))?;
+    assert_eq!(event["model"], json!("m"));
+    assert_eq!(event["origins"][0]["at"], json!("Bash result"));
+    assert_eq!(event["rules"].as_array().map(Vec::len), Some(3));
+    let legacy: evot::privacy::Event = serde_json::from_str(
+        r#"{"time":"t","target":"llm","blocked":false,"kinds":["EMAIL"],"reason":"masked EMAIL ×1"}"#,
+    )?;
+    assert!(legacy.origins.is_empty() && legacy.rules.is_empty() && legacy.model.is_none());
+
+    // A command with no description is labelled by its first line, bounded.
+    let mut config = self::config(vec![
+        assistant(vec![Content::ToolCall {
+            id: "call-2".into(),
+            name: "Bash".into(),
+            arguments: json!({ "command": format!("{}\nmore", "x".repeat(80)) }),
+            metadata: None,
+        }]),
+        Message::ToolResult {
+            tool_call_id: "call-2".into(),
+            tool_name: "Bash".into(),
+            content: vec![Content::Text {
+                text: EMAIL.to_string(),
+            }],
+            is_error: false,
+            timestamp: 0,
+            retention: Default::default(),
+        },
+    ]);
+    let record = masker.mask_request(&mut config)?.record(Target::Llm);
+    let label = record.origins[0].label.as_deref().unwrap_or_default();
+    assert_eq!(label.chars().count(), 61, "{label}");
+    assert!(label.ends_with('…'));
+
+    // Shell env setup and `cd … &&` are skipped so the label is the command.
+    for (command, head) in [
+        (
+            "S=\"-o BatchMode=yes -o IdentityAgent=none\"; ssh $S db0-aws 'date; cat x' < /dev/null",
+            "ssh $S db0-aws 'date; cat x' < /dev/null",
+        ),
+        ("cd /some/dir && cargo test -p evot", "cargo test -p evot"),
+        ("FOO=1 BAR='a; b' make check", "make check"),
+        ("cat ~/.ssh/id_ed25519", "cat ~/.ssh/id_ed25519"),
+        ("/Users/x/github/proj/src/query/cache/manager.rs", "cache/manager.rs"),
+        ("~/notes.md", "~/notes.md"),
+        ("X=\"unterminated; ssh host", "X=\"unterminated; ssh host"),
+    ] {
+        let mut config = self::config(vec![
+            assistant(vec![Content::ToolCall {
+                id: "c".into(),
+                name: "Bash".into(),
+                arguments: json!({ "command": command }),
+                metadata: None,
+            }]),
+            Message::ToolResult {
+                tool_call_id: "c".into(),
+                tool_name: "Bash".into(),
+                content: vec![Content::Text {
+                    text: EMAIL.to_string(),
+                }],
+                is_error: false,
+                timestamp: 0,
+                retention: Default::default(),
+            },
+        ]);
+        let record = masker.mask_request(&mut config)?.record(Target::Llm);
+        assert_eq!(record.origins[0].label.as_deref(), Some(head), "{command}");
+    }
+
+    // Uploads have no request shape, so no origins.
+    let mut upload = json!({ "note": EMAIL });
+    assert!(masker
+        .scrub(&mut upload)?
+        .record(Target::Share)
+        .origins
+        .is_empty());
+    Ok(())
+}
+
+#[test]
+fn session_tags_collect_a_sessions_placeholders_from_its_records() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    let lines = [
+        r#"{"v":1,"time":"t","target":"llm","session":"s1","values":[{"kind":"EMAIL","by":"rule","action":"mask","tag":"{{EMAIL_aaaaaaaa}}","len":10,"n":2}]}"#,
+        r#"{"v":1,"time":"t","target":"llm","session":"s1","values":[{"kind":"EMAIL","by":"known","action":"mask","tag":"{{EMAIL_aaaaaaaa}}","len":10,"n":1},{"kind":"API_KEY","by":"rule","action":"mask","tag":"{{API_KEY_bbbbbbbb}}","len":40,"n":1}]}"#,
+        r#"{"v":1,"time":"t","target":"llm","session":"s2","values":[{"kind":"PHONE","by":"rule","action":"mask","tag":"{{PHONE_cccccccc}}","len":11,"n":1}]}"#,
+    ];
+    std::fs::write(dir.path().join(format!("{today}.jsonl")), lines.join("\n"))?;
+    let tags = evot::privacy::session_record_tags(dir.path(), "s1", 7)?;
+    assert_eq!(tags, vec!["{{API_KEY_bbbbbbbb}}", "{{EMAIL_aaaaaaaa}}"]);
+    assert!(evot::privacy::session_record_tags(dir.path(), "s3", 7)?.is_empty());
     Ok(())
 }

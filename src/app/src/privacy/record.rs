@@ -55,6 +55,28 @@ pub struct Record {
     pub blocked: bool,
     #[serde(default)]
     pub values: Vec<ValueRecord>,
+    /// Where the request had them, most places first. Empty for uploads and
+    /// records from before this field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub origins: Vec<OriginRecord>,
+}
+
+/// One place in a request that held values: `Bash result` with the
+/// command's label, `user`, `system prompt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OriginRecord {
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Places (occurrences), not distinct values.
+    pub n: usize,
+}
+
+/// Distinct values one rule found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleCount {
+    pub rule: String,
+    pub values: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -79,9 +101,11 @@ pub struct ValueRecord {
 }
 
 impl Record {
-    /// One record for a request's hits, each value once with its count.
+    /// One record for a request's hits, each value once with its count,
+    /// and each place once with how many values it held.
     pub(super) fn new(target: Target, hits: &[Hit]) -> Self {
         let mut values: Vec<ValueRecord> = Vec::new();
+        let mut origins: Vec<OriginRecord> = Vec::new();
         for hit in hits {
             match values.iter_mut().find(|v| v.tag == hit.tag) {
                 Some(value) => value.n += 1,
@@ -97,7 +121,21 @@ impl Record {
                     note: hit.note.clone(),
                 }),
             }
+            if let Some(origin) = &hit.origin {
+                match origins
+                    .iter_mut()
+                    .find(|o| o.at == origin.at && o.label == origin.label)
+                {
+                    Some(place) => place.n += 1,
+                    None => origins.push(OriginRecord {
+                        at: origin.at.clone(),
+                        label: origin.label.clone(),
+                        n: 1,
+                    }),
+                }
+            }
         }
+        origins.sort_by(|a, b| b.n.cmp(&a.n).then(a.at.cmp(&b.at)));
         Self {
             v: RECORD_SCHEMA_VERSION,
             time: chrono::Local::now().to_rfc3339(),
@@ -107,7 +145,38 @@ impl Record {
             model: None,
             blocked: values.iter().any(|v| v.action == Action::Block),
             values,
+            origins,
         }
+    }
+
+    /// Distinct values per rule, most first. Values a known-value finder
+    /// re-masked count under `known`; a rule-less finder under its name.
+    pub fn rules(&self) -> Vec<RuleCount> {
+        let values: Vec<&ValueRecord> = self
+            .values
+            .iter()
+            .filter(|v| v.action == Action::Block)
+            .collect();
+        let values = if values.is_empty() {
+            self.values.iter().collect()
+        } else {
+            values
+        };
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for v in values {
+            let rule = match (&v.rule, v.by) {
+                (Some(rule), _) => rule.clone(),
+                (None, Finder::Known) => "known".to_string(),
+                (None, by) => format!("{by:?}").to_lowercase(),
+            };
+            *counts.entry(rule).or_default() += 1;
+        }
+        let mut counts: Vec<RuleCount> = counts
+            .into_iter()
+            .map(|(rule, values)| RuleCount { rule, values })
+            .collect();
+        counts.sort_by(|a, b| b.values.cmp(&a.values).then(a.rule.cmp(&b.rule)));
+        counts
     }
 
     /// Every value not merely warned of blocks it (a task definition).
@@ -247,10 +316,21 @@ pub struct Event {
     pub kinds: Vec<String>,
     /// One clause: what it did ([`Record::reason`]).
     pub reason: String,
+    /// Where it was going (a model request).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Which rules found the values, most first ([`Record::rules`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<RuleCount>,
+    /// Where the request had them, most places first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub origins: Vec<OriginRecord>,
 }
 
 impl Event {
-    pub(super) fn of(record: &Record) -> Self {
+    pub fn of(record: &Record) -> Self {
         let kinds = if record.blocked {
             record.blocked_kinds()
         } else {
@@ -264,6 +344,10 @@ impl Event {
             blocked: record.blocked,
             kinds,
             reason: record.reason(),
+            provider: record.provider.clone(),
+            model: record.model.clone(),
+            rules: record.rules(),
+            origins: record.origins.clone(),
         }
     }
 }
@@ -289,6 +373,28 @@ impl LiveNotice {
             tags: tags.into_iter().map(str::to_string).collect(),
         }
     }
+}
+
+/// Every placeholder tag the records of the last `days` days hold for
+/// `session`: what that session has already had masked. Tags only, so a
+/// resumed session's first request does not report its history as new.
+pub fn session_tags(dir: &Path, session: &str, days: u32) -> Result<Vec<String>> {
+    let today = chrono::Local::now().date_naive();
+    let mut tags = BTreeSet::new();
+    for (day, path) in day_files(dir)? {
+        if (today - day).num_days() >= i64::from(days) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)?;
+        for record in text
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Record>(line).ok())
+            .filter(|record| record.session.as_deref() == Some(session))
+        {
+            tags.extend(record.values.into_iter().map(|v| v.tag));
+        }
+    }
+    Ok(tags.into_iter().collect())
 }
 
 pub fn summarize(dir: &Path, days: u32) -> Result<Summary> {

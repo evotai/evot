@@ -197,7 +197,7 @@ impl SuggestionWorkflow {
     fn stage_note(&self) -> &'static str {
         match self.stage() {
             "loop" => "a /loop is active (see activities). Waiting between checks is normal; ask what it found, adjust or stop it, never restart it.",
-            "background" => "a background task is running (see activities). Ask status or partial results, or do something else; silence is not failure, do not re-run it.",
+            "background" => "a background task is running (see activities). If the reply just reported its status, do not ask again; steer it, work on the goal meanwhile, or wait ([]). Silence is not failure, do not re-run it.",
             "foreground_running" => "the agent is executing now; typed text is queued as steering. Add a constraint or correction, do not propose the work in flight.",
             "queued" => "the user already queued steering; refine it or wait.",
             "awaiting_input" => "the assistant is blocked on an explicit input request; the move is one of the distinct answers.",

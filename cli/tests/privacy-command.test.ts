@@ -115,3 +115,19 @@ describe('/privacy', () => {
     expect(privacyStatus.read(legacy, '$').summary.kinds[0]!.verified).toBeUndefined()
   })
 })
+
+describe('/privacy recent with record detail', () => {
+  test('names the model and where the values sat; old events without detail render as before', () => {
+    const s = status()
+    s.summary.recent = [
+      { time: '2026-01-02T10:05:00+08:00', target: 'llm', blocked: true, kinds: ['PRIVATE_KEY'], reason: 'contains PRIVATE_KEY ×1',
+        model: 'claude-opus-5.5', provider: 'evot-pro-anthropic', rules: [{ rule: 'secrets.ssh-private-key', values: 1 }],
+        origins: [{ at: 'Bash result', label: 'cat ~/.ssh/id_ed25519', n: 1 }] },
+      { time: '2026-01-02T09:00:00+08:00', target: 'llm', blocked: false, kinds: ['EMAIL'], reason: 'masked EMAIL ×2' },
+    ]
+    const lines = renderStatus(s, '2026-01-02').split('\n')
+    expect(lines[4]).toBe('  10:05  model request  ✗ contains PRIVATE_KEY ×1 → claude-opus-5.5')
+    expect(lines[5]).toBe('         ' + ' '.repeat('model request'.length) + '  in: Bash result "cat ~/.ssh/id_ed25519"')
+    expect(lines[6]).toBe('  09:00  model request  masked EMAIL ×2')
+  })
+})

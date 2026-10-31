@@ -9,11 +9,12 @@ export interface PrivacyHappening { notice: PrivacyLiveNotice; fresh: number }
  * Every model request masks the whole history again, so a card per record
  * would repeat itself each turn. A record earns a card only when it masks a
  * value this session has not had masked before (a new placeholder tag).
- * Blocked records already surface as error cards where they stopped; they
- * are skipped here. */
+ * Blocked records surface as error cards where they stopped; the feed keeps
+ * the latest one so that card can say where the values sat. */
 export class PrivacyFeed {
   private cursor = 0
   private readonly seen = new Map<string, Set<string>>()
+  private readonly blocked = new Map<string, PrivacyLiveNotice>()
 
   constructor(private readonly live: (after: number) => PrivacyLive) {}
 
@@ -28,9 +29,9 @@ export class PrivacyFeed {
     this.cursor = Math.max(this.cursor, batch.cursor)
     const out: PrivacyHappening[] = []
     for (const notice of batch.notices) {
-      if (notice.blocked) continue
       if (notice.session && session && notice.session !== session) continue
       const key = notice.session ?? session ?? ''
+      if (notice.blocked) { this.blocked.set(key, notice); continue }
       let tags = this.seen.get(key)
       if (!tags) { tags = new Set(); this.seen.set(key, tags) }
       let fresh = 0
@@ -45,8 +46,26 @@ export class PrivacyFeed {
     return out
   }
 
+  /** The record behind the block that just stopped `session`'s request, if
+   * this process made it. Polls first so a block raised a moment ago counts. */
+  lastBlocked(session: string | null): PrivacyLiveNotice | undefined {
+    this.poll(session)
+    return this.blocked.get(session ?? '')
+  }
+
   /** A new or switched session starts with nothing seen. */
   forget(session: string | null): void {
     this.seen.delete(session ?? '')
+    this.blocked.delete(session ?? '')
+  }
+
+  /** A resumed session has had its history masked before: the tags its
+   * records already hold are seen, so the first request does not report them
+   * all as new. Tags are placeholders, never values. */
+  seed(session: string | null, tags: Iterable<string>): void {
+    const key = session ?? ''
+    let seen = this.seen.get(key)
+    if (!seen) { seen = new Set(); this.seen.set(key, seen) }
+    for (const tag of tags) seen.add(tag)
   }
 }

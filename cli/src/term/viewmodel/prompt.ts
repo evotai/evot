@@ -254,7 +254,10 @@ function buildInputLines(
       const full = suggestion
         ? `${truncateToWidth(suggestion, Math.max(0, contentWidth - stringWidth(acceptHint)))}${acceptHint}`
         : statusGhost(input).trimStart() || (atLeastWidth(widthTier(columns), 'md') ? guidance.placeholder : guidance.shortPlaceholder)
-      const hint = truncateToWidth(full, contentWidth)
+      // An automatic request that found nothing: say so beside the placeholder
+      // so an empty composer is not read as "suggestions never ran".
+      const quiet = !suggestion && input.suggestionStatus === 'quiet' && suggestionVisible(input) ? ' · no suggestion' : ''
+      const hint = truncateToWidth(`${full}${quiet}`, contentWidth)
       lines.push(line(plain(CURSOR_MARKER), ...(hint ? [dim(hint)] : [])))
       continue
     }

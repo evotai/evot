@@ -23,12 +23,19 @@ more noise than signal.
 
 Each request or upload with a finding appends one line to
 `~/.evotai/privacy/records/<day>.jsonl` (`record.rs`): kind, rule,
-placeholder, length, count. Never a value. `/privacy` summarizes them.
+placeholder, length, count, and for model requests where each value sat
+(`origins`: `user`, `system prompt`, `Bash call`, `Bash result` with the
+call's label). Labels are read from the request *after* masking, so a
+command that carried a value names it by placeholder. Never a value.
+`/privacy` summarizes them.
 
 The same records enter a bounded in-memory feed (`service::live_notices`,
 per process). The TUI reads it after each step and shows a card only when a
 request masks a placeholder tag the session has not seen before, so
-re-masking the same history each turn stays silent.
+re-masking the same history each turn stays silent. On resume the CLI
+seeds "seen" from the session's records (`session_tags`) so the first
+request does not report the whole history as new. A blocked request's
+error card takes model, origins and rules from the latest blocked notice.
 
 ## Rules
 

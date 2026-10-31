@@ -272,6 +272,14 @@ pub async fn summary(days: u32) -> Result<Summary> {
     .await
 }
 
+/// Placeholder tags already recorded for `session` in the last `days` days.
+pub async fn session_tags(session: String, days: u32) -> Result<Vec<String>> {
+    blocking_io("privacy session tags", move |_| {
+        record::session_tags(&records_dir()?, &session, days.max(1))
+    })
+    .await
+}
+
 /// Mask these values wherever they appear from now on: variables injected
 /// into the shell, provider keys, tokens.
 pub fn remember_secrets<I, S>(values: I)

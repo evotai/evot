@@ -40,3 +40,13 @@ pub fn privacy_live(after: u32) -> NapiResult<String> {
     serde_json::to_string(&serde_json::json!({ "cursor": cursor, "notices": notices }))
         .map_err(failure)
 }
+
+/// Placeholder tags already recorded for `session` (last `days` days), so a
+/// resumed session's first request does not report its history as new.
+#[napi]
+pub async fn privacy_session_tags(session: String, days: u32) -> NapiResult<String> {
+    let tags = evot::privacy::session_tags(session, days)
+        .await
+        .map_err(failure)?;
+    serde_json::to_string(&tags).map_err(failure)
+}

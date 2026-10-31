@@ -28,7 +28,7 @@ import { buildPrivacyCard, buildPrivacyHappeningCard, buildUserMessage, messages
 import { manualCompactionLines } from './viewmodel/manual-compaction.js'
 import { createHyperlink } from '../render/hyperlink.js'
 import { renderErrorNotice } from '../render/command-notice.js'
-import { Agent, QueryStream, fastExit, authNotices, privacyLive, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
+import { Agent, QueryStream, fastExit, authNotices, privacyLive, privacySessionTags, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
 import { createInitialState, type AppState } from './app/state.js'
 import { assistantToolCalls } from './app/assistant-content.js'
 import type { UIAssistantBlock } from './app/types.js'
@@ -2227,6 +2227,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       const { transcriptToMessages } = await import('../session/transcript.js')
       const messages = transcriptToMessages(transcript)
       suggestionContext.restore(transcript)
+      // The history was masked in earlier processes; its placeholders are not
+      // news. Best effort: without them the first card over-reports once.
+      privacyFeed.forget(session.session_id)
+      void privacySessionTags(session.session_id).then(tags => privacyFeed.seed(session.session_id, tags)).catch(() => {})
       renderer.clearScreen()
       compactLines.length = 0
       expandedLines.length = 0
@@ -2569,6 +2573,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         const update = reduceRunEvent(streamMachine!, event, {
           termRows: renderer.termRows,
           cloudProvider: activeProviderIsCloud(),
+          privacyDetail: () => privacyFeed.lastBlocked(sessionId),
         })
 
         streamMachine = update.state

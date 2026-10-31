@@ -25,8 +25,52 @@ export interface PrivacyCardRow { tone: 'status' | 'error' | 'hint'; text: strin
 
 export interface PrivacyCard { title: string; rows: PrivacyCardRow[] }
 
+/** What a record knows about one request beyond its kinds: the model it was
+ * for, where the values sat, which rules found them. All optional: records
+ * from older builds, and uploads, have none of it. */
+export interface PrivacyDetail {
+  provider?: string | null
+  model?: string | null
+  /** `KIND ×n` clauses, most first, as `reason` already words them. */
+  reason?: string
+  rules?: { rule: string; values: number }[]
+  origins?: { at: string; label?: string | null; n: number }[]
+}
+
+const SHOWN = 3
+
+/** `→ claude-opus-5.5 · evot-pro-anthropic`, or nothing. */
+export function privacyDestination(detail: PrivacyDetail | undefined): string {
+  if (!detail?.model && !detail?.provider) return ''
+  const parts = [detail.model, detail.provider].filter((part): part is string => Boolean(part))
+  return ` → ${parts.join(' · ')}`
+}
+
+/** `in: Bash result "ssh db0 'cat …'" ×224 · user ×9 · +2 more`. */
+export function privacyOriginsRow(detail: PrivacyDetail | undefined): string | null {
+  const origins = detail?.origins ?? []
+  if (origins.length === 0) return null
+  const one = origins.length === 1
+  const parts = origins.slice(0, SHOWN).map(origin => {
+    const label = origin.label ? ` ${JSON.stringify(origin.label)}` : ''
+    return `${origin.at}${label}${one ? '' : ` ×${origin.n}`}`
+  })
+  if (origins.length > SHOWN) parts.push(`+${origins.length - SHOWN} more`)
+  return `in: ${parts.join(' · ')}`
+}
+
+/** `by rule: secrets.ssh-private-key · core.file-assignment 87 · known 9`. */
+export function privacyRulesRow(detail: PrivacyDetail | undefined): string | null {
+  const rules = detail?.rules ?? []
+  if (rules.length === 0) return null
+  const one = rules.length === 1
+  const parts = rules.slice(0, SHOWN).map(rule => (one || rule.values === 1 ? rule.rule : `${rule.rule} ${rule.values}`))
+  if (rules.length > SHOWN) parts.push(`+${rules.length - SHOWN} more`)
+  return `by rule: ${parts.join(' · ')}`
+}
+
 /** What the card says: what was stopped, why, and the command that undoes it. */
-export function privacyCard(stop: PrivacyStop): PrivacyCard {
+export function privacyCard(stop: PrivacyStop, detail?: PrivacyDetail): PrivacyCard {
   if (stop.kind === 'unavailable') {
     return {
       title: 'unavailable',
@@ -38,19 +82,20 @@ export function privacyCard(stop: PrivacyStop): PrivacyCard {
     }
   }
   const kinds = stop.kinds.join(', ')
-  const mask = stop.kinds.map(kind => `/privacy ${kind} mask`).join(' · ')
   const them = stop.kinds.length === 1 ? 'it' : 'them'
   if (stop.target === 'request') {
-    return {
-      title: 'blocked request',
-      rows: [
-        { tone: 'status', text: `✗ · nothing was sent to the model · ${kinds}` },
-        { tone: 'error', text: `Set to block, and still in this session's history: the next request stops here too.` },
-        { tone: 'hint', text: `Mask ${them} instead: ${mask} · or go on without ${them}: /new` },
-        { tone: 'hint', text: '/privacy shows what was blocked and when' },
-      ],
-    }
+    // `contains PRIVATE_KEY ×1`: the record's clause when there is one, else
+    // the kinds the error named.
+    const contains = detail?.reason && detail.reason.startsWith('contains') ? detail.reason : `contains ${stop.kinds.join(' · ')}`
+    const rows: PrivacyCardRow[] = [{ tone: 'status', text: `✗ · ${contains} · nothing was sent` }]
+    const origins = privacyOriginsRow(detail)
+    if (origins) rows.push({ tone: 'error', text: origins })
+    const rules = privacyRulesRow(detail)
+    if (rules) rows.push({ tone: 'error', text: rules })
+    rows.push({ tone: 'hint', text: `Still in this session's history, so the next request stops here too · /privacy shows the record · /new starts clean` })
+    return { title: `blocked request${privacyDestination(detail)}`, rows }
   }
+  const mask = stop.kinds.map(kind => `/privacy ${kind} mask`).join(' · ')
   if (stop.target === 'share') {
     return {
       title: 'blocked share',

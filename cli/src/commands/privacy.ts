@@ -1,4 +1,5 @@
 import type { PrivacyEvent, PrivacySettings, PrivacyStatus } from '../native/index.js'
+import { privacyOriginsRow } from '../privacy/notice.js'
 
 export interface PrivacyPort {
   status: (days: number) => Promise<PrivacyStatus>
@@ -93,7 +94,11 @@ export function renderStatus({ settings, summary }: PrivacyStatus, today = local
     const stamp = Math.max(...stamps.map((s) => s.length))
     const width = Math.max(...recent.map((event) => actor(event).length))
     recent.forEach((event, i) => {
-      lines.push(`  ${stamps[i]!.padEnd(stamp)}  ${actor(event).padEnd(width)}  ${event.blocked ? '✗ ' : ''}${event.reason}`)
+      const to = event.model ? ` → ${event.model}` : ''
+      lines.push(`  ${stamps[i]!.padEnd(stamp)}  ${actor(event).padEnd(width)}  ${event.blocked ? '✗ ' : ''}${event.reason}${to}`)
+      // Where the values sat, when the record knows (one line, folded).
+      const origins = privacyOriginsRow(event)
+      if (origins) lines.push(`  ${' '.repeat(stamp)}  ${' '.repeat(width)}  ${origins}`)
     })
   }
   lines.push('', renderSettings(settings), settings.enabled ? '  /privacy term WORD · /privacy off' : '  /privacy on')

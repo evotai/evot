@@ -17,6 +17,7 @@ export function suggestionStatusText(input: SuggestionDisplay): string {
   switch (input.suggestionStatus) {
     case 'pending': return `  ${FRAMES[(input.suggestionFrame ?? 0) % FRAMES.length]} suggesting…`
     case 'none': return '  · nothing to suggest · ⇥ retry'
+    case 'quiet': return ''
     case 'failed': return '  · suggestion failed · ⇥ retry'
     case 'timed_out': return '  · suggestion timed out · ⇥ retry'
     case 'unavailable': return '  · suggestions unavailable · ⇥ retry'
@@ -48,7 +49,7 @@ export function appendCompletionLines(rows: StyledLine[], prefix: StyledSpan[], 
 
 /** Tab cycles the same three candidates; Right inserts, never submits. */
 export function suggestionAcceptHint(input: SuggestionDisplay): string {
-  if (input.suggestionStatus) return `${suggestionStatusText(input)} · → accept`
+  if (input.suggestionStatus && input.suggestionStatus !== 'quiet') return `${suggestionStatusText(input)} · → accept`
   const position = input.suggestionPosition
   const action = input.suggestionReplacing ? 'replace rest' : 'accept'
   return position && position.total > 1

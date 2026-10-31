@@ -648,3 +648,31 @@ test('commands and incomplete context do not start samples', () => {
   h.start([messages()[0]!])
   expect(h.requests).toHaveLength(0)
 })
+
+test('an automatic request that finds nothing leaves a quiet marker; failures stay silent and Esc is untouched', async () => {
+  const h = harness()
+  h.start(messages())
+  expect(h.requests).toHaveLength(1)
+  h.requests[0]!.resolve([], 'empty')
+  await tick()
+  expect(h.controller.feedback()).toBe('quiet')
+  expect(h.controller.exhausted()).toBe(false)
+  // Not interactive: Esc keeps its normal meaning, typing clears it.
+  expect(h.controller.dismiss()).toBe(false)
+  expect(h.controller.feedback()).toBe('quiet')
+  h.setDraft('x')
+  expect(h.controller.feedback()).toBeUndefined()
+  // Tab afterwards is an explicit retry and reports the explicit wording.
+  h.setDraft('')
+  h.controller.next()
+  expect(h.requests).toHaveLength(2)
+  h.requests[1]!.resolve([], 'empty')
+  await tick()
+  expect(h.controller.feedback()).toBe('none')
+  // Transport failures of automatic requests remain invisible.
+  const quiet = harness()
+  quiet.start(messages())
+  quiet.requests[0]!.resolve([], 'failed')
+  await tick()
+  expect(quiet.controller.feedback()).toBeUndefined()
+})

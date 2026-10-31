@@ -1469,8 +1469,16 @@ describe('term stream machine', () => {
     }, { termRows: 24 })
     const text = failed.commitLines.map(l => l.text).join('\n')
     expect(text).toContain('⊘ privacy  blocked request')
-    expect(text).toContain('/privacy PRIVATE_KEY mask')
+    expect(text).toContain('contains PRIVATE_KEY · nothing was sent')
     expect(text).not.toContain('Invalid request')
+    // The record behind the block enriches the card when the host has it.
+    const detailed = reduceRunEvent(state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'test', turn: 1, error: err, metrics: { duration_ms: 2 } },
+    }, { termRows: 24, privacyDetail: () => ({ model: 'm', provider: 'p', origins: [{ at: 'Bash result', label: 'cat key', n: 1 }] }) })
+    const rich = detailed.commitLines.map(l => l.text).join('\n')
+    expect(rich).toContain('blocked request → m · p')
+    expect(rich).toContain('in: Bash result "cat key"')
     const terminal = reduceRunEvent(failed.state, { kind: 'error', payload: { message: err } }, { termRows: 24 })
     expect(terminal.commitLines.map(l => l.text).join('\n')).not.toContain('privacy')
     expect(terminal.writeLines.some(line => line.text.includes(err))).toBe(true)

@@ -1,5 +1,5 @@
 import { providerFailurePresentation } from '../../provider/error-presentation.js'
-import { parsePrivacyStop } from '../../privacy/notice.js'
+import { parsePrivacyStop, type PrivacyDetail } from '../../privacy/notice.js'
 import { formatLongWaitError, reviewNotice } from '../../render/verbose.js'
 import { buildError, buildPrivacyCard, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../render/output.js'
 import { formatDuration } from '../../render/format.js'
@@ -37,6 +37,9 @@ export interface StreamContext {
   termRows: number
   /** True only for a server-pushed evot cloud provider. */
   cloudProvider?: boolean
+  /** What the privacy record knows about the request that was just blocked
+   * (model, where the values sat, which rules); the error text has kinds only. */
+  privacyDetail?: () => PrivacyDetail | undefined
 }
 
 export interface StreamUpdate {
@@ -151,7 +154,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
   // remaining observability detail belongs in screen.log.
   const routeVerbose = (text: string, target: { commit: OutputLine[]; write: OutputLine[] }) => {
     if (isVisibleEvent(text)) {
-      target.commit.push(...buildEventCard(text))
+      target.commit.push(...buildEventCard(text, ctx.privacyDetail))
       // Customer copy is intentionally shorter; retain raw provider diagnostics
       // in the log-only stream instead of losing them during presentation.
       target.write.push(...buildVerboseEvent(text))
@@ -493,7 +496,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       else {
         const failure = providerFailurePresentation({ error: message })
         const privacy = parsePrivacyStop(message)
-        const lines = privacy ? buildPrivacyCard(privacy) : buildError(failure.kind === 'unknown' ? message : failure.label)
+        const lines = privacy ? buildPrivacyCard(privacy, ctx.privacyDetail?.()) : buildError(failure.kind === 'unknown' ? message : failure.label)
         commitLines.push(...lines)
         noticeLines.push(...lines)
         writeLines.push(...buildError(message))

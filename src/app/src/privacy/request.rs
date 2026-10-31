@@ -21,6 +21,7 @@ use super::policy::Policy;
 use super::rules::Engine;
 use super::scan;
 use super::scan::Hit;
+use super::scan::Origin;
 use super::vault::Vault;
 use crate::error::Result;
 
@@ -38,7 +39,11 @@ enum Slot {
     Signed,
 }
 
-/// Mask `config` in place; the hits say what was found.
+/// A visitor over one request string: the text, where it sits, the JSON
+/// field holding it and its origin. Returns whether it changed the text.
+type Visit<'a> = dyn FnMut(&mut String, Slot, Option<&str>, &Origin) -> bool + 'a;
+
+/// Mask `config` in place; the hits say what was found and where.
 pub(super) fn mask_config(
     policy: &Policy,
     vault: &Vault,
@@ -49,7 +54,7 @@ pub(super) fn mask_config(
     // wherever it is, even in a text that names it without context.
     let mut found = Vec::new();
     let mut inbound: HashSet<String> = HashSet::new();
-    walk(config, &sensitive, &mut |text, slot, field| {
+    walk(config, &sensitive, &mut |text, slot, field, _| {
         let spans = scan::find(
             policy,
             text,
@@ -77,7 +82,7 @@ pub(super) fn mask_config(
     let mut hits = Vec::new();
     let mut found = found.into_iter();
     let mut error = None;
-    walk(config, &sensitive, &mut |text, slot, _| {
+    walk(config, &sensitive, &mut |text, slot, _, origin| {
         if error.is_some() {
             return false;
         }
@@ -89,66 +94,234 @@ pub(super) fn mask_config(
             spans.retain(|s| policy.is_secret(&s.kind) || inbound.contains(&text[s.start..s.end]));
         }
         let put = |kind: &str, value: &str| vault.put(kind, value);
+        let before = hits.len();
         match scan::try_apply(Mode::Llm, text, spans, policy, vault, &put, &mut hits) {
             Ok(Some(masked)) => {
                 *text = masked;
+                for hit in &mut hits[before..] {
+                    hit.origin = Some(origin.clone());
+                }
                 true
             }
-            Ok(None) => false,
+            Ok(None) => {
+                for hit in &mut hits[before..] {
+                    hit.origin = Some(origin.clone());
+                }
+                false
+            }
             Err(failed) => {
                 error = Some(failed);
                 false
             }
         }
     });
-    match error {
-        Some(error) => Err(error),
-        None => Ok(hits),
+    if let Some(error) = error {
+        return Err(error);
+    }
+    // Labels come from the request as it now is, placeholders included, so
+    // a command that carried the value names it by placeholder, not value.
+    let labels = call_labels(&config.messages);
+    for hit in &mut hits {
+        if let Some(origin) = &mut hit.origin {
+            if let Some(call) = &origin.call {
+                origin.label = labels.get(call).cloned();
+            }
+        }
+    }
+    Ok(hits)
+}
+
+/// How many characters of a command or path the record keeps as a label.
+const LABEL_CHARS: usize = 60;
+
+/// A safe label per tool call, from its (already masked) arguments: a
+/// bash command's description, else its head; a path for file tools.
+fn call_labels(messages: &[Message]) -> std::collections::HashMap<String, String> {
+    let mut labels = std::collections::HashMap::new();
+    for message in messages {
+        let Message::Assistant { content, .. } = message else {
+            continue;
+        };
+        for block in content {
+            let Content::ToolCall { id, arguments, .. } = block else {
+                continue;
+            };
+            let text = [
+                "description",
+                "command",
+                "path",
+                "file_path",
+                "pattern",
+                "url",
+            ]
+            .iter()
+            .find_map(|key| arguments.get(key).and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+            if let Some(text) = text {
+                let first = text.lines().next().unwrap_or_default();
+                let first = if is_path(first) {
+                    path_tail(first)
+                } else {
+                    command_head(first)
+                };
+                let mut label: String = first.chars().take(LABEL_CHARS).collect();
+                if first.chars().count() > LABEL_CHARS || text.contains('\n') {
+                    label.push('…');
+                }
+                labels.insert(id.clone(), label);
+            }
+        }
+    }
+    labels
+}
+
+/// An absolute or home-relative path with no spaces: a file tool's target.
+fn is_path(text: &str) -> bool {
+    (text.starts_with('/') || text.starts_with("~/")) && !text.contains(char::is_whitespace)
+}
+
+/// The last two components (`cache/manager.rs`), enough to recognise a file.
+fn path_tail(path: &str) -> &str {
+    let trimmed = path.trim_end_matches('/');
+    let mut cut = trimmed.len();
+    for _ in 0..2 {
+        match trimmed[..cut].rfind('/') {
+            Some(pos) if pos > 0 => cut = pos,
+            _ => return trimmed,
+        }
+    }
+    &trimmed[cut + 1..]
+}
+
+/// The part of a shell line worth reading: past leading `NAME=value;` or
+/// `NAME=value` env setup (`S="-o BatchMode=yes"; ssh $S host 'cmd'` →
+/// `ssh $S host 'cmd'`), and past `cd dir &&`. Quotes are respected so a
+/// `;` inside a value does not split it.
+fn command_head(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    loop {
+        let Some(end) = assignment_end(rest) else {
+            break;
+        };
+        let after = rest[end..].trim_start();
+        let after = after.strip_prefix(';').unwrap_or(after).trim_start();
+        rest = after;
+    }
+    // `cd somewhere && real command`
+    if rest.starts_with("cd ") {
+        if let Some(pos) = rest.find("&&") {
+            let after = rest[pos + 2..].trim_start();
+            if !after.is_empty() {
+                rest = after;
+            }
+        }
+    }
+    if rest.is_empty() {
+        line
+    } else {
+        rest
     }
 }
 
+/// Byte offset past a leading `NAME=value` with quotes honoured, else `None`.
+fn assignment_end(text: &str) -> Option<usize> {
+    let name_end = text
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|&i| i > 0)?;
+    if !text[name_end..].starts_with('=') || text.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (i, c) in text[name_end + 1..].char_indices() {
+        let at = name_end + 1 + i;
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, c) {
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (Some('"'), '\\') => escaped = true,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '\\') => escaped = true,
+            (None, c) if c.is_whitespace() || c == ';' => return Some(at),
+            (None, _) => {}
+        }
+    }
+    quote.is_none().then_some(text.len())
+}
+
 /// Visit every string a request sends that may carry user data. `f` gets
-/// the text and where it sits, and says whether it changed the text.
-fn walk(
-    config: &mut StreamConfig,
-    sensitive: &HashSet<String>,
-    f: &mut dyn FnMut(&mut String, Slot, Option<&str>) -> bool,
-) {
+/// the text, where it sits and its origin, and says whether it changed
+/// the text.
+fn walk(config: &mut StreamConfig, sensitive: &HashSet<String>, f: &mut Visit<'_>) {
     let inbound = Slot::Inbound { sensitive: false };
-    f(&mut config.system_prompt, inbound, None);
+    let at = |at: &str| Origin {
+        at: at.to_string(),
+        call: None,
+        label: None,
+    };
+    f(
+        &mut config.system_prompt,
+        inbound,
+        None,
+        &at("system prompt"),
+    );
     for tool in &mut config.tools {
-        f(&mut tool.description, inbound, None);
-        walk_schema(&mut tool.parameters, inbound, f);
+        let origin = at("tool description");
+        f(&mut tool.description, inbound, None, &origin);
+        walk_schema(&mut tool.parameters, inbound, &origin, f);
     }
     for message in &mut config.messages {
-        let (content, slot) = match message {
-            Message::User { content, .. } => (content, inbound),
-            Message::Assistant { content, .. } => (content, Slot::Model),
+        let (content, slot, origin) = match message {
+            Message::User { content, .. } => (content, inbound, at("user")),
+            Message::Assistant { content, .. } => (content, Slot::Model, at("assistant")),
             Message::ToolResult {
                 content,
                 tool_call_id,
+                tool_name,
                 ..
             } => {
                 let sensitive = sensitive.contains(tool_call_id);
-                (content, Slot::Inbound { sensitive })
+                let origin = Origin {
+                    at: format!("{tool_name} result"),
+                    call: Some(tool_call_id.clone()),
+                    label: None,
+                };
+                (content, Slot::Inbound { sensitive }, origin)
             }
         };
         for block in content {
             match block {
                 Content::Text { text } => {
-                    f(text, slot, None);
+                    f(text, slot, None, &origin);
                 }
                 Content::Thinking { thinking, metadata } => {
                     let signed = metadata
                         .as_ref()
                         .is_some_and(ThinkingMetadata::has_replay_payload);
+                    let thinking_origin = at("thinking");
                     if !signed {
-                        f(thinking, Slot::Model, None);
-                    } else if f(thinking, Slot::Signed, None) {
+                        f(thinking, Slot::Model, None, &thinking_origin);
+                    } else if f(thinking, Slot::Signed, None, &thinking_origin) {
                         *metadata = None;
                     }
                 }
-                Content::ToolCall { arguments, .. } => walk_value(arguments, Slot::Model, None, f),
+                Content::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => {
+                    let origin = Origin {
+                        at: format!("{name} call"),
+                        call: Some(id.clone()),
+                        label: None,
+                    };
+                    walk_value(arguments, Slot::Model, None, &origin, f)
+                }
                 Content::Image { .. } => {}
             }
         }
@@ -160,11 +333,7 @@ fn walk(
 /// reference breaks the tool contract. Only recurse as a schema where the
 /// vocabulary says there is one; defaults/enums/examples are ordinary JSON
 /// even when their object keys look like schema keywords.
-fn walk_schema(
-    schema: &mut Value,
-    slot: Slot,
-    f: &mut dyn FnMut(&mut String, Slot, Option<&str>) -> bool,
-) {
+fn walk_schema(schema: &mut Value, slot: Slot, origin: &Origin, f: &mut Visit<'_>) {
     match schema {
         Value::Object(map) => {
             for (keyword, value) in map.iter_mut() {
@@ -179,7 +348,7 @@ fn walk_schema(
                     | "dependentSchemas" => {
                         if let Value::Object(schemas) = value {
                             for schema in schemas.values_mut() {
-                                walk_schema(schema, slot, f);
+                                walk_schema(schema, slot, origin, f);
                             }
                         }
                     }
@@ -188,7 +357,7 @@ fn walk_schema(
                         if let Value::Object(dependencies) = value {
                             for dependency in dependencies.values_mut() {
                                 if dependency.is_object() {
-                                    walk_schema(dependency, slot, f);
+                                    walk_schema(dependency, slot, origin, f);
                                 }
                             }
                         }
@@ -210,16 +379,16 @@ fn walk_schema(
                     | "if"
                     | "then"
                     | "else"
-                    | "contentSchema" => walk_schema(value, slot, f),
+                    | "contentSchema" => walk_schema(value, slot, origin, f),
                     // Annotations, literal constraints and extension data may
                     // carry secrets. Keep scanning all their string values.
-                    _ => walk_value(value, slot, Some(keyword), f),
+                    _ => walk_value(value, slot, Some(keyword), origin, f),
                 }
             }
         }
         Value::Array(schemas) => {
             for schema in schemas {
-                walk_schema(schema, slot, f);
+                walk_schema(schema, slot, origin, f);
             }
         }
         _ => {}
@@ -230,18 +399,19 @@ fn walk_value(
     value: &mut Value,
     slot: Slot,
     field: Option<&str>,
-    f: &mut dyn FnMut(&mut String, Slot, Option<&str>) -> bool,
+    origin: &Origin,
+    f: &mut Visit<'_>,
 ) {
     match value {
         Value::String(text) => {
-            f(text, slot, field);
+            f(text, slot, field, origin);
         }
         Value::Array(items) => items
             .iter_mut()
-            .for_each(|item| walk_value(item, slot, field, f)),
+            .for_each(|item| walk_value(item, slot, field, origin, f)),
         Value::Object(map) => {
             for (key, item) in map.iter_mut() {
-                walk_value(item, slot, Some(key), f);
+                walk_value(item, slot, Some(key), origin, f);
             }
         }
         _ => {}

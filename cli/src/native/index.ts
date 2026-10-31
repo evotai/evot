@@ -10,7 +10,7 @@ export type { CloudPushProgress, CloudPushResult, CloudPullResult, RemoteSession
 export type { CloudSync, CloudVisibility } from './contracts/results.js'
 export type { PrivacyAction, PrivacyEvent, PrivacyKind, PrivacyLive, PrivacyLiveNotice, PrivacySettings, PrivacyStatus } from './contracts/privacy.js'
 // @ts-ignore — binding.js is generated
-import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, privacyLive as rawPrivacyLive, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
+import { NapiAgent as RawAgent, version as rawVersion, startServer as rawStartServer, runAcp as rawRunAcp, startServerBackground as rawStartServerBackground, fastExit as rawFastExit, reapExitedChildren as rawReapExitedChildren, authBegin as rawAuthBegin, authPoll as rawAuthPoll, authLogout as rawAuthLogout, authSyncModels as rawAuthSyncModels, authSyncNotices as rawAuthSyncNotices, authWhoami as rawAuthWhoami, authRefreshSession as rawAuthRefreshSession, authNotices as rawAuthNotices, privacyStatus as rawPrivacyStatus, privacySave as rawPrivacySave, privacyLive as rawPrivacyLive, privacySessionTags as rawPrivacySessionTags, taskList as rawTaskList, taskDeliveryDefaults as rawTaskDeliveryDefaults, taskGet as rawTaskGet, taskCreate as rawTaskCreate, taskUpdate as rawTaskUpdate, taskDelete as rawTaskDelete, taskRun as rawTaskRun, taskShare as rawTaskShare, taskShareFetch as rawTaskShareFetch, taskShareId as rawTaskShareId } from './binding.js'
 
 import { QueryStream } from './query-stream.js'
 export { QueryStream } from './query-stream.js'
@@ -622,6 +622,14 @@ export async function privacySave(settings: PrivacySettings): Promise<PrivacySet
 /** Records this process made after `after` (0 for all kept), oldest first; in-memory, no disk read. */
 export function privacyLive(after: number): PrivacyLive {
   return decodeResult(rawPrivacyLive(after), privacy.privacyLive)
+}
+
+/** Placeholder tags already recorded for `session` in the last `days` days.
+ * Older addons have no such call; a resumed session then reports its history
+ * as new once, as before. */
+export async function privacySessionTags(session: string, days = 30): Promise<string[]> {
+  if (typeof rawPrivacySessionTags !== 'function') return []
+  return decodeResult(await rawPrivacySessionTags(session, days), privacy.privacyTags)
 }
 
 export const taskList = rawTaskList

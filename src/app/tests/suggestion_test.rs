@@ -277,12 +277,20 @@ fn every_prediction_mode_decides_reply_type_then_conversation_then_runtime() -> 
         assert!(classify < correct && correct < limits);
         // The last reply is the primary signal; earlier user questions are
         // background and are never re-asked once the reply addresses them.
-        assert!(text.contains("it is the primary signal"));
+        assert!(text.contains("it is the primary signal; derive the move from it"));
         assert!(text.contains("Earlier user messages are background only"));
         assert!(text.contains("Never suggest re-asking or restating an earlier user question"));
         assert!(text.contains("even when follow-up tool work came after the answer"));
         assert!(text.contains("classify the answer, not the preamble"));
-        assert!(text.contains("reports a failure or surfaces an anomaly -> pursue that problem"));
+        // An already-diagnosed and restarted failure is not a topic to probe;
+        // suggestions stay on the session goal and may be none while waiting.
+        assert!(text.contains("if the reply already explains the cause and has restarted or fixed it, there is nothing left to probe"));
+        assert!(text.contains("STAY ON THE GOAL"));
+        assert!(text.contains("probing it is drift unless it blocks the goal"));
+        assert!(text.contains("waiting is the natural move: return []"));
+        assert!(
+            text.contains("reports a failure or surfaces an anomaly -> if unexplained, pursue it")
+        );
         assert!(text.contains("reports work in progress or started -> status or partial results"));
         assert!(text.contains("They restrict, never redirect"));
         // Conversation corrections each name their evidence.
@@ -293,10 +301,11 @@ fn every_prediction_mode_decides_reply_type_then_conversation_then_runtime() -> 
             text.contains("Never invent phases or assume a generic pipeline; one phase at a time")
         );
         assert!(text.contains("habit: in TRAJECTORY"));
-        // One concern per suggestion applies in all modes.
-        assert!(
-            text.contains("ONE CONCERN each: one question or one action, never bundled or chained")
-        );
+        // One intent per suggestion; related small steps may be combined.
+        assert!(text.contains(
+            "ONE INTENT each: a suggestion may combine small steps that belong together"
+        ));
+        assert!(text.contains("but not unrelated concerns"));
         assert!(
             text.contains("several live issues become separate alternatives, most pressing first")
         );
