@@ -17,6 +17,8 @@ import { createLoopExtension, SCHEDULE_WAKEUP_SPEC } from '../src/loop/host-tool
 import { buildLoopStartPrompt, buildLoopWakeupPrompt } from '../src/loop/prompt.js'
 import type { HostToolExtension } from '../src/term/host-tools.js'
 import { LoopSession } from '../src/loop/session.js'
+import { earlyWakeFromResult, earlyWakeSentence } from '../src/loop/early-wake.js'
+import { buildToolCard } from '../src/render/output.js'
 import { composeExtensions, type HostToolCall, type HostToolExtension } from '../src/term/host-tools.js'
 
 function controller() {
@@ -281,6 +283,60 @@ describe('schedule_wakeup host tool', () => {
     expect(res.is_error).toBe(false)
     expect(c.active).toBe(false)
     expect(stops).toEqual(['model'])
+  })
+})
+
+describe('early wake from a running background shell', () => {
+  const shells = [{ taskId: '3ecbfd4f-1234-5678', command: 'sleep 30', elapsedMs: 5000 }]
+
+  test('sentence names one shell, counts several, and is absent without any', () => {
+    expect(earlyWakeSentence([])).toBeNull()
+    expect(earlyWakeSentence(['3ecbfd4f-1234'])).toBe('wakes earlier when background shell 3ecbfd4f finishes')
+    expect(earlyWakeSentence(['3ecbfd4f-1234', 'c0e571db-9999']))
+      .toBe('wakes earlier when any of 2 background shells (3ecbfd4f, c0e571db) finishes')
+  })
+
+  test('the tool result tells the model the delay is only a fallback', async () => {
+    const { c } = controller()
+    c.start({ kind: 'dynamic' }, userTask('p'), 0)
+    const plain = await createLoopExtension(c).dispatch(call({ delay_seconds: 1800, reason: 'x', noop: true }))
+    expect(plain.content[0]?.text).not.toContain('wakes earlier')
+    const withShell = await createLoopExtension(c, () => shells).dispatch(call({ delay_seconds: 1800, reason: 'x', noop: true }))
+    expect(withShell.content[0]?.text).toMatch(/^Next wakeup in 30m at \d\d:\d\d:\d\d\. The loop wakes earlier when background shell 3ecbfd4f finishes\.$/)
+    expect(earlyWakeFromResult(withShell.content[0]?.text ?? '')).toBe('wakes earlier when background shell 3ecbfd4f finishes')
+    expect(earlyWakeFromResult(plain.content[0]?.text ?? '')).toBeNull()
+  })
+
+  test('the wakeup card repeats it under the reason', () => {
+    const base = { id: 't', name: 'ScheduleWakeup', status: 'success', startedAt: 0, durationMs: 1,
+      args: { delay_seconds: 1800, reason: 'Waiting for Codex', noop: true } }
+    const lines = (result: string) => buildToolCard({ ...base, result } as never).map(line => stripAnsi(line.text))
+    expect(lines('Next wakeup in 30m at 19:37:24. The loop wakes earlier when background shell 3ecbfd4f finishes.').slice(1))
+      .toEqual(['  Waiting for Codex', '  wakes earlier when background shell 3ecbfd4f finishes'])
+    expect(lines('Next wakeup in 30m at 19:37:24.').slice(1)).toEqual(['  Waiting for Codex'])
+  })
+
+  test('the footer row and /loop status read live shells, not the scheduling moment', async () => {
+    let running: typeof shells = []
+    const notices: string[] = []
+    const s = new LoopSession({
+      runTurn: () => {}, canWake: () => true, notify: text => notices.push(text), requestRender: () => {},
+      backgroundTasks: () => running,
+    })
+    s.handleCommand('/loop a', 'a')
+    await s.extension?.dispatch(call({ delay_seconds: 1800, reason: 'x', noop: true }))
+    s.endRun('ok')
+    expect(s.waitRemaining()?.earlyWake).toBeNull()
+    running = shells
+    expect(s.waitRemaining()?.earlyWake).toBe('wakes earlier when background shell 3ecbfd4f finishes')
+    expect(stripAnsi(formatLoopWaitLine({ remainingMs: 1_790_000, earlyWake: s.waitRemaining()?.earlyWake })))
+      .toBe('◌ loop · wakes in 29m50s · or earlier when background shell 3ecbfd4f finishes')
+    s.handleCommand('/loop status', 'status')
+    expect(notices.at(-1)).toContain('\n  wakes earlier when background shell 3ecbfd4f finishes')
+    running = []
+    s.handleCommand('/loop status', 'status')
+    expect(notices.at(-1)).not.toContain('wakes earlier')
+    s.dispose()
   })
 })
 

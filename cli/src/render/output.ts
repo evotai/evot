@@ -14,6 +14,7 @@ import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
 import { formatCompactionCompleted } from './verbose.js'
+import { earlyWakeFromResult } from '../loop/early-wake.js'
 import type { UICompaction, UIMessage, UIToolCall } from '../term/app/types.js'
 
 // ---------------------------------------------------------------------------
@@ -1253,6 +1254,9 @@ function buildLoopCard(call: UIToolCall, now: number): OutputLine[] {
     : `◌ loop${quiet ? ' · quiet' : ''} · ${loopNextWakeup(args, call.startedAt ?? now)}`
   const lines = [line(head)]
   if (reason) lines.push(line(`  ${reason}`))
+  // The host wrote the result; it knows which shells were running at the time.
+  const early = typeof call.result === 'string' ? earlyWakeFromResult(call.result) : null
+  if (early) lines.push(line(`  ${early}`))
   return stampToolCard(lines, 'success')
 }
 

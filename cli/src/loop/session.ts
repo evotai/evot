@@ -4,6 +4,7 @@ import { createLoopExtension } from './host-tool.js'
 import { formatDuration, parseLoopArgs, type LoopCommand } from './parser.js'
 import { buildLoopStartPrompt, buildLoopWakeupPrompt, type RunningBackgroundTask } from './prompt.js'
 import { formatWallClock as clock } from '../render/format.js'
+import { earlyWakeSentence } from './early-wake.js'
 
 export interface LoopSessionDeps {
   runTurn: (userLine: string | null, prompt: string, extension: HostToolExtension) => void
@@ -42,7 +43,7 @@ export class LoopSession {
     this.#controller = new LoopController({
       stopped: (cause, snapshot) => this.#onStopped(cause, snapshot),
     })
-    this.#extension = createLoopExtension(this.#controller)
+    this.#extension = createLoopExtension(this.#controller, () => this.#deps.backgroundTasks?.() ?? [])
   }
 
   get active(): boolean {
@@ -135,17 +136,26 @@ export class LoopSession {
     const mode = snapshot.mode.kind === 'fixed' ? `every ${formatDuration(snapshot.mode.intervalMs)}` : 'self-paced'
     const next = remaining === null ? 'running now' : `next wakeup in ${formatDuration(remaining)} (${clock(now + remaining)})`
     const noop = snapshot.noopStreak > 0 ? ` · ${snapshot.noopStreak} quiet` : ''
+    const early = remaining === null ? null : this.earlyWake()
     const reason = snapshot.reason ? `\n  ${snapshot.reason}` : ''
-    return `◌ loop · ${snapshot.task.label} · ${mode} · tick ${snapshot.tick} · ${next}${noop} · since ${clock(snapshot.startedAt)}${reason}`
+    const earlyLine = early ? `\n  ${early}` : ''
+    return `◌ loop · ${snapshot.task.label} · ${mode} · tick ${snapshot.tick} · ${next}${noop} · since ${clock(snapshot.startedAt)}${reason}${earlyLine}`
   }
 
   /** The next wakeup as the status-line badge shows it: the `19m37s` label
    *  and the raw remaining time, so the footer can tone the final minute;
-   *  null while a run is in flight or no loop is active. */
-  waitRemaining(now = Date.now()): { label: string; remainingMs: number } | null {
+   *  null while a run is in flight or no loop is active. `earlyWake` names
+   *  the running shell that would end the wait before the timer. */
+  waitRemaining(now = Date.now()): { label: string; remainingMs: number; earlyWake: string | null } | null {
     const remaining = this.#controller.remainingMs(now)
     if (remaining === null) return null
-    return { label: formatDuration(remaining), remainingMs: remaining }
+    return { label: formatDuration(remaining), remainingMs: remaining, earlyWake: this.earlyWake() }
+  }
+
+  /** The sentence for a parked loop with a live background shell, or null. */
+  earlyWake(): string | null {
+    const tasks = this.#deps.backgroundTasks?.() ?? []
+    return earlyWakeSentence(tasks.map(task => task.taskId))
   }
 
   dispose(): void {

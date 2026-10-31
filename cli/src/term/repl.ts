@@ -1895,12 +1895,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       spinnerBlock = buildRunStatusBlock(spinnerText, renderer.termCols)
     } else if (!isLoading && overlay.kind !== 'ask-user' && loopSession.waiting) {
       // Parked between loop ticks. The wakeup card in the transcript says why;
-      // this row says until when. A background shell the agent left running
-      // is the footer chip's business, not this row's.
+      // this row says until when, and that a running shell can end it early.
       const wait = loopSession.waitRemaining()
       if (wait) {
         const waitText = formatLoopWaitLine({
           remainingMs: wait.remainingMs,
+          earlyWake: wait.earlyWake,
           stopPending: runInteraction.snapshot(runInteractionInput()).interruptPending,
         })
         spinnerBlock = buildRunStatusBlock(waitText, renderer.termCols)

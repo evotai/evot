@@ -10,6 +10,8 @@ import type { LoopController } from './controller.js'
 import { MIN_DELAY_SECONDS, MAX_DELAY_SECONDS } from './controller.js'
 import { formatDuration } from './parser.js'
 import { formatWallClock } from '../render/format.js'
+import { earlyWakeSentence } from './early-wake.js'
+import type { RunningBackgroundTask } from './prompt.js'
 
 export const SCHEDULE_WAKEUP_SPEC = {
   name: 'schedule_wakeup',
@@ -58,15 +60,24 @@ export function isScheduleWakeupName(name: string): boolean {
   return lower === SCHEDULE_WAKEUP_SPEC.name || lower === 'schedulewakeup'
 }
 
-export function createLoopExtension(controller: LoopController): HostToolExtension {
+/** `backgroundTasks` is read at scheduling time so the result can tell the
+ *  model and the user that a running shell cuts the wait short. */
+export function createLoopExtension(
+  controller: LoopController,
+  backgroundTasks: () => readonly RunningBackgroundTask[] = () => [],
+): HostToolExtension {
   return {
     specsJson: LOOP_HOST_TOOL_SPECS_JSON,
     handles: isScheduleWakeupName,
-    dispatch: call => Promise.resolve(dispatchScheduleWakeup(call, controller)),
+    dispatch: call => Promise.resolve(dispatchScheduleWakeup(call, controller, backgroundTasks())),
   }
 }
 
-function dispatchScheduleWakeup(call: HostToolCall, controller: LoopController): HostToolResponse {
+function dispatchScheduleWakeup(
+  call: HostToolCall,
+  controller: LoopController,
+  background: readonly RunningBackgroundTask[],
+): HostToolResponse {
   if (!controller.active) return errorResponse(call, 'No loop is running.')
   const args = call.arguments
   const reason = typeof args.reason === 'string' ? args.reason.trim() : ''
@@ -84,5 +95,7 @@ function dispatchScheduleWakeup(call: HostToolCall, controller: LoopController):
   const applied = controller.schedule({ delaySeconds: delay, reason, noop: args.noop })
   const at = formatWallClock(Date.now() + applied * 1000)
   const clamped = applied !== Math.round(delay) ? ` (adjusted from ${Math.round(delay)}s)` : ''
-  return textResponse(call, `Next wakeup in ${formatDuration(applied * 1000)} at ${at}${clamped}.`)
+  const early = earlyWakeSentence(background.map(task => task.taskId))
+  const earlyText = early ? ` The loop ${early}.` : ''
+  return textResponse(call, `Next wakeup in ${formatDuration(applied * 1000)} at ${at}${clamped}.${earlyText}`)
 }
