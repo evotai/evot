@@ -373,6 +373,12 @@ describe('prompts', () => {
     const dynamic = buildLoopStartPrompt({ kind: 'dynamic' }, 'watch')
     expect(dynamic).toContain('`schedule_wakeup` exactly once')
     expect(dynamic).toContain('third straight tick')
+    // Quiet ticks are normal while a watcher runs; they must not end the loop.
+    expect(dynamic).toContain('Quiet ticks while a watcher you armed is still running are expected and do not count')
+    // Short by default: a few minutes, inside the warm cache; long only for known-long waits.
+    expect(dynamic).toContain('Default to a short delay, 270s (about 5 minutes')
+    expect(dynamic).toContain('Go long (1200-1800) only when the wait is known to take far longer')
+    expect(SCHEDULE_WAKEUP_SPEC.description).toContain('Default to about 270s (5 minutes')
     expect(dynamic).toContain('`noop` is required')
     // The 5-minute cache boundary: stay under it or go long, never land on it.
     expect(dynamic).toContain('Do not choose 300s exactly')

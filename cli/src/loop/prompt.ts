@@ -42,12 +42,12 @@ export function buildLoopStartPrompt(
       ].join(' ')
     : [
         'You are running a self-paced loop. Every turn: do the work, write a short status line (with your cursor), then call `schedule_wakeup` exactly once as the final action; the turn ends when it returns.',
-        'Call it with `stop: true` when the goal is reached or the loop cannot move further without the user. On the third straight tick with nothing to do, stop and say so in one line rather than keep waking.',
+        'Call it with `stop: true` when the goal is reached or the loop cannot move further without the user. Quiet ticks while a watcher you armed is still running are expected and do not count; otherwise, on the third straight tick with nothing to do, stop and say so in one line rather than keep waking.',
       ].join(' ')
 
   const dynamicRules = mode.kind === 'dynamic'
     ? [
-        `\`delay_seconds\` is clamped to [${MIN_DELAY_SECONDS}, ${MAX_DELAY_SECONDS}]. While a background watcher is running, use 1200-1800 as a fallback in case it hangs. Use a short delay only for external state no watcher can observe, matched to how fast it actually changes.`,
+        `\`delay_seconds\` is clamped to [${MIN_DELAY_SECONDS}, ${MAX_DELAY_SECONDS}]. Default to a short delay, ${CACHE_SAFE_SECONDS}s (about 5 minutes; a watcher finishing wakes you sooner anyway). Go long (1200-1800) only when the wait is known to take far longer than that, such as a CI pipeline, a human review or a multi-hour benchmark, and a watcher is armed for it. For external state no watcher can observe, match the delay to how fast it actually changes.`,
         `The prompt cache lives ${formatDuration(CACHE_WINDOW_SECONDS * 1000)}: delays up to ${CACHE_SAFE_SECONDS}s resume on a warm cache, longer ones pay one miss. Do not choose ${CACHE_WINDOW_SECONDS}s exactly; either stay under ${CACHE_SAFE_SECONDS}s or go to 1200 or more.`,
         '`noop` is required: true when this turn changed nothing and found nothing new; false when you edited files, pushed, commented, or surfaced a finding. Consecutive quiet ticks are counted and shown to you at the next wakeup.',
         'The `reason` must be one specific sentence about what you are waiting for.',
