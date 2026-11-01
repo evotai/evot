@@ -169,6 +169,54 @@ async fn openai_sse_uses_first_non_empty_reasoning_alias_once() {
 }
 
 #[tokio::test]
+async fn openai_sse_empty_content_beside_reasoning_keeps_one_thinking_block() {
+    // Some compatible providers send `"content": ""` with every reasoning
+    // token. An empty string is not visible text and must not split the
+    // reasoning into one block per token.
+    let chunk = |reasoning: &str| {
+        format!(
+            "data: {}",
+            serde_json::json!({
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": "", "reasoning_content": reasoning},
+                    "finish_reason": null
+                }]
+            })
+        )
+    };
+    let sse = openai_sse::body(vec![
+        chunk("dated"),
+        chunk(" today"),
+        chunk(" 10"),
+        openai_sse::text_chunk("answer", None),
+        openai_sse::finish_with_usage("stop", 50, 10),
+        openai_sse::done(),
+    ]);
+
+    let (message, events) = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .unwrap();
+
+    let indices = events
+        .iter()
+        .filter_map(|event| match event {
+            StreamEvent::ThinkingDelta { content_index, .. } => Some(*content_index),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(indices, vec![0, 0, 0]);
+    assert!(matches!(
+        message,
+        Message::Assistant { content, .. }
+            if matches!(content.as_slice(), [
+                Content::Thinking { thinking, .. },
+                Content::Text { text },
+            ] if thinking == "dated today 10" && text == "answer")
+    ));
+}
+
+#[tokio::test]
 async fn openai_sse_interleaved_reasoning_and_text_append_in_arrival_order() {
     let sse = openai_sse::body(vec![
         openai_sse::reasoning_chunk(Some("plan "), None, None),

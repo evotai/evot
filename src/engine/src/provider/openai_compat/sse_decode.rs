@@ -297,7 +297,9 @@ async fn process_sse_chunk(
 
         // Handle text content. As with reasoning, preserve type transitions so
         // every new delta extends the tail instead of mutating an earlier row.
-        if let Some(text) = &delta.content {
+        // Some providers send `"content": ""` beside every reasoning token; an
+        // empty string is not a transition and must not split the reasoning.
+        if let Some(text) = delta.content.as_ref().filter(|text| !text.is_empty()) {
             let idx = if matches!(content.last(), Some(Content::Text { .. })) {
                 content.len() - 1
             } else {
