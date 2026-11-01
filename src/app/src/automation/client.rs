@@ -53,7 +53,7 @@ pub async fn update_task(
 }
 
 /// A task definition as it may go to the server: refused if it holds any
-/// secret or personal data (it runs later from the stored copy, so a
+/// secret (it runs later from the stored copy, so a
 /// scrubbed one would do something else; secrets go in the env file).
 async fn task_body(body: &serde_json::Value) -> Result<serde_json::Value> {
     let bytes = crate::privacy::scrub_upload(crate::privacy::Target::Task, "", body, None).await?;

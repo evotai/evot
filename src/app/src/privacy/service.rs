@@ -354,8 +354,7 @@ pub async fn upload_context<T: Serialize>(history: &T) -> Result<UploadContext> 
     .await
 }
 
-/// `payload` as JSON bytes with secrets and personal data scrubbed for
-/// good, for an upload to `target`, under the current settings and packs.
+/// `payload` as JSON bytes with secrets scrubbed for good, for an upload to `target`, under the current settings and packs.
 /// See [`scrub_upload_with`].
 pub async fn scrub_upload<T: Serialize>(
     target: Target,

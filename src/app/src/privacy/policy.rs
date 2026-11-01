@@ -28,7 +28,7 @@ pub enum Action {
 }
 
 /// `~/.evotai/privacy/settings.json`. A missing file is the defaults: on,
-/// secrets and personal data masked.
+/// secrets masked.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivacySettings {
     #[serde(default)]
@@ -38,12 +38,6 @@ pub struct PrivacySettings {
     /// API keys, private keys, tokens, passwords.
     #[serde(default = "yes")]
     pub secrets: bool,
-    /// Emails, phones, ID and card numbers, names and addresses by field.
-    #[serde(default = "yes")]
-    pub personal: bool,
-    /// Public IPs and MAC addresses. Off by default: logs are full of them.
-    #[serde(default)]
-    pub network: bool,
     /// Per kind (`API_KEY`, `EMAIL`, `TERM`, …). A kind not listed is
     /// masked, or warned of when its finding is low-confidence.
     #[serde(default)]
@@ -68,8 +62,6 @@ impl Default for PrivacySettings {
             schema_version: SETTINGS_SCHEMA_VERSION,
             enabled: true,
             secrets: true,
-            personal: true,
-            network: false,
             actions: BTreeMap::new(),
             terms: Vec::new(),
             terms_any_case: true,
@@ -108,8 +100,6 @@ pub(super) struct Policy {
     pub enabled: bool,
     pub engine: Arc<Engine>,
     secrets: bool,
-    personal: bool,
-    network: bool,
     actions: BTreeMap<String, Action>,
     allow: Vec<String>,
     terms: Option<Regex>,
@@ -138,8 +128,6 @@ impl Policy {
             enabled: settings.enabled,
             engine,
             secrets: settings.secrets,
-            personal: settings.personal,
-            network: settings.network,
             actions: settings
                 .actions
                 .iter()
@@ -158,8 +146,6 @@ impl Policy {
     pub fn covers(&self, category: Category) -> bool {
         match category {
             Category::Secret => self.secrets,
-            Category::Personal => self.personal,
-            Category::Network => self.network,
             Category::Custom => true,
         }
     }

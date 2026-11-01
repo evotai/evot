@@ -5,13 +5,12 @@ import { privacyStatus } from '../src/native/contracts/privacy.js'
 import type { PrivacySettings, PrivacyStatus } from '../src/native/index.js'
 
 const defaults: PrivacySettings = {
-  schema_version: 1, enabled: true, secrets: true, personal: true,
+  schema_version: 1, enabled: true, secrets: true,
   actions: {}, terms: [], terms_any_case: true, allow: [],
 }
 
 const kinds = [
   { kind: 'API_KEY', category: 'secret' as const }, { kind: 'PRIVATE_KEY', category: 'secret' as const },
-  { kind: 'EMAIL', category: 'personal' as const }, { kind: 'IP', category: 'network' as const },
   { kind: 'TERM', category: 'custom' as const },
 ]
 const packs = [
@@ -29,7 +28,7 @@ function status(settings: PrivacySettings = defaults): PrivacyStatus {
       by_target: { llm: { requests: 3, blocked: 1 }, sync: { requests: 1, blocked: 0 } },
       kinds: [{ kind: 'API_KEY', values: 2, verified: 1, masked: 3, warned: 0, blocked: 1 }],
       recent: [
-        { time: '2026-01-02T10:05:00+08:00', target: 'llm', session: 'abcdef123456', blocked: false, kinds: ['API_KEY', 'EMAIL'], reason: 'masked API_KEY ×1 · EMAIL ×2' },
+        { time: '2026-01-02T10:05:00+08:00', target: 'llm', session: 'abcdef123456', blocked: false, kinds: ['API_KEY', 'TOKEN'], reason: 'masked API_KEY ×1 · TOKEN ×2' },
         { time: '2026-01-01T09:00:00+08:00', target: 'llm', session: 'abcdef123456', blocked: true, kinds: ['API_KEY'], reason: 'contains API_KEY ×1' },
       ],
     },
@@ -56,7 +55,7 @@ describe('/privacy', () => {
       '',
       '  3 requests masked · 1 call blocked',
       '',
-      '  10:05        model request  masked API_KEY ×1 · EMAIL ×2',
+      '  10:05        model request  masked API_KEY ×1 · TOKEN ×2',
       '  01-01 09:00  model request  ✗ contains API_KEY ×1',
       '',
       '  model requests masked · uploads scrubbed',
@@ -93,7 +92,7 @@ describe('/privacy', () => {
 
   test('only terms and the master switch are editable', async () => {
     const { port: p, saved } = port()
-    for (const line of ['off now', 'secrets off', 'personal off', 'network on', 'PRIVATE_KEY warn', 'allow add x', 'trust api.example', 'untaint x.js', 'kinds']) {
+    for (const line of ['off now', 'secrets off', 'PRIVATE_KEY warn', 'allow add x', 'trust api.example', 'untaint x.js', 'kinds']) {
       expect(await runPrivacyCommand(p, line)).toBe(USAGE)
     }
     expect(saved).toHaveLength(0)
@@ -109,9 +108,12 @@ describe('/privacy', () => {
     const raw = status()
     expect(privacyStatus.read(JSON.parse(JSON.stringify(raw)), '$')).toEqual(raw)
     expect(() => privacyStatus.read({ settings: defaults }, '$')).toThrow()
-    // Settings and stats written before network/verified existed still read.
+    // Stats written before verified existed still read, and an older addon's
+    // retired personal/network switches are ignored.
     const legacy = JSON.parse(JSON.stringify(raw))
     delete legacy.summary.kinds[0].verified
+    legacy.settings.personal = true
+    legacy.settings.network = false
     expect(privacyStatus.read(legacy, '$').summary.kinds[0]!.verified).toBeUndefined()
   })
 })

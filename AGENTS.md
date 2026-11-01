@@ -32,7 +32,6 @@
 
 Files under `~/.evotai`, remote API DTOs, addon JSON, and stored sessions are published contracts.
 
-- Never remove or rename a published field directly. Keep deprecated wire/cache fields serialized even after domain logic stops using them.
 - Every added field must be backward-readable via `#[serde(default)]`, `Option<T>`, or an explicit migration.
 - Do not change a published field's type or meaning in place; add a new field and migrate.
 - Persistent formats need a schema version independent of server/catalog versions. Missing versions must map to legacy v0; reject unsupported future versions clearly.

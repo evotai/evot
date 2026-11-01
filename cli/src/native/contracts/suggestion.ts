@@ -86,4 +86,6 @@ export interface SuggestionHints {
   images?: SuggestionImage[]
   /** Deprecated wire field; never used to cycle. */
   rejected?: string[]
+  /** The session the draft belongs to; privacy records carry it. */
+  session?: string
 }

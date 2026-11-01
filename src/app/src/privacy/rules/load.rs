@@ -18,7 +18,6 @@ const BUILTIN: &[(&str, &str)] = &[
     ("secrets.json", include_str!("data/secrets.json")),
     ("cn-cloud.json", include_str!("data/cn-cloud.json")),
     ("betterleaks.json", include_str!("data/betterleaks.json")),
-    ("personal.json", include_str!("data/personal.json")),
 ];
 
 /// Dropped from a pack's text before parsing. Example values are shaped

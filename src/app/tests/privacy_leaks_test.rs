@@ -178,12 +178,9 @@ fn p4_records_keep_no_fragment_of_any_value() -> TestResult {
     let masker = masker()?;
     let pass = format!("correcthorse{}battery", random(4, 4));
     let key = api_key(5);
-    let text = format!(
-        "password={pass} key {key} mail li.lei@{}-corp.cn",
-        random(6, 6).to_lowercase()
-    );
+    let text = format!("password={pass} key {key}");
     let record = masker.inspect(&text, None).record(Target::Llm);
-    assert!(record.values.len() >= 3);
+    assert!(record.values.len() >= 2);
     let written = serde_json::to_string(&record)?;
     for value in [pass.as_str(), key.as_str()] {
         // No substring of four characters or more of a value appears.
@@ -621,9 +618,11 @@ async fn share_and_sync_payloads_hold_no_value() -> TestResult {
         json!({"meta": meta, "entries": entries, "viewer": serde_json::to_value(&upload.data)?});
     for (what, payload) in [("share", serde_json::to_value(&upload)?), ("sync", push)] {
         let out = scrubbed(&masker()?, &payload, None)?;
-        for value in [&key, &env, &mail] {
+        for value in [&key, &env] {
             assert!(!out.contains(value.as_str()), "{what} uploads a value");
         }
+        // An address is not a secret: it stays, as the viewer shows it.
+        assert!(out.contains(mail.as_str()), "{what} scrubbed an email");
     }
     Ok(())
 }

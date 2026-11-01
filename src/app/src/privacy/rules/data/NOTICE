@@ -2,8 +2,8 @@ Third-party rules in this directory
 ===================================
 
 Rule packs that carry a "source" block contain data derived from the
-projects below. evot's own packs (core.json, cn-cloud.json, personal.json)
-are original; ideas taken from other projects are credited in the rule's
+projects below. evot's own packs (core.json, cn-cloud.json) are
+original; ideas taken from other projects are credited in the rule's
 description in this file only and no code or data was copied from them:
 Microsoft Presidio (MIT) and ByteDance GoDLP (MIT) for field-name and
 context detection, Yelp detect-secrets (Apache-2.0) and gitleaks (MIT) for

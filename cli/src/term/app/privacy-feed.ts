@@ -29,7 +29,9 @@ export class PrivacyFeed {
     this.cursor = Math.max(this.cursor, batch.cursor)
     const out: PrivacyHappening[] = []
     for (const notice of batch.notices) {
-      if (notice.session && session && notice.session !== session) continue
+      // A record without a session (a legacy caller's request) belongs to no
+      // open session: another TUI on the same addon must not show it as its own.
+      if (session && notice.session !== session) continue
       const key = notice.session ?? session ?? ''
       if (notice.blocked) { this.blocked.set(key, notice); continue }
       let tags = this.seen.get(key)

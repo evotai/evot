@@ -9,17 +9,15 @@ use serde::Serialize;
 
 pub const PACK_SCHEMA_VERSION: u32 = 1;
 
-/// What a kind belongs to; a category is switched on or off as a whole.
+/// What a kind belongs to. Only secrets are looked for: a key sent to a
+/// model is a leak, and rules for anything else fired on ordinary numbers
+/// and words far more often than on what they named.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Category {
     /// Keys, tokens, passwords: masked by default.
     Secret,
-    /// Data about a person: masked by default.
-    Personal,
-    /// Addresses of machines (public IPs, MACs): off by default.
-    Network,
-    /// The user's own terms: always on when listed.
+    /// The user's own kinds and terms: always on when listed.
     Custom,
 }
 
@@ -254,6 +252,10 @@ pub struct SourcesDef {
     /// Commands whose output is the environment.
     #[serde(default)]
     pub commands: Vec<String>,
+    /// Commands handed a secrets file as a parameter (`ssh -i key`) whose
+    /// output is something else.
+    #[serde(default)]
+    pub uses: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

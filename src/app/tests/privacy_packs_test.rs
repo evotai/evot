@@ -28,8 +28,6 @@ struct Row {
     #[serde(default)]
     field: Option<String>,
     finds: Vec<String>,
-    #[serde(default)]
-    network: bool,
 }
 
 /// One regression batch: every row finds exactly the kinds it lists.
@@ -37,21 +35,13 @@ fn batch(file: &str) -> TestResult {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/privacy")
         .join(file);
-    let plain = masker()?;
-    let network = Masker::new(
-        &PrivacySettings {
-            network: true,
-            ..PrivacySettings::default()
-        },
-        [3; 32],
-    )?;
+    let masker = masker()?;
     let mut failures = Vec::new();
     // Fixture values look exactly like real keys; `<cut>` inside one keeps
     // secret scanners from flagging the file (see rules::CUT).
     let text = std::fs::read_to_string(&path)?.replace(evot::privacy::CUT, "");
     for (n, line) in text.lines().enumerate() {
         let row: Row = serde_json::from_str(line)?;
-        let masker = if row.network { &network } else { &plain };
         let mut want = row.finds.clone();
         want.sort();
         want.dedup();
@@ -74,11 +64,14 @@ fn batch_2_false_positives_stay_as_written() -> TestResult {
     batch("2-false-positives.jsonl")
 }
 
+/// Numbers with a checksum (ID, card, IBAN, wallet) are about a person, not
+/// a secret: valid or not, they go as written.
 #[test]
-fn batch_3_checksums_decide() -> TestResult {
+fn batch_3_checksummed_numbers_go_as_written() -> TestResult {
     batch("3-checksums.jsonl")
 }
 
+/// Field names say what a value is; only secret fields are taken.
 #[test]
 fn batch_4_values_found_by_field_name() -> TestResult {
     batch("4-fields.jsonl")
@@ -90,8 +83,8 @@ fn batch_5_encoded_values_are_looked_through() -> TestResult {
 }
 
 #[test]
-fn batch_6_personal_and_network_data() -> TestResult {
-    batch("6-personal.jsonl")
+fn batch_6_data_about_people_goes_as_written() -> TestResult {
+    batch("6-not-secrets.jsonl")
 }
 
 /// A token whose last six characters are the base62 CRC32 of its random
@@ -154,7 +147,7 @@ fn user_packs_add_rules_and_must_be_valid() -> TestResult {
     let pack: Pack = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "acme",
-        "kinds": [{"name": "EMPLOYEE_ID", "category": "personal"}],
+        "kinds": [{"name": "EMPLOYEE_ID", "category": "custom"}],
         "rules": [{
             "id": "acme.employee", "kind": "EMPLOYEE_ID", "regex": "\\bACME-[0-9]{6}\\b",
             "keywords": ["acme-"], "examples": {"matches": ["badge ACME-123456"], "ignores": ["ACME-12"]}
@@ -194,6 +187,16 @@ fn user_packs_add_rules_and_must_be_valid() -> TestResult {
     assert!(future.contains("newer"), "{future}");
     // A misspelt field is an error, not a rule that silently does less.
     assert!(serde_json::from_value::<Pack>(serde_json::json!({"id": "x", "rulez": []})).is_err());
+    // So is a retired category: the pack fails by name rather than load
+    // rules that would never run.
+    for category in ["personal", "network"] {
+        let error = serde_json::from_value::<Pack>(serde_json::json!({
+            "id": "old", "kinds": [{"name": "EMPLOYEE_ID", "category": category}]
+        }))
+        .err()
+        .ok_or("retired category accepted")?;
+        assert!(error.to_string().contains(category), "{error}");
+    }
     Ok(())
 }
 

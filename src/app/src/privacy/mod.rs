@@ -1,6 +1,6 @@
 //! Privacy masking without a model.
 //!
-//! LLM requests: secrets and personal data become placeholders before the
+//! LLM requests: secrets become placeholders before the
 //! provider sees them and are put back in the reply ([`wrap`]). Uploads
 //! (share links, cloud sync): the same values are scrubbed for good
 //! ([`scrub_upload`]). Both record what they found, never the values, for

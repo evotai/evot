@@ -1,9 +1,28 @@
 # Privacy
 
 What leaves this machine for a model or a server is masked or scrubbed
-first. Tool calls are not judged: the agent's work is running commands with
-the credentials it was given, and a check on every `bash` line produced far
-more noise than signal.
+first. Only secrets: keys, tokens, passwords, private keys, and the
+assignments in a secrets file. Tool calls are not judged: the agent's work
+is running commands with the credentials it was given, and a check on every
+`bash` line produced far more noise than signal.
+
+There are no rules for data about people or machines (emails, phone
+numbers, ID and card numbers, chat handles, addresses, IPs): they fired on
+cache sizes, tool-call ids and base64 far more often than on what they
+named, and a model seeing a phone number is not the harm a leaked key is.
+Pack kinds are `secret` or `custom`; settings files that still carry the
+old `personal` / `network` switches parse, and the switches are ignored.
+
+## Sensitive sources
+
+`core.file-assignment` (every `KEY=value` line is a secret) runs only on the
+output of a sensitive source: a `read` of a secrets file, or a `bash`
+command that prints one (`cat .env`, `env`, `ssh host 'cat ~/.env'`). A
+command from `sources.uses` (`ssh`, `scp`, `git`, `curl`, …) given a key
+file as an option's value (`ssh -i ~/.ssh/id_ed25519 host`) prints what the
+host says, not the key, so its output is ordinary (`engine::sensitive_command`).
+Before this distinction a session that ran 488 `ssh -i` commands had every
+line of remote build output masked as a secret.
 
 ## Boundaries
 

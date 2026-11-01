@@ -34,8 +34,8 @@ enum Slot {
     /// What the model wrote: assistant text, tool-call arguments.
     Model,
     /// Thinking the provider signed. It goes back byte for byte unless it
-    /// holds a secret, or personal data the user's side sent too: an email
-    /// the model made up for a test fixture is not worth the signature.
+    /// holds a secret, or one of the user's own terms the user's side sent
+    /// too: a word the model made up is not worth the signature.
     Signed,
 }
 
@@ -90,7 +90,7 @@ pub(super) fn mask_config(
         spans.extend(vault.known_spans(text));
         if slot == Slot::Signed {
             // A secret never goes back for a signature's sake, wherever it
-            // came from; personal data only when the user's side sent it.
+            // came from; a user's term only when the user's side sent it.
             spans.retain(|s| policy.is_secret(&s.kind) || inbound.contains(&text[s.start..s.end]));
         }
         let put = |kind: &str, value: &str| vault.put(kind, value);

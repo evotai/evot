@@ -50,12 +50,13 @@ test('a value is announced the first time it is masked, not on every request', (
   expect(feed.poll('s1')).toEqual([])
 })
 
-test('blocked records and other sessions are left to their own cards', () => {
+test('blocked records, other sessions and session-less records are left to their own cards', () => {
   const n = native()
   const feed = new PrivacyFeed(n.live)
   n.push(notice({ blocked: true, tags: ['KEY_z'] }))
   n.push(notice({ session: 'other', tags: ['KEY_y'] }))
-  n.push(notice({ session: null, tags: ['KEY_x'] }))
+  n.push(notice({ session: null, tags: ['KEY_w'] }))
+  n.push(notice({ tags: ['KEY_x'] }))
   const out = feed.poll('s1')
   expect(out.map(h => h.notice.tags)).toEqual([['KEY_x']])
   // A forgotten session sees its values as new again.

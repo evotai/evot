@@ -25,10 +25,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 // Shaped like real values so the rules take them; none is a live credential.
 const API_KEY: &str = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const AWS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
-const EMAIL: &str = "alice@acme-corp.cn";
-const PHONE: &str = "13800138000";
-const ID_CARD: &str = "11010519491231002X";
-const CARD: &str = "4111 1111 1111 1111";
+const GH_TOKEN: &str = "ghp_c3j27xdcg2lMLzgeonyLGcTJFiz4soCmZ9cp";
 const PASSWORD: &str = "Hunter2pass9";
 
 fn masker_with(settings: PrivacySettings) -> Result<Masker, evot::error::EvotError> {
@@ -117,35 +114,35 @@ fn placeholder_in(text: &str) -> Option<&str> {
 }
 
 #[test]
-fn masks_secrets_and_personal_data() -> TestResult {
+fn masks_secrets_only() -> TestResult {
     let masker = masker()?;
     let text = format!(
-        "key {API_KEY}, aws {AWS_KEY}, mail {EMAIL}, call {PHONE}, id {ID_CARD}, card {CARD}, \
-         DB_PASSWORD={PASSWORD}, 密码：786kih, postgres://app:s3cretpw@db.internal:5432/x"
+        "key {API_KEY}, aws {AWS_KEY}, gh {GH_TOKEN}, mail alice@acme-corp.cn, call 13800138000, \
+         id 11010519491231002X, card 4111 1111 1111 1111, DB_PASSWORD={PASSWORD}, 密码：786kih, \
+         postgres://app:s3cretpw@db.internal:5432/x"
     );
     let mut request = config(vec![user(&text)]);
     let report = masker.mask_request(&mut request)?;
     let wire = sent(&request)?;
-    for value in [
-        API_KEY, AWS_KEY, EMAIL, PHONE, ID_CARD, CARD, PASSWORD, "786kih", "s3cretpw",
-    ] {
+    for value in [API_KEY, AWS_KEY, GH_TOKEN, PASSWORD, "786kih", "s3cretpw"] {
         assert!(!wire.contains(value), "{value} was sent: {wire}");
     }
     assert!(wire.contains("{{API_KEY_"));
-    assert!(wire.contains("{{EMAIL_"));
-    assert!(wire.contains("{{ID_CARD_"));
+    assert!(wire.contains("{{TOKEN_"));
+    // Data about a person is not a secret: it goes as written.
+    for value in [
+        "alice@acme-corp.cn",
+        "13800138000",
+        "11010519491231002X",
+        "4111 1111 1111 1111",
+    ] {
+        assert!(wire.contains(value), "{value} was masked: {wire}");
+    }
     assert!(
         wire.contains("db.internal"),
         "the host is no secret: {wire}"
     );
-    for kind in [
-        "API_KEY",
-        "BANK_CARD",
-        "EMAIL",
-        "ID_CARD",
-        "PASSWORD",
-        "PHONE",
-    ] {
+    for kind in ["API_KEY", "PASSWORD", "TOKEN"] {
         assert!(report.kinds().contains(&kind.to_string()), "missing {kind}");
     }
     assert!(!report.blocked());
@@ -249,6 +246,53 @@ fn assignments_in_secret_files_are_masked() -> TestResult {
 }
 
 #[test]
+fn only_commands_that_print_a_secrets_file_make_their_output_sensitive() -> TestResult {
+    // Output shaped like a build log: assignments and `Key: value` lines
+    // that are secrets only if they came out of an env file.
+    let output = "Output: /Users/me/.evotai/sessions/01a1/tool-results/a64a69bb-bash-output.txt\n\
+                  Error: StorageOther. Code: 4000, Text = Unexpected fault on `1/11/_sg/x.mpk`\n\
+                  COLOR=abcd1234efgh\n";
+    // A fresh masker each time: a value once masked is known from then on.
+    let run = |command: &str| -> Result<bool, Box<dyn std::error::Error>> {
+        let masker = masker()?;
+        let mut request = config(vec![
+            assistant(vec![Content::ToolCall {
+                id: "c".into(),
+                name: "bash".into(),
+                arguments: json!({ "command": command }),
+                metadata: None,
+            }]),
+            tool_result("c", output),
+        ]);
+        masker.mask_request(&mut request)?;
+        Ok(!first_text(&request.messages[1]).contains("abcd1234efgh"))
+    };
+    for command in [
+        "cat .env",
+        "cat ~/.ssh/id_ed25519",
+        "sudo env",
+        "cd /app && printenv | sort",
+        "ssh db0 'cat ~/.env'",
+        "ssh -i ~/.ssh/id_ed25519 db0 cat .env",
+        "source .env && make",
+    ] {
+        assert!(run(command)?, "{command}: output should be sensitive");
+    }
+    for command in [
+        "scp -q -o BatchMode=yes -i $HOME/.ssh/id_ed25519 /tmp/x.patch db0:/tmp/",
+        "ssh -o IdentityAgent=none -i ~/.ssh/id_ed25519 db0-aws 'cargo test'",
+        "git -c core.sshCommand='ssh -i ~/.ssh/id_ed25519' pull",
+        "ssh -o IdentityFile=~/.ssh/id_ed25519 db0 ls",
+        "cargo test -p evot",
+        "ls -la",
+        "python3 env_setup.py",
+    ] {
+        assert!(!run(command)?, "{command}: output is not sensitive");
+    }
+    Ok(())
+}
+
+#[test]
 fn signed_thinking_keeps_its_signature_unless_it_must_be_masked() -> TestResult {
     let masker = masker()?;
     let thinking = |text: &str| Content::Thinking {
@@ -314,24 +358,26 @@ fn signed_thinking_keeps_its_signature_unless_it_must_be_masked() -> TestResult 
 #[test]
 fn actions_terms_and_allow_list() -> TestResult {
     let mut settings = PrivacySettings::default();
-    settings.actions.insert("EMAIL".into(), Action::Warn);
+    settings.actions.insert("TOKEN".into(), Action::Warn);
     settings.actions.insert("API_KEY".into(), Action::Block);
     settings.terms = vec!["Nightjar".into()];
-    settings.allow = vec![PHONE.into()];
+    settings.allow = vec![AWS_KEY.into()];
     let masker = masker_with(settings)?;
 
-    let mut request = config(vec![user(&format!("{EMAIL} {PHONE} project NIGHTJAR"))]);
+    let mut request = config(vec![user(&format!(
+        "{GH_TOKEN} {AWS_KEY} project NIGHTJAR"
+    ))]);
     let report = masker.mask_request(&mut request)?;
     let text = first_text(&request.messages[0]);
-    assert!(text.contains(EMAIL), "warn sends as written");
-    assert!(text.contains(PHONE), "allowed");
+    assert!(text.contains(GH_TOKEN), "warn sends as written");
+    assert!(text.contains(AWS_KEY), "allowed");
     assert!(
         !text.contains("NIGHTJAR") && text.contains("{{TERM_"),
         "{text}"
     );
     assert!(!report.blocked());
     assert!(
-        report.kinds().contains(&"EMAIL".to_string()),
+        report.kinds().contains(&"TOKEN".to_string()),
         "warned values are reported"
     );
 
@@ -527,7 +573,7 @@ fn uploads_are_scrubbed_for_good_and_keep_their_structure() -> TestResult {
         "session_id": "s-1",
         "entries": [
             {"id": "e1", "type": "message", "timestamp": "2026-01-01T00:00:00Z",
-             "message": {"role": "user", "content": [{"type": "text", "text": format!("mail {EMAIL} key {API_KEY}")}]}},
+             "message": {"role": "user", "content": [{"type": "text", "text": format!("gh {GH_TOKEN} key {API_KEY}")}]}},
             {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": ".env"}},
             {"role": "toolResult", "toolCallId": "c1", "content": [{"type": "text", "text": "SERVICE=abcd1234efgh"}]},
             {"type": "image", "mimeType": "image/png", "data": "c2stYW50LWFwaTAz"},
@@ -536,10 +582,10 @@ fn uploads_are_scrubbed_for_good_and_keep_their_structure() -> TestResult {
     });
     let report = masker.scrub(&mut payload)?;
     let text = payload.to_string();
-    for value in [EMAIL, API_KEY, "abcd1234efgh", "dXNlcjpwYXNz"] {
+    for value in [GH_TOKEN, API_KEY, "abcd1234efgh", "dXNlcjpwYXNz"] {
         assert!(!text.contains(value), "{value} uploaded: {text}");
     }
-    assert!(text.contains("[REDACTED:API_KEY]") && text.contains("[REDACTED:EMAIL]"));
+    assert!(text.contains("[REDACTED:API_KEY]") && text.contains("[REDACTED:TOKEN]"));
     assert!(!text.contains("{{"), "uploads never carry placeholders");
     assert_eq!(payload["entries"][0]["id"], "e1");
     assert_eq!(payload["entries"][2]["toolCallId"], "c1");
@@ -612,7 +658,10 @@ fn notice_wording_is_the_cli_contract() {
 fn settings_contract() -> TestResult {
     // Legacy v0: no version, fields from before any were added.
     let legacy = PrivacySettings::parse(r#"{"enabled": false}"#)?;
-    assert!(!legacy.enabled && legacy.secrets && legacy.personal && legacy.terms_any_case);
+    assert!(!legacy.enabled && legacy.secrets && legacy.terms_any_case);
+    // Switches for rules that no longer exist still parse, and do nothing.
+    let retired = PrivacySettings::parse(r#"{"personal": true, "network": true}"#)?;
+    assert_eq!(retired, PrivacySettings::default());
     assert_eq!(
         legacy.schema_version,
         evot::privacy::SETTINGS_SCHEMA_VERSION
@@ -627,7 +676,6 @@ fn settings_contract() -> TestResult {
         "schema_version",
         "enabled",
         "secrets",
-        "personal",
         "actions",
         "terms",
         "terms_any_case",
@@ -636,6 +684,7 @@ fn settings_contract() -> TestResult {
         assert!(written.get(field).is_some(), "missing {field}");
     }
     assert_eq!(written["actions"]["EMAIL"], "block");
+    assert!(written.get("personal").is_none() && written.get("network").is_none());
     assert_eq!(PrivacySettings::parse(&written.to_string())?, current);
 
     let future = PrivacySettings::parse(r#"{"schema_version": 99}"#);
@@ -645,9 +694,14 @@ fn settings_contract() -> TestResult {
 
 #[test]
 fn historical_settings_readers_and_current_writer_agree() -> TestResult {
+    fn shipped_default() -> bool {
+        true
+    }
     // Frozen historical field types, not the current PrivacySettings reader.
     // Like that reader, additive fields are tolerated; known fields are
-    // required and enum/type changes are rejected.
+    // required and enum/type changes are rejected. `personal` was always
+    // defaulted (to on) by the shipped reader, so a file written now, which
+    // has no such field, still reads there.
     #[derive(Debug, serde::Deserialize)]
     #[serde(rename_all = "snake_case")]
     enum HistoricalAction {
@@ -660,6 +714,7 @@ fn historical_settings_readers_and_current_writer_agree() -> TestResult {
         schema_version: u32,
         enabled: bool,
         secrets: bool,
+        #[serde(default = "shipped_default")]
         personal: bool,
         actions: std::collections::BTreeMap<String, HistoricalAction>,
         terms: Vec<String>,
@@ -676,7 +731,7 @@ fn historical_settings_readers_and_current_writer_agree() -> TestResult {
         assert_eq!(old.schema_version, current.schema_version);
         assert_eq!(
             (old.enabled, old.secrets, old.personal),
-            (current.enabled, current.secrets, current.personal)
+            (current.enabled, current.secrets, true)
         );
         assert_eq!(
             (old.terms, old.terms_any_case, old.allow),
@@ -775,7 +830,7 @@ fn record_contract() -> TestResult {
         origins: serde_json::Value,
     }
     let masker = masker()?;
-    let mut config = self::config(vec![user(&format!("mail {EMAIL}"))]);
+    let mut config = self::config(vec![user(&format!("gh {GH_TOKEN}"))]);
     let record = masker.mask_request(&mut config)?.record(Target::Llm);
     let line = serde_json::to_string(&record)?;
     let legacy: LegacyRecord = serde_json::from_str(&line)?;
@@ -802,7 +857,7 @@ async fn live_notices_report_each_record_as_it_is_made_without_values() -> TestR
     let (tx, _rx) = mpsc::channel(16);
     provider
         .stream_bounded(
-            config(vec![user(&format!("deploy with {API_KEY} for {EMAIL}"))]),
+            config(vec![user(&format!("deploy with {API_KEY} and {GH_TOKEN}"))]),
             tx,
             CancellationToken::new(),
         )
@@ -812,14 +867,14 @@ async fn live_notices_report_each_record_as_it_is_made_without_values() -> TestR
     // Other tests record concurrently; find ours.
     let notice = notices
         .iter()
-        .find(|n| n.event.target == Target::Llm && n.event.kinds == ["API_KEY", "EMAIL"])
+        .find(|n| n.event.target == Target::Llm && n.event.kinds == ["API_KEY", "TOKEN"])
         .ok_or("no live notice for the masked request")?;
     assert!(!notice.event.blocked);
-    assert_eq!(notice.event.reason, "masked API_KEY ×1 · EMAIL ×1");
+    assert_eq!(notice.event.reason, "masked API_KEY ×1 · TOKEN ×1");
     assert_eq!(notice.tags.len(), 2, "one placeholder tag per value");
     let text = serde_json::to_string(notice)?;
     assert!(
-        !text.contains(API_KEY) && !text.contains(EMAIL),
+        !text.contains(API_KEY) && !text.contains(GH_TOKEN),
         "notices never hold values"
     );
     assert!(
@@ -850,14 +905,14 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
             tool_call_id: "call-1".into(),
             tool_name: "Bash".into(),
             content: vec![Content::Text {
-                text: format!("TOKEN={API_KEY}\nMAIL={EMAIL}\n"),
+                text: format!("TOKEN={API_KEY}\nGH={GH_TOKEN}\n"),
             }],
             is_error: false,
             timestamp: 0,
             retention: Default::default(),
         },
     ]);
-    config.system_prompt = format!("never print {EMAIL}");
+    config.system_prompt = format!("never print {GH_TOKEN}");
     let report = masker.mask_request(&mut config)?;
     let mut record = report.record(Target::Llm);
     record.provider = Some("p".into());
@@ -878,7 +933,7 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
     ]);
     // Rules: distinct values per rule, most first. The `NAME=value` lines
     // of the result are values of their own (kind SECRET), so the
-    // assignment rule has two and the bare key and email one each.
+    // assignment rule has two and the bare key and token one each.
     let counted = record.rules();
     let rules: Vec<(&str, usize)> = counted
         .iter()
@@ -886,11 +941,11 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
         .collect();
     assert_eq!(rules, vec![
         ("core.file-assignment", 2),
-        ("personal.email", 1),
+        ("secrets.github-classic", 1),
         ("secrets.sk-key", 1)
     ]);
     let written = serde_json::to_string(&record)?;
-    assert!(!written.contains(API_KEY) && !written.contains(EMAIL));
+    assert!(!written.contains(API_KEY) && !written.contains(GH_TOKEN));
     assert!(written.contains("\"origins\""));
 
     // The live event carries the same, and old events without it still read.
@@ -915,7 +970,7 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
             tool_call_id: "call-2".into(),
             tool_name: "Bash".into(),
             content: vec![Content::Text {
-                text: EMAIL.to_string(),
+                text: GH_TOKEN.to_string(),
             }],
             is_error: false,
             timestamp: 0,
@@ -951,7 +1006,7 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
                 tool_call_id: "c".into(),
                 tool_name: "Bash".into(),
                 content: vec![Content::Text {
-                    text: EMAIL.to_string(),
+                    text: GH_TOKEN.to_string(),
                 }],
                 is_error: false,
                 timestamp: 0,
@@ -963,7 +1018,7 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
     }
 
     // Uploads have no request shape, so no origins.
-    let mut upload = json!({ "note": EMAIL });
+    let mut upload = json!({ "note": GH_TOKEN });
     assert!(masker
         .scrub(&mut upload)?
         .record(Target::Share)

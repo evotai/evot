@@ -110,7 +110,7 @@ export function privacyCard(stop: PrivacyStop, detail?: PrivacyDetail): PrivacyC
       title: 'blocked task',
       rows: [
         { tone: 'status', text: `✗ · the task was not saved · ${kinds}` },
-        { tone: 'error', text: 'A task runs later from the copy on the server, so its instruction may hold no secret or personal data.' },
+        { tone: 'error', text: 'A task runs later from the copy on the server, so its instruction may hold no secret.' },
         { tone: 'hint', text: 'Put secrets in the task\'s env file and name the variable in the instruction instead' },
       ],
     }

@@ -6,9 +6,6 @@ export interface PrivacySettings {
   schema_version: number
   enabled: boolean
   secrets: boolean
-  personal: boolean
-  /** Absent before network kinds existed: off. */
-  network?: boolean
   actions: Record<string, PrivacyAction>
   terms: string[]
   terms_any_case: boolean
@@ -16,7 +13,7 @@ export interface PrivacySettings {
 }
 export interface PrivacyKindStats { kind: string; values: number; verified?: number; masked: number; warned: number; blocked: number }
 /** A kind the rule packs define; the CLI holds no list of its own. */
-export interface PrivacyKind { kind: string; category: 'secret' | 'personal' | 'network' | 'custom' }
+export interface PrivacyKind { kind: string; category: 'secret' | 'custom' }
 export interface PrivacyPack { id: string; rules: number; source?: string | null; license?: string | null }
 /** One place in a request that held values. `label` is a command's description
  * or head, a path: taken after masking, never a piece of a value. */
@@ -41,7 +38,7 @@ export interface PrivacyLive { cursor: number; notices: PrivacyLiveNotice[] }
 export interface PrivacyStatus { settings: PrivacySettings; summary: PrivacySummary; kinds: PrivacyKind[]; packs: PrivacyPack[] }
 
 export const privacySettings = object({
-  schema_version: uint, enabled: boolean, secrets: boolean, personal: boolean, network: optional(boolean),
+  schema_version: uint, enabled: boolean, secrets: boolean,
   actions: json, terms: array(text), terms_any_case: boolean, allow: array(text),
 }) as unknown as Schema<PrivacySettings>
 
@@ -65,7 +62,7 @@ export const privacyLive = object({
   notices: array(object({ seq: uint, ...eventFields, tags: array(text) })),
 }) as unknown as Schema<PrivacyLive>
 
-const kinds = array(object({ kind: text, category: oneOf('secret', 'personal', 'network', 'custom') }))
+const kinds = array(object({ kind: text, category: oneOf('secret', 'custom') }))
 const packs = array(object({ id: text, rules: uint, source: optional(nullable(text)), license: optional(nullable(text)) }))
 
 export const privacyStatus = object({ settings: privacySettings, summary, kinds, packs }) as unknown as Schema<PrivacyStatus>

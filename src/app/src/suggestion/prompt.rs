@@ -207,7 +207,7 @@ pub fn prompt_config(
         max_tokens: Some(output_tokens),
         model_config: Some(model.config.clone()),
         cache_config: Default::default(),
-        prompt_cache_key: None,
+        prompt_cache_key: hints.session.clone(),
         client: None,
     })
 }

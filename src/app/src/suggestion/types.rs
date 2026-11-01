@@ -80,6 +80,10 @@ pub struct SuggestionHints {
     /// Deprecated wire field; ignored by prediction and local cycling.
     #[serde(default)]
     pub rejected: Vec<String>,
+    /// The session the draft belongs to, so privacy records and the TUI's
+    /// masking cards attribute the request to it; absent on legacy callers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 fn is_false(value: &bool) -> bool {

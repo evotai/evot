@@ -549,13 +549,14 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     validate: text => validCommandInput(text, suggestionInventory),
     identity: text => commandIdentity(text, suggestionInventory),
     allowsCommand: text => allowedSuggestionCommand(text, composerPolicy().allowedCommands),
-    start: (messages, hints) => {
-      const draft = (hints?.draft ?? '') + (hints?.suffix ?? '')
+    start: (messages, given) => {
+      const hints = { ...given, session: sessionId ?? undefined }
+      const draft = (hints.draft ?? '') + (hints.suffix ?? '')
       if (!parsePasteRefs(draft).some(ref => ref.type === 'image')) return agent.suggestNextPrompt(messages, hints)
       return prepareSuggestion(async signal => {
         const images = await suggestionImages(draft, pastedImages, pendingImages, signal)
         signal.throwIfAborted()
-        if (getEditorText(editor) !== draft || editorCursorOffset(editor) !== (hints?.draft?.length ?? 0)) throw new Error('Suggestion input changed')
+        if (getEditorText(editor) !== draft || editorCursorOffset(editor) !== (hints.draft?.length ?? 0)) throw new Error('Suggestion input changed')
         return agent.suggestNextPrompt(messages, { ...hints, images })
       })
     },

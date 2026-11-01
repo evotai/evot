@@ -137,7 +137,7 @@ impl Masker {
         self.records.as_ref()
     }
 
-    /// Swap secrets and personal data in an LLM request for placeholders.
+    /// Swap the secrets in an LLM request for placeholders.
     pub fn mask_request(&self, config: &mut StreamConfig) -> Result<Report> {
         if !self.policy.enabled {
             return Ok(Report::default());

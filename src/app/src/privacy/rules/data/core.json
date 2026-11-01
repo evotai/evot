@@ -226,6 +226,21 @@
   "commands": [
    "env",
    "printenv"
+  ],
+  "uses": [
+   "ssh",
+   "scp",
+   "sftp",
+   "rsync",
+   "mosh",
+   "ssh-add",
+   "ssh-keygen",
+   "ssh-copy-id",
+   "git",
+   "curl",
+   "wget",
+   "ansible",
+   "ansible-playbook"
   ]
  },
  "structure": {

@@ -124,6 +124,7 @@ pub(in crate::privacy) struct Sources {
     prefixes: Vec<String>,
     suffixes: Vec<String>,
     commands: HashSet<String>,
+    uses: HashSet<String>,
 }
 
 pub(in crate::privacy) struct Engine {
@@ -379,6 +380,7 @@ impl Engine {
                     (&mut sources.prefixes, &s.prefixes),
                     (&mut sources.suffixes, &s.suffixes),
                     (&mut sources.commands, &s.commands),
+                    (&mut sources.uses, &s.uses),
                 ] {
                     to.extend(from.iter().cloned());
                 }
@@ -563,6 +565,7 @@ impl Engine {
                 prefixes: sources.prefixes,
                 suffixes: sources.suffixes,
                 commands: sources.commands.into_iter().collect(),
+                uses: sources.uses.into_iter().collect(),
             },
             structure,
             decode,
@@ -706,17 +709,53 @@ impl Engine {
                     .iter()
                     .filter_map(|key| arg(key))
                     .any(|p| self.sensitive_path(p))
-                    || command.as_deref().and_then(arg).is_some_and(|command| {
-                        command
-                            .split(|c: char| c.is_whitespace() || ";|&<>()'\"`".contains(c))
-                            .any(|word| {
-                                self.sources.commands.contains(word) || self.sensitive_path(word)
-                            })
-                    })
+                    || command
+                        .as_deref()
+                        .and_then(arg)
+                        .is_some_and(|command| self.sensitive_command(command))
+            })
+    }
+
+    /// A shell command whose output holds secrets: one of its simple
+    /// commands prints the environment or names a secrets file. For a
+    /// command that merely uses one (`ssh -i ~/.ssh/id_ed25519 host`, from
+    /// `sources.uses`) a file given as an option's value is not read into
+    /// the output; `ssh host 'cat ~/.env'` still is. Quotes are not parsed:
+    /// words inside them are words of the enclosing command.
+    pub fn sensitive_command(&self, command: &str) -> bool {
+        command
+            .split(|c: char| ";|&\n`()".contains(c))
+            .any(|segment| {
+                let mut words = segment
+                    .split(|c: char| c.is_whitespace() || "<>'\"".contains(c))
+                    .filter(|w| !w.is_empty())
+                    .skip_while(|w| is_command_prefix(w));
+                let Some(head) = words.next() else {
+                    return false;
+                };
+                let head_name = head.rsplit('/').next().unwrap_or(head);
+                if self.sources.commands.contains(head_name) {
+                    return true;
+                }
+                if self.sensitive_path(head) {
+                    return true;
+                }
+                let uses = self.sources.uses.contains(head_name);
+                let mut after_option = false;
+                words.any(|word| {
+                    let skip = uses && after_option;
+                    after_option = word.starts_with('-') && !word.contains('=');
+                    !skip && self.sensitive_path(word)
+                })
             })
     }
 
     pub fn sensitive_path(&self, path: &str) -> bool {
+        if path.contains('=') {
+            // `IdentityFile=~/.ssh/id_ed25519`, `KEY=.env`: a parameter, not
+            // a file the command prints.
+            return false;
+        }
         let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
         let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             std::borrow::Cow::Owned(name.to_ascii_lowercase())
@@ -792,6 +831,17 @@ impl Engine {
         }
         failures
     }
+}
+
+/// Words before a command name that do not change what it prints.
+fn is_command_prefix(word: &str) -> bool {
+    matches!(
+        word,
+        "sudo" | "exec" | "nohup" | "time" | "command" | "builtin"
+    ) || word.starts_with('-')
+        || word.split_once('=').is_some_and(|(name, _)| {
+            !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
 }
 
 impl Rule {
