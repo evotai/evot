@@ -1,6 +1,7 @@
+import stringWidth from 'string-width'
 import { createAppSelectorState } from '../app/selector-identity.js'
 import { RESUME_SELECTOR_TITLE } from '../app/resume.js'
-import { SELECTOR_VIEWPORT, type SelectorState } from '../selector.js'
+import { SELECTOR_VIEWPORT, type SelectorItem, type SelectorState } from '../selector.js'
 import type { PreviewViewport } from '../preview-scroll.js'
 import { buildSelectorRegionLines } from './selector.js'
 import { truncateAnsiToWidth } from '../../render/wrap.js'
@@ -11,8 +12,8 @@ import { splitPaneHints } from '../split-pane.js'
 import { CURSOR_MARKER } from '../render-frame.js'
 import { confirmationHint } from './confirmation-hint.js'
 import { effortLabel } from './model-effort.js'
-import { buildSelectorHeader, buildSelectorRow } from './selector-row.js'
-import { dim, line, styledLineToAnsi } from './types.js'
+import { buildSelectorHeader, buildSelectorRow, buildSessionLineRow, SESSION_ID_COLUMN, sessionLineHeight, type SelectorRowOptions } from './selector-row.js'
+import { dim, line, styledLineToAnsi, type StyledLine } from './types.js'
 import { finiteSize } from './width.js'
 
 function fullResumeSlot(): SelectorState {
@@ -114,19 +115,40 @@ function compactCommandRegion(state: SelectorState, columns: number, budget: num
   let start = Math.max(0, Math.min(state.scrollOffset, Math.max(0, state.items.length - listRows)))
   if (state.focusIndex < start) start = state.focusIndex
   else if (state.focusIndex >= start + listRows) start = state.focusIndex - listRows + 1
+  const sessionRow = compactSessionRow(state, width - 1)
   const visible = state.previewPane?.focused
     ? scrollPreview(selected?.preview ?? [], width, listRows, state.previewPane.offset).slice(0, listRows).map(styledLineToAnsi)
     : state.items.slice(start, start + listRows).map((item, index) => {
+      const options = { highlighted: start + index === state.focusIndex, query: state.query }
+      const session = item.header ? undefined : sessionRow?.(item, options)
+      if (session) return styledLineToAnsi(session)
       const detail = item.effort
         ? [effortLabel(item.effort.levels[item.effort.index] ?? ''), item.detail].filter(Boolean).join(' · ')
         : item.detail
       return styledLineToAnsi(item.header ? buildSelectorHeader(item.label, item.headerCount)
-        : buildSelectorRow({ ...item, detail }, { highlighted: start + index === state.focusIndex, query: state.query }))
+        : buildSelectorRow({ ...item, detail }, options))
     })
   if (visible.length === 0) visible.push(styledLineToAnsi(line(dim(state.emptyMessage ?? 'No matches'))))
   while (visible.length < listRows) visible.push('')
   return {
     lines: [...header, search, ...visible, ...footer].map(text => truncateAnsiToWidth(text, width)),
     ...(state.previewPane ? { previewViewport: { width, height: listRows } } : {}),
+  }
+}
+
+/**
+ * One-line session lists keep their `· <id>  <title>  <age>` row in the
+ * compact surface too: the id is what `/resume <id>` takes. Each compact
+ * entry has one row, so a pane too narrow to share a line with the id falls
+ * back to the plain title row.
+ */
+function compactSessionRow(state: SelectorState, width: number) {
+  if (state.rowLayout !== 'session-line') return undefined
+  let idWidth = 0
+  for (const item of state.items) if (!item.header) idWidth = Math.max(idWidth, stringWidth(item.id ?? ''))
+  idWidth = Math.min(idWidth, SESSION_ID_COLUMN)
+  return (item: SelectorItem, options: SelectorRowOptions): StyledLine | undefined => {
+    if (sessionLineHeight(item, width, idWidth) !== 1) return undefined
+    return buildSessionLineRow(item, options, width, idWidth)[0]
   }
 }

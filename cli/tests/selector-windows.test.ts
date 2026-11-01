@@ -124,6 +124,17 @@ describe('selector window composition', () => {
     }
   })
 
+  test('compact one-line session rows keep the id that /resume <id> takes', () => {
+    const id = '018f0000-0000-7000-8000-000000000001'
+    const state = createResumeWindow([{ id, label: 'smoke resume fixture', status: { text: 'just now', tone: 'muted' } }])
+    const text = buildCommandSelectorRegion(state, 80, 24, false, 6).lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '')
+    expect(text).toMatch(new RegExp(`·\\s+${id}\\s+smoke resume fixture\\s+just now`))
+    // Too narrow to share a line with the id: one row, the title.
+    const narrow = buildCommandSelectorRegion(state, 40, 24, false, 6).lines.join('\n').replace(/\x1b\[[0-9;]*m/g, '')
+    expect(narrow).toContain('smoke resume fixture')
+    expect(narrow).not.toContain(id)
+  })
+
   test('compact rename retains its real editor and cursor instead of drawing the search list', () => {
     const state = { ...createResumeWindow([{ id: 'one', label: 'Session' }]), rename: {
       sessionId: 'one', text: 'new-title', cursor: 9,

@@ -559,11 +559,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await session.waitFor('production alerts')
       session.checkpoint()
       session.write('/production')
-      // Search snippets can truncate the inline ID. Check the actual filtered
-      // row and count rather than requiring hidden metadata to fit on screen.
+      // Check the filtered row itself: the id column, then the new name.
       const filtered = await session.waitForScreen(/Search\s+production(?:\s|$)/)
       expect(filtered).toMatch(/Sessions\s+1 \/ 1(?:\r|\n)/)
-      expect(filtered).toMatch(/·\s+production alerts/)
+      expect(filtered).toMatch(new RegExp(`·\\s+${SEEDED_SESSION_ID}\\s+production alerts`))
       session.write('\x1b')
     } finally {
       await session.kill()
@@ -590,7 +589,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // the complete shared current-row treatment before keyboard promotion.
       const populated = await session.waitForScreen(createdSessionId)
       expect(populated).toMatch(/Sessions\s+1(?:\r|\n)/)
-      expect(populated).toMatch(/·\s+smoke resume fixture/)
+      expect(populated).toMatch(new RegExp(`·\\s+${SEEDED_SESSION_ID}\\s+smoke resume fixture`))
       expect(session.outputSince()).toContain(selectionBackgroundAnsi())
 
       // An ambiguous bare slash is a bridge between command windows. Keep the
@@ -730,10 +729,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       // cross-project history without making it part of the default recents.
       session.checkpoint()
       session.write('other cwd fixture')
-      // The title search produces a context snippet instead of the inline ID.
+      // Search results keep the one-line row: the id, then the matched title.
       const searched = await session.waitForScreen(/Search\s+other cwd fixture(?:\s|$)/)
       expect(searched).toContain('Other cwd')
-      expect(searched).toMatch(/·\s+other cwd fixture/)
+      expect(searched).toMatch(new RegExp(`·\\s+${OTHER_CWD_SESSION_ID}\\s+other cwd fixture`))
       expect(searched).not.toContain('smoke resume fixture')
     } finally {
       await session.kill()
@@ -1624,14 +1623,16 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         expect(suggestionWorkflow(body).runtime.activities?.length).toBeGreaterThan(0)
         expect(prompt).toContain('Run focused authentication tests')
         expect(prompt).toContain('"kind":"background"')
-        expect(prompt).not.toContain('PRIVATE_SHELL_MARKER')
+        // The launched script is context: it says which steps run and what
+        // the task waits for. Secrets in it are masked by privacy, not omitted.
+        expect(prompt).toContain('"command":"sleep 30 # BACKGROUND_SCRIPT_MARKER"')
         states.push(prompt)
         const chunk = { id: 'bg-suggestion', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['Check authentication test progress', 'Show the latest test results']) }, finish_reason: 'stop' }] }
         return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
       }
       mainCalls++
       if (mainCalls === 1) {
-        const chunk = { id: 'bg', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'bg-auth', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30 # PRIVATE_SHELL_MARKER', description: 'Run focused authentication tests', run_in_background: true }) } }] }, finish_reason: 'tool_calls' }] }
+        const chunk = { id: 'bg', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'bg-auth', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30 # BACKGROUND_SCRIPT_MARKER', description: 'Run focused authentication tests', run_in_background: true }) } }] }, finish_reason: 'tool_calls' }] }
         return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
       }
       return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(': waiting\n\n')) } }), { headers: { 'content-type': 'text/event-stream' } })

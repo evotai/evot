@@ -810,3 +810,70 @@ fn trajectory_steps_carry_origin_state_and_stay_additive() -> TestResult {
     assert_eq!(legacy.outcome, "answered");
     Ok(())
 }
+
+#[test]
+fn long_history_shrinks_to_fit_the_window_beside_a_full_trajectory() -> TestResult {
+    // A long resumed session on the default 8192-token suggestion window: the
+    // instructions and trajectory take a large fixed share, so the history
+    // must shrink to the room left instead of dropping the whole request.
+    let request: SuggestionRequest = serde_json::from_str(include_str!(
+        "fixtures/schema/suggestion-request-thread.json"
+    ))?;
+    let (_, mut hints) = request.into_parts();
+    hints.explicit = false;
+    let state = hints.workflow.as_mut().ok_or("no workflow")?;
+    state.thread = (0..50)
+        .map(|index| evot::suggestion::SuggestionExchange {
+            user: format!("Refinement {index} {}", "current task ".repeat(30)),
+            assistant: Some(format!(
+                "Completed {index} {}",
+                "current result ".repeat(30)
+            )),
+            tools: 1,
+            failed: 0,
+            outcome: "answered".into(),
+            from: Some(evot::suggestion::SuggestionOrigin {
+                reply: Some(format!(
+                    "Completed {} {}",
+                    index.max(1) - 1,
+                    "current result ".repeat(30)
+                )),
+                stage: "answered".into(),
+            }),
+        })
+        .collect();
+    let messages = (0..100)
+        .map(|index| SuggestionMessage {
+            role: if index % 2 == 0 { "user" } else { "assistant" }.into(),
+            text: if index % 2 == 0 {
+                format!("Recent refinement {index} {}", "current task ".repeat(30))
+            } else {
+                format!(
+                    "Completed refinement {index} {}",
+                    "current result ".repeat(30)
+                )
+            },
+        })
+        .collect::<Vec<_>>();
+    let model = endpoint();
+    let config =
+        prompt_config(&model, &messages, &hints).ok_or("long history dropped the request")?;
+    let tokens: usize = config
+        .messages
+        .iter()
+        .flat_map(|message| match message {
+            Message::User { content, .. } | Message::Assistant { content, .. } => content.clone(),
+            _ => Vec::new(),
+        })
+        .filter_map(|content| match content {
+            Content::Text { text } => Some(evot_engine::context::estimate_tokens(&text) + 16),
+            _ => None,
+        })
+        .sum();
+    assert!(tokens < model.config.context_window() as usize - 1024);
+    // The latest exchange survives; the oldest falls out.
+    let last = config.messages.iter().rev().nth(1).ok_or("no history")?;
+    assert!(matches!(last, Message::Assistant { content, .. }
+        if matches!(content.first(), Some(Content::Text { text }) if text.starts_with("Completed refinement 99 "))));
+    Ok(())
+}

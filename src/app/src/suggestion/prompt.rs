@@ -144,13 +144,10 @@ pub fn prompt_config(
     let fixed_tokens = evot_engine::context::estimate_tokens(&final_instruction)
         + evot_engine::context::content_tokens(&images)
         + 64;
-    // Images are user input, not history: reserve their budget rather than
-    // silently dropping them or overflowing when several images are pasted.
-    let budget = if images.is_empty() {
-        HISTORY_TOKENS
-    } else {
-        HISTORY_TOKENS.min(window.saturating_sub(TOKEN_HEADROOM + fixed_tokens + 64))
-    };
+    // History gets what the instructions, trajectory and images leave of the
+    // window. A fixed budget let a long session plus a full trajectory exceed
+    // a small window, and the whole request was then dropped as too large.
+    let budget = HISTORY_TOKENS.min(window.saturating_sub(TOKEN_HEADROOM + fixed_tokens + 64));
     let recent = recent_context(messages, budget)?;
     if !hints.is_explicit()
         && ((!open_exchange && !recent.iter().any(|message| message.role == "assistant"))
@@ -158,11 +155,10 @@ pub fn prompt_config(
     {
         return None;
     }
-    let input_tokens = recent
-        .iter()
-        .map(|message| evot_engine::context::estimate_tokens(&message.text) + 16)
-        .sum::<usize>()
-        + fixed_tokens;
+    let mut input_tokens = fixed_tokens;
+    for message in &recent {
+        input_tokens += message_tokens(message)?;
+    }
     if input_tokens >= window.saturating_sub(TOKEN_HEADROOM) {
         return None;
     }
@@ -212,10 +208,11 @@ pub fn prompt_config(
     })
 }
 
+/// What one history message costs in the request, framing included. The
+/// history budget and the final window check must count the same way, or a
+/// history that fits its budget can still fail the check.
 fn message_tokens(message: &SuggestionMessage) -> Option<usize> {
-    Some(evot_engine::context::estimate_tokens(
-        &serde_json::to_string(message).ok()?,
-    ))
+    Some(evot_engine::context::estimate_tokens(&serde_json::to_string(message).ok()?) + 16)
 }
 
 /// Match the UI budget defensively for direct addon callers too. Never drop a
