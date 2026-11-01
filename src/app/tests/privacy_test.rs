@@ -246,6 +246,36 @@ fn assignments_in_secret_files_are_masked() -> TestResult {
 }
 
 #[test]
+fn rust_paths_in_secret_files_are_not_assignments() -> TestResult {
+    // `Default::default()` once read as `Default` = `:default()`; the value
+    // became known and was masked in every later request.
+    let masker = masker()?;
+    let code = "    Default::default()\n\
+                \x20   TableSnapshot::try_new(meta)?\n\
+                \x20   Thread::spawn(move || {\n\
+                12:    std::env::var(\"HOME_DIR\")\n";
+    let file = format!("STRIPE: abcd1234efgh\n{code}");
+    let call = |id: &str, path: &str| Content::ToolCall {
+        id: id.into(),
+        name: "read".into(),
+        arguments: json!({ "path": path }),
+        metadata: None,
+    };
+    let mut request = config(vec![
+        assistant(vec![call("c1", "/app/.env"), call("c2", "/app/src/lib.rs")]),
+        tool_result("c1", &file),
+        tool_result("c2", code),
+    ]);
+    masker.mask_request(&mut request)?;
+    let env = first_text(&request.messages[1]);
+    assert!(!env.contains("abcd1234efgh"), "{env}");
+    assert!(env.ends_with(code), "{env}");
+    let lib = first_text(&request.messages[2]);
+    assert_eq!(lib, code);
+    Ok(())
+}
+
+#[test]
 fn only_commands_that_print_a_secrets_file_make_their_output_sensitive() -> TestResult {
     // Output shaped like a build log: assignments and `Key: value` lines
     // that are secrets only if they came out of an env file.

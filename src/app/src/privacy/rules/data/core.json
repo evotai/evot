@@ -89,7 +89,7 @@
    "id": "core.file-assignment",
    "kind": "SECRET",
    "scope": "sensitive",
-   "regex": "(?m)^[ \\t]*(?:[0-9]+[\\t→:| ]+)?(?:export[ \\t]+)?[\"']?[A-Za-z_][A-Za-z0-9_.-]*[\"']?[ \\t]*[=:][ \\t]*[\"']?([^\"'\\s#,][^\"'\\r\\n]*?)[\"']?[ \\t]*,?[ \\t]*\\r?$",
+   "regex": "(?m)^[ \\t]*(?:[0-9]+[\\t→:| ]+)?(?:export[ \\t]+)?[\"']?[A-Za-z_][A-Za-z0-9_.-]*[\"']?[ \\t]*[=:][ \\t]*[\"']?([^\"'\\s#,:][^\"'\\r\\n]*?)[\"']?[ \\t]*,?[ \\t]*\\r?$",
    "unless": [
     {
      "value": "^.{0,7}$"
@@ -117,7 +117,8 @@
     "ignores": [
      "DEBUG=true\nPORT=3000\nHOME=$HOME",
      "\"base_url\": \"https://api.databend.com\",\n\"warehouse\": \"default\",\n\"credential_source\": \"file\"",
-     "MODE=release\nFORMAT=json\nSTATUS=aaaaaaaaaa"
+     "MODE=release\nFORMAT=json\nSTATUS=aaaaaaaaaa",
+     "    Default::default()\n    TableSnapshot::try_new(meta)?\n12:    std::env::var(\"HOME_DIR\")"
     ]
    }
   }
