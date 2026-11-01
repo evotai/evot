@@ -73,11 +73,3 @@ export function assistantContentToOutputLines(
   )
 }
 
-/** Visible text blocks used by non-interactive clients and overflow handling. */
-export function assistantText(content: UIAssistantBlock[]): string {
-  return [...content]
-    .sort((a, b) => a.contentIndex - b.contentIndex)
-    .filter((block): block is Extract<UIAssistantBlock, { type: 'text' }> => block.type === 'text')
-    .map(block => block.text)
-    .join('')
-}

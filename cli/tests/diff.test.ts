@@ -1,6 +1,6 @@
 import { beforeAll, describe, test, expect } from 'bun:test'
 import chalk from 'chalk'
-import { formatDiff, colorizeUnifiedDiff, colorizeUnifiedDiffRows } from '../src/render/diff.js'
+import { formatDiff, colorizeUnifiedDiffRows } from '../src/render/diff.js'
 import { getTheme } from '../src/render/theme/index.js'
 import stripAnsi from 'strip-ansi'
 
@@ -52,36 +52,6 @@ describe('formatDiff', () => {
     const result = formatDiff(oldLines, newLines)
     const plain = stripAnsi(result.text)
     expect(plain).toContain('…')
-  })
-})
-
-describe('colorizeUnifiedDiff', () => {
-  test('colorizes diff lines with line numbers', () => {
-    const diff = '--- a/file\n+++ b/file\n@@ -1,2 +1,2 @@\n-old\n+new\n context'
-    const result = colorizeUnifiedDiff(diff)
-    const plain = stripAnsi(result)
-    expect(plain).toContain('+new')
-    expect(plain).toContain('-old')
-    // Should NOT contain raw --- / +++ headers
-    expect(plain).not.toContain('--- a/file')
-  })
-
-  test('shows line numbers in gutter', () => {
-    const diff = '@@ -1,3 +1,3 @@\n line1\n-old\n+new\n line3'
-    const result = colorizeUnifiedDiff(diff)
-    const plain = stripAnsi(result)
-    expect(plain).toMatch(/1\s/)
-    expect(plain).toMatch(/2\s*[-+]/)
-  })
-
-  test('handles non-finite terminal width', () => {
-    const original = process.stdout.columns
-    Object.defineProperty(process.stdout, 'columns', { value: Infinity, configurable: true })
-    try {
-      expect(() => colorizeUnifiedDiff('@@ -1 +1 @@\n-old\n+new')).not.toThrow()
-    } finally {
-      Object.defineProperty(process.stdout, 'columns', { value: original, configurable: true })
-    }
   })
 })
 

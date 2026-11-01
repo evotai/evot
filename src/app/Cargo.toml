@@ -45,11 +45,6 @@ pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ targe
 bin-dir = "bin/{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
 
-[features]
-default = ["web", "code-search"]
-web = ["evot-engine/web"]
-code-search = ["evot-engine/code-search"]
-
 [lints.clippy]
 module_inception = "allow"
 should_implement_trait = "allow"

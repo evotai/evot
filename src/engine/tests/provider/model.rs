@@ -976,8 +976,4 @@ fn api_protocol_display_is_stable() {
         ApiProtocol::OpenAiCompletions.to_string(),
         "openai_completions"
     );
-    assert_eq!(
-        ApiProtocol::BedrockConverseStream.to_string(),
-        "bedrock_converse_stream"
-    );
 }

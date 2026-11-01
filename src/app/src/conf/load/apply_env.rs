@@ -7,7 +7,6 @@ use crate::conf::channels::FeishuChannelConfig;
 use crate::conf::paths;
 use crate::conf::thinking_level_from_str;
 use crate::conf::Config;
-use crate::conf::StorageBackend;
 use crate::error::EvotError;
 use crate::error::Result;
 
@@ -59,31 +58,8 @@ pub(super) fn apply_env(config: &mut Config, vars: &[(String, String)]) -> Resul
 
     // Storage
     for (key, value) in vars {
-        match key.as_str() {
-            "EVOT_STORAGE_BACKEND" => {
-                config.storage.backend = match value.as_str() {
-                    "fs" => StorageBackend::Fs,
-                    "cloud" => StorageBackend::Cloud,
-                    other => {
-                        return Err(EvotError::Conf(format!(
-                            "unknown EVOT_STORAGE_BACKEND: {other}"
-                        )))
-                    }
-                };
-            }
-            "EVOT_STORAGE_FS_ROOT_DIR" => {
-                config.storage.fs.root_dir = paths::expand_home_path(value)?;
-            }
-            "EVOT_STORAGE_CLOUD_ENDPOINT" => {
-                config.storage.cloud.endpoint = value.clone();
-            }
-            "EVOT_STORAGE_CLOUD_API_KEY" => {
-                config.storage.cloud.api_key = value.clone();
-            }
-            "EVOT_STORAGE_CLOUD_WORKSPACE" => {
-                config.storage.cloud.workspace = Some(value.clone());
-            }
-            _ => {}
+        if key == "EVOT_STORAGE_FS_ROOT_DIR" {
+            config.storage.fs.root_dir = paths::expand_home_path(value)?;
         }
     }
 

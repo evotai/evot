@@ -87,36 +87,6 @@ export function stripResolvedImageRefs(text: string, resolvedIds: Set<number>): 
 }
 
 /**
- * Strip image refs from text, returning only the text portion.
- * Used for text-only previews; input history must keep image references.
- */
-export function stripImageRefs(text: string): string {
-  const refs = parsePasteRefs(text)
-  let result = text
-  for (let i = refs.length - 1; i >= 0; i--) {
-    const ref = refs[i]!
-    if (ref.type !== 'image') continue
-    result = result.slice(0, ref.start) + result.slice(ref.end)
-  }
-  // Collapse multiple spaces left by removal
-  return result.replace(/  +/g, ' ').trim()
-}
-
-/**
- * Snap cursor position to the nearest ref boundary if it lands inside a ref.
- * Returns the original position if not inside any ref.
- */
-export function snapCursor(cursorCol: number, refs: PasteRef[]): number {
-  for (const ref of refs) {
-    if (cursorCol > ref.start && cursorCol < ref.end) {
-      const mid = (ref.start + ref.end) / 2
-      return cursorCol < mid ? ref.start : ref.end
-    }
-  }
-  return cursorCol
-}
-
-/**
  * Handle backspace at a ref boundary — if cursor is right after a ref end
  * or at a ref start, delete the entire ref.
  * Returns null if no ref was deleted (caller should do normal backspace).
@@ -133,26 +103,6 @@ export function deleteRefBackspace(
         newLine: line.slice(0, ref.start) + line.slice(ref.end),
         newCursorCol: ref.start,
       }
-    }
-  }
-  return null
-}
-
-/**
- * Check if cursor movement (left/right arrow) should skip over a ref.
- * Returns the new cursor position, or null if no skip needed.
- */
-export function skipRefOnMove(
-  cursorCol: number,
-  direction: 'left' | 'right',
-  refs: PasteRef[],
-): number | null {
-  for (const ref of refs) {
-    if (direction === 'right' && cursorCol === ref.start) {
-      return ref.end
-    }
-    if (direction === 'left' && cursorCol === ref.end) {
-      return ref.start
     }
   }
   return null

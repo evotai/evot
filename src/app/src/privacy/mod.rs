@@ -4,9 +4,8 @@
 //! provider sees them and are put back in the reply ([`wrap`]). Uploads
 //! (share links, cloud sync): the same values are scrubbed for good
 //! ([`scrub_upload`]). Both record what they found, never the values, for
-//! `/privacy` ([`summary`]). Tool calls: each is checked before it runs, and
-//! one that would send a secret where the user has not trusted is refused
-//! ([`GuardedTool`]). Settings live in `~/.evotai/privacy/`.
+//! `/privacy` ([`summary`]). Tool calls are not judged: they run with real
+//! values. Settings live in `~/.evotai/privacy/`.
 //!
 //! Every rule, word list, exclusion, source and structural field is data:
 //! the packs in `rules/data/*.json` and the user's `~/.evotai/privacy/rules`.

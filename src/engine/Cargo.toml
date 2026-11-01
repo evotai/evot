@@ -18,7 +18,7 @@ tracing = "0.1"
 parking_lot = { workspace = true }
 reqwest = { workspace = true }
 reqwest-eventsource = "0.6"
-htmd = { workspace = true, optional = true }
+htmd = { workspace = true }
 futures = "0.3"
 jsonrepair = "0.1"
 unicode-normalization = "0.1"
@@ -27,59 +27,34 @@ base64 = "0.22"
 flate2 = "=1.1.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 command-group = { version = "5", features = ["with-tokio"] }
-headless_chrome = { workspace = true, optional = true }
-html2text = { workspace = true, optional = true }
-tree-sitter = { version = "0.24", optional = true }
-tree-sitter-rust = { version = "0.23", optional = true }
-tree-sitter-python = { version = "0.23", optional = true }
-tree-sitter-javascript = { version = "0.23", optional = true }
-tree-sitter-typescript = { version = "0.23", optional = true }
-tree-sitter-go = { version = "0.23", optional = true }
-tree-sitter-java = { version = "0.23", optional = true }
-tree-sitter-c = { version = "0.23", optional = true }
-tree-sitter-cpp = { version = "0.23", optional = true }
-tree-sitter-c-sharp = { version = "0.23", optional = true }
-tree-sitter-ruby = { version = "0.23", optional = true }
-tree-sitter-php = { version = "0.23", optional = true }
-tree-sitter-swift = { version = "0.7", optional = true }
-tree-sitter-kotlin-ng = { version = "1.1", optional = true }
-tree-sitter-scala = { version = "0.23", optional = true }
-tree-sitter-bash = { version = "0.23", optional = true }
-tree-sitter-lua = { version = "0.4", optional = true }
-tree-sitter-elixir = { version = "0.3", optional = true }
-tree-sitter-haskell = { version = "0.23", optional = true }
+headless_chrome = { workspace = true }
+html2text = { workspace = true }
+tree-sitter = { version = "0.24" }
+tree-sitter-rust = { version = "0.23" }
+tree-sitter-python = { version = "0.23" }
+tree-sitter-javascript = { version = "0.23" }
+tree-sitter-typescript = { version = "0.23" }
+tree-sitter-go = { version = "0.23" }
+tree-sitter-java = { version = "0.23" }
+tree-sitter-c = { version = "0.23" }
+tree-sitter-cpp = { version = "0.23" }
+tree-sitter-c-sharp = { version = "0.23" }
+tree-sitter-ruby = { version = "0.23" }
+tree-sitter-php = { version = "0.23" }
+tree-sitter-swift = { version = "0.7" }
+tree-sitter-kotlin-ng = { version = "1.1" }
+tree-sitter-scala = { version = "0.23" }
+tree-sitter-bash = { version = "0.23" }
+tree-sitter-lua = { version = "0.4" }
+tree-sitter-elixir = { version = "0.3" }
+tree-sitter-haskell = { version = "0.23" }
 similar = "2"
 lru = "0.12"
 ignore = "0.4"
 globset = "0.4"
 grep = "0.4"
-rayon = { version = "1.10", optional = true }
+rayon = { version = "1.10" }
 
-[features]
-default = ["web", "code-search"]
-web = ["dep:headless_chrome", "dep:htmd", "dep:html2text"]
-code-search = [
-    "dep:tree-sitter",
-    "dep:tree-sitter-rust",
-    "dep:tree-sitter-python",
-    "dep:tree-sitter-javascript",
-    "dep:tree-sitter-typescript",
-    "dep:tree-sitter-go",
-    "dep:tree-sitter-java",
-    "dep:tree-sitter-c",
-    "dep:tree-sitter-cpp",
-    "dep:tree-sitter-c-sharp",
-    "dep:tree-sitter-ruby",
-    "dep:tree-sitter-php",
-    "dep:tree-sitter-swift",
-    "dep:tree-sitter-kotlin-ng",
-    "dep:tree-sitter-scala",
-    "dep:tree-sitter-bash",
-    "dep:tree-sitter-lua",
-    "dep:tree-sitter-elixir",
-    "dep:tree-sitter-haskell",
-    "dep:rayon",
-]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

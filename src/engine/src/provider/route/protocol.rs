@@ -8,7 +8,6 @@ pub enum ApiProtocol {
     AnthropicMessages,
     OpenAiResponses,
     OpenAiCompletions,
-    BedrockConverseStream,
 }
 
 impl std::fmt::Display for ApiProtocol {
@@ -17,7 +16,6 @@ impl std::fmt::Display for ApiProtocol {
             Self::AnthropicMessages => write!(f, "anthropic_messages"),
             Self::OpenAiResponses => write!(f, "openai_responses"),
             Self::OpenAiCompletions => write!(f, "openai_completions"),
-            Self::BedrockConverseStream => write!(f, "bedrock_converse_stream"),
         }
     }
 }

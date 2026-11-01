@@ -46,9 +46,7 @@ impl ModelConfig {
     /// reasoning effort for this model.
     pub fn honors_reasoning_effort(&self) -> bool {
         match self.protocol() {
-            ApiProtocol::AnthropicMessages
-            | ApiProtocol::OpenAiResponses
-            | ApiProtocol::BedrockConverseStream => true,
+            ApiProtocol::AnthropicMessages | ApiProtocol::OpenAiResponses => true,
             ApiProtocol::OpenAiCompletions => self.compat().is_some_and(|compat| {
                 let format_carries_effort = match compat.thinking_format {
                     ThinkingFormat::OpenRouter => true,

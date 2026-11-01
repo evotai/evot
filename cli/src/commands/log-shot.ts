@@ -300,13 +300,6 @@ export function buildShotFooterLine(): string {
   return '/log shot'
 }
 
-/** @deprecated use formatShotModelLabel — kept for tests that only need model chip text. */
-export function buildShotHeaderSpans(header?: ShotHeaderMeta): string[] {
-  const modelLabel = formatShotModelLabel(header)
-  if (!modelLabel) return []
-  return [`<span class="model">${escapeHtml(modelLabel)}</span>`]
-}
-
 export function buildShotHtml(
   source: ShotSource,
   opts?: { columns?: number; header?: ShotHeaderMeta },

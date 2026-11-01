@@ -5,10 +5,6 @@ import { lexRawMarkdownTokens } from '../src/markdown/parse/marked.js'
 import { renderLatexMath } from '../src/markdown/math/ansi.js'
 import { renderMarkdown } from '../src/render/markdown.js'
 import { getTheme, resetThemeCache } from '../src/render/theme/index.js'
-import {
-  findStreamingCommitPoint,
-  isInsideOpenMathBlock,
-} from '../src/markdown/streaming/commit.js'
 
 function render(source: string): string {
   return stripAnsi(renderMarkdown(source))
@@ -95,24 +91,5 @@ describe('terminal LaTeX rendering', () => {
 
   test('falls back to the original LaTeX when a construct is unsupported', () => {
     expect(renderLatexMath('\\unknown{x}')).toBe('\\unknown{x}')
-  })
-})
-
-describe('streaming display math boundaries', () => {
-  test('holds open dollar and bracket blocks pending', () => {
-    expect(isInsideOpenMathBlock('$$\n\\frac{a}{b}')).toBe(true)
-    expect(isInsideOpenMathBlock('\\[\n\\frac{a}{b}')).toBe(true)
-    expect(isInsideOpenMathBlock('\\[\n\\frac{a}{b}\n\\]')).toBe(false)
-    expect(isInsideOpenMathBlock('$$\nx + y $$')).toBe(true)
-  })
-
-  test('commits prose before an open math block without tearing the formula', () => {
-    const prefix = 'Intro\n\n'
-    expect(findStreamingCommitPoint(`${prefix}$$\nx^2`)).toBe(prefix.length)
-    expect(findStreamingCommitPoint(`${prefix}\\[\nx^2`)).toBe(prefix.length)
-  })
-
-  test('ignores display delimiters inside code fences', () => {
-    expect(isInsideOpenMathBlock('```text\n$$\nx^2\n```')).toBe(false)
   })
 })

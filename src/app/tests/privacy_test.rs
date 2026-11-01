@@ -605,7 +605,6 @@ fn every_llm_transport_is_built_behind_the_privacy_boundary() -> TestResult {
         "AnthropicProvider)",
         "OpenAiCompatProvider)",
         "OpenAiResponsesProvider)",
-        "BedrockProvider)",
     ];
     let mut offenders = Vec::new();
     while let Some(dir) = stack.pop() {

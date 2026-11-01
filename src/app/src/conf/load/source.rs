@@ -9,7 +9,6 @@ use crate::conf::paths;
 use crate::conf::thinking_level_from_str;
 use crate::conf::ChannelsConfig;
 use crate::conf::Config;
-use crate::conf::StorageBackend;
 use crate::error::EvotError;
 use crate::error::Result;
 
@@ -81,9 +80,7 @@ struct ServerSource {
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
 struct StorageSource {
-    backend: Option<StorageBackend>,
     fs: FsStorageSource,
-    cloud: CloudStorageSource,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -94,25 +91,9 @@ struct FsStorageSource {
 
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]
-struct CloudStorageSource {
-    endpoint: Option<String>,
-    api_key: Option<String>,
-    workspace: Option<String>,
-}
-
-#[derive(Debug, Default, serde::Deserialize)]
-#[serde(default)]
 struct SandboxSource {
     enabled: Option<bool>,
     allowed_dirs: Option<Vec<String>>,
-}
-
-fn optional_string(value: String) -> Option<String> {
-    if value.trim().is_empty() {
-        None
-    } else {
-        Some(value)
-    }
 }
 
 impl ConfigSource {
@@ -136,20 +117,8 @@ impl ConfigSource {
             config.server.port = port;
         }
 
-        if let Some(backend) = self.storage.backend {
-            config.storage.backend = backend;
-        }
         if let Some(root_dir) = self.storage.fs.root_dir {
             config.storage.fs.root_dir = paths::expand_home_path(&root_dir)?;
-        }
-        if let Some(endpoint) = self.storage.cloud.endpoint {
-            config.storage.cloud.endpoint = endpoint;
-        }
-        if let Some(api_key) = self.storage.cloud.api_key {
-            config.storage.cloud.api_key = api_key;
-        }
-        if let Some(workspace) = self.storage.cloud.workspace {
-            config.storage.cloud.workspace = optional_string(workspace);
         }
 
         if self.channel.feishu.is_some() {

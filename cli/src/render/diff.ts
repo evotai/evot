@@ -36,7 +36,6 @@ const style = {
   removedWord: (s: string) => chalk.bgHex(getTheme().diffRemovedWordBg).hex(getTheme().diffRemovedFg)(s),
 }
 
-
 const WORD_DIFF_THRESHOLD = 0.4
 
 // ---------------------------------------------------------------------------
@@ -79,13 +78,6 @@ export function formatDiff(oldText: string, newText: string, filename = ''): Dif
   }
 
   return { text: output.join('\n'), linesAdded, linesRemoved }
-}
-
-/**
- * Colorize a pre-computed unified diff string (from the Rust engine).
- */
-export function colorizeUnifiedDiff(diff: string): string {
-  return colorizeUnifiedDiffRows(diff).map(row => row.text).join('\n')
 }
 
 export interface DiffHunk {

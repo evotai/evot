@@ -1,7 +1,5 @@
 #[path = "provider/anthropic/mod.rs"]
 mod anthropic;
-#[path = "provider/bedrock.rs"]
-mod bedrock;
 #[path = "provider/error.rs"]
 mod error;
 #[path = "provider/json_repair.rs"]

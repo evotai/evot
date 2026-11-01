@@ -4,7 +4,6 @@ import {
   buildAssistantLines,
   buildThinkingLines,
   buildToolResult,
-  buildToolProgress,
   buildToolCall,
   buildToolCard,
   buildVerboseEvent,
@@ -608,29 +607,6 @@ describe('buildToolResult', () => {
     expect(all).toContain('line 0')
     expect(all).toContain('line 6')
     expect(all).toContain('ctrl+o to collapse')
-  })
-
-  test('expanded progress shows collapse hint', () => {
-    const progress = Array.from({ length: 7 }, (_, i) => `line ${i}`).join('\n')
-    const lines = buildToolProgress('bash', progress, true)
-    const all = lines.map(l => l.text).join('\n')
-    expect(all).toContain('line 0')
-    expect(all).toContain('line 6')
-    expect(all).toContain('ctrl+o to collapse')
-  })
-
-  test('collapsed progress card is a single header carrying the expand hint', () => {
-    const lines = buildToolProgress('bash', 'line1\nline2\nline3')
-    expect(lines[0]!.text).toBe('⌘ bash  · 3 lines (ctrl+o)')
-    expect(lines).toHaveLength(1)
-    // No progress content previewed in the collapsed card.
-    expect(lines.map(l => l.text).join('\n')).not.toContain('line3')
-  })
-
-  test('single-line progress renders inline (nothing to collapse)', () => {
-    const lines = buildToolProgress('bash', 'only line')
-    expect(lines[0]!.text).toBe('⌘ bash  · 1 line')
-    expect(lines.map(l => l.text).join('\n')).toContain('  only line')
   })
 
   test('includes diff when present', () => {

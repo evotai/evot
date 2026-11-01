@@ -9,7 +9,6 @@ import {
   focusedPanelTarget,
   formatCommandLabel,
   formatElapsed,
-  formatOutputView,
   sanitizeTerminalOutput,
   formatPanelItems,
   formatPanelSubtitle,
@@ -412,60 +411,3 @@ describe('sanitizeTerminalOutput', () => {
   })
 })
 
-describe('formatOutputView', () => {
-  test('leads with a status header naming the task and command', () => {
-    const lines = formatOutputView(proc({ command: 'bun run dev' }), 'hello\n')
-    expect(lines[0]).toBe('  ● 028deb34 · running · 2s  bun run dev')
-    expect(lines[1]).toBe('    hello')
-  })
-
-  test('limits noisy output before rendering and states what was omitted', () => {
-    const output = Array.from({ length: 250 }, (_, index) => `line ${index + 1}`).join('\n')
-    const state = createBackgroundOutputState(proc(), output)
-    const preview = state.items[0]?.preview ?? []
-
-    expect(preview).toContain('  … 50 earlier lines')
-    expect(preview).not.toContain('line 1')
-    expect(preview).toContain('line 250')
-  })
-
-  test('a trailing newline is a terminator, not an empty last line', () => {
-    const lines = formatOutputView(proc(), 'one\ntwo\n')
-    expect(lines.filter(line => line.trim() === '')).toHaveLength(0)
-    expect(lines[2]).toBe('    two')
-  })
-
-  test('empty output says so and still points at the file', () => {
-    const lines = formatOutputView(proc(), '')
-    expect(lines[1]).toBe('    (no output yet)')
-    expect(lines[2]).toBe('    /tmp/out.txt')
-  })
-
-  test('keeps the tail, since a running task’s latest output is what matters', () => {
-    const output = Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n')
-    const lines = formatOutputView(proc(), output, 3)
-    expect(lines).toContain('    line 9')
-    expect(lines).not.toContain('    line 0')
-  })
-
-  test('states how much was elided rather than silently cutting output', () => {
-    const output = Array.from({ length: 10 }, (_, index) => `line ${index}`).join('\n')
-    const lines = formatOutputView(proc(), output, 3)
-    expect(lines[1]).toBe('    … 7 earlier lines')
-  })
-
-  test('a capped output file is called out so a partial view is not trusted', () => {
-    const lines = formatOutputView(proc({ output_file_truncated: true }), 'tail\n')
-    expect(lines[1]).toContain('output file was capped')
-  })
-
-  test('the output path closes the block so the full log stays reachable', () => {
-    const lines = formatOutputView(proc(), 'a\n')
-    expect(lines[lines.length - 1]).toBe('    /tmp/out.txt')
-  })
-
-  test('output shorter than the tail limit needs no elision notice', () => {
-    const lines = formatOutputView(proc(), 'only\n', 40)
-    expect(lines.some(line => line.includes('earlier'))).toBe(false)
-  })
-})

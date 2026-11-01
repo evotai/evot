@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import stringWidth from 'string-width'
-import { displayWidth, padRight, clipDisplayText } from '../src/render/format.js'
+import { displayWidth, clipDisplayText } from '../src/render/format.js'
 
 const CLAIMED_RANGES: ReadonlyArray<readonly [number, number, number]> = [
   [0x3000, 0x3029, 2],
@@ -116,41 +116,6 @@ describe('display width fast path', () => {
         throw new Error(`disagreement on ${JSON.stringify(s)}: fast=${displayWidth(s)} string-width=${stringWidth(s)}`)
       }
     }
-  })
-})
-
-describe('padRight after the single-pass rewrite', () => {
-  test('pads narrow and wide text to the requested columns', () => {
-    expect(displayWidth(padRight('abc', 10))).toBe(10)
-    expect(displayWidth(padRight('中文', 10))).toBe(10)
-    expect(displayWidth(padRight('', 5))).toBe(5)
-  })
-
-  test('truncated output never exceeds the column budget', () => {
-    for (const sample of [
-      'a'.repeat(80),
-      '中'.repeat(80),
-      '现在粘贴大的图片到输入框，会卡顿一下才显示出来',
-      'commit and push to remote main … 现在粘贴大的图片到输入框',
-      '👍'.repeat(40),
-      'mixed 中文 and English 混排 text that runs well past the budget',
-    ]) {
-      for (const n of [1, 2, 3, 10, 44]) {
-        const out = padRight(sample, n)
-        expect(displayWidth(out)).toBeLessThanOrEqual(n)
-      }
-    }
-  })
-
-  test('a wide character is dropped rather than half-printed', () => {
-    const out = padRight('中文中文', 4)
-    expect(out.endsWith('…')).toBe(true)
-    expect(displayWidth(out)).toBeLessThanOrEqual(4)
-  })
-
-  test('exact-fit text is padded, not truncated', () => {
-    expect(padRight('中文', 4)).toBe('中文')
-    expect(padRight('abcd', 4)).toBe('abcd')
   })
 })
 

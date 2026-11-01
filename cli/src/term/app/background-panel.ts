@@ -456,33 +456,6 @@ export function refreshBackgroundOutputState(
   return { ...next, query: state.query, outputView: state.outputView }
 }
 
-/** Transcript-compatible formatting shared by the live output renderer. */
-export function formatOutputView(
-  process: BackgroundProcess,
-  output: string,
-  tailLines = OUTPUT_TAIL_LINES,
-): string[] {
-  const id = process.task_id.slice(0, 8)
-  const header = `  ${STATUS_MARK[process.status]} ${id} · ${formatStatusDetail(process)}  ${formatCommandLabel(process.command)}`
-  // A trailing newline is a line terminator, not an empty final line.
-  const normalized = output.endsWith('\n') ? output.slice(0, -1) : output
-  const all = normalized.length === 0 ? [] : normalized.split('\n')
-  if (all.length === 0) {
-    return [header, '    (no output yet)', `    ${process.output_path}`]
-  }
-  const visible = all.slice(-tailLines)
-  const hidden = all.length - visible.length
-  return [
-    header,
-    ...(process.output_file_truncated
-      ? ['    (output file was capped; earlier output was dropped)']
-      : []),
-    ...(hidden > 0 ? [`    … ${hidden} earlier ${hidden === 1 ? 'line' : 'lines'}`] : []),
-    ...visible.map(line => `    ${line}`),
-    `    ${process.output_path}`,
-  ]
-}
-
 const STATUS_MARK: Record<BackgroundProcess['status'], string> = {
   running_foreground: '●',
   running: '●',

@@ -4,7 +4,7 @@ import { blocksToLines, styledLineToAnsi, paintBackground, line, colored, dim } 
 import { buildUserMessage, buildAssistantLines, buildToolCard, buildEventCard, buildPrivacyCard, buildPrivacyActionCard, buildPrivacyHappeningCard, type OutputLine } from '../src/render/output.js'
 import { getTheme } from '../src/render/theme/index.js'
 import { assistantMessageToOutputLines } from '../src/render/assistant.js'
-import { colorizeUnifiedDiff } from '../src/render/diff.js'
+import { colorizeUnifiedDiffRows } from '../src/render/diff.js'
 import stripAnsi from 'strip-ansi'
 import stringWidth from 'string-width'
 import chalk from 'chalk'
@@ -408,7 +408,7 @@ describe('buildOutputBlocks', () => {
   test('long diff line wraps instead of truncating', () => {
     const longAdded = 'x'.repeat(200)
     const diff = `@@ -1,1 +1,1 @@\n-short old line\n+${longAdded}`
-    const colored = colorizeUnifiedDiff(diff)
+    const colored = colorizeUnifiedDiffRows(diff).map(row => row.text).join('\n')
     const result = renderPlainWithColumns([{ id: 'd1', kind: 'tool', text: colored }], 40)
     // The full added content survives across wrapped lines (no truncation).
     expect(result.replace(/\n/g, '')).toContain(longAdded)

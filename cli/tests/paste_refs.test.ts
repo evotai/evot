@@ -8,10 +8,7 @@ import {
   formatImageRef,
   parsePasteRefs,
   expandPasteRefs,
-  stripImageRefs,
-  snapCursor,
   deleteRefBackspace,
-  skipRefOnMove,
   shouldCollapse,
   cleanPastedText,
   resolveHistoryText,
@@ -122,43 +119,6 @@ describe('expandPasteRefs', () => {
 })
 
 // ---------------------------------------------------------------------------
-// snapCursor
-// ---------------------------------------------------------------------------
-
-describe('snapCursor', () => {
-  const refs = parsePasteRefs('hello [Pasted text #1 +5 lines] end')
-  // ref is at start=6, end=31
-
-  test('cursor before ref → unchanged', () => {
-    expect(snapCursor(3, refs)).toBe(3)
-  })
-
-  test('cursor at ref start → unchanged', () => {
-    expect(snapCursor(6, refs)).toBe(6)
-  })
-
-  test('cursor at ref end → unchanged', () => {
-    expect(snapCursor(31, refs)).toBe(31)
-  })
-
-  test('cursor inside ref, left half → snap to start', () => {
-    expect(snapCursor(10, refs)).toBe(6)
-  })
-
-  test('cursor inside ref, right half → snap to end', () => {
-    expect(snapCursor(25, refs)).toBe(31)
-  })
-
-  test('cursor after ref → unchanged', () => {
-    expect(snapCursor(33, refs)).toBe(33)
-  })
-
-  test('no refs → unchanged', () => {
-    expect(snapCursor(5, [])).toBe(5)
-  })
-})
-
-// ---------------------------------------------------------------------------
 // deleteRefBackspace
 // ---------------------------------------------------------------------------
 
@@ -181,35 +141,6 @@ describe('deleteRefBackspace', () => {
 
   test('cursor at ref start → null (normal backspace)', () => {
     expect(deleteRefBackspace(line, 6, refs)).toBeNull()
-  })
-})
-
-// ---------------------------------------------------------------------------
-// skipRefOnMove
-// ---------------------------------------------------------------------------
-
-describe('skipRefOnMove', () => {
-  const refs = parsePasteRefs('hello [Pasted text #1 +5 lines] end')
-  // ref at start=6, end=31
-
-  test('right arrow at ref start → skip to end', () => {
-    expect(skipRefOnMove(6, 'right', refs)).toBe(31)
-  })
-
-  test('left arrow at ref end → skip to start', () => {
-    expect(skipRefOnMove(31, 'left', refs)).toBe(6)
-  })
-
-  test('right arrow not at ref → null', () => {
-    expect(skipRefOnMove(3, 'right', refs)).toBeNull()
-  })
-
-  test('left arrow not at ref → null', () => {
-    expect(skipRefOnMove(3, 'left', refs)).toBeNull()
-  })
-
-  test('no refs → null', () => {
-    expect(skipRefOnMove(5, 'right', [])).toBeNull()
   })
 })
 
@@ -344,44 +275,12 @@ describe('expandPasteRefs — image refs', () => {
 })
 
 // ---------------------------------------------------------------------------
-// stripImageRefs
-// ---------------------------------------------------------------------------
-
-describe('stripImageRefs', () => {
-  test('strips single image ref', () => {
-    expect(stripImageRefs('hello [Image #1] world')).toBe('hello world')
-  })
-
-  test('strips multiple image refs', () => {
-    expect(stripImageRefs('[Image #1] hello [Image #2]')).toBe('hello')
-  })
-
-  test('leaves text refs intact', () => {
-    expect(stripImageRefs('[Pasted text #1] and [Image #2]')).toBe('[Pasted text #1] and')
-  })
-
-  test('no refs → unchanged', () => {
-    expect(stripImageRefs('hello world')).toBe('hello world')
-  })
-
-  test('only image ref → empty', () => {
-    expect(stripImageRefs('[Image #1]')).toBe('')
-  })
-})
-
-// ---------------------------------------------------------------------------
 // cursor/delete/skip work with image refs
 // ---------------------------------------------------------------------------
 
 describe('cursor operations with image refs', () => {
   const text = 'hello [Image #1] end'
   const refs = parsePasteRefs(text)
-  // [Image #1] at start=6, end=16
-
-  test('snapCursor inside image ref → snap to boundary', () => {
-    expect(snapCursor(10, refs)).toBe(6)
-    expect(snapCursor(14, refs)).toBe(16)
-  })
 
   test('deleteRefBackspace at image ref end → delete entire ref', () => {
     const result = deleteRefBackspace(text, 16, refs)
@@ -391,13 +290,6 @@ describe('cursor operations with image refs', () => {
     })
   })
 
-  test('skipRefOnMove right at image ref start → skip to end', () => {
-    expect(skipRefOnMove(6, 'right', refs)).toBe(16)
-  })
-
-  test('skipRefOnMove left at image ref end → skip to start', () => {
-    expect(skipRefOnMove(16, 'left', refs)).toBe(6)
-  })
 })
 
 // ---------------------------------------------------------------------------

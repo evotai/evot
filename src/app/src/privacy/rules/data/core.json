@@ -71,9 +71,6 @@
   "no_digit_and_letter": {
    "value": "^(?:[^0-9]*|[^A-Za-z]*)$"
   },
-  "a_key_word": {
-   "value": "^(?:[^0-9]{0,15}|[^A-Za-z]*)$"
-  },
   "code_name": {
    "value": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*$",
    "after": "^[ \\t]*\\("
@@ -82,26 +79,6 @@
    "value": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*$",
    "before": "[^\"'][ \\t]*:[ \\t]*$",
    "after": "^[ \\t]*(?:$|[;,)}\\]|?&<>])"
-  },
-  "after_digit_dot": {
-   "value": "^[0-9]",
-   "before": "[0-9]\\.$",
-   "window": 2
-  },
-  "before_dot_digit": {
-   "value": "[0-9]$",
-   "after": "^\\.[0-9]",
-   "window": 2
-  },
-  "json_number_field": {
-   "value": "^[0-9]+$",
-   "before": "\"[ \\t\\r\\n]*:[ \\t\\r\\n]*$",
-   "after": "^[ \\t\\r\\n]*(?:$|[,}\\]])"
-  },
-  "json_number_list": {
-   "value": "^[0-9]+$",
-   "before": "\\[[0-9.,+\\-eE \\t\\r\\n]*$",
-   "after": "^[ \\t\\r\\n]*(?:$|[,\\]])"
   },
   "low_entropy": {
    "entropy_below": 2.5

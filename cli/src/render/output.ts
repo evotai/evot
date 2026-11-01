@@ -774,30 +774,6 @@ export function buildToolResult(
   return lines
 }
 
-export function buildToolProgress(name: string, text: string, expanded?: boolean): OutputLine[] {
-  const progressLines = text.replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n')
-  const total = progressLines.length
-  // Collapsed: no content preview. The header carries the line count and,
-  // for a multiline body, the expand hint; no extra row.
-  const count = `${total} ${total === 1 ? 'line' : 'lines'}`
-  const header = `${toolGlyph(name).icon} ${name}  · ${expanded || total <= 1 ? count : `${count} ${EXPAND_HINT}`}`
-  const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: header }]
-  if (expanded) {
-    // Expanded: full progress body + collapse hint.
-    for (const l of progressLines) {
-      lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${l}` })
-    }
-    if (progressLines.length > 1) {
-      lines.push(toolHintLine(`  [2m${COLLAPSE_HINT}[0m`))
-    }
-    return lines
-  }
-  if (total <= 1) {
-    lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${progressLines[0] ?? ''}` })
-  }
-  return lines
-}
-
 export function buildVerboseEvent(eventText: string): OutputLine[] {
   if (!eventText) return []
   return eventText.split('\n').map((line) => ({

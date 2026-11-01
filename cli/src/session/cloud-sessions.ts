@@ -48,9 +48,6 @@ const PENDING: Record<Exclude<CloudState, 'local'>, string> = {
   synced: '', push_pending: '↑', pull_pending: '⇣', remote_only: '⇣', diverged: '!',
 }
 
-/** Width of the list's access column: the longest label plus its suffix. */
-export const CLOUD_LABEL_WIDTH = 'private ⇣'.length
-
 /**
  * The access column of the sessions list, spelled out: who can read the
  * session is the thing a user scans `/share` for, and a glyph (☁ renders as a

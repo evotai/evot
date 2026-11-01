@@ -81,19 +81,6 @@ function truncateToWidth(s: string, budget: number): string {
   return out
 }
 
-export function padRight(s: string, n: number): string {
-  n = repeatCount(n)
-
-  if (/^[\x20-\x7e]*$/.test(s)) {
-    if (s.length <= n) return s + ' '.repeat(n - s.length)
-    return s.slice(0, Math.max(0, n - 1)) + '…'
-  }
-
-  const width = displayWidth(s)
-  if (width <= n) return s + ' '.repeat(n - width)
-  return truncateToWidth(s, n - 1) + '…'
-}
-
 export function relativeTime(iso: string): string {
   try {
     const date = new Date(iso)

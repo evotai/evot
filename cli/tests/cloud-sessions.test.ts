@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test'
 import {
-  CloudSessionSync, CLOUD_LABEL_WIDTH, cloudBadge, cloudLabel, cloudState, mergeRemoteSessions, describeShareResult, shareAccess,
+  CloudSessionSync, cloudBadge, cloudLabel, cloudState, mergeRemoteSessions, describeShareResult, shareAccess,
 } from '../src/session/cloud-sessions.js'
 import { applySessionText, formatSessionItems, sessionCloudSection, sessionPreviewLines } from '../src/term/app/resume.js'
 import type { CloudPushResult, RemoteSession, SessionMeta } from '../src/native/index.js'

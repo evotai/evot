@@ -11,7 +11,6 @@ import {
   renderShotAnsi,
   writeMarkdownShot,
   formatShotModelLabel,
-  buildShotHeaderSpans,
   buildShotHeroTime,
   shotWindowSize,
   ansiMaxColumns,
@@ -208,7 +207,6 @@ describe('log-shot ansi + render', () => {
     expect(formatShotModelLabel({ model: 'gpt-5.5' })).toBe('gpt-5.5')
     expect(formatShotModelLabel({ model: 'gpt-5.5', thinkingLevel: 'off' })).toBe('gpt-5.5 · thinking off')
     expect(formatShotModelLabel({})).toBe('')
-    expect(buildShotHeaderSpans({ model: 'm' }).join('')).toContain('class="model">m</span>')
   })
 
   test('painted history lines keep TUI wrap 1:1 (no raw reflow)', () => {

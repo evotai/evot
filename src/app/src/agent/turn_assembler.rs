@@ -73,10 +73,7 @@ impl TurnAssembler {
             limits: RwLock::new(ExecutionLimits::default()),
             skills_dirs: RwLock::new(Vec::new()),
             skill_names: RwLock::new(None),
-            spill_root: match config.storage.backend {
-                crate::conf::StorageBackend::Fs => Some(config.storage.fs.root_dir.clone()),
-                _ => None,
-            },
+            spill_root: Some(config.storage.fs.root_dir.clone()),
             variables: RwLock::new(None),
             sandbox: SandboxPolicy::from_config(&config.sandbox),
             provider_override: RwLock::new(None),

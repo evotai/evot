@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 use evot::conf::thinking_level_from_str;
 use evot::conf::Config;
 use evot::conf::Protocol;
-use evot::conf::StorageBackend;
 use evot_engine::provider::CompatCaps;
 use evot_engine::ThinkingLevel;
 
@@ -88,7 +87,6 @@ fn load_config_prefers_process_env_over_env_file() -> TestResult {
     let config = result?;
     assert_eq!(config.active_llm()?.api_key, "process-key");
     assert_eq!(config.server.port, 9020);
-    assert_eq!(config.storage.backend, StorageBackend::Fs);
     assert_eq!(config.storage.fs.root_dir, env_home.join(".evotai"));
     Ok(())
 }

@@ -193,7 +193,7 @@ fn default_window() -> usize {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChecksumDef {
-    /// `luhn`, `cn_id`, `iban`, `crc32_base62`, `bech32`, `hkid`, `twid`.
+    /// `crc32_base62` (the only one).
     pub algorithm: String,
     /// A value failing the checksum is kept (at its confidence) rather
     /// than dropped.

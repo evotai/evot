@@ -14,15 +14,12 @@
 
 mod glob;
 mod grep;
-#[cfg(feature = "code-search")]
 mod search;
 mod walk;
 
 pub use glob::GlobTool;
 pub use grep::GrepTool;
-#[cfg(feature = "code-search")]
 pub use search::SearchTool;
-#[cfg(feature = "code-search")]
 pub(crate) use walk::cap_output;
 pub(crate) use walk::finalize_output;
 pub(crate) use walk::parallel_collect;

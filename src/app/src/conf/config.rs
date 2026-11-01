@@ -675,20 +675,8 @@ impl Config {
             )));
         }
 
-        match self.storage.backend {
-            StorageBackend::Fs => {
-                if self.storage.fs.root_dir.as_os_str().is_empty() {
-                    return Err(EvotError::Conf("storage.fs.root_dir not set".into()));
-                }
-            }
-            StorageBackend::Cloud => {
-                if self.storage.cloud.endpoint.is_empty() {
-                    return Err(EvotError::Conf("storage.cloud.endpoint not set".into()));
-                }
-                if self.storage.cloud.api_key.is_empty() {
-                    return Err(EvotError::Conf("storage.cloud.api_key not set".into()));
-                }
-            }
+        if self.storage.fs.root_dir.as_os_str().is_empty() {
+            return Err(EvotError::Conf("storage.fs.root_dir not set".into()));
         }
 
         Ok(())
@@ -716,39 +704,20 @@ impl Default for ServerConfig {
 
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
-    pub backend: StorageBackend,
     pub fs: FsStorageConfig,
-    pub cloud: CloudStorageConfig,
 }
 
 impl StorageConfig {
     pub fn fs(root_dir: PathBuf) -> Self {
         Self {
-            backend: StorageBackend::Fs,
             fs: FsStorageConfig { root_dir },
-            cloud: CloudStorageConfig::default(),
         }
     }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum StorageBackend {
-    #[default]
-    Fs,
-    Cloud,
 }
 
 #[derive(Debug, Clone)]
 pub struct FsStorageConfig {
     pub root_dir: PathBuf,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CloudStorageConfig {
-    pub endpoint: String,
-    pub api_key: String,
-    pub workspace: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

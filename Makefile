@@ -68,8 +68,6 @@ setup:
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets -- -D warnings
-	cargo check -p evotengine --no-default-features
-	cargo check -p evot --no-default-features
 	$(NEXTEST) --workspace --exclude evot-napi --no-fail-fast
 
 build: build-napi build-cli

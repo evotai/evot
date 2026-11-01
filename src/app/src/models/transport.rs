@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use evot_engine::provider::AnthropicProvider;
 use evot_engine::provider::ApiProtocol;
-use evot_engine::provider::BedrockProvider;
 use evot_engine::provider::OpenAiCompatProvider;
 use evot_engine::provider::OpenAiResponsesProvider;
 use evot_engine::provider::StreamProvider;
@@ -24,7 +23,6 @@ pub fn for_api(protocol: ApiProtocol) -> Arc<dyn StreamProvider> {
     let raw: Arc<dyn StreamProvider> = match protocol {
         ApiProtocol::AnthropicMessages => Arc::new(AnthropicProvider),
         ApiProtocol::OpenAiCompletions => Arc::new(OpenAiCompatProvider),
-        ApiProtocol::BedrockConverseStream => Arc::new(BedrockProvider),
         ApiProtocol::OpenAiResponses => Arc::new(OpenAiResponsesProvider),
     };
     crate::privacy::wrap(raw)

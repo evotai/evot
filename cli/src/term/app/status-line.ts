@@ -14,10 +14,6 @@ const STATUS_SLOTS = new Map<string, string>([
   ['sys-cloud-session', 'cloud-session'],
 ])
 
-export function isStatusLineId(id: string): boolean {
-  return STATUS_SLOTS.has(id)
-}
-
 /** Which slot an id occupies, or undefined when it is not a status line. */
 export function statusLineSlot(id: string): string | undefined {
   return STATUS_SLOTS.get(id)

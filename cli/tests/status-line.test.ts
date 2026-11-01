@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { OutputLine } from '../src/render/output.js'
-import { isStatusLineId, replaceOrPushStatusLine, statusLineSlot } from '../src/term/app/status-line.js'
+import { replaceOrPushStatusLine, statusLineSlot } from '../src/term/app/status-line.js'
 
 function sys(id: string, text: string): OutputLine {
   return { id, kind: 'system', text }
@@ -74,12 +74,3 @@ describe('statusLineSlot', () => {
   })
 })
 
-describe('isStatusLineId', () => {
-  test('recognizes the known status ids only', () => {
-    expect(isStatusLineId('sys-model')).toBe(true)
-    expect(isStatusLineId('sys-think')).toBe(true)
-    expect(isStatusLineId('sys-cloud-session')).toBe(true)
-    expect(isStatusLineId('sys-m')).toBe(false)
-    expect(isStatusLineId('sys-plan')).toBe(false)
-  })
-})

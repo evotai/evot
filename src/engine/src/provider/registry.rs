@@ -64,7 +64,6 @@ impl ProviderRegistry {
 impl Default for ProviderRegistry {
     fn default() -> Self {
         use crate::provider::AnthropicProvider;
-        use crate::provider::BedrockProvider;
         use crate::provider::OpenAiCompatProvider;
         use crate::provider::OpenAiResponsesProvider;
 
@@ -72,7 +71,6 @@ impl Default for ProviderRegistry {
         registry.register(ApiProtocol::AnthropicMessages, AnthropicProvider);
         registry.register(ApiProtocol::OpenAiResponses, OpenAiResponsesProvider);
         registry.register(ApiProtocol::OpenAiCompletions, OpenAiCompatProvider);
-        registry.register(ApiProtocol::BedrockConverseStream, BedrockProvider);
 
         registry
     }

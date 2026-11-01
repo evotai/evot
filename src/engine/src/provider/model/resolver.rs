@@ -10,10 +10,7 @@ pub(super) fn resolve(request: ResolveModelRequest, profile: Option<&str>) -> Mo
         .and_then(|id| catalog::resolve(&catalog::normalize_model_id(id)))
         .or_else(|| catalog::resolve(&normalized_id))
         .unwrap_or_else(|| {
-            catalog::protocol_fallback(matches!(
-                request.protocol,
-                ApiProtocol::AnthropicMessages | ApiProtocol::BedrockConverseStream
-            ))
+            catalog::protocol_fallback(request.protocol == ApiProtocol::AnthropicMessages)
         });
 
     // An absent model id is the app's unconfigured sentinel, not an opaque

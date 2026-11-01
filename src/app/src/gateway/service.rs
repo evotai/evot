@@ -30,7 +30,6 @@ pub async fn start(conf: Config) -> Result<()> {
         env_file = %conf.env_file_path.display(),
         provider = %llm.as_ref().map(|l| l.provider.as_str()).unwrap_or("unconfigured"),
         model = %llm.as_ref().map(|l| l.model.as_str()).unwrap_or("unconfigured"),
-        storage = ?conf.storage.backend,
         storage_root = %conf.storage.fs.root_dir.display(),
         skills_dirs = ?conf.skills_dirs,
         sandbox = conf.sandbox.enabled,
@@ -55,14 +54,6 @@ pub async fn start(conf: Config) -> Result<()> {
 fn print_banner(conf: &Config) {
     let llm = conf.active_llm().ok();
     let addr = format!("{}:{}", conf.server.host, conf.server.port);
-    let storage_backend = match conf.storage.backend {
-        crate::conf::StorageBackend::Fs => "fs",
-        crate::conf::StorageBackend::Cloud => "cloud",
-    };
-    let storage_target = match conf.storage.backend {
-        crate::conf::StorageBackend::Fs => conf.storage.fs.root_dir.display().to_string(),
-        crate::conf::StorageBackend::Cloud => conf.storage.cloud.endpoint.clone(),
-    };
 
     eprintln!();
     eprintln!("  evot server");
@@ -87,7 +78,7 @@ fn print_banner(conf: &Config) {
     {
         eprintln!("  base_url: {base_url}");
     }
-    eprintln!("  storage:  {storage_backend} ({storage_target})");
+    eprintln!("  storage:  {}", conf.storage.fs.root_dir.display());
     let names = super::registry::configured_names(&conf.channels);
     if !names.is_empty() {
         eprintln!("  channels: {}", names.join(", "));
