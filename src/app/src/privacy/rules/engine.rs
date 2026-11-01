@@ -720,13 +720,14 @@ impl Engine {
     /// commands prints the environment or names a secrets file. For a
     /// command that merely uses one (`ssh -i ~/.ssh/id_ed25519 host`, from
     /// `sources.uses`) a file given as an option's value is not read into
-    /// the output; `ssh host 'cat ~/.env'` still is. Quotes are not parsed:
-    /// words inside them are words of the enclosing command.
+    /// the output; `ssh host 'cat ~/.env'` still is. Quotes are not parsed,
+    /// except in the values of leading assignments (`S="-i ~/.ssh/key"`):
+    /// other words inside them are words of the enclosing command.
     pub fn sensitive_command(&self, command: &str) -> bool {
         command
             .split(|c: char| ";|&\n`()".contains(c))
             .any(|segment| {
-                let mut words = segment
+                let mut words = skip_assignments(segment)
                     .split(|c: char| c.is_whitespace() || "<>'\"".contains(c))
                     .filter(|w| !w.is_empty())
                     .skip_while(|w| is_command_prefix(w));
@@ -831,6 +832,57 @@ impl Engine {
         }
         failures
     }
+}
+
+/// `segment` past its leading shell assignments (`S="-o A=1 -i key"`,
+/// `export A=1 B='x y'`). An assignment stores its value and prints
+/// nothing; a quoted value is one word, not words of the command after it.
+fn skip_assignments(segment: &str) -> &str {
+    let mut rest = segment.trim_start();
+    loop {
+        let word = rest
+            .strip_prefix("export")
+            .filter(|r| r.starts_with([' ', '\t']))
+            .map_or(rest, str::trim_start);
+        let name_len = word
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count();
+        let starts_with_letter = word
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_');
+        let Some(value) = word[name_len..]
+            .strip_prefix('=')
+            .filter(|_| starts_with_letter)
+        else {
+            return rest;
+        };
+        rest = value[shell_word_len(value)..].trim_start();
+    }
+}
+
+/// Bytes in the shell word at the start of `text`, quotes included; an
+/// unclosed quote runs to the end.
+fn shell_word_len(text: &str) -> usize {
+    let mut quote = None;
+    let mut escaped = false;
+    for (at, c) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, c) {
+            (Some('\''), '\'') => quote = None,
+            (Some('\''), _) => {}
+            (_, '\\') => escaped = true,
+            (Some('"'), '"') => quote = None,
+            (None, '\'' | '"') => quote = Some(c),
+            (None, c) if c.is_whitespace() => return at,
+            _ => {}
+        }
+    }
+    text.len()
 }
 
 /// Words before a command name that do not change what it prints.

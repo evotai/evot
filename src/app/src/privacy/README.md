@@ -21,6 +21,9 @@ command that prints one (`cat .env`, `env`, `ssh host 'cat ~/.env'`). A
 command from `sources.uses` (`ssh`, `scp`, `git`, `curl`, …) given a key
 file as an option's value (`ssh -i ~/.ssh/id_ed25519 host`) prints what the
 host says, not the key, so its output is ordinary (`engine::sensitive_command`).
+The same holds when the options sit in a shell variable
+(`S="-i ~/.ssh/id_ed25519"; ssh $S host`): a leading assignment prints
+nothing, and its quoted value is one word.
 Before this distinction a session that ran 488 `ssh -i` commands had every
 line of remote build output masked as a secret.
 

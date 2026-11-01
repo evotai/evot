@@ -305,10 +305,21 @@ fn only_commands_that_print_a_secrets_file_make_their_output_sensitive() -> Test
         "ssh db0 'cat ~/.env'",
         "ssh -i ~/.ssh/id_ed25519 db0 cat .env",
         "source .env && make",
+        "S=\"-i ~/.ssh/id_ed25519\"; ssh $S db0 'cat ~/.env'",
+        "KEY=\"$(cat .env)\" make",
+        "DEBUG=1 cat .env",
+        "S='-q' env",
     ] {
         assert!(run(command)?, "{command}: output should be sensitive");
     }
     for command in [
+        // ssh options kept in a shell variable: the assignment prints
+        // nothing, and its quoted value is not a command naming the key.
+        "S=\"-o BatchMode=yes -o IdentityAgent=none -i $HOME/.ssh/id_ed25519\"; \
+         ssh $S db0-aws 'tmux list-windows'",
+        "sleep 60; S=\"-o BatchMode=yes -i $HOME/.ssh/id_ed25519\"; \
+         scp $S -q /tmp/x.py db0-aws:/tmp/ && ssh $S db0-aws 'python3 /tmp/x.py'",
+        "export S='-i ~/.ssh/id_ed25519' T=1; ssh $S db0 ls",
         "scp -q -o BatchMode=yes -i $HOME/.ssh/id_ed25519 /tmp/x.patch db0:/tmp/",
         "ssh -o IdentityAgent=none -i ~/.ssh/id_ed25519 db0-aws 'cargo test'",
         "git -c core.sshCommand='ssh -i ~/.ssh/id_ed25519' pull",
