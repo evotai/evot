@@ -642,6 +642,8 @@ async fn run_loop(
                 &compaction_controller,
                 &context_tracker,
                 &context.messages,
+                config,
+                &message,
             ) {
                 check_compaction(
                     &mut compaction_controller,

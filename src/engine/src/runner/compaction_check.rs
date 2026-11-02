@@ -66,10 +66,11 @@ impl CompactionRequestShape<'_> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompactionCheckPhase {
     BeforePrompt,
-    /// Between tool turns of one run, once the local estimate says the
-    /// active context has reached the summary threshold. Without this a
-    /// tool-heavy run only compacts when the provider rejects the request,
-    /// which a large-window model or a lenient gateway may never do.
+    /// Between tool turns of one run, once the local estimate or the latest
+    /// real usage says the active context has reached the summary threshold.
+    /// Without this a tool-heavy run only compacts when the provider rejects
+    /// the request, which a large-window model or a lenient gateway may never
+    /// do.
     ToolTurn,
     RunEnd,
 }
@@ -310,14 +311,18 @@ async fn emit_compaction_events(
 }
 
 /// Whether a tool turn should run the compaction check before the next
-/// provider call: the active context plus request overhead, by the local
-/// byte heuristic, has reached the mid-run summary threshold. The heuristic
-/// overcounts, so this fires early and the usage-driven check decides; below
-/// the line the turn continues without touching the controller.
+/// provider call: the active context plus request overhead has reached the
+/// mid-run summary threshold, by either measure. The byte heuristic can
+/// undercount (CJK text, dense code), so the active model's latest real usage
+/// plus the messages appended after it also opens the check; the
+/// usage-driven check then decides. Below the line the turn continues without
+/// touching the controller.
 pub(super) fn tool_turn_needs_compaction_check(
     controller: &Option<CompactionController>,
     tracker: &ContextTracker,
     messages: &[AgentMessage],
+    loop_config: &AgentLoopConfig,
+    assistant_message: &Message,
 ) -> bool {
     let Some(ctrl) = controller.as_ref() else {
         return false;
@@ -326,9 +331,24 @@ pub(super) fn tool_turn_needs_compaction_check(
     if config.context_window == 0 {
         return false;
     }
+    let threshold = config.trigger_threshold();
     let local_estimate =
         total_tokens(messages).saturating_add(tracker.system_tool_overhead_tokens());
-    local_estimate >= config.trigger_threshold()
+    if local_estimate >= threshold {
+        return true;
+    }
+    let response_provider = match assistant_message {
+        Message::Assistant { provider, .. } => provider.as_str(),
+        _ => "",
+    };
+    let provider = target_provider(loop_config).unwrap_or(response_provider);
+    tracker
+        .estimate_context_tokens_from_anchor_for_model(
+            messages,
+            Some(provider),
+            Some(&loop_config.model),
+        )
+        .is_some_and(|anchored| anchored >= threshold)
 }
 
 /// A tool turn below the threshold still shows the controller its usage: a

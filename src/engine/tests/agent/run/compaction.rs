@@ -1598,6 +1598,142 @@ async fn test_tool_heavy_run_compacts_between_tool_turns() {
         .all(|event| !matches!(event, AgentEvent::Error { .. })));
 }
 
+#[tokio::test]
+async fn test_tool_turn_compacts_when_real_usage_passes_the_threshold_first() {
+    use evotengine::context::ContextConfig;
+
+    // The byte heuristic undercounts CJK text and dense code. In one long
+    // tool run the provider reported 384k-430k input against a 383,616
+    // threshold for 31 turns while the local estimate stayed below it, so
+    // nothing compacted until the request was past the window. Scaled down:
+    // a threshold of 963 tokens, two tool results of ~300 local tokens each
+    // (local estimate ~610), and a provider that counts 1,000 on the second
+    // call. The compaction must happen between tool turns, before the final
+    // answer, not at run end.
+    let call = |n: usize, input: u64| MockResponse::ToolCallsWithUsage {
+        calls: vec![MockToolCall {
+            name: "dump".into(),
+            arguments: serde_json::json!({ "n": n }),
+        }],
+        usage: Usage {
+            input,
+            output: 10,
+            ..Default::default()
+        },
+    };
+    let mut config = make_config(MockProvider::new(vec![
+        call(1, 400),
+        call(2, 1_000),
+        // Consumed by the summarizer after the second tool result.
+        MockResponse::Text("summary".into()),
+        MockResponse::Text("all done".into()),
+    ]));
+    let window = ContextConfig {
+        max_context_tokens: 1_100,
+        system_prompt_tokens: 0,
+        advertised_context_window: None,
+        reserve_tokens: Some(137),
+        trigger_tokens: None,
+        keep_recent_tokens: Some(220),
+    };
+    let threshold = 1_100 - 137;
+    config.context_config = Some(window);
+    let mut context = AgentContext {
+        system_prompt: "test".into(),
+        messages: Vec::new(),
+        tools: vec![Box::new(MockTool::ok("dump", &"x".repeat(1_200)))],
+        cwd: std::path::PathBuf::new(),
+        path_guard: std::sync::Arc::new(evotengine::PathGuard::open()),
+        prompt_cache_key: None,
+    };
+    let (tx, rx) = mpsc::unbounded_channel();
+    agent_loop(
+        vec![AgentMessage::Llm(Message::user("dump everything"))],
+        &mut context,
+        &config,
+        tx,
+        CancellationToken::new(),
+    )
+    .await;
+    let events = collect_events(rx);
+
+    let started = events.iter().position(|event| {
+        matches!(event, AgentEvent::ContextCompactionStarted {
+            will_retry: false,
+            ..
+        })
+    });
+    let started_tokens = events.iter().find_map(|event| match event {
+        AgentEvent::ContextCompactionStarted {
+            estimated_tokens, ..
+        } => Some(*estimated_tokens),
+        _ => None,
+    });
+    let final_text = events.iter().position(|event| {
+        matches!(
+            event,
+            AgentEvent::MessageEnd { message: AgentMessage::Llm(Message::Assistant { content, .. }) }
+                if content.iter().any(|block| matches!(block, Content::Text { text } if text == "all done"))
+        )
+    });
+    assert!(
+        started.is_some(),
+        "real usage over the threshold must compact"
+    );
+    assert!(
+        final_text.is_some(),
+        "the run must still finish with the final answer"
+    );
+    assert!(
+        started < final_text,
+        "compaction must happen between tool turns, not at run end"
+    );
+    assert!(
+        started_tokens.is_some_and(|tokens| tokens >= threshold),
+        "the trigger is sized from the provider's count: {started_tokens:?}"
+    );
+    // The precondition of the regression: by the local heuristic alone the
+    // context never reached the threshold before the compaction (the one
+    // tool definition adds a few dozen tokens, far inside the margin).
+    let mut before_compaction = vec![AgentMessage::Llm(Message::user("dump everything"))];
+    for event in events
+        .iter()
+        .take_while(|event| !matches!(event, AgentEvent::ContextCompactionStarted { .. }))
+    {
+        if let AgentEvent::TurnEnd {
+            message,
+            tool_results,
+        } = event
+        {
+            before_compaction.push(message.clone());
+            before_compaction.extend(tool_results.iter().cloned().map(AgentMessage::Llm));
+        }
+    }
+    assert_eq!(
+        before_compaction.len(),
+        5,
+        "both tool turns ran before the compaction"
+    );
+    let local = evotengine::context::total_tokens(&before_compaction)
+        + evotengine::context::estimate_tokens("test");
+    assert!(
+        local < threshold,
+        "local estimate {local} must stay below {threshold}"
+    );
+
+    let tool_results = events
+        .iter()
+        .filter(|event| matches!(event, AgentEvent::ToolExecutionEnd { .. }))
+        .count();
+    assert_eq!(
+        tool_results, 2,
+        "every tool call still executes exactly once"
+    );
+    assert!(events
+        .iter()
+        .all(|event| !matches!(event, AgentEvent::Error { .. })));
+}
+
 fn assistant_msg_for_test(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::Assistant {
         content: vec![Content::Text { text: text.into() }],
