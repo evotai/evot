@@ -79,6 +79,40 @@ describe('task tool card identity', () => {
   })
 })
 
+describe('task tool card names', () => {
+  const command = 'cd /home/dev/databend && cargo fmt --all && cargo clippy -p databend-storages-common-cache'
+
+  test('a leading cd does not fill the headline', () => {
+    expect(render(poll({ previewCommand: command }))[0])
+      .toBe('◷ background shell  cargo fmt --all && cargo clippy -p databend-storages-common-cache')
+  })
+
+  test('variable setup is skipped to the command that runs', () => {
+    expect(render(poll({ previewCommand: `S="-o BatchMode=yes"; ssh $S db0 ./run.sh` }))[0])
+      .toBe('◷ background shell  ssh $S db0 ./run.sh')
+  })
+
+  test('a settled card is named by the launch description, like the panel row', () => {
+    const lines = render(settled({ status: 'completed', exit_code: 0, elapsed_ms: 23_000, command, description: 'clippy storages-common-cache' }))
+    expect(lines[0]).toBe('◷ background shell  clippy storages-common-cache')
+  })
+
+  test('the engine preview of a described task is the description, kept as is', () => {
+    expect(render(poll({ previewCommand: 'clippy storages-common-cache' }))[0])
+      .toBe('◷ background shell  clippy storages-common-cache')
+  })
+
+  test('ctrl+o still shows the full command, setup included', () => {
+    const lines = render(settled({ status: 'completed', exit_code: 0, elapsed_ms: 1_000, command, description: 'clippy' }), true)
+    expect(lines.join('\n')).toContain('cd /home/dev/databend && cargo fmt --all')
+  })
+
+  test('a stop card names what it stops the same way', () => {
+    expect(render(poll({ name: 'task_stop', previewCommand: command }))[0])
+      .toBe('⊘ stop background shell  cargo fmt --all && cargo clippy -p databend-storages-common-cache')
+  })
+})
+
 describe('task tool in-flight status', () => {
   test('a blocking poll says it is waiting, not merely running', () => {
     expect(statusLine(render(poll()))).toBe('  ● · waiting for task')

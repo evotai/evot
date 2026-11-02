@@ -16,7 +16,7 @@ import { setDetectedThemeScheme } from '../render/theme/index.js'
 import { compactionToolName, createSpinnerState, advanceSpinner, formatSpinnerLine, setSpinnerPhase, spinnerStatsFromLastUsage } from './spinner.js'
 import { carryModelEfforts, createModelWindow, createResumeWindow } from './app/selector-windows.js'
 import { buildShellFrame } from './viewmodel/shell.js'
-import { buildRunStatusBlock } from './viewmodel/run-status.js'
+import { buildRunStatusBlock, type AwaitedTasks } from './viewmodel/run-status.js'
 import type { PreviewViewport } from './preview-scroll.js'
 import { promptFromSnapshot } from './viewmodel/prompt-snapshot.js'
 import { forkTrailTitles } from './viewmodel/fork-trail.js'
@@ -28,10 +28,10 @@ import { buildPrivacyCard, buildPrivacyHappeningCard, buildUserMessage, messages
 import { manualCompactionLines } from './viewmodel/manual-compaction.js'
 import { createHyperlink } from '../render/hyperlink.js'
 import { renderErrorNotice } from '../render/command-notice.js'
-import { Agent, QueryStream, fastExit, authNotices, privacyLive, privacySessionTags, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo } from '../native/index.js'
+import { Agent, QueryStream, fastExit, authNotices, privacyLive, privacySessionTags, taskShareId, type ManualCompactionOutcome, type SessionMeta, type ConfigInfo, type BackgroundProcess } from '../native/index.js'
 import { createInitialState, type AppState } from './app/state.js'
 import { assistantToolCalls } from './app/assistant-content.js'
-import type { UIAssistantBlock } from './app/types.js'
+import type { UIAssistantBlock, UIToolCall } from './app/types.js'
 import { assistantMessageToOutputLines } from '../render/assistant.js'
 import { HistoryManager } from '../session/history.js'
 import { ScreenLog } from './diagnostics/screen-log.js'
@@ -158,7 +158,8 @@ import { PendingImages } from './app/pending-images.js'
 import { createPasteHandlers, createPasteStore } from './app/paste-input.js'
 import { createQueueEdit } from './app/queue-edit.js'
 import { BackgroundTerminals } from './app/background-terminals.js'
-import { isBackgroundPanelShortcut } from './app/background-panel.js'
+import { awaitedTaskIds, isBackgroundPanelShortcut } from './app/background-panel.js'
+import { taskTitle } from '../render/task-label.js'
 import {
   isQueueManageShortcut,
 } from './app/queue-manage.js'
@@ -1891,6 +1892,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
           model: appState.model,
           columns: renderer.termCols,
           interaction: runInteraction.snapshot(runInteractionInput()),
+          awaitedTasks: awaitedTaskSummary(toolCalls),
         },
       )
       spinnerBlock = buildRunStatusBlock(spinnerText, renderer.termCols)
@@ -1998,6 +2000,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   /** Runtime facts as the suggestion layer sees them; also recorded as the
    * stage a user acted from, so the trajectory carries real transitions. */
+  /** Name and runtime of the tasks a blocking wait holds the turn for. */
+  function awaitedTaskSummary(calls: UIToolCall[]): AwaitedTasks | undefined {
+    const tasks = awaitedTaskIds(calls)
+      .map(id => backgroundTerminals.liveTask(id))
+      .filter((task): task is BackgroundProcess => task !== undefined)
+    if (tasks.length === 0) return undefined
+    return {
+      titles: tasks.map(task => taskTitle(task)),
+      elapsedMs: Math.max(...tasks.map(task => task.elapsed_ms)),
+    }
+  }
+
   function liveWorkflowRuntime(): WorkflowRuntime {
     const background = backgroundTerminals.runningProcesses()
     const loop = loopSession.snapshot
@@ -2415,6 +2429,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // An ask overlay is the agent waiting on the user: seizing the turn would
     // answer a question they have not answered yet.
     overlayBlocking: () => overlay.kind === 'ask-user',
+    awaitedTaskIds: () => isLoading
+      ? awaitedTaskIds(assistantToolCalls(streamMachine?.appState.currentAssistantContent ?? []))
+      : [],
     wakeForNotifications: () => {
       // No text: build_turn puts the queued completion notices into this turn's
       // input, so a synthetic prompt would duplicate what the model just read.

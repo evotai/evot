@@ -286,11 +286,11 @@ impl AgentTool for TaskOutputTool {
         let task_id = params["task_id"].as_str()?;
         // Name the task being polled, so several concurrent task_output cards
         // are distinguishable the moment they start — the result details are
-        // not available yet while the call is running. A short label, not the
-        // whole command: the bash card that started the task already printed it
-        // in full, and repeating a long pipeline on every poll only wraps.
+        // not available yet while the call is running. The launch description
+        // names the task best when there is one; the bash card that started
+        // the task already printed the command in full.
         match self.manager.summary(task_id) {
-            Some(summary) => Some(summary.command),
+            Some(summary) => Some(summary.description.unwrap_or(summary.command)),
             // Unknown id (already forgotten, or a model typo): show the id
             // rather than nothing, so the card still says what was asked for.
             None => Some(task_id.to_string()),
@@ -413,6 +413,7 @@ impl AgentTool for TaskOutputTool {
                 // polled. Without them every task_output card renders
                 // identically, which is useless when several are in flight.
                 "command": snapshot.command,
+                "description": snapshot.description,
                 "elapsed_ms": snapshot.elapsed.as_millis(),
                 "quiet_ms": snapshot.quiet_for.as_millis(),
                 "stall_wakes": snapshot.stall_wakes,

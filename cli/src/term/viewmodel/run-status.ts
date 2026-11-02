@@ -1,6 +1,7 @@
 import type { RunInteractionState } from '../app/run-interaction.js'
 import { backgroundChord } from '../design/key-hints.js'
 import { truncateAnsiToWidth } from '../../render/wrap.js'
+import { clipDisplayText } from '../../render/format.js'
 import type { ViewBlock } from './types.js'
 import { finiteSize } from './width.js'
 
@@ -12,8 +13,27 @@ export function buildRunStatusBlock(text: string, columns: number): ViewBlock {
   }
 }
 
+/** Tasks a blocking `task_output` wait is holding the turn for. */
+export interface AwaitedTasks {
+  /** Titles of the awaited tasks, in call order. */
+  titles: string[]
+  /** Runtime of the longest-running awaited task. */
+  elapsedMs: number
+}
+
+/** Title room on the status row; the action hint keeps the rest. */
+const AWAITED_TITLE_MAX = 48
+
+/** `Waiting on <task>…`, or a count when several tasks are awaited. */
+function waitingTaskLabel(awaited?: AwaitedTasks): string {
+  const titles = awaited?.titles.filter(Boolean) ?? []
+  if (titles.length === 0) return 'Waiting for task result…'
+  if (titles.length > 1) return `Waiting on ${titles.length} tasks…`
+  return `Waiting on ${clipDisplayText(titles[0]!, AWAITED_TITLE_MAX)}…`
+}
+
 /** Copy and display policy only. Never reads native state or handles keys. */
-export function runStatusPresentation(state: RunInteractionState): {
+export function runStatusPresentation(state: RunInteractionState, awaited?: AwaitedTasks): {
   label?: string
   hint: string
   confirmationPending: boolean
@@ -38,7 +58,7 @@ export function runStatusPresentation(state: RunInteractionState): {
     hint = `esc twice to interrupt${target}`
   }
   return {
-    label: state.kind === 'waiting-task' ? 'Waiting for task result…'
+    label: state.kind === 'waiting-task' ? waitingTaskLabel(awaited)
       : state.kind === 'waiting-background'
         ? state.backgroundStopping ? 'Stopping background tasks…' : 'Background task running · resumes when finished'
       : state.kind === 'waiting-loop' ? 'Loop waiting for the next wakeup'

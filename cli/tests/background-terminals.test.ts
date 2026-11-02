@@ -55,6 +55,8 @@ function harness(options: {
   overlayBlocking?: () => boolean
   /** Present by default so a wake is observable; pass null to omit the hook. */
   wake?: (() => void) | null
+  awaitedTaskIds?: () => readonly string[]
+  now?: () => number
 } = {}) {
   let processes = options.processes ?? []
   let panel: SelectorState | null = null
@@ -138,6 +140,8 @@ function harness(options: {
     runInFlight: () => options.runInFlight?.() ?? false,
     queuedMessages: () => options.queuedMessages?.() ?? 0,
     overlayBlocking: () => options.overlayBlocking?.() ?? false,
+    ...(options.awaitedTaskIds ? { awaitedTaskIds: options.awaitedTaskIds } : {}),
+    ...(options.now ? { now: options.now } : {}),
     wakeForNotifications: options.wake === null
       ? undefined
       : (options.wake ?? (() => { wakes++ })),
@@ -1322,5 +1326,46 @@ describe('BackgroundTerminals wake arming', () => {
     h.controller.refresh()
     h.controller.refresh()
     expect(h.wakes()).toBe(1)
+  })
+})
+
+describe('awaited tasks', () => {
+  test('a task keeps counting between polls', () => {
+    let now = 1_000
+    const h = harness({ processes: [proc({ task_id: 'a', elapsed_ms: 23_000 })], now: () => now })
+    h.controller.refresh(false)
+    now += 400
+    expect(h.controller.liveTask('a')?.elapsed_ms).toBe(23_400)
+  })
+
+  test('a finished task keeps its final runtime', () => {
+    let now = 1_000
+    const h = harness({ processes: [proc({ task_id: 'a', status: 'completed', exit_code: 0, elapsed_ms: 5_000 })], now: () => now })
+    h.controller.refresh(false)
+    now += 10_000
+    expect(h.controller.liveTask('a')?.elapsed_ms).toBe(5_000)
+    expect(h.controller.liveTask('missing')).toBeUndefined()
+  })
+
+  test('another session has no tasks to name', () => {
+    let session = 'session-1'
+    const h = harness({ processes: [proc({ task_id: 'a' })], sessionId: () => session })
+    h.controller.refresh(false)
+    session = 'session-2'
+    expect(h.controller.liveTask('a')).toBeUndefined()
+  })
+
+  test('the panel marks the task the agent is waiting on, and follows the wait', () => {
+    let awaited: string[] = ['b']
+    const h = harness({
+      processes: [proc({ task_id: 'a', command: 'make build' }), proc({ task_id: 'b', command: 'make bench' })],
+      awaitedTaskIds: () => awaited,
+    })
+    h.controller.togglePanel()
+    const marked = () => h.panel()?.items.map(item => item.status?.text.includes('◷ waiting'))
+    expect(marked()).toEqual([false, true])
+    awaited = []
+    h.controller.refresh(false)
+    expect(marked()).toEqual([false, false])
   })
 })

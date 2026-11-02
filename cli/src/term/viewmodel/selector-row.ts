@@ -84,6 +84,32 @@ export function buildSelectorRow(item: SelectorItem, options: SelectorRowOptions
   }
 }
 
+/**
+ * One background-task row: title, a dim command column, and the status pinned
+ * to the right edge. The status is laid out first and the left side truncated
+ * into what remains, so a narrow terminal cuts the command, never the runtime.
+ */
+export function buildBackgroundRow(item: SelectorItem, options: SelectorRowOptions, width: number): StyledLine {
+  const { brandHex, mutedHex, selectionMutedHex } = getTheme()
+  const secondaryHex = options.highlighted ? selectionMutedHex : mutedHex
+  const title = buildSelectorRow({ ...item, detail: undefined }, options)
+  const bg = title.bg
+  const withBg = (span: StyledSpan): StyledSpan => (bg ? { ...span, bg } : span)
+  const status = item.status
+  const statusText = status ? truncateToWidth(status.text, Math.max(0, width - 6)) : ''
+  const right: StyledSpan[] = statusText
+    ? [status?.tone === 'active' ? { text: statusText, hex: brandHex } : { text: statusText, hex: secondaryHex }]
+    : []
+  const detail: StyledSpan[] = item.detail ? [{ text: `  ${item.detail}`, hex: secondaryHex }] : []
+  const leftWidth = Math.max(1, width - spansWidth(right) - (right.length ? 2 : 0))
+  const left = truncateSpansToWidth([...title.spans, ...detail.map(withBg)], leftWidth)
+  const gap = Math.max(0, width - spansWidth(left) - spansWidth(right))
+  return {
+    spans: [...left, withBg({ text: ' '.repeat(gap) }), ...right.map(withBg)],
+    ...(bg ? { bg } : {}),
+  }
+}
+
 /** Title-first two-line entry for browsing durable objects. The continuation
  * rail and shared selection band bind metadata to its title. Status has its
  * own width budget, so long titles cannot push running/paused/open off screen. */

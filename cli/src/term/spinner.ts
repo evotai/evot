@@ -7,7 +7,7 @@ import { providerFailurePresentation } from '../provider/error-presentation.js'
 import { formatCacheHitPercent } from '../render/cache.js'
 import { truncateAnsiToWidth, visibleWidth } from '../render/wrap.js'
 import { resolveRunInteraction, type RunInteractionState } from './app/run-interaction.js'
-import { runStatusPresentation } from './viewmodel/run-status.js'
+import { runStatusPresentation, type AwaitedTasks } from './viewmodel/run-status.js'
 import { confirmationHintAnsi } from './viewmodel/confirmation-hint.js'
 
 function getSpinnerChars(): string[] {
@@ -293,6 +293,8 @@ export interface SpinnerFormatOptions {
   columns?: number
   /** Requested model, used to identify long quota waits. */
   model?: string
+  /** The tasks a blocking wait is on: named on the row, timed by their runtime. */
+  awaitedTasks?: AwaitedTasks
 }
 
 export function formatSpinnerLine(
@@ -302,10 +304,15 @@ export function formatSpinnerLine(
   options: SpinnerFormatOptions = {},
 ): string {
   const elapsed = now - state.phaseStartedAt
-  const presentation = runStatusPresentation(options.interaction ?? resolveRunInteraction({
+  const interaction = options.interaction ?? resolveRunInteraction({
     active: state.phase !== 'awaiting_background', owner: state,
     phase: state.phase, backgroundTasks: 1,
-  }))
+  })
+  const presentation = runStatusPresentation(interaction, options.awaitedTasks)
+  // The wait itself is seconds old; what the user wants to know is how long
+  // the task has been running, which is what the wait is really measuring.
+  const awaitedTime = interaction.kind === 'waiting-task' && options.awaitedTasks?.titles.length
+    ? humanDuration(options.awaitedTasks.elapsedMs) : undefined
   const slow = presentation.allowSlowWarning && isSlow(state, now)
   const char = SPINNER_FRAMES[state.frame]!
 
@@ -361,8 +368,8 @@ export function formatSpinnerLine(
       label = slow ? 'Preparing slow…' : 'Preparing…'
   }
 
-  const status = state.recoveryStartedAt !== undefined && isLongWaitPhase(state.phase)
-    ? `waiting ${humanDuration(Math.max(0, now - state.recoveryStartedAt))}` : humanDuration(elapsed)
+  const status = awaitedTime ?? (state.recoveryStartedAt !== undefined && isLongWaitPhase(state.phase)
+    ? `waiting ${humanDuration(Math.max(0, now - state.recoveryStartedAt))}` : humanDuration(elapsed))
   label = presentation.label ?? label
   const tokenSuffix = presentation.showUsage ? formatSpinnerTokenSuffix(state, now, stats) : ''
   const interruptHint = options.hideInteractionHint ? '' : confirmationHintAnsi(presentation.hint, presentation.confirmationPending)

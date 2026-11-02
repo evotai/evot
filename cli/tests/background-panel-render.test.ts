@@ -113,10 +113,10 @@ describe('background panel rendering', () => {
       .toEqual(buildSelectorRegionLines(createBackgroundPanelState([]), 100, 24))
   })
 
-  test('the focused row is marked and rows carry a parenthesised status', () => {
+  test('the focused row is marked and its status ends the row', () => {
     const lines = render([proc({ command: 'bun run dev' })])
     expect(lines.some(l => l.startsWith('· bun run dev'))).toBe(true)
-    expect(lines.find(l => l.includes('bun run dev'))).toContain('(running · 2s)')
+    expect(lines.find(l => l.includes('bun run dev'))?.trimEnd()).toEndWith('running · 2s')
   })
 
   test('an empty panel states it in the body and offers only close', () => {
@@ -282,6 +282,25 @@ describe('background panel rendering', () => {
 
     expect(lines.some(line => line.includes('output file was capped'))).toBe(true)
     expect(lines.some(line => line.trim() === 'line 30')).toBe(true)
+  })
+
+  test('a narrow terminal cuts the command, never the status', () => {
+    // The screenshot case: a long `cd … &&` command and an 11-minute task.
+    const processes = [
+      proc({ task_id: 'a', elapsed_ms: 23_000, description: 'clippy storages-common-cache',
+        command: 'cd /tmp && cargo fmt --all && cargo clippy -p databend-storages-common-cache -- -D warnings 2>&1 | head' }),
+      proc({ task_id: 'b', elapsed_ms: 673_000,
+        command: `S="-o BatchMode=yes -o IdentityAgent=none -o ServerAliveInterval=60"; ssh $S db0 'cd bench && ./run.sh sf100'` }),
+    ]
+    for (const columns of [110, 72, 48]) {
+      const state = createBackgroundPanelState(processes, ['a'])
+      const lines = buildSelectorRegionLines(state, columns, 24).map(stripAnsi)
+      const first = lines.find(l => l.includes('clippy storages'))
+      const second = lines.find(l => l.includes('ssh'))
+      expect(first?.trimEnd()).toEndWith('running · 23s  ◷ waiting')
+      expect(second?.trimEnd()).toEndWith('running · 11m 13s')
+      expect(lines.every(l => l.length <= columns)).toBe(true)
+    }
   })
 
   test('a multi-line command stays on one row', () => {

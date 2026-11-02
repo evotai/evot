@@ -17,6 +17,8 @@ import type { Hint } from '../design/key-hints.js'
 import type { SelectorItem, SelectorState } from '../selector.js'
 import { createAppSelectorState } from './selector-identity.js'
 import { clipDisplayText, formatElapsed } from '../../render/format.js'
+import { taskCommandLabel, taskDirectory, taskTitle } from '../../render/task-label.js'
+import type { UIToolCall } from './types.js'
 
 export const BACKGROUND_PANEL_TITLE = 'Background'
 export const BACKGROUND_OUTPUT_TITLE = 'Background output'
@@ -112,23 +114,74 @@ export function formatPanelSubtitle(processes: BackgroundProcess[]): string | un
   return live > 0 ? `${live} active ${live === 1 ? 'shell' : 'shells'}` : undefined
 }
 
+/** Marker on the row of a task the agent is blocked on right now. */
+export const WAITING_MARK = '◷ waiting'
+
+/** Activity rows report silence from this long on: a stuck task looks idle. */
+export const QUIET_NOTICE_MS = 60_000
+
+/**
+ * Tasks a running blocking `task_output` call is waiting on. The engine only
+ * counts such waits, so the ids come from the live tool calls; `block`
+ * defaults to true, matching the engine.
+ */
+export function awaitedTaskIds(calls: readonly UIToolCall[]): string[] {
+  return calls
+    .filter(call => call.status === 'running'
+      && ['task_output', 'taskoutput'].includes(call.name.toLowerCase())
+      && call.args?.block !== false
+      && typeof call.args?.task_id === 'string')
+    .map(call => call.args.task_id as string)
+}
+
+/**
+ * The command column beside a title. With a description as the title, the
+ * command follows it; a command title already is the command, so only a `cd`
+ * into another directory adds anything.
+ */
+function panelCommandDetail(process: BackgroundProcess): string | undefined {
+  const dir = taskDirectory(process.command, process.cwd)
+  const where = dir ? `in ${dir}` : ''
+  if (!process.description?.trim()) return where || undefined
+  const command = sanitizeTerminalOutput(taskCommandLabel(process.command))
+  return [command, where].filter(Boolean).join('  ')
+}
+
+/** Status column: never truncated, so the runtime survives a narrow terminal. */
+function panelStatus(process: BackgroundProcess, awaited: boolean): SelectorItem['status'] {
+  const text = formatStatusDetail(process)
+  return awaited ? { text: `${text}  ${WAITING_MARK}`, tone: 'active' } : { text, tone: 'muted' }
+}
+
+/** The last output line under a row, plus how long the task has been silent. */
+export function formatPanelActivity(lastLine: string | undefined, process: BackgroundProcess): string | undefined {
+  const quiet = (process.quiet_for_ms ?? 0) >= QUIET_NOTICE_MS
+    ? `quiet ${formatElapsed(process.quiet_for_ms ?? 0)}` : ''
+  const text = [lastLine?.trim(), quiet].filter(Boolean).join(' · ')
+  return text || undefined
+}
+
 /** Only live tasks occupy the management panel. */
-export function formatPanelItems(processes: BackgroundProcess[]): SelectorItem[] {
+export function formatPanelItems(processes: BackgroundProcess[], awaited: readonly string[] = []): SelectorItem[] {
   const live = processes.filter(process => isLiveStatus(process.status))
   return live.map((process): SelectorItem => ({
-    label: formatCommandLabel(process.command),
-    detail: `(${formatStatusDetail(process)})`,
+    label: clipDisplayText(sanitizeTerminalOutput(taskTitle(process)), 96),
+    detail: panelCommandDetail(process),
+    status: panelStatus(process, awaited.includes(process.task_id)),
     id: process.task_id,
     hints: backgroundPanelHints({ id: process.task_id, live: true }, live.length),
     // The full command and id stay searchable even though the row is truncated.
-    searchText: `${process.command} ${process.task_id}`,
+    searchText: `${process.description ?? ''} ${process.command} ${process.task_id}`,
   }))
 }
 
 /** Open the panel over the current task list. */
-export function createBackgroundPanelState(processes: BackgroundProcess[]): SelectorState {
+export function createBackgroundPanelState(
+  processes: BackgroundProcess[],
+  awaited: readonly string[] = [],
+): SelectorState {
   return {
-    ...createAppSelectorState('background', BACKGROUND_PANEL_TITLE, formatPanelItems(processes)),
+    ...createAppSelectorState('background', BACKGROUND_PANEL_TITLE, formatPanelItems(processes, awaited)),
     presentation: 'background-list',
     subtitle: formatPanelSubtitle(processes),
     noFilter: true,
@@ -147,9 +200,10 @@ export function createBackgroundPanelState(processes: BackgroundProcess[]): Sele
 export function refreshBackgroundPanelState(
   state: SelectorState,
   processes: BackgroundProcess[],
+  awaited: readonly string[] = [],
 ): SelectorState {
   const focusedId = state.items[state.focusIndex]?.id
-  const items = formatPanelItems(processes)
+  const items = formatPanelItems(processes, awaited)
   const next: SelectorState = {
     ...state,
     items,

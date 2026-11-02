@@ -23,6 +23,7 @@ import {
   createBackgroundPanelState,
   decideBackgroundPanelAction,
   focusedPanelTarget,
+  formatPanelActivity,
   isLiveStatus,
   PANEL_EMPTY_MESSAGE,
   refreshBackgroundOutputState,
@@ -88,6 +89,10 @@ export interface BackgroundTerminalsDeps {
   queuedMessages?: () => number
   /** True while an overlay is waiting on the user (an ask, a prompt). */
   overlayBlocking?: () => boolean
+  /** Tasks a blocking `task_output` call is waiting on, marked in the panel. */
+  awaitedTaskIds?: () => readonly string[]
+  /** Clock for live elapsed times between polls; injectable for tests. */
+  now?: () => number
 }
 
 export class BackgroundTerminals {
@@ -145,7 +150,7 @@ export class BackgroundTerminals {
       if (!process) return item
       if (process.output_file_truncated) return { ...item, activity: 'Output file capped — preview is incomplete' }
       const lines = sanitizeTerminalOutput(this.readOutput(process)).trimEnd().split('\n')
-      return { ...item, activity: lines.reverse().find(line => line.trim())?.trim() }
+      return { ...item, activity: formatPanelActivity(lines.reverse().find(line => line.trim()), process) }
     })
     return { ...state, items, allItems: items }
   }
@@ -156,7 +161,10 @@ export class BackgroundTerminals {
     // before the host marks this run loading.
     const id = this.deps.sessionId()
     if (id) {
-      try { this.processes = this.deps.client.backgroundProcesses(id) } catch { /* Keep last snapshot. */ }
+      try {
+        this.processes = this.deps.client.backgroundProcesses(id)
+        this.polledAt = this.now()
+      } catch { /* Keep last snapshot. */ }
       this.visibleSession = id
     }
     this.visibility.begin(this.processes)
@@ -174,6 +182,22 @@ export class BackgroundTerminals {
   }
 
   private panelProcesses(): BackgroundProcess[] { return this.visibility.visible(this.processes) }
+  private awaited(): readonly string[] { return this.deps.awaitedTaskIds?.() ?? [] }
+  /** When `processes` was read; elapsed times advance from here between polls. */
+  private polledAt = 0
+  private now(): number { return this.deps.now?.() ?? Date.now() }
+
+  /**
+   * A task of the visible session with its runtime as of now, not of the last
+   * poll, so a status row that repaints every frame keeps counting.
+   */
+  liveTask(taskId: string): BackgroundProcess | undefined {
+    if (this.visibleSession !== this.deps.sessionId()) return undefined
+    const process = this.processes.find(candidate => candidate.task_id === taskId)
+    if (!process || !isLiveStatus(process.status)) return process
+    const drift = Math.max(0, this.now() - this.polledAt)
+    return { ...process, elapsed_ms: process.elapsed_ms + drift }
+  }
   /**
    * Blocking waits as of the last poll.
    *
@@ -396,6 +420,7 @@ export class BackgroundTerminals {
         this.wakeArmed = true
       }
       this.processes = next
+      this.polledAt = this.now()
       // Read in the same poll as the list so both halves of `canReclaimTurn()`
       // describe one moment. A live read per frame would cross the native
       // boundary at spinner rate for a value that changes rarely.
@@ -416,7 +441,7 @@ export class BackgroundTerminals {
           if (state.owner === SELECTOR_OWNER.backgroundOutput) {
             this.refreshOutputView(state, next, sessionChanged ? [] : previous)
           } else {
-            this.showListOrClose(this.withActivity(refreshBackgroundPanelState(state, this.panelProcesses())))
+            this.showListOrClose(this.withActivity(refreshBackgroundPanelState(state, this.panelProcesses(), this.awaited())))
           }
         }
       }
@@ -468,7 +493,7 @@ export class BackgroundTerminals {
       this.deps.openPanel(createBackgroundOutputState(process, this.readOutput(process), true))
       this.subscribeOutput(process)
     } else {
-      this.deps.openPanel(this.withActivity(createBackgroundPanelState(processes)))
+      this.deps.openPanel(this.withActivity(createBackgroundPanelState(processes, this.awaited())))
     }
   }
 
@@ -597,8 +622,8 @@ export class BackgroundTerminals {
     }
     const taskId = state.items[0]?.id
     const panel = this.withActivity(this.returnPanel
-      ? refreshBackgroundPanelState(this.returnPanel, this.panelProcesses())
-      : createBackgroundPanelState(this.panelProcesses()))
+      ? refreshBackgroundPanelState(this.returnPanel, this.panelProcesses(), this.awaited())
+      : createBackgroundPanelState(this.panelProcesses(), this.awaited()))
     this.showListOrClose(taskId ? selectorFocusOn(panel, item => item.id === taskId) : panel)
   }
 
@@ -647,7 +672,7 @@ export class BackgroundTerminals {
     const process = processes.find(candidate => candidate.task_id === taskId)
     if (!process) {
       this.dispose()
-      this.showListOrClose(this.withActivity(createBackgroundPanelState(this.panelProcesses())))
+      this.showListOrClose(this.withActivity(createBackgroundPanelState(this.panelProcesses(), this.awaited())))
       return
     }
     const wasLive = previous.some(candidate => candidate.task_id === taskId && isLiveStatus(candidate.status))

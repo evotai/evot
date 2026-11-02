@@ -13,7 +13,7 @@ import { scrollPreview } from './scroll-preview.js'
 import { confirmationHint } from './confirmation-hint.js'
 import { previewGeometry } from '../preview-scroll.js'
 import { splitPaneHints } from '../split-pane.js'
-import { buildSelectorHeader, buildSelectorRow } from './selector-row.js'
+import { buildBackgroundRow, buildSelectorHeader, buildSelectorRow } from './selector-row.js'
 import { buildEffortCell, effortLabel, effortLevelHex, planEffortLayout } from './model-effort.js'
 import { buildBrowseSelectorLines } from './browse-selector.js'
 import { selectorColumns, selectorHints, selectorTitle, selectorSearch } from './selector-chrome.js'
@@ -55,7 +55,7 @@ export function buildSelectorRegionLines(
     }
     for (let i = first; i < state.items.length && visible.length < budget; i++) {
       const item = state.items[i]!
-      visible.push(item.header ? line(dim(`  ${item.label}`)) : buildSelectorRow(item, { highlighted: i === state.focusIndex, query: '' }))
+      visible.push(item.header ? line(dim(`  ${item.label}`)) : buildBackgroundRow(item, { highlighted: i === state.focusIndex, query: '' }, width))
       if (item.activity && visible.length < budget) visible.push(line(dim(`    ↳ ${clipDisplayText(item.activity, Math.max(1, width - 6))}`)))
     }
     return ['', border,
@@ -321,7 +321,7 @@ export function buildSelectorBlocks(
   const available = Math.max(1, finiteSize(columns, 80) - 1)
   const paneWidth = selectorPaneWidth(state, available)
   const geometry = state.previewPane ? previewGeometry(columns, rows) : undefined
-  const listLines = buildSelectorListLines(state, geometry?.listRows)
+  const listLines = buildSelectorListLines(state, geometry?.listRows, available - paneWidth)
   if (paneWidth > 0) {
     const preview = state.items[state.focusIndex]?.preview ?? []
     // Height is the list viewport, not the focused preview: a short session
@@ -362,7 +362,7 @@ export function buildSelectorBlocks(
 }
 
 /** The list rows themselves — everything between the filter line and the hints. */
-function buildSelectorListLines(state: SelectorState, viewport = SELECTOR_VIEWPORT): StyledLine[] {
+function buildSelectorListLines(state: SelectorState, viewport = SELECTOR_VIEWPORT, width = 80): StyledLine[] {
   if (state.items.length === 0) {
     if (state.emptyMessage) return [line(dim(`  ${state.emptyMessage}`))]
     // A no-filter list has no query to explain an empty result, so the generic
@@ -405,6 +405,11 @@ function buildSelectorListLines(state: SelectorState, viewport = SELECTOR_VIEWPO
     blankPending = false
     seenRow = true
     const highlighted = i === state.focusIndex
+    if (state.presentation === 'background-list') {
+      // Same row as the live panel: status pinned right, command cut first.
+      lines.push(buildBackgroundRow(item, { highlighted, query: state.query }, width))
+      continue
+    }
     lines.push(buildSelectorRow(item, {
       highlighted,
       query: state.query,

@@ -13,6 +13,7 @@ import { parsePrivacyStop, privacyCard, privacyDestination, privacyOriginsRow, p
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
+import { stripTaskSetup } from './task-label.js'
 import { formatCompactionCompleted } from './verbose.js'
 import { earlyWakeFromResult } from '../loop/early-wake.js'
 import { countPlan, formatPlanCounts, formatPlanRows, parsePlanRecord, planProgressFromResult } from '../loop/plan.js'
@@ -50,6 +51,17 @@ function toolDisplayName(name: string): string {
     case 'session_search': return 'search sessions'
     default: return name
   }
+}
+
+/**
+ * What a task card names. Collapsed: the launch description when the task has
+ * one, so the card, the panel row and the status row agree. Expanded: the
+ * full command, which is what ctrl+o is for.
+ */
+function taskCardSubject(details: Record<string, unknown>, previewCommand: string | undefined, expanded?: boolean): string | undefined {
+  const command = detailString(details, 'command')
+  if (expanded) return command ?? previewCommand
+  return detailString(details, 'description') ?? command ?? previewCommand
 }
 
 /** True for the tools that act on an existing background task by id. */
@@ -117,7 +129,9 @@ function toolPrimaryArg(
     // `task_output`. Falls back to the raw id when the task is already gone.
     const command = toolDraftText({ previewCommand, task_id: args?.task_id }, ['previewCommand', 'task_id'])
     if (!command) return ''
-    return formatBashCommandDisplay(command, expanded, true).headline
+    // Collapsed, name the task the way the background panel does: setup such
+    // as `cd <repo> &&` would otherwise fill the headline.
+    return formatBashCommandDisplay(expanded ? command : stripTaskSetup(command).command, expanded, true).headline
   }
 
   if (n === 'session_search') return sessionSearchScope(args)
@@ -534,7 +548,7 @@ export function buildToolCard(call: UIToolCall, expanded?: boolean, _now = Date.
   const lines = buildToolCall(
     call.name,
     args,
-    isTaskTool(call.name) ? detailString(details, 'command') ?? call.previewCommand : call.previewCommand,
+    isTaskTool(call.name) ? taskCardSubject(details, call.previewCommand, expanded) : call.previewCommand,
     expanded,
     { failed: settledFailed },
   )

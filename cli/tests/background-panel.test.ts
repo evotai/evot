@@ -16,7 +16,11 @@ import {
   isBackgroundPanelShortcut,
   refreshBackgroundPanelState,
   shouldDownOpenPanel,
+  awaitedTaskIds,
+  formatPanelActivity,
+  WAITING_MARK,
 } from '../src/term/app/background-panel.js'
+import type { UIToolCall } from '../src/term/app/types.js'
 import { selectorDown } from '../src/term/selector.js'
 import type { BackgroundProcess } from '../src/native/index.js'
 
@@ -130,11 +134,13 @@ describe('formatPanelSubtitle', () => {
 })
 
 describe('formatPanelItems', () => {
-  test('rows carry the command, a parenthesised status and the task id', () => {
+  test('rows carry the command, a status column and the task id', () => {
     const items = formatPanelItems([proc({ command: 'bun run dev' })])
     expect(items).toHaveLength(1)
     expect(items[0]!.label).toBe('bun run dev')
-    expect(items[0]!.detail).toBe('(running · 2s)')
+    // A command title already is the command: no second column repeats it.
+    expect(items[0]!.detail).toBeUndefined()
+    expect(items[0]!.status).toEqual({ text: 'running · 2s', tone: 'muted' })
     expect(items[0]!.id).toBe('028deb34-db80-401f-8c65-7b13f92efb36')
   })
 
@@ -411,3 +417,78 @@ describe('sanitizeTerminalOutput', () => {
   })
 })
 
+
+describe('task names and the waiting marker', () => {
+  test('a described task is titled by its description, the command follows dimmed', () => {
+    const [item] = formatPanelItems([proc({
+      command: 'cd /tmp && cargo fmt --all && cargo clippy -p databend-storages-common-cache',
+      description: 'clippy storages-common-cache',
+    })])
+    expect(item!.label).toBe('clippy storages-common-cache')
+    expect(item!.detail).toBe('cargo fmt --all && cargo clippy -p databend-storages-common-cache')
+  })
+
+  test('an undescribed task skips its setup to the command that runs', () => {
+    const [cd, assigned] = formatPanelItems([
+      proc({ task_id: 'a', command: 'cd /tmp && cargo clippy -p cache' }),
+      proc({ task_id: 'b', command: `S="-o BatchMode=yes -i $HOME/.ssh/id"; ssh $S db0 './run.sh'` }),
+    ])
+    expect(cd!.label).toBe('cargo clippy -p cache')
+    // A cd into the task's own cwd adds nothing.
+    expect(cd!.detail).toBeUndefined()
+    expect(assigned!.label).toBe(`ssh $S db0 './run.sh'`)
+  })
+
+  test('a cd into another directory is shown beside the title', () => {
+    const [item] = formatPanelItems([proc({ cwd: '/work/repo', command: 'cd /srv/bench && ./run.sh' })])
+    expect(item!.label).toBe('./run.sh')
+    expect(item!.detail).toBe('in /srv/bench')
+  })
+
+  test('the awaited task carries the waiting marker in its status', () => {
+    const items = formatPanelItems([proc({ task_id: 'a' }), proc({ task_id: 'b' })], ['b'])
+    expect(items[0]!.status).toEqual({ text: 'running · 2s', tone: 'muted' })
+    expect(items[1]!.status).toEqual({ text: `running · 2s  ${WAITING_MARK}`, tone: 'active' })
+  })
+
+  test('the marker follows a refresh', () => {
+    const state = createBackgroundPanelState([proc({ task_id: 'a' })])
+    expect(state.items[0]!.status?.text).not.toContain(WAITING_MARK)
+    const next = refreshBackgroundPanelState(state, [proc({ task_id: 'a' })], ['a'])
+    expect(next.items[0]!.status?.text).toContain(WAITING_MARK)
+  })
+})
+
+describe('awaitedTaskIds', () => {
+  const call = (overrides: Partial<UIToolCall>): UIToolCall => ({
+    id: 'c', name: 'task_output', args: { task_id: 't1' }, status: 'running', ...overrides,
+  })
+
+  test('running blocking task_output calls name their task', () => {
+    expect(awaitedTaskIds([call({}), call({ args: { task_id: 't2', block: true } })])).toEqual(['t1', 't2'])
+  })
+
+  test('a non-blocking poll, a finished call or another tool waits on nothing', () => {
+    expect(awaitedTaskIds([
+      call({ args: { task_id: 't1', block: false } }),
+      call({ status: 'done' }),
+      call({ name: 'task_stop' }),
+      call({ args: {} }),
+    ])).toEqual([])
+  })
+})
+
+describe('formatPanelActivity', () => {
+  test('a recently active task shows only its last line', () => {
+    expect(formatPanelActivity('  Compiling cache v0.1.0 ', proc({ quiet_for_ms: 2_000 }))).toBe('Compiling cache v0.1.0')
+  })
+
+  test('silence of a minute or more is reported', () => {
+    expect(formatPanelActivity('q72 finished in 41.2s', proc({ quiet_for_ms: 185_000 }))).toBe('q72 finished in 41.2s · quiet 3m 5s')
+    expect(formatPanelActivity(undefined, proc({ quiet_for_ms: 60_000 }))).toBe('quiet 1m')
+  })
+
+  test('no output and no silence leaves no activity row', () => {
+    expect(formatPanelActivity(undefined, proc({}))).toBeUndefined()
+  })
+})

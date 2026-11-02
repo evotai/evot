@@ -1471,6 +1471,51 @@ async fn task_tools_preview_the_command_they_act_on() -> Result<(), Box<dyn Erro
     Ok(())
 }
 
+#[tokio::test]
+async fn task_output_names_a_described_task_by_its_description() -> Result<(), Box<dyn Error>> {
+    // A launch description says what the task is for; the command behind it
+    // is usually `cd <repo> && …` and already printed on the bash card.
+    let dir = tempfile::tempdir()?;
+    let manager = Arc::new(ProcessManager::new());
+    let bash = BashTool::new().with_process_manager(manager.clone());
+    let output = TaskOutputTool::new(manager.clone());
+    let stop = TaskStopTool::new(manager.clone());
+    let command = "cd /tmp && sleep 5";
+    let started = bash
+        .execute(
+            serde_json::json!({
+                "command": command,
+                "description": "clippy storages-common-cache",
+                "run_in_background": true,
+            }),
+            context("bash", dir.path()),
+        )
+        .await?;
+    let id = task_id(&started)?.to_string();
+    let params = serde_json::json!({"task_id": id});
+    assert_eq!(
+        output.preview_command(&params).as_deref(),
+        Some("clippy storages-common-cache")
+    );
+    // Stopping still shows exactly what will be killed.
+    assert_eq!(stop.preview_command(&params).as_deref(), Some(command));
+
+    let polled = output
+        .execute(
+            serde_json::json!({"task_id": id, "block": false}),
+            context("task_output", dir.path()),
+        )
+        .await?;
+    assert_eq!(
+        polled.details["description"],
+        "clippy storages-common-cache"
+    );
+    assert_eq!(polled.details["command"], command);
+
+    manager.terminate_all_and_wait(Duration::from_secs(5)).await;
+    Ok(())
+}
+
 #[test]
 fn an_unknown_task_id_previews_as_the_id_itself() {
     // A forgotten or mistyped id still has to render something; an empty
