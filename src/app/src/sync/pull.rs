@@ -6,6 +6,8 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use super::client;
+use super::fork::fork_notice;
+use super::fork::ForkSource;
 use super::portable::has_path_images;
 use super::types::RemoteSession;
 use super::types::SyncPull;
@@ -116,24 +118,31 @@ pub async fn pull_session(
 }
 
 /// Materialise the server copy under a fresh local id, leaving both the
-/// diverged local session and the cloud copy untouched. The fork is local-only.
+/// diverged local session and the cloud copy untouched. The fork is local-only
+/// and runs in `cwd`, this client's workspace.
 pub async fn fork_remote_session(
     state: &AuthState,
     storage: &Arc<dyn Storage>,
     session_id: &str,
+    cwd: &str,
 ) -> Result<SessionMeta> {
     let remote = client::pull(state, session_id, 0).await?;
-    install_fork(storage, remote, "cloud copy").await
+    install_fork(storage, remote, ForkSource::Cloud, cwd).await
 }
 
 /// Write a pulled session under a fresh local id with no cloud link, titled
 /// `<title> (<label>)`. Shared by the cloud fork and by importing someone
 /// else's public share: both are a local conversation that starts from a
 /// remote transcript and never writes back to it.
+///
+/// The fork runs in `cwd`, not where it was recorded. When that environment
+/// differs, a runtime note at the end of the transcript tells the model that
+/// earlier paths and tools belong to the original one.
 pub async fn install_fork(
     storage: &Arc<dyn Storage>,
     remote: SyncPull,
-    label: &str,
+    source: ForkSource,
+    cwd: &str,
 ) -> Result<SessionMeta> {
     validate_fork(&remote)?;
     let new_id = new_id();
@@ -141,11 +150,14 @@ pub async fn install_fork(
     meta.session_id = new_id.clone();
     meta.cloud = None;
     meta.title = Some(format!(
-        "{} ({label})",
-        meta.display_title().unwrap_or("session")
+        "{} ({})",
+        meta.display_title().unwrap_or("session"),
+        source.label()
     ));
     meta.custom_title = None;
-    let entries: Vec<TranscriptEntry> = remote
+    let notice = fork_notice(source, &meta.cwd, cwd);
+    meta.cwd = cwd.to_string();
+    let mut entries: Vec<TranscriptEntry> = remote
         .entries
         .into_iter()
         .map(|mut entry| {
@@ -153,6 +165,19 @@ pub async fn install_fork(
             entry
         })
         .collect();
+    if let Some(notice) = notice {
+        let (seq, turn) = entries
+            .last()
+            .map(|entry| (entry.seq + 1, entry.turn))
+            .unwrap_or((1, 0));
+        entries.push(TranscriptEntry::new(
+            new_id.clone(),
+            None,
+            seq,
+            turn,
+            notice,
+        ));
+    }
     storage.save_session(meta.clone()).await?;
     if !entries.is_empty() {
         if let Err(error) = storage.append_entries(entries).await {

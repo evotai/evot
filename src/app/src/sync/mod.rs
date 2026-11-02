@@ -1,10 +1,14 @@
 mod client;
+mod fork;
 mod portable;
 mod pull;
 mod push;
 mod types;
 
 pub use client::index as remote_index;
+pub use fork::fork_notice;
+pub use fork::ForkSource;
+pub use fork::FORK_NOTICE_KIND;
 pub use pull::cloud_state;
 pub use pull::fork_remote_session;
 pub use pull::install_fork;

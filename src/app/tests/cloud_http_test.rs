@@ -214,12 +214,14 @@ async fn cloud_http_shares_pool_without_caching_auth_or_server_selection() -> Te
             &rotated_auth,
             &storage,
             &format!("https://evot.ai/share/{SHARE_ID}"),
+            "/mine",
         )
         .await?;
         evot::share::import_shared_session(
             &rotated_auth,
             &storage,
             &format!("https://evot.ai/team/{SHARE_ID}"),
+            "/mine",
         )
         .await?;
         evot::automation::fetch_task_share(&rotated_auth, SHARE_ID).await?;

@@ -15,20 +15,23 @@ use crate::error::EvotError;
 use crate::error::Result;
 use crate::storage::Storage;
 use crate::sync::install_fork;
+use crate::sync::ForkSource;
 use crate::sync::SyncPull;
 use crate::types::SessionMeta;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The copy runs in `cwd`, the importer's workspace, never the owner's.
 pub async fn import_shared_session(
     auth: &AuthState,
     storage: &Arc<dyn Storage>,
     link: &str,
+    cwd: &str,
 ) -> Result<SessionMeta> {
     let share = parse_session_share_link(link)
         .ok_or_else(|| EvotError::Conf("not a shared session link".into()))?;
     let remote = fetch(auth, &share).await?;
-    install_fork(storage, remote, "shared copy").await
+    install_fork(storage, remote, ForkSource::Shared, cwd).await
 }
 
 async fn fetch(auth: &AuthState, share: &SessionShareLink) -> Result<SyncPull> {

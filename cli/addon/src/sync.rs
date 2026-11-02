@@ -181,19 +181,28 @@ impl NapiAgent {
     /// Materialise the server copy as a new local-only session; returns its meta.
     #[napi]
     pub async fn cloud_fork_remote_session(&self, session_id: String) -> Result<String> {
-        let meta =
-            evot::api::sync::fork_remote_session(&auth()?, &self.agent.storage(), &session_id)
-                .await
-                .map_err(failure)?;
+        let meta = evot::api::sync::fork_remote_session(
+            &auth()?,
+            &self.agent.storage(),
+            &session_id,
+            self.agent.cwd(),
+        )
+        .await
+        .map_err(failure)?;
         serde_json::to_string(&meta).map_err(failure)
     }
 
     /// `/share <url>`: fork a public page's transcript into a new local session.
     #[napi]
     pub async fn import_shared_session(&self, link: String) -> Result<String> {
-        let meta = evot::api::import_shared_session(&auth()?, &self.agent.storage(), &link)
-            .await
-            .map_err(failure)?;
+        let meta = evot::api::import_shared_session(
+            &auth()?,
+            &self.agent.storage(),
+            &link,
+            self.agent.cwd(),
+        )
+        .await
+        .map_err(failure)?;
         serde_json::to_string(&meta).map_err(failure)
     }
 }
