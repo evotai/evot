@@ -36,6 +36,10 @@ fn prompt_section_lists_enabled_machines_with_their_ssh_targets() -> Result {
     );
     assert!(!section.contains("old"));
     assert!(section.contains("tmux session named evot-"));
+    assert!(
+        !section.contains("rsync"),
+        "how to copy is the model's call"
+    );
     assert!(section.contains("bash -s <<'EOF'"));
     let mut with_tmux = machine("big-2");
     with_tmux.profile = Some(evot::compute::MachineProfile {

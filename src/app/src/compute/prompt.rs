@@ -1,6 +1,6 @@
 //! The per-turn system prompt section that lists the user's machines. evot
 //! only tells the model what each machine is for; the model reaches them with
-//! ordinary `ssh`, `rsync` and `tmux` through bash.
+//! ordinary `ssh` through bash and decides how to move files itself.
 
 use super::model::ComputeMachine;
 
@@ -23,7 +23,7 @@ pub fn prompt_section(machines: &[ComputeMachine]) -> Option<String> {
          The user connected these ssh machines for you to use. Each one is for what its description says; do not use it for anything else.\n\
          {}\n\
          Each name is an ssh alias (unless another one is shown): reach it with `ssh <name>` through bash, and tell the user which machine you are using.\n\
-         - Copy a project with rsync into ~/evot-work/<project>, leaving out .git, files ignored by .gitignore, and secrets such as .env* and keys.\n\
+         - Never copy secrets such as .env* files or keys to a machine.\n\
          - Run anything long detached so a dropped connection does not stop it; where the tools list tmux, use a tmux session named evot-<short-name>.\n\
          - To avoid quoting and escaping bugs, send anything beyond a simple command as a script on stdin with a quoted heredoc: ssh <name> bash -s <<'EOF' … EOF. Nothing inside it is expanded locally or needs escaping.\n\
          {PROMPT_CLOSE}",
