@@ -228,6 +228,69 @@ async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
 }
 
 #[tokio::test]
+async fn shares_never_upload_compute_machine_details() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let section = format!(
+        "{}\n- big-1: Rust builds on ubuntu@10.0.0.9\n{}",
+        evot::compute::prompt::PROMPT_OPEN,
+        evot::compute::prompt::PROMPT_CLOSE
+    );
+    storage.append_entry(user("s1", 1, "hi")).await?;
+    storage
+        .append_entry(TranscriptEntry::new(
+            "s1".into(),
+            None,
+            2,
+            0,
+            serde_json::from_value(json!({
+                "type": "stats", "kind": "llm_call_started", "data": {
+                    "system_prompt": format!("Base.\n\n{section}"),
+                    "tool_definitions": [
+                        {"name": "bash", "description": "", "parameters": {}}
+                    ],
+                }
+            }))?,
+        ))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+    assert!(!body.contains("big-1"), "machine names stay local");
+    assert!(!body.contains("10.0.0.9"));
+    assert!(!body.contains("compute_machines"));
+    assert!(
+        body.contains("Base."),
+        "the rest of the prompt is still shared"
+    );
+    // The local transcript keeps the full record.
+    let local = storage.load_active_entries("s1").await?;
+    assert!(serde_json::to_string(&local)?.contains("big-1"));
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn share_uploads_more_than_the_former_32_mib_limit() -> TestResult {
     let server = MockServer::start().await;
     let state = state(&server)?;

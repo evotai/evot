@@ -1,4 +1,5 @@
-//! Make path-backed message images portable before publishing.
+//! Make entries portable before publishing: embed path-backed message images,
+//! and drop compute machine details from recorded model calls.
 //!
 //! Only typed transcript and engine message content is rewritten, including
 //! compacted context. Tool arguments, details and extension data are opaque.
@@ -67,7 +68,10 @@ fn engine_message_has_path_images(message: &Value) -> bool {
 fn portable_entry(entry: &TranscriptEntry) -> Result<TranscriptEntry> {
     let mut value = serde_json::to_value(entry)?;
     let changed = match value.get_mut("item") {
-        Some(item) => embed_item_images(item)?,
+        Some(item) => {
+            let redacted = redact_compute(item);
+            embed_item_images(item)? || redacted
+        }
         None => false,
     };
     if changed {
@@ -75,6 +79,18 @@ fn portable_entry(entry: &TranscriptEntry) -> Result<TranscriptEntry> {
     } else {
         Ok(entry.clone())
     }
+}
+
+/// Compute machines are the user's private setup: their prompt section and
+/// tool definition never leave this computer, like a skill's local paths.
+fn redact_compute(item: &mut Value) -> bool {
+    if item.get("type").and_then(Value::as_str) != Some("stats")
+        || item.get("kind").and_then(Value::as_str) != Some("llm_call_started")
+    {
+        return false;
+    }
+    item.get_mut("data")
+        .is_some_and(crate::compute::prompt::redact_llm_call)
 }
 
 fn embed_item_images(item: &mut Value) -> Result<bool> {

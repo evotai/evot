@@ -11,6 +11,7 @@ export const SELECTOR_OWNER = {
   background: Symbol('background'),
   backgroundOutput: Symbol('background-output'),
   task: Symbol('task'),
+  compute: Symbol('compute'),
 } as const
 
 export function createAppSelectorState(
@@ -35,4 +36,5 @@ export function isCommandSelector(state: SelectorState): boolean {
     || state.owner === SELECTOR_OWNER.resume
     || state.owner === SELECTOR_OWNER.skill
     || state.owner === SELECTOR_OWNER.task
+    || state.owner === SELECTOR_OWNER.compute
 }

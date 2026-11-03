@@ -51,17 +51,24 @@ pub fn export_session(
         match &row.item {
             TranscriptItem::Stats { kind, data } => match kind.as_str() {
                 "llm_call_started" => {
-                    if system_prompt.is_none() {
-                        system_prompt = data
-                            .get("system_prompt")
-                            .filter(|value| value.as_str().is_some_and(|text| !text.is_empty()))
-                            .cloned();
-                    }
-                    if tools.is_none() {
-                        tools = data
-                            .get("tool_definitions")
-                            .filter(|value| value.as_array().is_some_and(|rows| !rows.is_empty()))
-                            .cloned();
+                    if system_prompt.is_none() || tools.is_none() {
+                        // Compute machine details stay on this computer.
+                        let mut call = data.clone();
+                        crate::compute::prompt::redact_llm_call(&mut call);
+                        if system_prompt.is_none() {
+                            system_prompt = call
+                                .get("system_prompt")
+                                .filter(|value| value.as_str().is_some_and(|text| !text.is_empty()))
+                                .cloned();
+                        }
+                        if tools.is_none() {
+                            tools = call
+                                .get("tool_definitions")
+                                .filter(|value| {
+                                    value.as_array().is_some_and(|rows| !rows.is_empty())
+                                })
+                                .cloned();
+                        }
                     }
                     if data.get("attempt").and_then(Value::as_u64).unwrap_or(0) == 0 {
                         retry_visible = false;

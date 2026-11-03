@@ -47,7 +47,7 @@ export function resetPaneForSelection(previous: SelectorState, next: SelectorSta
 }
 
 /** Owners whose list can sit under the composer without the keyboard. */
-const COMPOSER_PREVIEW_OWNERS = new Set<symbol>([SELECTOR_OWNER.resume, SELECTOR_OWNER.shares, SELECTOR_OWNER.task])
+const COMPOSER_PREVIEW_OWNERS = new Set<symbol>([SELECTOR_OWNER.resume, SELECTOR_OWNER.shares, SELECTOR_OWNER.task, SELECTOR_OWNER.compute])
 
 /** Contextual hints: the shell owns navigation, features supply domain actions. */
 export function splitPaneHints(state: SelectorState): Hint[] {

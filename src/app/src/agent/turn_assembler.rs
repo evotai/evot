@@ -214,6 +214,14 @@ impl TurnAssembler {
         } else {
             None
         };
+        // Compute machines are reached with ssh through bash.
+        let compute_section = if !tool_free && sandbox_rt.allow_bash {
+            enabled_compute_machines()
+                .await
+                .and_then(|machines| crate::compute::prompt::prompt_section(&machines))
+        } else {
+            None
+        };
         let mut tools = build_tools(
             policy,
             envs,
@@ -236,6 +244,17 @@ impl TurnAssembler {
                 .position(|section| matches!(section.name, "environment" | "dynamic_boundary"))
                 .unwrap_or(sections.len());
             sections.insert(insert_at, section);
+            system_prompt = sections
+                .iter()
+                .map(|section| section.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+        }
+        if let Some(text) = compute_section {
+            sections.push(Section {
+                name: "compute",
+                text,
+            });
             system_prompt = sections
                 .iter()
                 .map(|section| section.text.as_str())
@@ -323,4 +342,18 @@ fn last_assistant_model(messages: &[evot_engine::AgentMessage]) -> Option<&str> 
         }
         _ => None,
     })
+}
+
+/// Enabled Compute machines, or `None` when there are none or the store
+/// cannot be read (a broken file must not break the turn).
+async fn enabled_compute_machines() -> Option<Vec<crate::compute::ComputeMachine>> {
+    let service = crate::compute::ComputeService::default_location().ok()?;
+    let machines: Vec<_> = match service.list().await {
+        Ok(machines) => machines.into_iter().filter(|m| m.enabled).collect(),
+        Err(error) => {
+            tracing::warn!(%error, "compute machines unavailable this turn");
+            return None;
+        }
+    };
+    (!machines.is_empty()).then_some(machines)
 }

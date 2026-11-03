@@ -36,6 +36,8 @@ mod compact_describe_test;
 mod compact_service_test;
 #[path = "compact_test.rs"]
 mod compact_test;
+mod compute_prompt_test;
+mod compute_test;
 #[path = "conf_load_test.rs"]
 mod conf_load_test;
 #[path = "config_info_contract_test.rs"]

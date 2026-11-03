@@ -185,6 +185,7 @@ import { errorText } from '../render/format.js'
 import { buildRunFooterLine } from '../render/run-footer.js'
 import { RunThinking } from '../render/run-thinking.js'
 import { TaskSession } from '../task/session.js'
+import { ComputeSession } from '../compute/session.js'
 import { LoopSession } from '../loop/session.js'
 import { formatLoopWaitLine } from '../loop/wait-line.js'
 import { ensureFeishuDelivery } from '../channels/feishu/setup.js'
@@ -219,7 +220,7 @@ const SPINNER_INTERVAL_MS = 100
 import { type QueuedUserMessage } from './app/prompt-queue.js'
 type QueuedCompactionSubmission = { displayText: string; expandedText: string; contentJson?: string }
 type CommandWindowPreview =
-  | { kind: 'selector'; trigger: 'model' | 'resume' | 'skill' | 'task' | 'share'; sourceText: string; generation: number; state: SelectorState }
+  | { kind: 'selector'; trigger: 'model' | 'resume' | 'skill' | 'task' | 'compute' | 'share'; sourceText: string; generation: number; state: SelectorState }
   | { kind: 'help'; trigger: 'help'; sourceText: string; generation: number }
 
 
@@ -442,6 +443,28 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       clearAll()
       editor = insertText(editor, text)
     },
+    destroyed: () => destroyed,
+  })
+  const computeSession = new ComputeSession({
+    dimensions: () => ({ columns: renderer.termCols, rows: renderer.termRows }),
+    isComputeOverlay: () =>
+      overlay.kind === 'selector' && overlay.state.owner === SELECTOR_OWNER.compute,
+    computeOverlayState: () =>
+      overlay.kind === 'selector' && overlay.state.owner === SELECTOR_OWNER.compute
+        ? overlay.state
+        : null,
+    showSelector: state => { overlay = { kind: 'selector', state } },
+    currentSessionId: () => sessionId,
+    closeOverlay: () => { overlay = { kind: 'none' } },
+    requestRender: () => renderer.requestRender(),
+    notifyError: text => commitSystem('sys-compute-err', renderErrorNotice(text)),
+    notify: text => commitSystem('sys-compute', `  ${text}`),
+    collectAnswers: questions => presentAskQuestions(questions, 'idle'),
+    runComputeTurn: (userLine, prompt, extension) => {
+      commitUserMessage(userLine)
+      runQuery(prompt, undefined, undefined, extension)
+    },
+    cwd: () => agent.cwd,
     destroyed: () => destroyed,
   })
   const taskIdentity = new AuthIdentityTracker(() => taskSession.resetIdentity())
@@ -912,6 +935,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   /** Unmount callback of the `/task` preview, while one is showing. */
   let unmountTaskPreview: (() => void) | null = null
+  let unmountComputePreview: (() => void) | null = null
 
   /** Stop every command preview's background work: a window is going away
    *  or changing identity, so nothing started for it may repaint. */
@@ -919,6 +943,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     cancelResumeCommandLoad()
     unmountTaskPreview?.()
     unmountTaskPreview = null
+    unmountComputePreview?.()
+    unmountComputePreview = null
   }
 
   /** Mount the Task list under the composer. The session repaints through
@@ -934,6 +960,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       }
     })
     unmountTaskPreview = mounted.unmount
+    return mounted.state
+  }
+
+  /** Mount the Compute list under the composer, exactly as for /task. */
+  function computePreviewState(): SelectorState {
+    const mounted = computeSession.preview(() => {
+      if (commandWindowPreview?.kind === 'selector' && commandWindowPreview.trigger === 'compute') {
+        commandWindowPreview = { ...commandWindowPreview, state: computeSession.previewState() }
+        renderer.requestRender()
+      }
+    })
+    unmountComputePreview = mounted.unmount
     return mounted.state
   }
 
@@ -1229,6 +1267,17 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       renderer.requestRender()
       return
     }
+    if (trigger === 'compute') {
+      commandWindowPreview = {
+        kind: 'selector',
+        trigger,
+        sourceText,
+        generation,
+        state: computePreviewState(),
+      }
+      renderer.requestRender()
+      return
+    }
 
     commandWindowPreview = {
       kind: 'selector',
@@ -1314,7 +1363,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // Once the task picker owns the keyboard, `/task` is no longer a draft.
     // Leaving it in the editor made a background task edit look like it was
     // responding while the same command was still waiting to be submitted.
-    if (preview.kind === 'help' || preview.trigger === 'task') clearAll()
+    if (preview.kind === 'help' || preview.trigger === 'task' || preview.trigger === 'compute') clearAll()
     renderer.requestRender()
     if (preview.trigger === 'resume') {
       scheduleFocusedResumeEnrichment(preview.generation)
@@ -1331,6 +1380,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       unmountTaskPreview?.()
       unmountTaskPreview = null
       if (overlay.kind === 'selector') taskSession.open(overlay.state.items[overlay.state.focusIndex]?.id)
+    }
+    if (preview.trigger === 'compute') {
+      unmountComputePreview?.()
+      unmountComputePreview = null
+      if (overlay.kind === 'selector') computeSession.open(overlay.state.items[overlay.state.focusIndex]?.id)
     }
     return true
   }
@@ -2221,6 +2275,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     suggestionContextId++
     suggestions.cancel()
     taskSession.cancelFlow()
+    computeSession.cancelFlow()
     loopSession.reset()
     try {
       const cloudNotice = await pullBeforeResume(session.session_id)
@@ -2546,6 +2601,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       sessionId = stream.sessionId ?? sessionId
       if (sessionId) {
         taskSession.bindFlowSession(sessionId, hostToolExtension)
+        computeSession.bindFlowSession(sessionId, hostToolExtension)
         sessionHook.startSession(sessionId, agent.cwd)
         // The query may have just persisted a formerly unbound first session,
         // and every run can change its title, turn count, and recency.
@@ -2573,6 +2629,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             (response.is_error && part.text === 'User cancelled the question.')
             || /→ Cancel(?:\n|$)/.test(part.text))) {
             taskSession.cancelFlow()
+            computeSession.cancelFlow()
           }
           if (ownsRun(generation)) await stream.respondHostTool(JSON.stringify(response))
           continue
@@ -2692,6 +2749,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         commitRunFooter()
         if (taskSession.unfinishedFlow(hostToolExtension)) {
           commitSystem('sys-task-incomplete', '  Task change not saved yet · reply to continue editing, or /task cancel')
+        }
+        if (computeSession.unfinishedFlow(hostToolExtension)) {
+          commitSystem('sys-compute-incomplete', '  Compute change not saved yet · reply to continue, or /compute cancel')
         }
         // Fresh ads/models belong in the background: awaiting the catalog here
         // stalled the prompt for the whole HTTP round-trip after every turn.
@@ -3279,6 +3339,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
             // the next reply is still in that edit flow, not a normal coding
             // turn. Keep its task tool available until confirmation/cancel.
             const taskExtension = taskSession.followUpExtension(sessionId)
+              ?? computeSession.followUpExtension(sessionId)
             if (imageBlocks) {
               const contentJson = JSON.stringify(imageBlocks)
               runQuery('', contentJson, undefined, taskExtension)
@@ -3498,6 +3559,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       privacyFeed.forget(sessionId)
       suggestions.cancel()
       taskSession.cancelFlow()
+      computeSession.cancelFlow()
       loopSession.reset()
       // Abort any in-flight streaming and clear local context view without switching sessions.
       if (isLoading && streamRef) {
@@ -3529,6 +3591,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       privacyFeed.forget(sessionId)
       suggestions.cancel()
       taskSession.cancelFlow()
+      computeSession.cancelFlow()
       loopSession.reset()
       // Abort any in-flight streaming.
       if (isLoading && streamRef) {
@@ -3589,6 +3652,16 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         void taskSession.import(args.trim())
       } else {
         taskSession.create(text.trim(), args)
+      }
+    } else if (name === '/compute') {
+      if (args === 'cancel') {
+        commitSystem('sys-compute-cancel', computeSession.cancelFlow()
+          ? '  Compute change cancelled · nothing was saved'
+          : '  No compute change in progress')
+      } else if (!args || args === 'list') {
+        await computeSession.command(text.trim())
+      } else {
+        computeSession.create(text.trim(), args)
       }
     } else if (name === '/loop') {
       loopSession.handleCommand(text.trim(), args)
@@ -4290,6 +4363,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       void taskSession.handleKey(event)
       return
     }
+    if (overlay.state.owner === SELECTOR_OWNER.compute) {
+      void computeSession.handleKey(event)
+      return
+    }
     const action = handleSelectorControl(overlay.state, event, renderer.termCols, renderer.termRows,
       focusedCommandWindowGeneration !== null ? selectorPreviewViewport : undefined)
 
@@ -4608,6 +4685,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     if (destroyed) return
     destroyed = true
     taskSession.dispose()
+    computeSession.dispose()
     queuedCompactionSubmissions = []
     resolvePendingTaskModel()
     unfreezeTerminalTitle()

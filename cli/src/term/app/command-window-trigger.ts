@@ -1,9 +1,9 @@
 import { resolveCommand } from '../../commands/index.js'
 import type { KeyEvent } from '../input.js'
 
-export type CommandWindowTrigger = 'resume' | 'model' | 'skill' | 'task' | 'share' | 'help'
+export type CommandWindowTrigger = 'resume' | 'model' | 'skill' | 'task' | 'compute' | 'share' | 'help'
 
-const COMMAND_WINDOW_NAMES = ['/resume', '/sessions', '/model', '/skill', '/task', '/share', '/help'] as const
+const COMMAND_WINDOW_NAMES = ['/resume', '/sessions', '/model', '/skill', '/task', '/compute', '/share', '/help'] as const
 
 /**
  * An incomplete command-window spelling that is not unique yet. When a command
@@ -47,6 +47,7 @@ export function resolveCommandWindowTrigger(text: string): CommandWindowTrigger 
   if (resolved.name === '/model') return 'model'
   if (resolved.name === '/skill') return 'skill'
   if (resolved.name === '/task') return 'task'
+  if (resolved.name === '/compute') return 'compute'
   if (resolved.name === '/share') return 'share'
   if (resolved.name === '/help') return 'help'
   return null

@@ -8,6 +8,7 @@ pub mod blocking;
 pub mod bootstrap;
 pub mod command;
 pub mod compact;
+pub mod compute;
 pub mod conf;
 pub mod contracts;
 pub mod conversation;
