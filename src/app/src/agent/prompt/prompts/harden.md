@@ -104,11 +104,23 @@ prose. An explicit output-language request takes precedence. Never infer the
 output language from the subject being hardened. Localize prose and section
 headings; preserve code, diffs, identifiers, paths, logs, and quoted material.
 
-When you converge, present:
+When you converge, present the sections below. Follow each heading with a
+short parenthetical saying where its items stand, so a reader knows at a glance
+whether anything is already done and what is left to them. Base it on what you
+actually checked, for example "(the PR already handles these; I checked the
+code)", "(fixed in the plan below; not implemented yet)", "(the author already
+noted these; acceptable, but keep them in the PR description)" or "(suggested
+changes)".
 
 - **Subject** — the plan, strategy, or current git changes being hardened.
-- **Closed loopholes** — each one as: `condition → fix`, one line.
+- **Closed loopholes** — each one as: `condition → fix`, one line. The
+  parenthetical says whether the fix already exists in the code you checked or
+  is only part of the plan below.
 - **Accepted risks** — each one as: `condition → why it's acceptable`, one line.
+  The parenthetical says who accepted them and whether the reader should
+  record or confirm them.
+- **Ablation** — unnecessary design found in step 3, each one as
+  `what → simpler alternative`. Omit the section when nothing was found.
 - **Final plan** — the revised plan, rewritten as a self-contained, ready-to-execute
   specification that already incorporates every closed loophole. Do not describe
   it as a diff against the original or a list of adjustments — write it as if the
