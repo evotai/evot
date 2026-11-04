@@ -3011,6 +3011,24 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     }
   }
 
+  /** Stop the current run before leaving its session (`/new`, `/clear`).
+   *  A run may still be waiting for `agent.query` to return its stream, e.g.
+   *  a background-task wake on a long session. Revoking it is what keeps that
+   *  stream, once it arrives, from rebinding the old session and writing its
+   *  snapshot of the old state (title, share badge) back over the new one. */
+  function abandonRun() {
+    if (!isLoading) return
+    revokeRun()
+    const interruptedStream = streamRef
+    streamRef = null
+    interruptedStream?.abort()
+    isLoading = false
+    flushStreamContent()
+    streamMachine = null
+    stopSpinner()
+    runStartedAt = null
+  }
+
   /** Flush any in-progress streaming content to committed output.
    *  Call before clearing streaming state on any abort/cancel path. */
   function flushStreamContent() {
@@ -3561,18 +3579,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       taskSession.cancelFlow()
       computeSession.cancelFlow()
       loopSession.reset()
-      // Abort any in-flight streaming and clear local context view without switching sessions.
-      if (isLoading && streamRef) {
-        revokeRun()
-        const interruptedStream = streamRef
-        streamRef = null
-        interruptedStream.abort()
-        isLoading = false
-        flushStreamContent()
-        streamMachine = null
-        stopSpinner()
-        runStartedAt = null
-      }
+      // Abort any in-flight run and clear local context view without switching sessions.
+      abandonRun()
       sessionHook.endSession('context_cleared')
       sessionId = null
       appState = { ...createInitialState(appState.model, agent.cwd) }
@@ -3593,18 +3601,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       taskSession.cancelFlow()
       computeSession.cancelFlow()
       loopSession.reset()
-      // Abort any in-flight streaming.
-      if (isLoading && streamRef) {
-        revokeRun()
-        const interruptedStream = streamRef
-        streamRef = null
-        interruptedStream.abort()
-        isLoading = false
-        flushStreamContent()
-        streamMachine = null
-        stopSpinner()
-        runStartedAt = null
-      }
+      abandonRun()
       // Leave the session unbound until the first real prompt. The query path
       // creates and returns the session id, so abandoning /new no longer leaves
       // an empty, untitled session in persistent storage or /resume.

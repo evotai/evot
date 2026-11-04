@@ -326,6 +326,27 @@ async function startEvot(
 }
 
 describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
+  test('/new drops the share badge of the session it leaves', async () => {
+    const session = await startEvot(true, false, false, undefined, state => {
+      const path = join(state, 'sessions', SEEDED_SESSION_ID, 'session.json')
+      const meta = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+      meta.cloud = { visibility: 'private', synced_seq: 1, synced_at: new Date().toISOString(),
+        origin_host: 'localhost', team: true, team_url: 'https://example.invalid/team/x', team_name: 'smoke' }
+      writeFileSync(path, JSON.stringify(meta))
+    }, ['--continue'])
+    try {
+      await session.waitForScreen('👥')
+      session.checkpoint()
+      session.write('/new\r')
+      await session.waitFor('new session')
+      await new Promise(resolve => setTimeout(resolve, 500))
+      const screen = await session.waitForScreen(/./)
+      expect(screen).not.toContain('👥')
+    } finally {
+      await session.kill()
+    }
+  })
+
   test('--continue with no history exits cleanly during partial startup', async () => {
     const home = mkdtempSync(join(tmpdir(), 'evot-continue-home-'))
     seedSmokeHome(home)
