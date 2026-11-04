@@ -40,13 +40,29 @@ test('badges: private ☁, public 🌐, suffix says what is pending', () => {
   expect(cloudBadge('synced', 'public', true)).toBe('🌐')
 })
 
-test('remote-only rows join the list after local ones and read as pull-pending', () => {
+test('remote-only rows join the list by recency and read as pull-pending', () => {
   const local = [meta('a'), meta('b')]
   const merged = mergeRemoteSessions(local, [remote('b', 3), remote('z', 4), remote('y', 2, { meta: meta('y', { updated_at: '2024-02-01T00:00:00Z' }) })])
-  expect(merged.map(s => s.session_id)).toEqual(['a', 'b', 'y', 'z'])
-  expect(cloudState(merged[2], remote('y', 2))).toBe('pull_pending')
-  expect(merged[2]!.cloud?.origin_host).toBe('macbook')
+  // Newest first; equal stamps keep local order, then remote order.
+  expect(merged.map(s => s.session_id)).toEqual(['y', 'a', 'b', 'z'])
+  expect(cloudState(merged[0], remote('y', 2))).toBe('pull_pending')
+  expect(merged[0]!.cloud?.origin_host).toBe('macbook')
   expect(mergeRemoteSessions(local, [])).toBe(local)
+})
+
+test('a session just synced from another machine leads its cwd group in the shared list', () => {
+  const synced = { visibility: 'private' as const, synced_seq: 5, synced_at: '2026-11-04T10:00:00Z' }
+  // Machines write different fraction widths; order follows the instant, not the text.
+  const local = [
+    meta('here-new', { cwd: '/w', updated_at: '2026-11-04T09:00:00.123456+00:00', cloud: synced }),
+    meta('far-old', { cwd: '/home/u', updated_at: '2026-10-20T00:00:00.000000+00:00', cloud: synced }),
+  ]
+  const fresh = remote('far-new', 9, { meta: meta('far-new', { cwd: '/home/u', updated_at: '2026-11-04T10:10:38.532343123+00:00' }) })
+  const merged = mergeRemoteSessions(local, [fresh, remote('undated', 1, { meta: meta('undated', { cwd: '/home/u', updated_at: '' }) })])
+  expect(merged.map(s => s.session_id)).toEqual(['far-new', 'here-new', 'far-old', 'undated'])
+  const ids = formatSessionItems(merged, '/w', () => undefined, null, () => 'private', { showOtherCwds: true, cloudFirst: true })
+    .map(item => item.id ?? `# ${item.label}`)
+  expect(ids.filter(id => !id.startsWith('# ')).join(' ')).toBe('here-new far-new far-old undated')
 })
 
 test('list labels spell out who can read the session', () => {

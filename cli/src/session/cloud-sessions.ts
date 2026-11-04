@@ -79,15 +79,28 @@ export function remoteAsLocal(remote: RemoteSession): SessionMeta {
   }
 }
 
-/** Local rows first (their order kept), then remote-only rows by recency. */
+/** Epoch ms of `updated_at`; unreadable or missing stamps sort last. Parsed,
+ *  not compared as text, because machines write different fraction widths. */
+function updatedAtMs(session: SessionMeta): number {
+  const ms = Date.parse(session.updated_at ?? '')
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms
+}
+
+/**
+ * Local and remote-only rows in one list, newest first, so a session that
+ * just arrived from another machine sits with the other recent ones instead
+ * of after every local row. The sort is stable: equal stamps keep local
+ * order, then remote order.
+ */
 export function mergeRemoteSessions(local: SessionMeta[], remote: RemoteSession[]): SessionMeta[] {
   if (remote.length === 0) return local
   const known = new Set(local.map(session => session.session_id))
-  const extra = remote
-    .filter(row => !known.has(row.session_id))
-    .sort((a, b) => (b.meta.updated_at ?? '').localeCompare(a.meta.updated_at ?? ''))
-    .map(remoteAsLocal)
-  return extra.length === 0 ? local : [...local, ...extra]
+  const extra = remote.filter(row => !known.has(row.session_id)).map(remoteAsLocal)
+  if (extra.length === 0) return local
+  return [...local, ...extra]
+    .map(session => ({ session, ms: updatedAtMs(session) }))
+    .sort((a, b) => b.ms - a.ms)
+    .map(row => row.session)
 }
 
 export interface CloudSessionSyncDeps {
