@@ -8,6 +8,7 @@
 
 ## News
 
+- **2026-11-03** `/compute` — add your ssh machines; the agent runs commands and long jobs on them for you.
 - **2026-10-18** `Tab` — context-aware suggestions, e.g. “Run the tests.” `Tab` cycles; `→` accepts without sending.
 - **2026-10-14** `/loop` — babysit a PR, poll a deploy, check back on a build; the agent picks when to wake and when to stop.
 - **2026-09-16** `/task` — scheduled runs with push delivery.
