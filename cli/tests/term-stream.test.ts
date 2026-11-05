@@ -1558,6 +1558,21 @@ describe('term stream machine', () => {
     expect(u2.writeLines.some(l => l.text.includes('HTTP 520'))).toBe(true)
   })
 
+  test('cyber policy refusal shows one specific error card, not a provider outage', () => {
+    const msg = 'Invalid request: The model provider refused this request under its cybersecurity content policy.'
+    const state = createStreamMachineState(createInitialState('gpt-6-astra', '/tmp'), createSpinnerState())
+    const failed = reduceRunEvent(state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'gpt-6-astra', turn: 3, error: msg, metrics: { duration_ms: 19100 } },
+    }, { termRows: 24 })
+    const terminal = reduceRunEvent(failed.state, { kind: 'error', payload: { message: msg } }, { termRows: 24 })
+    const tui = [...failed.commitLines, ...terminal.commitLines].map(l => l.text).join('\n')
+    expect(tui.split('Request refused by cybersecurity content policy').length - 1).toBe(1)
+    expect(tui).not.toContain('Model provider unavailable')
+    expect(tui).toContain('✦ llm  gpt-6-astra')
+    expect(terminal.writeLines.some(l => l.text.includes(msg))).toBe(true)
+  })
+
   test('revoked cloud session reports a signal and keeps the raw error out of the TUI', () => {
     const raw = 'Auth error: session_revoked: this session was signed out; run evot login again'
     let state = createStreamMachineState(createInitialState('cloud-model', '/tmp'), createSpinnerState())

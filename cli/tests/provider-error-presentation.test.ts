@@ -53,6 +53,37 @@ test('the gateway tells us who failed; the copy says so and nothing more', () =>
   expect(providerFailurePresentation({ error: 'HTTP/1.1 502 Bad Gateway' }).kind).toBe('busy')
 })
 
+test('cyber policy refusals have specific copy across codes and code-less protocols', () => {
+  const label = 'Request refused by cybersecurity content policy'
+  for (const error of [
+    'HTTP 400: {"error":{"type":"invalid_request_error","code":"cyber_policy","message":"PRIVATE_BACKEND https://private.invalid"}}',
+    // Older gateways preserved the code but redacted the text to provider_error copy.
+    'cyber_policy: The model provider failed to process this request.',
+    'Invalid request: The model provider refused this request under its cybersecurity content policy.',
+    'invalid_request_error: This content was flagged for possible cybersecurity risk.',
+  ]) {
+    const copy = providerFailurePresentation({ error })
+    expect(copy.kind).toBe('cyber-policy')
+    expect(copy.label).toBe(label)
+    const text = buildLlmCard(`[LLM] ✗ · gpt-6-astra · turn 3 · 19.1s\n    error     ${error}`).map(l => l.text).join('\n')
+    expect(text).toContain(label)
+    expect(text).not.toContain('Model provider unavailable')
+    expect(text).not.toContain('PRIVATE_BACKEND')
+    expect(text).not.toContain('https:')
+  }
+  expect(providerFailurePresentation({ kind: 'cyber-policy' }).label).toBe(label)
+  // Explicit authentication failures still take precedence over policy details.
+  expect(providerFailurePresentation({ error: 'HTTP 403: cyber_policy' }).kind).toBe('authentication')
+  expect(providerFailurePresentation({ error: 'cyber_policy_extra' }).kind).toBe('unknown')
+})
+
+test('permanent request prefixes win over historical redaction fallback text', () => {
+  const error = 'Invalid request: The model provider failed to process this request.'
+  expect(providerFailurePresentation({ error }).kind).toBe('invalid-request')
+  expect(buildLlmCard(`[LLM] ✗ · model\n    error     ${error}`).map(l => l.text).join('\n')).toContain('Invalid request')
+  expect(providerFailurePresentation({ error: 'The model provider failed to process this request.' }).kind).toBe('busy')
+})
+
 test('final failure and retry cards show only the error fact', () => {
   const failed = buildLlmCard('[LLM] ✗ · gpt-5.6-sol · turn 20 · 40.5s\n    error     HTTP 500: gateway_error: PRIVATE').map(l => l.text).join('\n')
   expect(failed).toContain('Gateway error, not the model provider')
@@ -140,7 +171,7 @@ test('standard overload errors have fixed copy without provider details', () => 
 test('provider failures describe status without telling the user to control retry or model choice', () => {
   for (const kind of [
     'connection', 'timeout', 'dns', 'busy', 'overloaded', 'gateway', 'gateway-no-backend',
-    'rate-limit', 'quota', 'authentication', 'invalid-request', 'context-overflow',
+    'rate-limit', 'quota', 'authentication', 'invalid-request', 'cyber-policy', 'context-overflow',
     'configuration', 'backend-version', 'model-not-found', 'not-found', 'unknown',
   ] as const) {
     const copy = providerFailurePresentation({ kind })

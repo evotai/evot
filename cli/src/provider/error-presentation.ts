@@ -4,7 +4,7 @@
  */
 import { parsePrivacyStop } from '../privacy/notice.js'
 
-export type ProviderFailureKind = 'connection' | 'timeout' | 'dns' | 'busy' | 'overloaded' | 'gateway' | 'gateway-no-backend' | 'rate-limit' | 'quota' | 'authentication' | 'invalid-request' | 'context-overflow' | 'configuration' | 'backend-version' | 'model-not-found' | 'not-found' | 'privacy-blocked' | 'privacy-unavailable' | 'unknown'
+export type ProviderFailureKind = 'connection' | 'timeout' | 'dns' | 'busy' | 'overloaded' | 'gateway' | 'gateway-no-backend' | 'rate-limit' | 'quota' | 'authentication' | 'invalid-request' | 'cyber-policy' | 'context-overflow' | 'configuration' | 'backend-version' | 'model-not-found' | 'not-found' | 'privacy-blocked' | 'privacy-unavailable' | 'unknown'
 
 /** Who failed, when the gateway says so. Two parties only: the model
  * provider (the backend serving the model) or the gateway (the proxy in
@@ -30,8 +30,12 @@ export function classifyProviderFailure(error: string): ProviderFailureKind {
   // are not HTTP statuses. Accept explicit markers or a leading bare code.
   const status = Number(text.match(/\bhttp(?:\/\d(?:\.\d)?)?\s+(\d{3})(?!\d)|\bstatus(?:_code|\s+code)?[\s:=]+(\d{3})(?!\d)|^\s*(\d{3})(?:\s|:|$)/)?.slice(1).find(Boolean))
   if (status === 401 || status === 403) return 'authentication'
+  // Policy codes survive OpenAI errors; the safe message carries the same
+  // cause through code-less protocols and engine InvalidRequest strings.
+  if (/\bcyber_policy\b|\bcybersecurity content policy\b|\bflagged for possible cybersecurity risk\b/.test(text)) return 'cyber-policy'
   const origin = classifyByOrigin(text, status)
-  if (origin) return origin
+  // The engine's permanent diagnosis beats a redacted provider-failure message.
+  if (origin && !/^invalid request:/.test(text)) return origin
   if (/model_not_found|model not found/.test(text)) return 'model-not-found'
   if (status === 404 || /not_found_error/.test(text)) return 'not-found'
   if (/^invalid request:/.test(text)) return 'invalid-request'
@@ -62,6 +66,7 @@ const labels: Record<ProviderFailureKind, string> = {
   'gateway-no-backend': 'No backend available for this model',
   'rate-limit': 'Rate limited', quota: 'Quota unavailable',
   authentication: 'Authentication failed', 'invalid-request': 'Invalid request',
+  'cyber-policy': 'Request refused by cybersecurity content policy',
   'context-overflow': 'Context limit exceeded',
   configuration: 'Configuration error', 'backend-version': 'The model provider requires a newer client version than the gateway uses.',
   'model-not-found': 'Model not found', 'not-found': 'Resource not found',
