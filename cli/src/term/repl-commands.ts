@@ -191,7 +191,7 @@ export async function handleSkillCommand(ctx: ReplCommandContext, args: string):
   if (sub === 'update' || sub.startsWith('update ')) {
     const name = sub.slice(6).trim()
     const status = progressLine()
-    status.update(skill.renderProgress(`updating ${name || 'installed skills'}...`))
+    status.update(skill.renderProgress(`updating ${name || 'official catalog and installed skills'}...`))
     try {
       const outcome = await skill.skillUpdate(name || undefined, {
         progress: (msg) => status.update(skill.renderProgress(msg)),

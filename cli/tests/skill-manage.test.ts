@@ -491,9 +491,79 @@ describe('skillUpdate', () => {
     expect(notice(await skillUpdate('bad name', { root, variablesFile: vars(root), env: {} }))).toContain('invalid skill name')
   })
 
-  test('nothing tracked yields a clear message', async () => {
+  test('an empty installation fetches and installs the official catalog', async () => {
     const root = workspace()
-    expect(notice(await skillUpdate(undefined, { root, variablesFile: vars(root), env: {} }))).toBe('no updatable skills installed')
+    const next = stubFetch('abc1234')
+    const out = await skillUpdate(undefined, { root, variablesFile: vars(root), fetch: next.fetch, env: {} })
+    expect(next.calls).toBe(1)
+    expect(view(out).units.map(entry => entry.outcome)).toEqual(['new', 'new'])
+    expect(readSourceRecord(join(root, 'lark'))?.commit).toBe('abc1234')
+  })
+
+  test('update discovers new official units in the same fetch, without waiting for maintenance', async () => {
+    const root = workspace()
+    await maintainOfficialSkills({
+      root, env: {}, variablesFile: vars(root), now: () => 1000,
+      head: async () => 'abc1234', fetch: stubCatalog('abc1234', ['lark']),
+    })
+    let calls = 0
+    const out = await skillUpdate(undefined, {
+      root, env: {}, variablesFile: vars(root), now: () => 1001,
+      fetch: async () => {
+        calls += 1
+        return stubCatalog('def5678', ['lark', 'tla-model'])()
+      },
+    })
+    expect(calls).toBe(1)
+    expect(unit(out, 'lark').outcome).toBe('updated')
+    expect(unit(out, 'tla-model').outcome).toBe('new')
+    expect(readSourceRecord(join(root, 'tla-model'))?.commit).toBe('def5678')
+  })
+
+  test('named update does not install unrelated official units', async () => {
+    const root = workspace()
+    await skillInstall('lark', { root, env: {}, fetch: stubFetch('abc1234').fetch })
+    const next = stubFetch('def5678')
+    const out = await skillUpdate('lark', { root, env: {}, fetch: next.fetch })
+    expect(next.calls).toBe(1)
+    expect(view(out).units.map(entry => entry.name)).toEqual(['lark'])
+    expect(existsSync(join(root, 'databend-cloud'))).toBe(false)
+  })
+
+  test('discovery preserves local and third-party collisions', async () => {
+    const root = workspace()
+    writeSkill(join(root, 'lark'), 'lark')
+    const local = readFileSync(join(root, 'lark', 'SKILL.md'), 'utf8')
+    const thirdParty = async (): Promise<Checkout> => {
+      const dir = workspace()
+      writeSkill(dir, 'tla-model')
+      return { dir, commit: 'bbb2222' }
+    }
+    await skillInstall('acme/tla-model', { root, env: {}, fetch: thirdParty })
+    const out = await skillUpdate(undefined, {
+      root, env: {}, variablesFile: vars(root),
+      fetch: source => source.official
+        ? stubCatalog('def5678', ['lark', 'tla-model', 'new-official'])()
+        : thirdParty(),
+    })
+    expect(unit(out, 'lark').outcome).toBe('skipped')
+    expect(unit(out, 'tla-model').outcome).toBe('unchanged')
+    expect(unit(out, 'new-official').outcome).toBe('new')
+    expect(readFileSync(join(root, 'lark', 'SKILL.md'), 'utf8')).toBe(local)
+    expect(readSourceRecord(join(root, 'tla-model'))?.repo).toBe('acme/tla-model')
+  })
+
+  test('empty installations report catalog fetch and validation failures', async () => {
+    for (const fetch of [
+      async (): Promise<Checkout> => { throw new Error('network down') },
+      async (): Promise<Checkout> => ({ dir: workspace(), commit: 'abc1234' }),
+    ]) {
+      const root = workspace()
+      const out = await skillUpdate(undefined, { root, env: {}, fetch })
+      expect(view(out).units).toHaveLength(1)
+      expect(view(out).units[0]!.outcome).toBe('failed')
+      expect(scanSkillDir(root)).toHaveLength(0)
+    }
   })
 
   test('third-party repo-root units stay updatable', async () => {
@@ -516,9 +586,10 @@ describe('skillUpdate', () => {
       root,
       variablesFile: vars(root),
       env: {},
-      fetch: rootSkillRepo('bbb2222'),
+      fetch: source => source.official ? stubFetch('ccc3333').fetch() : rootSkillRepo('bbb2222')(),
     })
-    expect(view(out).units.map((entry) => entry.outcome)).toEqual(['updated'])
+    expect(unit(out, 'solo').outcome).toBe('updated')
+    expect(unit(out, 'lark').outcome).toBe('new')
     expect(readSourceRecord(join(root, 'solo'))?.commit).toBe('bbb2222')
   })
 

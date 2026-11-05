@@ -381,6 +381,40 @@ async function updateOne(
   }
 }
 
+function sameSource(a: Source, b: Source): boolean {
+  return a.repo === b.repo && a.ref === b.ref
+}
+
+/** Official units the catalog gained since they were installed, as background
+ *  sync would add them. An existing directory of the same name is never touched. */
+async function installNewOfficial(ctx: Context, source: Source, checkout: Checkout): Promise<UnitResult[]> {
+  let units: Unit[]
+  try {
+    units = enumerateUnits(checkout.dir, { ...source, path: undefined })
+  } catch (error) {
+    return [{
+      name: `${source.repo}@${source.ref}`, skills: 0, outcome: 'failed',
+      detail: error instanceof Error ? error.message : String(error), notes: [],
+    }]
+  }
+  const results: UnitResult[] = []
+  for (const unit of units) {
+    if (existsSync(join(ctx.root, unit.name))) continue
+    try {
+      const notes = await applyUnit(ctx, source, unit, checkout.commit, false)
+      results.push({ name: unit.name, skills: unit.skills.length, outcome: 'new', detail: checkout.commit, notes })
+    } catch (error) {
+      results.push({
+        name: unit.name, skills: unit.skills.length, outcome: 'failed',
+        detail: error instanceof Error ? error.message : String(error), notes: [],
+      })
+    }
+  }
+  return results
+}
+
+/** Update installed units. Without a name this also adds official units that
+ *  are not installed yet, so it matches background sync. */
 export async function skillUpdate(arg?: string, options: ManageOptions = {}): Promise<SkillOutcome> {
   const ctx = context(options)
   const name = arg?.trim()
@@ -396,6 +430,10 @@ export async function skillUpdate(arg?: string, options: ManageOptions = {}): Pr
   }
 
   const groups = groupBySource(units, ctx.env)
+  const catalog = name ? null : resolveSource(undefined, ctx.env)
+  if (catalog && !groups.some(({ source }) => sameSource(source, catalog))) {
+    groups.push({ source: catalog, members: [] })
+  }
   if (!groups.length) return { notice: 'no updatable skills installed' }
 
   const results: UnitResult[] = []
@@ -408,10 +446,16 @@ export async function skillUpdate(arg?: string, options: ManageOptions = {}): Pr
       for (const unit of members) {
         results.push({ name: unit.name, skills: 1, outcome: 'failed', detail, notes: [] })
       }
+      if (!members.length) {
+        results.push({ name: `${source.repo}@${source.ref}`, skills: 0, outcome: 'failed', detail, notes: [] })
+      }
       continue
     }
     try {
       for (const unit of members) results.push(await updateOne(ctx, source, checkout, unit))
+      if (catalog && sameSource(source, catalog)) {
+        results.push(...await installNewOfficial(ctx, source, checkout))
+      }
     } finally {
       await discardCheckout(checkout)
     }
