@@ -46,6 +46,10 @@ describe('task prompts', () => {
     expect(prompt).toContain('DeepSeek Flash')
     expect(prompt).not.toContain('provider:model')
     expect(prompt).not.toContain('four questions')
+    expect(prompt).toContain('Leave workspace_ref empty')
+    expect(prompt).toContain('isolated workspace for each run')
+    expect(prompt).toContain('Do not copy the current working directory')
+    expect(prompt).toContain('separate scratch directory for temporary files')
   })
 
   test('pressing e makes the first turn a field selector with readable current values', () => {

@@ -36,7 +36,10 @@ const properties = {
     enum: ['', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
     description: 'Optional preferred thinking level. The user makes the final choice in the host model picker.',
   },
-  workspace_ref: { type: 'string' },
+  workspace_ref: {
+    type: 'string',
+    description: 'Explicit local project directory, only when the task needs that project. Omit or leave empty for an isolated workspace per run; never copy the current CLI directory as a default. Temporary files belong in the run scratch directory even when a project is specified.',
+  },
   delivery_channel: { type: 'string', enum: ['', 'feishu'] },
   delivery_target: {
     type: 'string',

@@ -204,7 +204,7 @@ function createConfirmationFields(
     schedule: `${String(patch.cron ?? '')} · ${String(patch.timezone ?? '')}`,
     instruction: patch.instruction,
     model: modelSetting(patch.model_policy ?? 'fixed', patch.model_spec, patch.thinking_level, defaults),
-    workspace_ref: patch.workspace_ref || 'Default workspace',
+    workspace_ref: patch.workspace_ref || 'Isolated run workspace',
     delivery: createDeliveryLabel(patch, defaults),
     enabled: patch.enabled ?? true,
     timeout_seconds: patch.timeout_seconds ?? DEFAULT_TIMEOUT_SECONDS,
@@ -258,8 +258,8 @@ function taskUpdateChanges(
   if (touched('workspace_ref')) {
     add(
       'workspace',
-      current.workspace_ref || 'Default workspace',
-      merged.workspace_ref || 'Default workspace',
+      current.workspace_ref || 'Isolated run workspace',
+      merged.workspace_ref || 'Isolated run workspace',
     )
   }
   if (touched('delivery_channel', 'delivery_target')) {

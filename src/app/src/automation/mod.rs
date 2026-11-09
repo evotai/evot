@@ -4,6 +4,7 @@ pub mod dispatcher;
 pub mod executor;
 pub mod lease;
 pub mod model;
+pub mod workspace;
 
 pub use client::claim;
 pub use client::create_task;

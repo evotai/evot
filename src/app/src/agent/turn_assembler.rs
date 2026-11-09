@@ -45,6 +45,8 @@ pub struct TurnBuildRequest {
     pub consume_process_notifications: bool,
     /// Selection replaced by the latest model switch, if any.
     pub previous_llm: Option<LlmConfig>,
+    /// Existing run-local directory for temporary files, outside the project.
+    pub scratch_dir: Option<PathBuf>,
 }
 
 pub struct TurnAssembler {
@@ -98,7 +100,7 @@ impl TurnAssembler {
         }
     }
 
-    fn build_system_prompt(&self, mode: ToolMode, cwd: &str) -> (String, Vec<Section>) {
+    fn build_system_prompt_sections(&self, mode: ToolMode, cwd: &str) -> Vec<Section> {
         let mut sections = if mode == ToolMode::Chat {
             // The coding identity, tool guidance, and workspace instructions
             // all describe a toolset a tool-free turn does not have.
@@ -119,12 +121,7 @@ impl TurnAssembler {
                 .unwrap_or_default(),
         };
         sections.extend(dynamic_sections(&ctx));
-        let text = sections
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        (text, sections)
+        sections
     }
 
     pub async fn build_turn(
@@ -142,6 +139,7 @@ impl TurnAssembler {
             approver,
             consume_process_notifications,
             previous_llm,
+            scratch_dir,
         } = request;
         let mut input = crate::conversation::input::PreparedInput::user(input);
         let llm = llm.clone();
@@ -160,7 +158,7 @@ impl TurnAssembler {
             )));
         }
         let variables = self.variables.read().clone();
-        let envs = variables.map(|v| v.all_env_pairs()).unwrap_or_default();
+        let mut envs = variables.map(|v| v.all_env_pairs()).unwrap_or_default();
         // Values the shell is given show up in tool output with no context a
         // rule could see; the provider key may be echoed by a misbehaving tool.
         crate::privacy::remember_secrets(
@@ -199,6 +197,16 @@ impl TurnAssembler {
             std::fs::create_dir_all(spill_dir)?;
             system_dirs.push(spill_dir.clone());
         }
+        if let Some(scratch) = &scratch_dir {
+            system_dirs.push(scratch.clone());
+            // Apply after remembering secrets: a managed directory is not a
+            // credential. Run-local temp settings override inherited variables.
+            const SCRATCH_ENVS: [&str; 4] = ["EVOT_SCRATCH_DIR", "TMPDIR", "TMP", "TEMP"];
+            envs.retain(|(key, _)| !SCRATCH_ENVS.contains(&key.as_str()));
+            for key in SCRATCH_ENVS {
+                envs.push((key.into(), scratch.to_string_lossy().into_owned()));
+            }
+        }
         let sandbox_rt = self.sandbox.build_runtime(cwd_path, &system_dirs)?;
         let process_manager = if policy.background_processes {
             Some(self.processes.acquire(session_id)?)
@@ -228,30 +236,39 @@ impl TurnAssembler {
         if let Some(approver) = &approver {
             tools = super::tools::require_approval(tools, approver);
         }
-        let (mut system_prompt, mut sections) = self.build_system_prompt(mode, &cwd);
+        let mut sections = self.build_system_prompt_sections(mode, &cwd);
+        if let Some(scratch) = &scratch_dir {
+            sections.push(Section {
+                name: "scratch",
+                text: format!(
+                    "Run scratch directory: {}\n\n\
+                     Put all temporary scripts, downloads, intermediate data, and debug logs in this directory, never in the project workspace. \
+                     Use absolute scratch paths with read/write/edit tools. Before shell commands that generate temporary files, cd to \"$EVOT_SCRATCH_DIR\" or use explicit scratch paths. \
+                     EVOT_SCRATCH_DIR, TMPDIR, TMP, and TEMP are set to this directory for shell subprocesses. \
+                     Some utilities ignore temp environment variables; for mktemp, always pass an explicit template such as \"$EVOT_SCRATCH_DIR/evot.XXXXXX\". \
+                     The current working directory remains the workspace for project reads and intentional project changes; do not move source edits or requested final project artifacts into scratch.",
+                    scratch.display(),
+                ),
+            });
+        }
         if let Some(section) = skills_prompt_section(&skills) {
             let insert_at = sections
                 .iter()
                 .position(|section| matches!(section.name, "environment" | "dynamic_boundary"))
                 .unwrap_or(sections.len());
             sections.insert(insert_at, section);
-            system_prompt = sections
-                .iter()
-                .map(|section| section.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n");
         }
         if let Some(text) = compute_section {
             sections.push(Section {
                 name: "compute",
                 text,
             });
-            system_prompt = sections
-                .iter()
-                .map(|section| section.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n");
         }
+        let system_prompt = sections
+            .iter()
+            .map(|section| section.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let (prior_messages, compaction_state, transcript_seq) = session.context_snapshot().await;
         let compaction_llm = previous_llm.filter(|previous| {
             previous.model != llm.model

@@ -73,6 +73,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 input: vec![evot_engine::Content::Text {
                     text: "hello".into(),
                 }],
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
@@ -102,6 +103,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     input: vec![evot_engine::Content::Text {
                         text: "继续任务".into(),
                     }],
+                    scratch_dir: None,
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
@@ -139,6 +141,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 &locator.session_id(),
                 TurnBuildRequest {
                     input,
+                    scratch_dir: None,
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
@@ -164,6 +167,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 input: vec![evot_engine::Content::Text {
                     text: "original task".into(),
                 }],
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
@@ -207,6 +211,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 &locator.session_id(),
                 TurnBuildRequest {
                     input,
+                    scratch_dir: None,
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
@@ -250,6 +255,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     },
                     mime_type: "image/png".into(),
                 }],
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
@@ -277,6 +283,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 &locator.session_id(),
                 TurnBuildRequest {
                     input: Vec::new(),
+                    scratch_dir: None,
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
@@ -338,6 +345,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 input: vec![evot_engine::Content::Text {
                     text: "status?".into(),
                 }],
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
@@ -378,6 +386,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 input: vec![evot_engine::Content::Text {
                     text: "and now?".into(),
                 }],
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
@@ -400,6 +409,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
             &locator.session_id(),
             TurnBuildRequest {
                 input: Vec::new(),
+                scratch_dir: None,
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,

@@ -71,12 +71,19 @@ describe('task window', () => {
     expect(preview).toContain('# Instructions')
     expect(preview).toContain(task.instruction)
     expect(preview).toContain(`Schedule  ${task.cron} · ${task.timezone}`)
+    expect(preview).toContain('Workspace  Isolated run workspace')
     expect(preview).toContain('# Activity')
     expect(preview).toContain('12 runs · 9 succeeded · last 30 days')
     expect(preview.join('\n')).not.toContain('%')
     expect(preview).toContain('# Recent runs')
     expect(preview.some(line => line.includes('Running'))).toBe(true)
     expect(preview.some(line => line.includes('Delivery failed'))).toBe(true)
+  })
+
+  test('an explicit project is shown instead of the isolated workspace default', () => {
+    const state = createTaskWindow({ ...response, tasks: [{ ...task, workspace_ref: '/work/project' }] })
+    expect(state.items[0]?.preview).toContain('Workspace  /work/project')
+    expect(state.items[0]?.preview).not.toContain('Workspace  Isolated run workspace')
   })
 
   test('recent runs lead the pane and failed runs carry the alert marker', () => {

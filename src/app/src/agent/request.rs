@@ -34,6 +34,9 @@ pub struct QueryRequest {
     pub llm: Option<LlmConfig>,
     pub host_tools: Option<HostTools>,
     pub cwd: Option<String>,
+    /// Run-local scratch, propagated to every turn and shell subprocess.
+    /// Not persisted or accepted from cloud task definitions.
+    pub scratch_dir: Option<PathBuf>,
     /// Tools scoped to this run only, added by a prepared command (e.g.
     /// `/sessions` attaches `session_search`). Never part of ordinary turns.
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
@@ -53,6 +56,7 @@ impl QueryRequest {
             llm: None,
             host_tools: None,
             cwd: None,
+            scratch_dir: None,
             extra_tools: Vec::new(),
             approver: None,
         }
@@ -67,6 +71,7 @@ impl QueryRequest {
             llm: None,
             host_tools: None,
             cwd: None,
+            scratch_dir: None,
             extra_tools: Vec::new(),
             approver: None,
         }
@@ -103,6 +108,11 @@ impl QueryRequest {
 
     pub fn cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
+        self
+    }
+
+    pub fn scratch_dir(mut self, scratch_dir: PathBuf) -> Self {
+        self.scratch_dir = Some(scratch_dir);
         self
     }
 

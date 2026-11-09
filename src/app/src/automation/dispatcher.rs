@@ -14,10 +14,8 @@ use super::executor::ExecutorCapabilities;
 use super::model::ClaimedRun;
 use super::model::Task;
 use crate::agent::Agent;
-use crate::agent::QueryRequest;
 use crate::agent::RunEventPayload;
 use crate::agent::SubmitOutcome;
-use crate::agent::ToolMode;
 use crate::auth::AuthState;
 use crate::conf::Config;
 use crate::error::EvotError;
@@ -155,13 +153,24 @@ async fn execute(
     }
     let locator = SessionLocator::new("automation", &format!("run:{}", claimed.id));
     let session_id = locator.session_id();
-    let mut request = QueryRequest::text(&task.instruction)
-        .session_id(Some(session_id.clone()))
-        .mode(ToolMode::Headless)
-        .source("automation");
-    if !task.workspace_ref.trim().is_empty() {
-        request = request.cwd(task.workspace_ref.clone());
-    }
+    let mut request =
+        match super::workspace::prepare_request(&config.storage.fs.root_dir, task, &claimed.id)
+            .await
+        {
+            Ok(request) => request,
+            Err(error) => {
+                finish(
+                    auth,
+                    claimed,
+                    "needs_attention",
+                    "",
+                    super::delivery::NOT_REQUESTED,
+                    &error.to_string(),
+                )
+                .await;
+                return;
+            }
+        };
     if task.model_policy == "fixed" {
         match fixed_model(&agent, config, task) {
             Ok(model) => request = request.llm(model),

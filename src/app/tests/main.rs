@@ -19,6 +19,7 @@ mod auto_compact_test;
 mod automation_delivery_test;
 mod automation_lease_test;
 mod automation_share_test;
+mod automation_workspace_test;
 #[path = "background_reclaim_test.rs"]
 mod background_reclaim_test;
 mod blocking_test;

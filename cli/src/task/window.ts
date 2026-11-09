@@ -174,7 +174,7 @@ function preview(
     `Schedule  ${task.cron} · ${task.timezone}`,
     `Next  ${task.enabled ? dateTime(task.next_run_at) : 'Paused'}`,
     `Delivery  ${delivery}`,
-    `Workspace  ${task.workspace_ref || 'Default workspace'}`,
+    `Workspace  ${task.workspace_ref || 'Isolated run workspace'}`,
     `Timeout  ${task.timeout_seconds}s · Max lateness ${task.max_lateness_seconds}s`,
     '',
     `${PREVIEW_SECTION_PREFIX}Instructions`,

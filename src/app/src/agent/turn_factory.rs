@@ -23,6 +23,7 @@ pub(super) struct AgentTurnFactory {
     /// Run-scoped tools attached by a prepared command.
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
     pub approver: Option<Arc<dyn ToolApprover>>,
+    pub scratch_dir: Option<std::path::PathBuf>,
 }
 
 #[async_trait::async_trait]
@@ -39,6 +40,7 @@ impl TurnFactory for AgentTurnFactory {
                     host_tools: self.host_tools.clone(),
                     extra_tools: self.extra_tools.clone(),
                     approver: self.approver.clone(),
+                    scratch_dir: self.scratch_dir.clone(),
                     consume_process_notifications: true,
                     previous_llm: self.previous_llm.clone(),
                 },

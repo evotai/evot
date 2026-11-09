@@ -496,6 +496,17 @@ impl Agent {
                 request.cwd.as_deref(),
             )
             .await?;
+        // A retried scheduled run may find a session created by an older
+        // executor. Never silently reuse its inherited CLI checkout.
+        if request.scratch_dir.is_some() {
+            if let Some(cwd) = &request.cwd {
+                if session.meta().await.cwd != *cwd {
+                    return Err(EvotError::Conf(
+                        "task session workspace differs from the prepared run workspace".into(),
+                    ));
+                }
+            }
+        }
         self.submit_to_session(request, session).await
     }
 
@@ -681,6 +692,7 @@ impl Agent {
             host_tools: request.host_tools.clone(),
             extra_tools: request.extra_tools.clone(),
             approver: request.approver.clone(),
+            scratch_dir: request.scratch_dir.clone(),
         });
 
         let run = runtime::execute_run(runtime::ExecuteRunArgs {
@@ -919,6 +931,7 @@ impl Agent {
                     approver: None,
                     consume_process_notifications: false,
                     previous_llm: None,
+                    scratch_dir: None,
                 },
             )
             .await?;

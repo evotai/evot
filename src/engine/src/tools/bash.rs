@@ -295,13 +295,16 @@ impl AgentTool for BashTool {
         };
         let output_dir = process_output_dir(&ctx);
         let mut command = Command::new("bash");
-        command.arg("-c").arg(command_text).current_dir(&cwd);
-        if !self.envs.is_empty() {
-            command.envs(self.envs.iter().map(|(key, value)| (key, value)));
-        }
+        command.arg("-c").arg(command_text);
         if let Some(dirs) = &self.sandbox_dirs {
             super::sandbox::wrap_command(&mut command, dirs)
                 .map_err(|error| ToolError::Failed(format!("Sandbox setup failed: {error}")))?;
+        }
+        // macOS sandbox wrapping replaces the Command. Set execution context
+        // afterwards so cwd and run-local temp variables survive the wrapper.
+        command.current_dir(&cwd);
+        if !self.envs.is_empty() {
+            command.envs(self.envs.iter().map(|(key, value)| (key, value)));
         }
 
         let task_id = self

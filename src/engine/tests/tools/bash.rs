@@ -10,6 +10,47 @@ use super::ctx;
 use super::ctx_with_cancel;
 
 #[tokio::test]
+async fn sandboxed_bash_preserves_workspace_and_scratch_environment(
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let evotengine::SandboxSupport::Unavailable(reason) = evotengine::check_sandbox_available() {
+        eprintln!("sandbox unavailable: {reason}");
+        return Ok(());
+    }
+    let workspace = tempfile::tempdir()?;
+    let scratch = tempfile::tempdir()?;
+    let cwd = workspace.path().canonicalize()?;
+    let scratch = scratch.path().canonicalize()?;
+    let tool = BashTool::new()
+        .with_envs([
+            (
+                "EVOT_SCRATCH_DIR".into(),
+                scratch.to_string_lossy().into_owned(),
+            ),
+            ("TMPDIR".into(), scratch.to_string_lossy().into_owned()),
+        ])
+        .with_sandbox_dirs(vec![cwd.clone(), scratch.clone()]);
+    let mut context = ctx("bash");
+    context.cwd = cwd.clone();
+    let result = tool.execute(serde_json::json!({
+        "command": "set -eu; test \"$TMPDIR\" = \"$EVOT_SCRATCH_DIR\"; pwd -P; printf ok > \"$TMPDIR/result.txt\""
+    }), context).await?;
+    let text = result
+        .content
+        .iter()
+        .filter_map(|content| match content {
+            Content::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains(cwd.to_string_lossy().as_ref()), "{text}");
+    assert!(!text.contains("Exit code:"), "{text}");
+    assert_eq!(std::fs::read_to_string(scratch.join("result.txt"))?, "ok");
+    assert!(!cwd.join("result.txt").exists());
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_bash_echo() {
     let tool = BashTool::new();
     let result = tool
