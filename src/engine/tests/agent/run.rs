@@ -16,5 +16,7 @@ mod network_recovery;
 mod retry;
 #[path = "run/steering.rs"]
 mod steering;
+#[path = "run/tool_availability.rs"]
+mod tool_availability;
 #[path = "run/tools.rs"]
 mod tools;

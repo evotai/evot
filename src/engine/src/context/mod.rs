@@ -7,6 +7,7 @@ pub mod image_resize;
 pub mod limits;
 pub mod sanitize;
 pub mod tokens;
+pub mod tool_availability;
 pub mod window;
 
 pub use compaction::plan_compaction;
@@ -56,6 +57,7 @@ pub use tokens::estimate_tokens;
 pub use tokens::message_tokens;
 pub use tokens::tool_definition_tokens;
 pub use tokens::total_tokens;
+pub use tool_availability::tool_availability_reminder;
 pub use window::ContextBudgetSnapshot;
 pub use window::ContextConfig;
 pub use window::ContextTracker;

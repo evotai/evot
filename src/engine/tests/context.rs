@@ -30,6 +30,8 @@ mod summarizer_progress;
 mod summary;
 #[path = "context/tokens.rs"]
 mod tokens;
+#[path = "context/tool_availability.rs"]
+mod tool_availability;
 #[path = "context/trigger.rs"]
 mod trigger;
 #[path = "context/window.rs"]

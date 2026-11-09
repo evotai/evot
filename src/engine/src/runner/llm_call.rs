@@ -91,7 +91,7 @@ pub(super) async fn stream_assistant_response(
     // thinking survives only for the exact provider/model/protocol that emitted
     // it; foreign thinking is retained as ordinary text context.
     let (target_provider, target_model, target_api) = target_model(config);
-    let llm_messages = crate::context::transform_messages_for_model(
+    let mut llm_messages = crate::context::transform_messages_for_model(
         llm_messages,
         &target_provider,
         &target_model,
@@ -100,6 +100,11 @@ pub(super) async fn stream_assistant_response(
 
     // Build tool definitions
     let tool_defs = build_tool_definitions(context, &config.model);
+    if let Some(reminder) =
+        crate::context::tool_availability_reminder(&llm_messages, &context.tools)
+    {
+        llm_messages.push(reminder);
+    }
 
     // Retry loop for transient provider errors
     let retry = &config.retry_policy;
