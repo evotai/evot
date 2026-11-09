@@ -237,6 +237,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          # Release builds do not use RUSTC_WRAPPER. Do not fail a release
+          # because downloading an unused optional compiler cache times out.
+          sccache: 'false'
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -369,9 +372,21 @@ jobs:
   finalize_release:
     name: Publish release (undraft)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [create_release, build]
-    if: github.ref_name == 'main' && !cancelled() && needs.build.result != 'cancelled'
+    if: success() && github.ref_name == 'main' && needs.create_release.result == 'success' && needs.build.result == 'success'
     steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Verify all published packages and checksums
+        shell: bash
+        run: python3 .github/scripts/verify-release-assets.py "${TAG}" --repo "${GITHUB_REPOSITORY}"
+        env:
+          TAG: ${{ needs.create_release.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish release
         shell: bash
         run: |

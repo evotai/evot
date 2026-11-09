@@ -6,6 +6,10 @@ inputs:
     description: Additional targets to install
     required: false
     default: ""
+  sccache:
+    description: Install the optional compiler cache
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -53,6 +57,7 @@ runs:
         restore-keys: cargo-registry-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Setup sccache
+      if: inputs.sccache == 'true'
       uses: mozilla-actions/sccache-action@v0.0.9
       with:
         token: ${{ github.token }}
