@@ -167,6 +167,98 @@ async fn ordinary_saves_preserve_cloud_state() -> TestResult {
 }
 
 #[tokio::test]
+async fn local_only_push_skips_auth_and_progress_even_when_forced() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let meta = SessionMeta::new("local".into(), "/w".into(), "m".into());
+    storage.save_session(meta.clone()).await?;
+    storage.append_entry(user("local", 1, "stay local")).await?;
+
+    // The native bridge supplies this lazy auth loader. Neither missing nor
+    // unreadable credentials should matter to an unshared session, on any run.
+    for force in [false, false, true] {
+        let outcome = sync::push_session_with_auth(
+            || panic!("local-only pushes must not read auth"),
+            &storage,
+            "local",
+            "test",
+            force,
+            &|_| panic!("local-only pushes must not prepare an upload"),
+        )
+        .await?;
+        assert!(matches!(outcome, sync::PushOutcome::NotShared));
+    }
+    let loaded = storage
+        .get_session("local")
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(serde_json::to_value(loaded)?, serde_json::to_value(meta)?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_push_still_reports_auth_failures_before_preparing_upload() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut meta = SessionMeta::new("shared".into(), "/w".into(), "m".into());
+    meta.cloud = Some(CloudSync::new(CloudVisibility::Private, "laptop"));
+    storage.save_session(meta.clone()).await?;
+
+    for message in [
+        "sharing requires sign-in; run /login",
+        "auth file is unreadable",
+    ] {
+        let outcome = sync::push_session_with_auth(
+            || Err(evot::error::EvotError::Conf(message.into())),
+            &storage,
+            "shared",
+            "test",
+            false,
+            &|_| panic!("auth failures must not prepare an upload"),
+        )
+        .await;
+        assert!(matches!(outcome, Err(evot::error::EvotError::Conf(error)) if error == message));
+    }
+    let loaded = storage
+        .get_session("shared")
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(serde_json::to_value(loaded)?, serde_json::to_value(meta)?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_push_loads_auth_and_uploads_through_the_native_entry_point() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut meta = SessionMeta::new("shared".into(), "/w".into(), "m".into());
+    meta.cloud = Some(CloudSync::new(CloudVisibility::Private, "laptop"));
+    storage.save_session(meta).await?;
+    storage.append_entry(user("shared", 1, "sync me")).await?;
+
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/shared"))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome =
+        sync::push_session_with_auth(|| Ok(state), &storage, "shared", "test", false, &|_| {})
+            .await?;
+    assert!(matches!(outcome, sync::PushOutcome::Synced {
+        pushed: 1,
+        ..
+    }));
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
     let server = MockServer::start().await;
     let state = state(&server)?;

@@ -206,11 +206,6 @@ pub fn export_session(
                         }
                     }
                 }
-                "context_pruned" => {
-                    if let Some(notice) = super::stats::prune_notice(data) {
-                        append_entry(&mut entries, &mut parent, base_id, &row.created_at, notice);
-                    }
-                }
                 // Started/no-op diagnostics belong to the spinner or screen.log.
                 "context_compaction_started" => {}
                 _ => {}

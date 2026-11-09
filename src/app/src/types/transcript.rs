@@ -87,7 +87,7 @@ pub enum CompactReason {
     Threshold,
     Overflow,
     Manual,
-    /// Judge-decided prune applied at run end (no summary written).
+    /// Historical pruning reason, retained to read existing transcripts.
     Prune,
     /// Automatic compact-and-retry after a provider safety refusal.
     Refusal,

@@ -204,6 +204,27 @@ test('CloudSessionSync pushes once per settle, coalesces, and reports failures s
   expect(pushes).toHaveLength(2)
 })
 
+test('local-only pushes stay silent across runs without entering the remote index', async () => {
+  const pushes: string[] = []
+  const notices: string[] = []
+  const sync = new CloudSessionSync({
+    push: async id => { pushes.push(id); return { kind: 'not_shared' } },
+    list: async () => [],
+    notify: text => notices.push(text),
+  }, 1)
+  try {
+    for (let run = 0; run < 2; run++) {
+      sync.schedulePush('local')
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(pushes).toEqual(['local', 'local'])
+    expect(notices).toEqual([])
+    expect(sync.remoteSessions).toEqual([])
+  } finally {
+    sync.dispose()
+  }
+})
+
 test('CloudSessionSync surfaces divergence from a background push as a hint, not an error', async () => {
   const notices: string[] = []
   const diverged: CloudPushResult = { kind: 'diverged', local_seq: 3, remote_seq: 8 }

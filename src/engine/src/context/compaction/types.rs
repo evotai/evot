@@ -28,7 +28,7 @@ pub fn bounded_fallback_reason(reason: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionMethod {
-    /// Lossless pruning of stale tool calls decided by a judge model; no summary.
+    /// Historical method, retained only to read existing sessions. Never emitted.
     Prune,
     /// Provider-native server-side compaction (opaque encrypted item).
     Remote,
@@ -42,7 +42,7 @@ pub enum CompactionMethod {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionPhase {
-    /// Asking the judge which tool calls still matter.
+    /// Historical wire phase. No runtime path emits it.
     Pruning,
     Planning,
     Remote,

@@ -380,19 +380,6 @@ describe('buildOutputBlocks', () => {
     expect(buildPrivacyActionCard('term x', '  term added: x')[0]!.toolCard?.tone).toBe('notice')
   })
 
-  test('jev prune card has space above it', () => {
-    const result = renderPlain([
-      { id: 'a1', kind: 'assistant', text: 'text' },
-      ...buildEventCard('[JEV] ✂ · removed 1 · truncated 2 · 26k → 11k (−15k)'),
-    ])
-    const lines = result.split('\n')
-    const pruneIdx = lines.findIndex(l => l.includes('jev prune'))
-    // The card leads with its own padded blank row, like any tool card.
-    expect(lines[pruneIdx - 1]!.trim()).toBe('')
-    expect(lines[pruneIdx]).toContain('✂ jev prune  26k → 11k')
-    expect(lines[pruneIdx + 1]).toContain('✓ · removed 1 · truncated 2')
-  })
-
   test('long tool command wraps instead of truncating', () => {
     const cmd = 'cd /Users/bohu/github/evotai/evot && rg -n "first_line|before_turn|after_turn" src/ --glob "*.rs" | head -20'
     const result = renderPlainWithColumns([{ id: 't1', kind: 'tool', text: `⌘ bash  ${cmd}` }], 72)

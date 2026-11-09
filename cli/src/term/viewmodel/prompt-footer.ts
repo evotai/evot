@@ -238,9 +238,6 @@ function buildFooterCandidate(
         ? ` (${formatContextTokens(input.contextTokens)}/${formatContextTokens(input.contextWindow)})`
         : ''
       const text = `context: ${contextPercent.toFixed(1)}%${detail}${warning}`
-      // No badge for judge pruning: the catalog keeps it on permanently, so a
-      // badge would say nothing, and each prune already lands as a card in
-      // the transcript when it happens.
       groups.push([
         contextPercent > 90
           ? colored(text, 'red')

@@ -119,8 +119,13 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
     let mut model_capabilities = std::collections::HashMap::new();
     let context_windows = context_windows(&cache.response);
     let model_protocols = model_protocols(&cache.response);
-    let judges: std::collections::HashSet<String> = judge_model_ids(&cache.response);
-    let mut judge: Option<crate::conf::JudgeEndpoint> = None;
+    let non_chat_models: std::collections::HashSet<String> = cache
+        .response
+        .models
+        .iter()
+        .filter(|model| !model.is_chat())
+        .map(|model| model.id.clone())
+        .collect();
     for model in &cache.response.models {
         if let Ok(level) = thinking_level_from_str(&model.thinking_level) {
             thinking_levels.insert(model.id.clone(), level);
@@ -147,28 +152,11 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
         let protocol = parse_protocol(&group.protocol).map_err(|_| {
             EvotError::Conf(format!("unsupported cloud protocol: {}", group.protocol))
         })?;
-        // A judge is not something to chat with: it leaves the picker and
-        // becomes the session's judge endpoint (first one published wins).
-        let (judge_models, chat_models): (Vec<String>, Vec<String>) = group
+        // Ignore retired auxiliary endpoints even when an old catalog still
+        // publishes them. Unannotated historical chat entries remain usable.
+        group
             .models
-            .into_iter()
-            .partition(|model| judges.contains(model));
-        if judge.is_none() {
-            if let Some(model) = judge_models.into_iter().next() {
-                judge = Some(crate::conf::JudgeEndpoint {
-                    provider: name.clone(),
-                    protocol: model_protocols
-                        .get(&model)
-                        .cloned()
-                        .unwrap_or_else(|| protocol.clone()),
-                    base_url: group.base_url.clone(),
-                    api_key: group.api_key.clone(),
-                    context_window: context_windows.get(&model).copied(),
-                    model,
-                });
-            }
-        }
-        group.models = chat_models;
+            .retain(|model| !non_chat_models.contains(model));
         if group.models.is_empty() {
             continue;
         }
@@ -210,7 +198,6 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
     config.cloud_model_protocols = model_protocols;
     config.cloud_default_model =
         Some(cache.response.default_model.trim().to_string()).filter(|model| !model.is_empty());
-    config.judge = judge;
 
     // The catalog owns the landing spot, so a stale cloud selection (e.g. a
     // Free provider left in the env file) yields to it. BYOK always wins: a
@@ -251,50 +238,4 @@ fn model_protocols(
         .iter()
         .filter_map(|model| Some((model.id.clone(), parse_protocol(&model.protocol).ok()?)))
         .collect()
-}
-
-fn judge_model_ids(response: &crate::auth::ModelsResponse) -> std::collections::HashSet<String> {
-    response
-        .models
-        .iter()
-        .filter(|model| model.is_judge())
-        .map(|model| model.id.clone())
-        .collect()
-}
-
-/// The judge the server currently publishes, read from the models cache the
-/// cloud sync rewrites every few seconds. Re-read per run so an operator
-/// disabling the judge model takes effect on the next run, not the next
-/// launch. `None` when logged out, no cache, or no `role=judge` model.
-pub fn current_judge_endpoint() -> Option<crate::conf::JudgeEndpoint> {
-    // Logged out: no judge.
-    crate::auth::load_auth().ok()??;
-    let cache = crate::auth::load_models_cache().ok()??;
-    let judges = judge_model_ids(&cache.response);
-    if judges.is_empty() {
-        return None;
-    }
-    let context_windows = context_windows(&cache.response);
-    let model_protocols = model_protocols(&cache.response);
-    let mut groups = cache.response.providers;
-    groups.sort_by_key(|group| group.sort_order);
-    groups.into_iter().find_map(|group| {
-        let model = group
-            .models
-            .iter()
-            .find(|model| judges.contains(*model))?
-            .clone();
-        let protocol = match model_protocols.get(&model) {
-            Some(protocol) => protocol.clone(),
-            None => parse_protocol(&group.protocol).ok()?,
-        };
-        Some(crate::conf::JudgeEndpoint {
-            provider: normalize_provider_name(&group.name),
-            protocol,
-            base_url: group.base_url,
-            api_key: group.api_key,
-            context_window: context_windows.get(&model).copied(),
-            model,
-        })
-    })
 }

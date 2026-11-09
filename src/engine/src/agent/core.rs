@@ -49,9 +49,6 @@ pub struct Agent {
     /// compaction still uses the active request model.
     pub(super) compaction_context: Option<crate::context::SummarizerContext>,
     pub(super) compaction_fallback_context: Option<crate::context::SummarizerContext>,
-    pub(super) judge: Option<Arc<dyn crate::judge::Judge>>,
-    pub(super) prune_ledger:
-        Option<Arc<tokio::sync::Mutex<crate::context::compaction::PruneLedger>>>,
     /// Cross-compaction state restored from a persisted session.
     pub(super) compaction_state: Option<crate::context::CompactionState>,
     pub(super) context_management_disabled: bool,
@@ -110,8 +107,6 @@ impl Agent {
             context_config: None,
             compaction_context: None,
             compaction_fallback_context: None,
-            judge: None,
-            prune_ledger: None,
             compaction_state: None,
             context_management_disabled: false,
             execution_limits: Some(ExecutionLimits::default()),
@@ -200,20 +195,6 @@ impl Agent {
     ) -> Self {
         self.compaction_context = primary;
         self.compaction_fallback_context = fallback;
-        self
-    }
-
-    /// Judge model that prunes stale tool calls before compaction summarizes.
-    pub fn with_judge(mut self, judge: Option<Arc<dyn crate::judge::Judge>>) -> Self {
-        self.judge = judge;
-        self
-    }
-
-    pub fn with_prune_ledger(
-        mut self,
-        ledger: Option<Arc<tokio::sync::Mutex<crate::context::compaction::PruneLedger>>>,
-    ) -> Self {
-        self.prune_ledger = ledger;
         self
     }
 

@@ -110,6 +110,53 @@ fn cloud_alias_capabilities_reach_runtime_and_request_without_renaming_model() -
 }
 
 #[test]
+fn historical_judge_catalog_never_becomes_an_active_provider_or_default() -> TestResult {
+    let _guard = env_lock()
+        .lock()
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let home = tempfile::tempdir()?;
+    let previous = std::env::var_os("HOME");
+    std::env::set_var("HOME", home.path());
+    let result = (|| -> TestResult {
+        let root = home.path().join(".evotai");
+        std::fs::create_dir_all(&root)?;
+        std::fs::write(
+            root.join("auth.json"),
+            r#"{
+            "version":1,"server_base_url":"https://unused.example.test",
+            "user":{"id":"u1","name":"User","email":"user@example.test"},
+            "cli_token":"fixture-token","refresh_token":"","models_synced_at":0
+        }"#,
+        )?;
+        std::fs::write(
+            root.join("models.cache.json"),
+            include_str!("fixtures/schema/models-cache-v1-retired-judge.json"),
+        )?;
+        let config = Config::load()?;
+        assert!(!config.providers.contains_key("retired-only"));
+        let profile = config
+            .providers
+            .get("evot-pro")
+            .ok_or("missing chat provider")?;
+        assert_eq!(profile.models, ["chat-model", "legacy-chat"]);
+        assert_eq!(
+            config.preferred_new_session_llm(),
+            Some(("evot-pro".into(), "chat-model".into()))
+        );
+        assert_eq!(config.build_llm("evot-pro", None)?.model, "chat-model");
+        // Cache DTOs retain the old record without granting it runtime capability.
+        let cache = auth::load_models_cache()?.ok_or("missing historical cache")?;
+        assert_eq!(cache.response.models[0].role, "judge");
+        Ok(())
+    })();
+    match previous {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    result
+}
+
+#[test]
 fn historical_catalog_has_no_capability_overrides_and_current_writer_preserves_them() -> TestResult
 {
     let historical: auth::ModelsCache =

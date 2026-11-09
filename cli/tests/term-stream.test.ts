@@ -1938,33 +1938,3 @@ describe('term stream machine', () => {
     expect(findAssistantToolCall(state.appState.currentAssistantContent, 'call-edit')?.status).toBe('done')
   })
 })
-
-describe('judge review of a tool-call window', () => {
-  const ctx = { termRows: 24 }
-  const call = (id: string, relevance: number, name = 'read') => ({ tool_call_id: id, tool_name: name, arguments: `{"path":"${id}.md"}`, relevance })
-  const initial = () => createStreamMachineState({ ...createInitialState('model', '/tmp'), judge: 'jev-latest' }, createSpinnerState())
-
-  test('a clean window is silent on screen and recorded in the log', () => {
-    const update = reduceRunEvent(initial(), {
-      kind: 'tool_calls_reviewed',
-      payload: { calls: [call('a', 0.9), call('b', 0.8), call('c', 0.35), call('d', 0.95), call('e', 0.7), call('f', 0.88)] },
-    }, ctx)
-    expect(update.commitLines).toHaveLength(0)
-    expect(update.noticeLines).toHaveLength(0)
-    const log = update.writeLines.map(line => stripAnsi(line.text)).join('\n')
-    expect(log).toContain('[JEV] review · 6 calls · 1 off-task')
-    expect(log).toContain('35%  read')
-  })
-
-  test('an off-task window is one notice line naming the calls', () => {
-    const update = reduceRunEvent(initial(), {
-      kind: 'tool_calls_reviewed',
-      payload: { calls: [call('a', 0.9), call('notes', 0.14), call('c', 0.8), call('ls', 0.22, 'bash'), call('e', 0.7), call('f', 0.88)] },
-    }, ctx)
-    const text = update.commitLines.map(line => stripAnsi(line.text)).join('\n')
-    expect(text).toContain('⚑ jev: 2 of the last 6 tool calls look off-task')
-    expect(text).toContain('read path=notes.md 14%')
-    expect(text).toContain('bash path=ls.md 22%')
-    expect(update.noticeLines).toHaveLength(1)
-  })
-})

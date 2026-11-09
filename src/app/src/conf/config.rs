@@ -168,10 +168,10 @@ pub struct ProviderProfile {
     pub thinking_level: Option<ThinkingLevel>,
     pub context_window: Option<u32>,
     pub max_tokens: Option<u32>,
-    /// Whether the model accepts image input. `None` leaves the protocol
-    /// default (Anthropic: vision; OpenAI-compatible: text-only). Set to
-    /// `Some(false)` for text-only models so images are never sent, and
-    /// `Some(true)` for vision-capable OpenAI-compatible models.
+    /// Whether the model accepts image input. `None` uses catalog metadata,
+    /// defaulting to image support for unknown models. Set to `Some(false)`
+    /// for text-only endpoints so images are never sent, or `Some(true)` to
+    /// override a catalog model's text-only capability.
     pub supports_image: Option<bool>,
 }
 
@@ -277,10 +277,6 @@ pub struct Config {
     /// the model is currently served by a cloud provider.
     pub cloud_default_model: Option<String>,
     pub cloud_providers: HashSet<String>,
-    /// The judge model the server published, if any: answers typed questions
-    /// about the conversation and drives lossless context pruning. Never a
-    /// chat provider; never in the picker.
-    pub judge: Option<JudgeEndpoint>,
 }
 
 /// Server-owned alias metadata, separate from user provider overrides.
@@ -288,19 +284,6 @@ pub struct Config {
 pub struct CloudModelCapabilities {
     pub profile: String,
     pub max_output_tokens: Option<u32>,
-}
-
-/// Where a judge model lives. It rides on the cloud gateway like any other
-/// model, so the same key and protocol apply; only its use differs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JudgeEndpoint {
-    pub provider: String,
-    pub protocol: Protocol,
-    pub base_url: String,
-    pub api_key: String,
-    pub model: String,
-    /// Context window the server published for the judge model, if any.
-    pub context_window: Option<u32>,
 }
 
 impl Config {
@@ -324,7 +307,6 @@ impl Config {
             cloud_model_protocols: HashMap::new(),
             cloud_default_model: None,
             cloud_providers: HashSet::new(),
-            judge: None,
         }
     }
 

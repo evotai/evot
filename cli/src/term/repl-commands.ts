@@ -1,6 +1,3 @@
-import { existsSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
 import type { Agent } from '../native/index.js'
 import type { ConfigInfo } from '../native/index.js'
 import { findLastAssistantMarkdown, findLastAssistantTurn } from '../session/assistant-markdown.js'
@@ -38,40 +35,21 @@ export function formatLogPaths(
   logPath: string | null,
   rendererPath: string | null = null,
   renderSummary: string | null = null,
-  judgeTracePath: string | null = null,
 ): string | null {
   if (!logPath) return null
   const lines = [`  Log: ${logPath}`]
-  if (judgeTracePath) lines.push(`  Judge trace: ${judgeTracePath}`)
   if (rendererPath) lines.push(`  Renderer run: ${rendererPath}`)
   if (renderSummary) lines.push(renderSummary)
   return lines.join('\n')
 }
 
-/** `sessions/<id>/judge-trace.jsonl`, or null until the judge has been asked. */
-export function judgeTracePath(sessionId: string | null, exists: (path: string) => boolean = existsSync): string | null {
-  if (!sessionId) return null
-  const path = join(homedir(), '.evotai', 'sessions', sessionId, 'judge-trace.jsonl')
-  return exists(path) ? path : null
-}
-
-/**
- * System prompt of a `/log <query>` fork. The screen log is what the user
- * saw; the judge trace is the evidence behind every `[JEV]` line in it.
- */
-export function logAnalysisPrompt(logPath: string, judgeTrace: string | null): string {
-  const files = [`Screen log file to analyze:\n${logPath}`]
-  if (judgeTrace) {
-    files.push(
-      `Judge trace (JSONL, one line per Jev request: the state text the judge read, the questions, and its answers):\n${judgeTrace}\n` +
-      'The screen log\'s "[JEV]" lines summarise these requests; read the trace to see why a call was kept, truncated or removed.',
-    )
-  }
+/** System prompt of a temporary `/log <query>` fork. */
+export function logAnalysisPrompt(logPath: string): string {
   return [
     'You are in a temporary log analysis session.',
     'This session is not persisted and does not affect the main session context.',
     '',
-    files.join('\n\n'),
+    `Screen log file to analyze:\n${logPath}`,
     '',
     'Rules:',
     '- Read relevant log sections before answering; do not guess',

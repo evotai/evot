@@ -619,6 +619,32 @@ fn explicit_overrides_apply_after_catalog_resolution() {
 }
 
 #[test]
+fn text_only_catalog_models_and_explicit_opt_out_still_disable_images() {
+    assert!(!ModelConfig::openai("deepseek-chat", "DeepSeek Chat").supports_image());
+
+    for protocol in [
+        ApiProtocol::AnthropicMessages,
+        ApiProtocol::OpenAiCompletions,
+        ApiProtocol::OpenAiResponses,
+    ] {
+        let config = resolved(
+            protocol,
+            "custom-proxy",
+            "team-model",
+            "https://proxy.example/v1",
+            None,
+            RouteCapabilities::default(),
+            ModelOverrides {
+                supports_image: Some(false),
+                ..Default::default()
+            },
+        );
+        assert!(!config.supports_image());
+        assert_eq!(config.input(), [InputModality::Text]);
+    }
+}
+
+#[test]
 fn openai_compat_profiles_are_transport_only() {
     let xai = OpenAiCompat::xai();
     assert_eq!(xai.thinking_format, ThinkingFormat::Xai);
@@ -871,6 +897,8 @@ fn unknown_models_use_modern_capacity_and_route_safe_reasoning() {
     ] {
         assert_eq!(config.context_window(), 1_000_000);
         assert_eq!(config.max_tokens(), 128_000);
+        assert!(config.supports_image());
+        assert_eq!(config.input(), [InputModality::Text, InputModality::Image]);
         assert!(config.reasoning());
         assert_eq!(config.default_thinking_level(), High);
         assert!(!config.can_remote_compact());

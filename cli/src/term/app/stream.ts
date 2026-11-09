@@ -1,6 +1,6 @@
 import { providerFailurePresentation } from '../../provider/error-presentation.js'
 import { parsePrivacyStop, type PrivacyDetail } from '../../privacy/notice.js'
-import { formatLongWaitError, reviewNotice } from '../../render/verbose.js'
+import { formatLongWaitError } from '../../render/verbose.js'
 import { buildError, buildPrivacyCard, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../render/output.js'
 import { formatDuration } from '../../render/format.js'
 import { compactionToolName, recordStreamDelta, resetStreamStats, setLongWait, setRetryWait, setSpinnerPhase, type SpinnerState } from '../spinner.js'
@@ -397,14 +397,6 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     }
   }
 
-  if (event.kind === 'context_pruned') {
-    const newEvents = state.appState.verboseEvents.slice(prev.appState.verboseEvents.length)
-    for (const evt of newEvents) {
-      routeVerbose(evt.text, { commit: commitLines, write: writeLines })
-    }
-    rerenderStatus = true
-  }
-
   if (event.kind === 'context_compaction_completed') {
     const flushed = flushStreaming(state)
     state = {
@@ -461,19 +453,6 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       mergeFlushExpanded(flushed)
     }
     rerenderStatus = true
-  }
-
-  if (known?.kind === 'tool_calls_reviewed') {
-    // One line, only when the window looks off-task. A clean window is
-    // silent; its scores are in the verbose log.
-    const notice = reviewNotice(known.payload.calls)
-    const newEvents = state.appState.verboseEvents.slice(prev.appState.verboseEvents.length)
-    for (const evt of newEvents) writeLines.push(...buildVerboseEvent(evt.text))
-    if (notice) {
-      const lines = buildSystem(notice)
-      commitLines.push(...lines)
-      noticeLines.push(...lines)
-    }
   }
 
   if (known?.kind === 'error') {

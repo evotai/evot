@@ -4,7 +4,6 @@
 //! assembly settings remain live between turns; the selected LLM is supplied
 //! separately as a per-run snapshot.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,12 +57,6 @@ pub struct TurnAssembler {
     pub(super) sandbox: SandboxPolicy,
     pub(super) provider_override: RwLock<Option<Arc<dyn evot_engine::provider::StreamProvider>>>,
     pub(super) processes: ProcessRegistry,
-    /// Prune verdicts per session, kept across runs so the judge is not asked
-    /// the same questions every prompt. Judge-decided only; lost on restart,
-    /// which merely costs one re-ask.
-    pub(super) prune_ledgers: RwLock<
-        HashMap<String, Arc<tokio::sync::Mutex<evot_engine::context::compaction::PruneLedger>>>,
-    >,
 }
 
 impl TurnAssembler {
@@ -78,7 +71,6 @@ impl TurnAssembler {
             sandbox: SandboxPolicy::from_config(&config.sandbox),
             provider_override: RwLock::new(None),
             processes: ProcessRegistry::new(),
-            prune_ledgers: RwLock::new(HashMap::new()),
         }
     }
 
@@ -103,7 +95,6 @@ impl TurnAssembler {
             },
             provider_override: RwLock::new(None),
             processes: ProcessRegistry::new(),
-            prune_ledgers: RwLock::new(HashMap::new()),
         }
     }
 
@@ -315,15 +306,6 @@ impl TurnAssembler {
                 provider_override: self.provider_override.read().clone(),
                 compaction_llm,
                 compaction_state,
-                // Re-resolved every run: the catalog decides whether pruning
-                // is on, and it can change while a session is open.
-                judge: crate::judge::current_for_session(session_dir.as_deref(), Some(session_id)),
-                prune_ledger: self
-                    .prune_ledgers
-                    .write()
-                    .entry(session_id.to_string())
-                    .or_default()
-                    .clone(),
             },
             history: prior_messages,
             input,

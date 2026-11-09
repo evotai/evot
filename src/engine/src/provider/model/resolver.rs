@@ -2,16 +2,13 @@ use super::catalog;
 use super::resolved::ModelConfig;
 use super::resolved::ModelRoute;
 use super::resolved::ResolveModelRequest;
-use crate::provider::route::ApiProtocol;
 
 pub(super) fn resolve(request: ResolveModelRequest, profile: Option<&str>) -> ModelConfig {
     let normalized_id = catalog::normalize_model_id(&request.model_id);
     let mut capabilities = profile
         .and_then(|id| catalog::resolve(&catalog::normalize_model_id(id)))
         .or_else(|| catalog::resolve(&normalized_id))
-        .unwrap_or_else(|| {
-            catalog::protocol_fallback(request.protocol == ApiProtocol::AnthropicMessages)
-        });
+        .unwrap_or_else(catalog::fallback);
 
     // An absent model id is the app's unconfigured sentinel, not an opaque
     // model alias. Do not offer reasoning controls before a model is selected.

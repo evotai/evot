@@ -229,9 +229,6 @@ pub(super) async fn check_compaction(
     };
 
     let should_retry = response.action == AfterResponseAction::Retry;
-    if let Some(outcome) = response.pruned.clone() {
-        super::driver::emit_context_pruned(ctrl, messages, outcome, tx).await;
-    }
     emit_compaction_events(ctrl, tracker, messages, &response, tx).await;
     should_retry
 }

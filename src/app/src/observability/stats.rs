@@ -148,9 +148,8 @@ fn default_compact_reason() -> CompactReason {
     CompactReason::Threshold
 }
 
-/// One run-end step of the judge-driven prune branch. `decided` records the
-/// verdicts with their probabilities so the judge's quality can be evaluated
-/// offline; `applied` is present when the context was actually edited.
+/// Historical pruning stats. Kept for lossless read/write of saved transcripts;
+/// no current runtime produces these records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextPrunedStats {
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -58,7 +58,7 @@ fn build_model_config_with_route(
 }
 
 #[test]
-fn openai_compatible_defaults_to_text_only() {
+fn openai_compatible_defaults_to_image_support() {
     let mc = build_model_config(
         Protocol::OpenAi,
         "openrouter",
@@ -69,9 +69,9 @@ fn openai_compatible_defaults_to_text_only() {
         None,
         None,
     );
-    // Unknown OpenAI-compatible models are conservatively text-only.
-    assert!(!mc.supports_image());
-    assert_eq!(mc.input(), vec![InputModality::Text]);
+    // Opaque proxy model IDs need no recognizable family name to accept images.
+    assert!(mc.supports_image());
+    assert_eq!(mc.input(), vec![InputModality::Text, InputModality::Image]);
     // Default window when none configured.
     assert_eq!(mc.context_window(), 1_000_000);
 }

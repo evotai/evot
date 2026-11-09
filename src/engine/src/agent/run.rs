@@ -222,8 +222,6 @@ impl Agent {
             },
             compaction_context: self.compaction_context.clone(),
             compaction_fallback_context: self.compaction_fallback_context.clone(),
-            judge: self.judge.clone(),
-            prune_ledger: self.prune_ledger.clone(),
             initial_compaction_state: self.compaction_state.clone(),
             execution_limits: self.execution_limits.clone(),
             cache_config: self.cache_config.clone(),

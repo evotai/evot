@@ -516,6 +516,59 @@ fn test_content_to_openai_multipart() {
 }
 
 #[test]
+fn opaque_proxy_models_send_images_unless_explicitly_disabled() {
+    use evotengine::provider::ModelOverrides;
+
+    let compat = OpenAiCompat::openrouter();
+    for supports_image in [None, Some(false), Some(true)] {
+        let model_config = resolved_model_config(
+            ApiProtocol::OpenAiCompletions,
+            "custom-proxy",
+            "team-model",
+            "https://proxy.example/v1",
+            Some(compat.clone()),
+            Default::default(),
+            ModelOverrides {
+                supports_image,
+                ..Default::default()
+            },
+        );
+        let config = StreamConfigBuilder::openai()
+            .model("team-model")
+            .model_config(model_config)
+            .messages(vec![Message::User {
+                provenance: None,
+                content: vec![
+                    Content::Text {
+                        text: "Describe this image".into(),
+                    },
+                    Content::Image {
+                        mime_type: "image/png".into(),
+                        source: ImageSource::Base64 {
+                            data: "aW1hZ2U=".into(),
+                        },
+                    },
+                ],
+                timestamp: 0,
+            }])
+            .build();
+        let body = build_request_body(&config, &compat);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content[0]["text"], "Describe this image");
+        if supports_image == Some(false) {
+            assert_eq!(content[1]["type"], "text");
+            assert!(content[1].get("image_url").is_none());
+        } else {
+            assert_eq!(content[1]["type"], "image_url");
+            assert_eq!(
+                content[1]["image_url"]["url"],
+                "data:image/png;base64,aW1hZ2U="
+            );
+        }
+    }
+}
+
+#[test]
 fn test_content_to_openai_text_only_model_drops_image() {
     let content = vec![
         Content::Text {

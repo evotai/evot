@@ -148,7 +148,7 @@ export interface MessageStats {
 // ---------------------------------------------------------------------------
 
 export interface VerboseEvent {
-  kind: 'llm_call' | 'llm_retry' | 'llm_completed' | 'compact_call' | 'compact_done' | 'jev_decided' | 'jev_applied' | 'jev_review'
+  kind: 'llm_call' | 'llm_retry' | 'llm_completed' | 'compact_call' | 'compact_done'
   text: string
   expandedText?: string
 }

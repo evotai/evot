@@ -9,7 +9,7 @@ describe('compaction spinner labels', () => {
     expect(toolActionLabel(compactionToolName('local', 'generating'))).toBe('Compacting · generating summary')
     expect(compactionToolName('local_fallback', 'generating')).toBe('compact_generating')
     expect(compactionToolName('remote', 'generating')).toBe('compact_remote')
-    expect(compactionToolName('pruning')).toBe('compact_prune')
+    expect(compactionToolName('pruning')).toBe('compact')
   })
 
   test('shows the active compaction method', () => {

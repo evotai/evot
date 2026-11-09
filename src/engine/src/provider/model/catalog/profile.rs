@@ -49,11 +49,11 @@ const FALLBACK_REASONING: ReasoningProfile = ReasoningProfile {
     anthropic_wire: None,
 };
 
-pub(in crate::provider::model) fn protocol_fallback(vision: bool) -> ModelCapabilities {
+pub(in crate::provider::model) fn fallback() -> ModelCapabilities {
     ModelProfile {
         max_input_tokens: 1_000_000,
         max_output_tokens: 128_000,
-        vision,
+        vision: true,
         reasoning: FALLBACK_REASONING,
         ..BASE
     }

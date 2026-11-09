@@ -95,10 +95,10 @@ describe('ModelAnnouncer', () => {
     expect(announcer.fresh([{ model: 'kimi-k3' }])).toEqual([])
 
     // Appears: announced.
-    expect(announcer.fresh([{ model: 'kimi-k3' }, { model: 'jev-latest' }]).map(m => m.model)).toEqual(['jev-latest'])
+    expect(announcer.fresh([{ model: 'kimi-k3' }, { model: 'new-chat-model' }]).map(m => m.model)).toEqual(['new-chat-model'])
     // Disappears, then reappears: silent.
     expect(announcer.fresh([{ model: 'kimi-k3' }])).toEqual([])
-    expect(announcer.fresh([{ model: 'kimi-k3' }, { model: 'jev-latest' }])).toEqual([])
+    expect(announcer.fresh([{ model: 'kimi-k3' }, { model: 'new-chat-model' }])).toEqual([])
     // A genuinely new id is still reported.
     expect(announcer.fresh([{ model: 'gpt-x' }]).map(m => m.model)).toEqual(['gpt-x'])
   })

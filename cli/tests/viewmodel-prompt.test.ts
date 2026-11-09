@@ -926,16 +926,6 @@ describe('prompt footer', () => {
     expect(footer).toBe('~/github/evotai/evot (main) │ gpt-5.6-sol • high │ context: 38.9% (105.8k/272k)')
   })
 
-  test('never badges the footer for judge pruning: prunes show as transcript cards', () => {
-    const footer = blocksToLines(buildPromptFooterBlocks(defaultInput({
-      columns: 160,
-      contextTokens: 105800,
-      contextWindow: 272000,
-    }))).map(stripAnsi)[0]!
-    expect(footer).toContain('context: 38.9% (105.8k/272k)')
-    expect(footer).not.toContain('jev')
-  })
-
   test('the background chip takes the brand tone, not cyan', () => {
     const { brandHex } = getTheme()
     const chip = blocksToLines(buildPromptFooterBlocks(defaultInput({ columns: 160, backgroundProcessCount: 1 }))).join('\n')

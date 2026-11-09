@@ -17,6 +17,7 @@ pub use pull::CloudState;
 pub use pull::PullOutcome;
 pub use push::local_host;
 pub use push::push_session;
+pub use push::push_session_with_auth;
 pub use push::share_session;
 pub use push::unshare_session;
 pub use push::ProgressSink;

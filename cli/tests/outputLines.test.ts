@@ -827,13 +827,13 @@ describe('buildVerboseEvent', () => {
       },
     })
     const lines = pruned.split('\n')
-    expect(lines[0]).toBe('[COMPACT] ✓ · jev prune · no summary · threshold · 256 → 170 msgs · 74k → 32k · saved 42k (57%)')
+    expect(lines[0]).toBe('[COMPACT] ✓ · legacy prune · no summary · threshold · 256 → 170 msgs · 74k → 32k · saved 42k (57%)')
     expect(pruned).not.toContain('L3')
     expect(pruned).not.toContain('reclaimed')
     expect(lines.at(-1)).toBe('    summary   removed 86 stale tool msgs')
     const card = buildEventCard(pruned)
     expect(card[0]!.text).toBe('✦ compact  74k → 32k')
-    expect(card[1]!.text).toContain('jev prune · no summary')
+    expect(card[1]!.text).toContain('legacy prune · no summary')
   })
 })
 

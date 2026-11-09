@@ -45,14 +45,11 @@ function msgBreakdown(ms: MessageStats | undefined): string {
   return parts.length > 0 ? ` · ${parts.join(' / ')}` : ''
 }
 
-function contextLine(used: number, contextWindow: number, saved?: number, judge?: string): string | undefined {
+function contextLine(used: number, contextWindow: number, saved?: number): string | undefined {
   if (contextWindow <= 0 || used <= 0) return undefined
   const pct = ((used / contextWindow) * 100).toFixed(0)
   const suffix = saved && saved > 0 ? `  (−${humanTokens(saved)})` : ''
-  // The catalog decides whether the judge-driven prune branch is on; say so
-  // where the number it acts on is shown.
-  const branch = judge ? ` · jev prune` : ''
-  return `    context   ${renderBar(used, contextWindow, 20)}   ${humanTokens(used)} / ${humanTokens(contextWindow)} · ${pct}%${suffix}${branch}`
+  return `    context   ${renderBar(used, contextWindow, 20)}   ${humanTokens(used)} / ${humanTokens(contextWindow)} · ${pct}%${suffix}`
 }
 
 function roleTokensLine(parts: string[]): string | undefined {
@@ -165,7 +162,7 @@ export function formatLlmCallStarted(data: Record<string, unknown>): string {
       : ms
         ? sysTok + toolDefTok + (ms.user_tokens ?? 0) + (ms.assistant_tokens ?? 0) + (ms.tool_result_tokens ?? 0) + (ms.image_tokens ?? 0)
         : 0
-    const line = contextLine(total, contextWindow, undefined, data.judge as string | undefined)
+    const line = contextLine(total, contextWindow)
     if (line) lines.push(line)
   }
 
@@ -361,10 +358,9 @@ export function formatCompactionCompleted(data: Record<string, unknown>): string
           ? 'refusal recovery'
           : reason
 
-      // A prune compaction is the judge cutting stale tool calls until the
-      // context fits again; nothing was summarised, nothing was lost.
+      // Preserve the meaning of historical pruning records without an active capability.
       const methodLabel = method === 'prune'
-        ? 'jev prune · no summary'
+        ? 'legacy prune · no summary'
         : method === 'remote'
           ? 'remote'
           : method === 'remote_failed_local'
@@ -391,176 +387,4 @@ export function formatCompactionCompleted(data: Record<string, unknown>): string
     default:
       return `[COMPACT] ✓ · ${type}`
   }
-}
-
-
-// ---------------------------------------------------------------------------
-// Judge prune (decide / apply)
-// ---------------------------------------------------------------------------
-
-interface PruneVerdict {
-  call_id: string
-  tool_name: string
-  arguments: string
-  decision: 'keep' | 'truncate' | 'remove'
-  keep_call?: number | null
-  keep_result?: number | null
-  saves_tokens: number
-}
-
-interface PruneRequest {
-  message_index: number
-  text: string
-  probability?: number | null
-  in_play: boolean
-}
-
-interface PruneDecided {
-  verdicts: PruneVerdict[]
-  context_tokens: number
-  pending_tokens: number
-  requests: number
-  elapsed_ms: number
-  user_requests?: PruneRequest[]
-}
-
-interface PruneApplied {
-  removed: number
-  truncated: number
-  skipped: number
-  before_tokens: number
-  after_tokens: number
-  before_messages: number
-  after_messages: number
-  trigger: 'run_end' | 'threshold' | 'before_compaction' | 'manual' | string
-}
-
-const APPLY_TRIGGER_LABEL: Record<string, string> = {
-  run_end: 'run end',
-  threshold: 'context past prune threshold',
-  before_compaction: 'before compaction',
-  manual: 'manual',
-}
-
-function pct(value: number | null | undefined): string {
-  return value === null || value === undefined ? '  –' : `${Math.round(value * 100).toString().padStart(3)}%`
-}
-
-/**
- * One judge round. The header is the summary; the task line says which user
- * requests the verdicts were judged against; each verdict follows as a
- * detail line so the stream can collapse them behind ctrl+o:
- *   [JEV] · 14 judged · remove 9 · truncate 2 · keep 3 · −38k pending · 2 req · 310ms
- *       task  [31] 88% analyse whether… · [61] 91% what triggers… · closed [0] 5% hi · [2] 20% fix the…
- *       remove   Read  {"path":"src/a.ts"}   call 12% · result  4% · −3.1k
- */
-export function formatJevDecided(decided: PruneDecided, contextWindow: number): string {
-  const counts = { keep: 0, truncate: 0, remove: 0 }
-  for (const v of decided.verdicts) counts[v.decision] += 1
-  const parts = [
-    `${decided.verdicts.length} judged`,
-    `remove ${counts.remove}`,
-    `truncate ${counts.truncate}`,
-    `keep ${counts.keep}`,
-    `−${humanTokens(decided.pending_tokens)} pending`,
-    `${decided.requests} req`,
-    formatDuration(decided.elapsed_ms),
-  ]
-  const lines = [`[JEV] · ${parts.join(' · ')}`]
-  const ctx = contextLine(decided.context_tokens, contextWindow)
-  if (ctx) lines.push(ctx)
-  const task = formatJevTask(decided.user_requests ?? [])
-  if (task) lines.push(`    ${task}`)
-  for (const v of decided.verdicts) {
-    const args = v.arguments.length > 60 ? `${v.arguments.slice(0, 57)}…` : v.arguments
-    const saved = v.saves_tokens > 0 ? ` · −${humanTokens(v.saves_tokens)}` : ''
-    lines.push(`    ${v.decision.padEnd(8)} ${v.tool_name}  ${args}   call ${pct(v.keep_call)} · result ${pct(v.keep_result)}${saved}`)
-  }
-  return lines.join('\n')
-}
-
-const TASK_TEXT_CHARS = 24
-
-/**
- * The user requests a decide round judged against, in play first, closed
- * after. Empty when the round recorded none (older sessions, single request).
- */
-export function formatJevTask(requests: PruneRequest[]): string {
-  if (requests.length === 0) return ''
-  const one = (r: PruneRequest): string => {
-    const text = r.text.replace(/\s+/g, ' ').trim()
-    const short = text.length > TASK_TEXT_CHARS ? `${text.slice(0, TASK_TEXT_CHARS - 1)}…` : text
-    const p = r.probability === null || r.probability === undefined ? '' : `${Math.round(r.probability * 100)}% `
-    return `[${r.message_index}] ${p}${short}`
-  }
-  const inPlay = requests.filter(r => r.in_play).map(one)
-  const closed = requests.filter(r => !r.in_play).map(one)
-  const parts = [`task  ${inPlay.join(' · ')}`]
-  if (closed.length > 0) parts.push(`closed ${closed.join(' · ')}`)
-  return parts.join(' · ')
-}
-
-/**
- *   [JEV] ✂ · removed 9 · truncated 2 · 120k → 82k (−38k) · cache cold
- */
-export function formatJevApplied(applied: PruneApplied, contextWindow: number): string {
-  const saved = applied.before_tokens - applied.after_tokens
-  const parts = [
-    `removed ${applied.removed}`,
-    `truncated ${applied.truncated}`,
-    `${humanTokens(applied.before_tokens)} → ${humanTokens(applied.after_tokens)} (−${humanTokens(Math.max(saved, 0))})`,
-    `${applied.before_messages} → ${applied.after_messages} msgs`,
-    APPLY_TRIGGER_LABEL[applied.trigger] ?? applied.trigger,
-  ]
-  if (applied.skipped > 0) parts.push(`${applied.skipped} skipped`)
-  const lines = [`[JEV] ✂ · ${parts.join(' · ')}`]
-  const ctx = contextLine(applied.after_tokens, contextWindow, saved)
-  if (ctx) lines.push(ctx)
-  return lines.join('\n')
-}
-
-
-// ---------------------------------------------------------------------------
-// Judge review of a tool-call window
-// ---------------------------------------------------------------------------
-
-export interface ReviewedCall {
-  tool_call_id: string
-  tool_name: string
-  arguments: string
-  relevance: number
-}
-
-/** Below this the judge thinks the call did not serve the task. */
-const OFF_TASK_BELOW = 0.4
-
-/**
- * The verbose record of one review window, every score included:
- *   [JEV] review · 6 calls · 2 off-task · avg 61%
- *       14%  Read  {"path":"docs/notes.md"}
- */
-export function formatToolCallsReviewed(calls: ReviewedCall[]): string {
-  const off = calls.filter(call => call.relevance < OFF_TASK_BELOW)
-  const avg = calls.length ? calls.reduce((sum, call) => sum + call.relevance, 0) / calls.length : 0
-  const lines = [`[JEV] review · ${calls.length} calls · ${off.length} off-task · avg ${Math.round(avg * 100)}%`]
-  for (const call of calls) {
-    lines.push(`    ${`${Math.round(call.relevance * 100)}%`.padStart(4)}  ${call.tool_name}  ${call.arguments}`)
-  }
-  return lines.join('\n')
-}
-
-/**
- * The one line the user sees, and only when the window looks off-task: at
- * least two calls, or a third of the window, below the threshold.
- *   ⚑ jev: 2 of the last 6 tool calls look off-task · Read docs/notes.md 14% · Bash ls -R 22%
- */
-export function reviewNotice(calls: ReviewedCall[]): string | undefined {
-  const off = calls.filter(call => call.relevance < OFF_TASK_BELOW)
-  if (off.length < 2 && off.length * 3 < calls.length) return undefined
-  const shown = off.slice(0, 3).map(call => {
-    const args = call.arguments.replace(/^\{|\}$/g, '').replace(/"(\w+)":/g, '$1=').replace(/"/g, '')
-    return `${call.tool_name} ${args.length > 40 ? `${args.slice(0, 37)}…` : args} ${Math.round(call.relevance * 100)}%`
-  })
-  const more = off.length > shown.length ? ` · +${off.length - shown.length}` : ''
-  return `  ⚑ jev: ${off.length} of the last ${calls.length} tool calls look off-task · ${shown.join(' · ')}${more}`
 }

@@ -1,6 +1,7 @@
-//! What a decide round and an apply batch report. Serialized into the
-//! session's judge trace and events: published shapes, extend with
-//! `#[serde(default)]`, never rename.
+//! Read/write compatibility DTOs for retired context-pruning events.
+//!
+//! Historical sessions and addon JSON retain these published shapes. They
+//! contain no runtime behavior and must never enable external model calls.
 
 use serde::Deserialize;
 use serde::Serialize;

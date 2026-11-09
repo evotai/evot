@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "synced_at": 123,
+  "response": {
+    "version": 640,
+    "default_model": "jev-latest",
+    "providers": [
+      {
+        "name": "evot-pro",
+        "protocol": "openai",
+        "base_url": "https://unused.example.test/v1/llm",
+        "api_key": "fixture-key",
+        "default_model": "jev-latest",
+        "models": ["jev-latest", "chat-model", "legacy-chat"]
+      },
+      {
+        "name": "retired-only",
+        "protocol": "openai",
+        "base_url": "https://unused.example.test/v1/llm",
+        "api_key": "fixture-key",
+        "default_model": "jev-latest",
+        "models": ["jev-latest"]
+      }
+    ],
+    "models": [
+      { "id": "jev-latest", "role": "judge", "sort_order": 100 },
+      { "id": "chat-model", "role": "chat", "sort_order": 1 }
+    ],
+    "notices": []
+  }
+}

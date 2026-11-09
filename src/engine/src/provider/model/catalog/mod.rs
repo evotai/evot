@@ -15,4 +15,4 @@ mod xai;
 
 pub(super) use lookup::normalize_model_id;
 pub(super) use lookup::resolve;
-pub(super) use profile::protocol_fallback;
+pub(super) use profile::fallback;

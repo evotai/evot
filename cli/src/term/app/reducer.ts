@@ -3,7 +3,7 @@
  */
 
 import { isKnownRunEvent, type RunEvent } from '../../native/contracts/query-event.js'
-import { formatLlmCallStarted, formatLlmCallRetry, formatLlmCallCompleted, formatCompactionStarted, formatCompactionCompleted, formatJevDecided, formatJevApplied, formatToolCallsReviewed } from '../../render/verbose.js'
+import { formatLlmCallStarted, formatLlmCallRetry, formatLlmCallCompleted, formatCompactionStarted, formatCompactionCompleted } from '../../render/verbose.js'
 import { emptyRunStats, type AppState } from './state.js'
 import { streamTokenRate } from '../../provider/stream-rate.js'
 import type { MessageStats, UIAssistantBlock, UIMessage, UIToolCall } from './types.js'
@@ -256,7 +256,6 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
         // The event carries the window for this request; the previous state
         // is only a fallback (it is 0 on the first call of a process).
         context_window: p.context_window ?? state.currentRunStats.contextWindow,
-        judge: state.judge,
       }
       const text = formatLlmCallStarted(data)
 
@@ -433,32 +432,6 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
           : state.sessionTokens,
         verboseEvents: [...state.verboseEvents, { kind: 'compact_done', text }],
       }
-    }
-
-    case 'tool_calls_reviewed': {
-      // Bookkeeping only; the stream decides whether the window is worth a
-      // notice. The verbose line records every score for later study.
-      const text = formatToolCallsReviewed(event.payload.calls)
-      return { ...state, verboseEvents: [...state.verboseEvents, { kind: 'jev_review', text }] }
-    }
-
-    case 'context_pruned': {
-      const p = event.payload
-      const contextWindow = p.context_window && p.context_window > 0 ? p.context_window : state.currentRunStats.contextWindow
-      const events = [...state.verboseEvents]
-      if (p.decided) events.push({ kind: 'jev_decided', text: formatJevDecided(p.decided, contextWindow) })
-      let stats = state.currentRunStats
-      let sessionTokens = state.sessionTokens
-      if (p.applied) {
-        events.push({ kind: 'jev_applied', text: formatJevApplied(p.applied, contextWindow) })
-        // The prune rewrote the model's context: the footer follows it now
-        // rather than at the next usage report.
-        if (p.applied.after_tokens > 0) {
-          stats = { ...stats, contextTokens: p.applied.after_tokens }
-          sessionTokens = { ...sessionTokens, contextTokens: p.applied.after_tokens, contextWindow }
-        }
-      }
-      return { ...state, currentRunStats: stats, sessionTokens, verboseEvents: events }
     }
 
     case 'run_finished': {

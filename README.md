@@ -98,7 +98,7 @@ Supported methods: `initialize`, `session/new`, `session/prompt`, `session/cance
 
 - **Small by design.** ~1k prompt tokens and four core tools: `read`, `bash`, `edit`, `write`.
 - **Less waiting.** Long-running commands continue in the background while the agent works on independent tasks.
-- **Lean context.** [TypeSafe Jev](https://typesafe.ai) prunes obsolete tool calls and trims stale results without summarising. Compaction is a fallback.
+- **Lean context.** Automatic context compaction keeps long sessions within the model's budget while preserving recent work.
 - **Your choice of model.** Free and low-cost hosted models, or your own provider keys.
 
 ## Performance

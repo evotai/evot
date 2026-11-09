@@ -29,7 +29,6 @@ const SLOW_THRESHOLD_MS = 8000
 const SLOW_THRESHOLD_BY_TOOL_MS: Record<string, number> = {
   bash: 30_000,
   compact: 30_000,
-  compact_prune: 30_000,
   compact_remote: 30_000,
   compact_local: 30_000,
   compact_local_fallback: 30_000,
@@ -94,7 +93,6 @@ export function compactionToolName(phase: string | null, activity?: string | nul
     if (activity === 'generating') return 'compact_generating'
   }
   switch (phase) {
-    case 'pruning': return 'compact_prune'
     case 'remote': return 'compact_remote'
     case 'local_fallback': return 'compact_local_fallback'
     case 'local': return 'compact_local'
@@ -117,7 +115,6 @@ export function toolActionLabel(toolName: string): string {
     case 'web_fetch': case 'webfetch': return 'Fetching'
     case 'skill': return 'Loading skill'
     case 'compact': return 'Compacting'
-    case 'compact_prune': return 'Asking judge which tool calls still matter'
     case 'compact_remote': return 'Compacting remote'
     case 'compact_local': return 'Compacting local'
     case 'compact_local_fallback': return 'Compacting local fallback'

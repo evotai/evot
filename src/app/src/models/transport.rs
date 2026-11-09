@@ -1,5 +1,5 @@
 //! The one place LLM transports are built, so every caller (agent turns,
-//! compaction, judge, suggestions) gets the privacy boundary.
+//! compaction, suggestions) gets the privacy boundary.
 use std::sync::Arc;
 
 use evot_engine::provider::AnthropicProvider;

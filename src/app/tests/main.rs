@@ -62,8 +62,6 @@ mod feishu_state_test;
 mod id_validation_test;
 #[path = "input_provenance_test.rs"]
 mod input_provenance_test;
-#[path = "judge_trace_test.rs"]
-mod judge_trace_test;
 #[path = "manual_compact_llm_test.rs"]
 mod manual_compact_llm_test;
 mod model_catalog_test;
@@ -82,6 +80,8 @@ mod privacy_runtime_test;
 mod privacy_test;
 mod process_registry_test;
 mod resume_context_anchor_test;
+#[path = "retired_pruning_test.rs"]
+mod retired_pruning_test;
 #[path = "run_ask_channel_test.rs"]
 mod run_ask_channel_test;
 #[path = "run_manager_test.rs"]

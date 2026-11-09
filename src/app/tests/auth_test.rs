@@ -250,7 +250,8 @@ const TIER_NAMED_CACHE_JSON: &str = r#"{
 }"#;
 
 /// The provider name is the tier and stays put when the tier mixes wire
-/// formats; each model routes by its own protocol, the judge included.
+/// formats; chat models route by their protocol and retired auxiliary models
+/// stay out of all providers.
 #[test]
 fn a_tier_named_group_routes_each_model_by_its_protocol() {
     let _guard = env_lock().lock().unwrap();
@@ -283,10 +284,10 @@ fn a_tier_named_group_routes_each_model_by_its_protocol() {
     assert_eq!(grok.protocol.to_string(), "openai");
     assert!(grok.model_config.honors_reasoning_effort());
 
-    let judge = config.judge.as_ref().expect("judge published");
-    assert_eq!(judge.provider, "evot-pro");
-    assert_eq!(judge.model, "jev-latest");
-    assert_eq!(judge.protocol.to_string(), "openai");
+    assert!(config
+        .providers
+        .values()
+        .all(|profile| !profile.models.iter().any(|model| model == "jev-latest")));
 
     // A task saved while the server split the tier keeps resolving.
     assert_eq!(

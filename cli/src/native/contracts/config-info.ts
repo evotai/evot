@@ -30,7 +30,7 @@ export interface ConfigInfo {
   baseUrl: string | null
   availableModels: ModelOption[]
   thinkingLevel: string
-  /** Judge model (Jev) the catalog publishes; present = judge prune is on. */
+  /** Retired field, decoded only for historical addon compatibility. */
   judge?: string
   /** The account's pinned landing model (cloud wire id), set with Space in the
    *  picker or by an admin. Absent when the account follows catalog rank. */

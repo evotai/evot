@@ -294,7 +294,7 @@ async fn unsupported_notices_are_skipped_without_failing_the_batch(
 }
 
 #[test]
-fn share_export_shows_applied_prunes_with_their_task() -> Result<(), Box<dyn std::error::Error>> {
+fn share_export_ignores_retired_pruning_diagnostics() -> Result<(), Box<dyn std::error::Error>> {
     let meta = SessionMeta::new("session".into(), "/project".into(), "test-model".into());
     let rows = vec![
         row(1, json!({"type":"user", "text":"hello"}))?,
@@ -328,15 +328,6 @@ fn share_export_shows_applied_prunes_with_their_task() -> Result<(), Box<dyn std
     ];
     let share = export_session(&meta, &rows, "test");
     let entries = share.data["entries"].as_array().ok_or("entries missing")?;
-    assert_eq!(entries.len(), 3, "user + two applied prunes");
-    assert_eq!(entries[1]["customType"], "evot.prune");
-    assert_eq!(
-        entries[1]["content"],
-        "✂ jev prune · removed 1 · truncated 11 · 26k → 11k tokens · savings ≥ 20% of context\nTask: [6] analyse whether jev scores persist · [10] what triggers a prune?"
-    );
-    assert_eq!(
-        entries[2]["content"],
-        "✂ jev prune · removed 2 · truncated 0 · 900 → 400 tokens · cache cold"
-    );
+    assert_eq!(entries.len(), 1, "only conversation content is exported");
     Ok(())
 }

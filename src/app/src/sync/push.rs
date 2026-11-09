@@ -153,10 +153,32 @@ pub async fn push_session(
     force: bool,
     on_progress: &ProgressSink<'_>,
 ) -> Result<PushOutcome> {
+    push_session_with_auth(
+        || Ok(state.clone()),
+        storage,
+        session_id,
+        evot_version,
+        force,
+        on_progress,
+    )
+    .await
+}
+
+/// Resolve credentials only after confirming the session has cloud sync enabled.
+/// Local-only sessions must stay a no-op even when signed out or auth is unreadable.
+pub async fn push_session_with_auth(
+    load_auth: impl FnOnce() -> Result<AuthState>,
+    storage: &Arc<dyn Storage>,
+    session_id: &str,
+    evot_version: &str,
+    force: bool,
+    on_progress: &ProgressSink<'_>,
+) -> Result<PushOutcome> {
     let meta = load_meta(storage, session_id).await?;
     let Some(cloud) = meta.cloud.clone() else {
         return Ok(PushOutcome::NotShared);
     };
+    let state = load_auth()?;
     // Reading and scrubbing a long session takes a moment; say so first.
     on_progress(PushProgress {
         uploaded_entries: 0,
@@ -294,7 +316,7 @@ pub async fn push_session(
                 tick(acknowledged_bytes, PushPhase::RateLimited { retry_in })
             }
         };
-        let response = client::push(state, &payload, &context, &on_event).await?;
+        let response = client::push(&state, &payload, &context, &on_event).await?;
         match response {
             PushResponse::Acked(ack) => {
                 // Record every acknowledged batch, so an interrupted upload

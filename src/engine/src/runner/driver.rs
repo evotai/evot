@@ -176,16 +176,10 @@ async fn run_loop(
                 activity: update.activity,
             });
         });
-        let mut controller = crate::context::CompactionController::new(
+        let controller = crate::context::CompactionController::new(
             crate::context::CompactionConfig::from_context_config(ctx_cfg),
         )
         .with_observer(observer);
-        if let Some(judge) = config.judge.clone() {
-            controller = controller.with_judge(judge);
-        }
-        if let Some(ledger) = config.prune_ledger.clone() {
-            controller = controller.with_prune_ledger(ledger);
-        }
         match config.initial_compaction_state.clone() {
             Some(state) => controller.with_state(state),
             None => controller,
@@ -245,26 +239,6 @@ async fn run_loop(
             context.messages.push(prompt);
         }
     }
-
-    // A resumed session reaches its first run with a ledger the judge has
-    // never seen. This boundary costs the same as a run end (the cache is
-    // cold, the prompt is new), so the judge gets its first look here rather
-    // than after the first response has already overflowed.
-    if let Some(controller) = compaction_controller.as_ref() {
-        if controller.prune_pending_first_ask().await {
-            prune_after_run(
-                &mut compaction_controller,
-                &context_tracker,
-                &mut context.messages,
-                cancel.clone(),
-                tx,
-            )
-            .await;
-        }
-    }
-
-    // Tool calls the judge has not reviewed yet; reviewed in windows.
-    let mut review_queue: Vec<crate::judge::relevance::ProposedCall> = Vec::new();
 
     // Check for steering messages at start
     let mut pending: Vec<AgentMessage> = config
@@ -532,36 +506,6 @@ async fn run_loop(
                 // model re-issue it rather than executing corrupted input.
                 tool_results = fail_truncated_tool_calls(&tool_calls, tx).await;
             } else {
-                // Every REVIEW_WINDOW calls the judge reviews that window in
-                // the background: one request, independent of the main model,
-                // nothing waits for it. The UI speaks up only when the window
-                // looks off-task.
-                if let Some(judge) = config.judge.clone() {
-                    review_queue.extend(tool_calls.iter().cloned());
-                    while review_queue.len() >= crate::judge::relevance::REVIEW_WINDOW {
-                        let window: Vec<_> = review_queue
-                            .drain(..crate::judge::relevance::REVIEW_WINDOW)
-                            .collect();
-                        let state = crate::judge::relevance::relevance_state(&context.messages);
-                        let (judge, review_tx, review_cancel) =
-                            (judge.clone(), tx.clone(), cancel.clone());
-                        tokio::spawn(async move {
-                            if let Some(calls) = crate::judge::relevance::review_window(
-                                judge,
-                                state,
-                                window,
-                                review_cancel,
-                            )
-                            .await
-                            {
-                                review_tx
-                                    .send(AgentEvent::ToolCallsReviewed { calls })
-                                    .await
-                                    .ok();
-                            }
-                        });
-                    }
-                }
                 let idle_clock = tracker.as_ref().map(|t| t.idle_clock());
                 let execution = execute_tool_calls(
                     &context.tools,
@@ -734,14 +678,6 @@ async fn run_loop(
             new_messages.pop();
             continue;
         }
-        prune_after_run(
-            &mut compaction_controller,
-            &context_tracker,
-            &mut context.messages,
-            cancel.clone(),
-            tx,
-        )
-        .await;
         break;
     }
 
@@ -772,51 +708,4 @@ fn settles_run(
         && tool_results
             .iter()
             .all(|r| !matches!(r, Message::ToolResult { is_error: true, .. }))
-}
-
-/// The judge-driven prune branch at run end: the run is over and the next
-/// request is a fresh user prompt, so pending edits land here at the latest.
-async fn prune_after_run(
-    controller: &mut Option<crate::context::CompactionController>,
-    tracker: &ContextTracker,
-    messages: &mut Vec<AgentMessage>,
-    cancel: tokio_util::sync::CancellationToken,
-    tx: &EventSink,
-) {
-    let Some(controller) = controller.as_mut().filter(|c| c.has_judge()) else {
-        return;
-    };
-    let context_tokens = crate::context::tokens::total_tokens(messages)
-        .saturating_add(tracker.system_tool_overhead_tokens());
-    let outcome = controller
-        .prune_step(
-            messages,
-            context_tokens,
-            crate::context::compaction::ApplyTrigger::RunEnd,
-            crate::context::now_ms(),
-            cancel,
-        )
-        .await;
-    emit_context_pruned(controller, messages, outcome, tx).await;
-}
-
-/// The `ContextPruned` event for one prune step, when it did anything.
-pub(crate) async fn emit_context_pruned(
-    controller: &crate::context::CompactionController,
-    messages: &[AgentMessage],
-    outcome: crate::context::compaction::PruneOutcome,
-    tx: &EventSink,
-) {
-    if outcome.decided.is_none() && outcome.applied.is_none() {
-        return;
-    }
-    tx.send(AgentEvent::ContextPruned {
-        decided: outcome.decided,
-        applied: outcome.applied,
-        messages: messages.to_vec(),
-        state: controller.state().clone(),
-        context_window: controller.config().displayed_window(),
-    })
-    .await
-    .ok();
 }

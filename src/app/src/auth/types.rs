@@ -65,9 +65,8 @@ pub struct FreeModelOption {
     /// older servers, which keeps the catalog's own order.
     #[serde(default)]
     pub sort_order: i64,
-    /// `chat` (default) answers in the conversation; `judge` answers typed
-    /// questions about it (TypeSafe Jev) and never generates text. Judges are
-    /// kept out of the picker and used for side decisions such as pruning.
+    /// Published role. Empty or `chat` is conversational; other roles are
+    /// retained for cache compatibility but never become chat providers.
     #[serde(default)]
     pub role: String,
     /// Context window in tokens, when the server publishes it. Zero (and
@@ -92,8 +91,8 @@ impl FreeModelOption {
         (self.context_window > 0).then_some(self.context_window)
     }
 
-    pub fn is_judge(&self) -> bool {
-        self.role.eq_ignore_ascii_case("judge")
+    pub fn is_chat(&self) -> bool {
+        self.role.is_empty() || self.role.eq_ignore_ascii_case("chat")
     }
 }
 

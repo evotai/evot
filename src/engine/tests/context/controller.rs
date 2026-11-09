@@ -1190,31 +1190,6 @@ async fn threshold_suppression_is_scoped_to_the_model() {
     let _ = base_ts;
 }
 
-/// A judge that wants everything gone: every question answers "no".
-struct DropAllJudge;
-
-#[async_trait::async_trait]
-impl evotengine::judge::Judge for DropAllJudge {
-    async fn ask(
-        &self,
-        _state: &str,
-        questions: &[evotengine::judge::Question],
-        _cancel: CancellationToken,
-    ) -> Result<
-        std::collections::HashMap<String, evotengine::judge::Answer>,
-        evotengine::judge::JudgeError,
-    > {
-        Ok(questions
-            .iter()
-            .map(|q| {
-                (q.id.clone(), evotengine::judge::Answer::Noul {
-                    probability: 0.0,
-                })
-            })
-            .collect())
-    }
-}
-
 fn tool_call_msg(id: &str) -> AgentMessage {
     AgentMessage::Llm(Message::Assistant {
         content: vec![Content::ToolCall {
@@ -1233,71 +1208,17 @@ fn tool_call_msg(id: &str) -> AgentMessage {
     })
 }
 
-/// At the threshold a judge gets to prune first; when the lossless cut is
-/// enough there is no summary at all.
-#[tokio::test]
-async fn threshold_with_judge_prunes_instead_of_summarising() {
-    let mut ctrl = CompactionController::new(config_small()).with_judge(Arc::new(DropAllJudge));
-
-    let mut messages = vec![
-        user_msg("read the log"),
-        tool_call_msg("c1"),
-        tool_result_msg("c1", &big_text(30_000)),
-    ];
-    for _ in 0..6 {
-        messages.push(assistant_msg("done"));
-    }
-
-    let usage = UsageSnapshot {
-        input: 8_500,
-        cache_read: 0,
-        cache_write: 0,
-        output: 100,
-        total_tokens: 0,
-        model: model_id(),
-        timestamp: 1000,
-        stop_reason: StopReason::Stop,
-        error_message: None,
-    };
-
-    let response = ctrl
-        .after_response(
-            &mut messages,
-            &usage,
-            &model_id(),
-            None,
-            CancellationToken::new(),
-        )
-        .await;
-    let stats = match response.stats {
-        Some(stats) => stats,
-        None => panic!("threshold with a judge must compact"),
-    };
-    assert_eq!(stats.method, Some(evotengine::CompactionMethod::Prune));
-    assert!(stats.summary.is_none(), "lossless cut was enough");
-    assert!(
-        !messages.iter().any(|m| matches!(
-            m,
-            AgentMessage::Llm(Message::ToolResult { content, .. })
-                if content.iter().any(|c| matches!(c, Content::Text { text } if text.len() > 1_000))
-        )),
-        "the big result was pruned"
-    );
-}
-
 /// A provider rejection is authoritative even when the local estimate fits.
-/// A prune-only cut must not consume the sole compact-and-retry allowance.
 #[tokio::test]
-async fn overflow_with_judge_summarizes_even_when_pruning_would_fit() {
+async fn overflow_summarizes_even_when_local_estimate_fits() {
     for summarizer_fails in [false, true] {
         let config = config_small();
-        let mut ctrl = CompactionController::new(config.clone()).with_judge(Arc::new(DropAllJudge));
+        let mut ctrl = CompactionController::new(config.clone());
         let mut messages = vec![
             user_msg(&big_text(8_000)),
             tool_call_msg("c1"),
             tool_result_msg("c1", &big_text(12_000)),
         ];
-        // Leave the old tool call outside the judge's protected recent tail.
         for _ in 0..6 {
             messages.push(assistant_msg("done"));
         }
@@ -1352,7 +1273,13 @@ async fn overflow_with_judge_summarizes_even_when_pruning_would_fit() {
             None => panic!("overflow recovery must compact before retrying"),
         };
         assert!(stats.summary.is_some(), "overflow requires a real summary");
-        assert_ne!(stats.method, Some(evotengine::CompactionMethod::Prune));
+        assert!(matches!(
+            stats.method,
+            Some(
+                evotengine::CompactionMethod::Local
+                    | evotengine::CompactionMethod::RemoteFailedLocal
+            )
+        ));
         assert!(stats.after_tokens < stats.before_tokens);
         assert!(!captured.lock().is_empty(), "attempt the LLM summary first");
         assert!(messages.iter().any(|message| matches!(
@@ -1363,86 +1290,23 @@ async fn overflow_with_judge_summarizes_even_when_pruning_would_fit() {
     }
 }
 
-/// Between the prune threshold (60% of the window) and the summary threshold
-/// a response triggers the prune branch alone: pending edits land, the
-/// response reports them, and no compaction is planned.
+/// Below the summary threshold, context stays unchanged and no side model is called.
 #[tokio::test]
-async fn mid_run_prune_fires_between_the_prune_and_summary_thresholds() {
+async fn below_summary_threshold_leaves_history_unchanged() {
     let config = config_small();
-    let prune_at = config.prune_trigger_threshold();
-    let summary_at = config.trigger_threshold();
-    assert!(prune_at < summary_at, "{prune_at} < {summary_at}");
-    let mut ctrl = CompactionController::new(config).with_judge(Arc::new(DropAllJudge));
-
-    // Enough calls to clear the judge's minimum batch (`decide_min_candidates`).
-    let mut messages = vec![user_msg("read the logs")];
-    for n in 0..10 {
-        let id = format!("c{n}");
-        messages.push(tool_call_msg(&id));
-        messages.push(tool_result_msg(&id, &big_text(3_000)));
-    }
-    for _ in 0..6 {
-        messages.push(assistant_msg("done"));
-    }
-    let before = messages.len();
-
-    let usage = UsageSnapshot {
-        input: (prune_at + summary_at) / 2,
-        cache_read: 0,
-        cache_write: 0,
-        output: 100,
-        total_tokens: 0,
-        model: model_id(),
-        timestamp: 1000,
-        stop_reason: StopReason::Stop,
-        error_message: None,
-    };
-    let response = ctrl
-        .after_response(
-            &mut messages,
-            &usage,
-            &model_id(),
-            None,
-            CancellationToken::new(),
-        )
-        .await;
-
-    assert!(response.stats.is_none(), "no summary below its threshold");
-    let applied = match response.pruned.and_then(|p| p.applied) {
-        Some(applied) => applied,
-        None => panic!("the prune branch must have applied"),
-    };
-    assert_eq!(
-        applied.trigger,
-        evotengine::context::compaction::ApplyTrigger::Threshold
-    );
-    assert_eq!(
-        applied.removed + applied.truncated,
-        10,
-        "every unpinned call was cut"
-    );
-    assert!(messages.len() < before);
-}
-
-/// Below the prune threshold a response leaves history alone.
-#[tokio::test]
-async fn below_the_prune_threshold_nothing_is_pruned() {
-    let config = config_small();
-    let usage_tokens = config.prune_trigger_threshold() / 2;
-    let mut ctrl = CompactionController::new(config).with_judge(Arc::new(DropAllJudge));
+    let mut ctrl = CompactionController::new(config.clone());
     let mut messages = vec![
         user_msg("read the log"),
         tool_call_msg("c1"),
-        tool_result_msg("c1", &big_text(30_000)),
+        tool_result_msg("c1", &big_text(3_000)),
+        assistant_msg("done"),
     ];
-    for _ in 0..6 {
-        messages.push(assistant_msg("done"));
-    }
+    let original = messages.clone();
     let usage = UsageSnapshot {
-        input: usage_tokens,
+        input: config.trigger_threshold() - 100,
         cache_read: 0,
         cache_write: 0,
-        output: 100,
+        output: 0,
         total_tokens: 0,
         model: model_id(),
         timestamp: 1000,
@@ -1458,7 +1322,8 @@ async fn below_the_prune_threshold_nothing_is_pruned() {
             CancellationToken::new(),
         )
         .await;
-    assert!(response.stats.is_none() && response.pruned.is_none());
+    assert!(response.stats.is_none());
+    assert_eq!(messages, original);
 }
 
 fn refusal_usage(ts: u64) -> UsageSnapshot {

@@ -200,7 +200,6 @@ import {
 import { TerminalTitle } from './title.js'
 import {
   formatLogPaths,
-  judgeTracePath,
   logAnalysisPrompt,
   handleClipCommand,
   handleCopyCommand,
@@ -1501,7 +1500,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // Re-read backend config after a model switch so the footer reflects the
     // new provider's effective thinking level (it can differ per provider).
     try { configInfo = agent.configInfo() } catch {}
-    if (appState.judge !== configInfo?.judge) appState = { ...appState, judge: configInfo?.judge }
   }
   refreshConfigInfo()
 
@@ -3146,7 +3144,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       clearAll()
       const logPath = screenLog.filePath
       if (logPath) {
-        const text = formatLogPaths(logPath, rendererTrace.filePath, renderDiagnostics.summary(), judgeTracePath(sessionId))
+        const text = formatLogPaths(logPath, rendererTrace.filePath, renderDiagnostics.summary())
         commitSystem('sys-log', text ?? `  Log: ${logPath}`)
       }
       else commitSystem('sys-log', '  No active screen log.')
@@ -3867,10 +3865,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   function reloadCloudContent(fresh = cloudCampaigns()): void {
     refreshCampaigns(adSlot, fresh, hasPremiumModel(configInfo), Date.now())
     try { configInfo = agent.configInfo() } catch {}
-    // The judge follows the catalog: switching it off on the server turns the
-    // `jev prune` marker off here on the next sync, and the engine re-reads
-    // the same cache per run.
-    if (appState.judge !== configInfo?.judge) appState = { ...appState, judge: configInfo?.judge }
   }
 
   // Live sync: re-fetch the cloud catalog so new notices, ads and models
@@ -4224,11 +4218,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     } else if (!query) {
       const logPath = screenLog.filePath
       if (logPath) {
-        const text = formatLogPaths(logPath, rendererTrace.filePath, renderDiagnostics.summary(), judgeTracePath(sid))
+        const text = formatLogPaths(logPath, rendererTrace.filePath, renderDiagnostics.summary())
         commitSystem('sys-log', text ?? `  Log: ${logPath}`)
       }
       else if (sid) {
-        const text = formatLogPaths(join(logDir, `${sid}.screen.log`), null, null, judgeTracePath(sid))
+        const text = formatLogPaths(join(logDir, `${sid}.screen.log`))
         commitSystem('sys-log', text ?? `  Log: ${join(logDir, `${sid}.screen.log`)}`)
       }
       else commitSystem('sys-log', `  Log dir: ${logDir} (no active session)`)
@@ -4237,7 +4231,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     } else {
       // /log <query> — fork agent to analyze log
       const logPath = join(logDir, `${sid}.screen.log`)
-      const systemPrompt = logAnalysisPrompt(logPath, judgeTracePath(sid))
+      const systemPrompt = logAnalysisPrompt(logPath)
       try {
         const forked = agent.fork(systemPrompt)
         logMode = forked

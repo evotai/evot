@@ -121,8 +121,12 @@ impl NapiAgent {
         on_progress: Option<ProgressCallback>,
     ) -> Result<String> {
         let callback = on_progress;
-        let outcome = evot::api::sync::push_session(
-            &auth()?,
+        let outcome = evot::api::sync::push_session_with_auth(
+            || {
+                evot::api::auth::load_auth()?.ok_or_else(|| {
+                    evot::api::EvotError::Conf("sharing requires sign-in; run /login".into())
+                })
+            },
             &self.agent.storage(),
             &session_id,
             env!("CARGO_PKG_VERSION"),

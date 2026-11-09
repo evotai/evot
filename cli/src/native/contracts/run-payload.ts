@@ -68,6 +68,7 @@ export const runPayloadSchemas = {
     activity: optional(nullable(oneOf('waiting', 'generating'))),
   }),
   context_compaction_completed: object({ reason, result: compactionResult, summary: optional(nullable(text)), context_window: optional(uint), will_retry: optional(boolean) }),
+  // Retired events are decoded for historical payloads, never acted on.
   tool_calls_reviewed: object({
     calls: array(object({ tool_call_id: text, tool_name: text, arguments: text, relevance: number })),
   }),

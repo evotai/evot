@@ -291,20 +291,6 @@ pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
             ]
         }
 
-        evot_engine::AgentEvent::ToolCallsReviewed { calls } => {
-            vec![RuntimeEvent::Public(RunEventPayload::ToolCallsReviewed {
-                calls: calls
-                    .iter()
-                    .map(|call| crate::agent::run::event::ReviewedCallPayload {
-                        tool_call_id: call.tool_call_id.clone(),
-                        tool_name: call.tool_name.clone(),
-                        arguments: call.arguments.clone(),
-                        relevance: call.relevance,
-                    })
-                    .collect(),
-            })]
-        }
-
         evot_engine::AgentEvent::ProgressMessage {
             tool_call_id,
             tool_name,
@@ -536,56 +522,6 @@ pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
                     activity: *activity,
                 },
             )]
-        }
-
-        evot_engine::AgentEvent::ContextPruned {
-            decided,
-            applied,
-            messages,
-            state,
-            context_window,
-        } => {
-            let mut events = vec![
-                RuntimeEvent::Transcript(
-                    TranscriptStats::ContextPruned(crate::observability::ContextPrunedStats {
-                        decided: decided.clone(),
-                        applied: applied.clone(),
-                        context_window: *context_window,
-                    })
-                    .to_item(),
-                ),
-                RuntimeEvent::Public(RunEventPayload::ContextPruned {
-                    decided: decided.clone(),
-                    applied: applied.clone(),
-                    context_window: *context_window,
-                }),
-            ];
-            // An applied prune is a new context and persists through the same
-            // path as a compaction; the record says it was a prune.
-            if let Some(report) = applied.as_ref().filter(|r| r.removed + r.truncated > 0) {
-                events.push(RuntimeEvent::CompactionCompleted {
-                    reason: crate::types::CompactReason::Prune,
-                    result: crate::observability::CompactionResult::Compacted {
-                        before_message_count: report.before_messages,
-                        after_message_count: report.after_messages,
-                        before_tokens: report.before_tokens,
-                        after_tokens: report.after_tokens,
-                        messages_evicted: report
-                            .before_messages
-                            .saturating_sub(report.after_messages),
-                        current_run_reclaimed: 0,
-                        method: Some(evot_engine::CompactionMethod::Prune),
-                        remote_blob_bytes: None,
-                        fallback_reason: None,
-                    },
-                    summary: None,
-                    messages: messages.clone(),
-                    state: state.clone(),
-                    context_window: *context_window,
-                    will_retry: false,
-                });
-            }
-            events
         }
 
         evot_engine::AgentEvent::ContextCompactionEnd {

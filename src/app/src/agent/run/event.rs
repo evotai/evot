@@ -198,11 +198,11 @@ pub enum RunEventPayload {
         #[serde(default)]
         will_retry: bool,
     },
-    /// The judge reviewed a window of recent tool calls for relevance.
+    /// Retired wire event, readable for historical addon payloads only.
     ToolCallsReviewed {
         calls: Vec<ReviewedCallPayload>,
     },
-    /// The judge asked and/or applied a prune at run end.
+    /// Retired wire event, readable for historical addon payloads only.
     ContextPruned {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         decided: Option<evot_engine::context::compaction::DecideReport>,

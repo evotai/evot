@@ -36,16 +36,6 @@ pub struct AgentErrorInfo {
 // Agent events
 // ---------------------------------------------------------------------------
 
-/// One tool call as the judge saw it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ReviewedCall {
-    pub tool_call_id: String,
-    pub tool_name: String,
-    /// Compact JSON of the arguments, abridged, for the notice.
-    pub arguments: String,
-    pub relevance: f64,
-}
-
 pub enum AgentEvent {
     AgentStart,
     AgentEnd {
@@ -76,14 +66,6 @@ pub enum AgentEvent {
         tool_call_id: String,
         tool_name: String,
         partial_result: ToolResult,
-    },
-    /// The judge reviewed a window of recent tool calls for relevance to the
-    /// user's task: one background request per `REVIEW_WINDOW` calls. A
-    /// failed review is never emitted.
-    ToolCallsReviewed {
-        /// The window, oldest first, each call with the probability that it
-        /// served the task.
-        calls: Vec<ReviewedCall>,
     },
     ToolExecutionEnd {
         tool_call_id: String,
@@ -168,18 +150,6 @@ pub enum AgentEvent {
     ContextCompactionPhase {
         phase: crate::context::CompactionPhase,
         activity: Option<crate::context::compaction::types::CompactionActivity>,
-    },
-    /// The judge-driven prune branch ran at run end. `decided` is a round of
-    /// verdicts (no edit yet); `applied` means `messages` is the new context
-    /// and must be persisted like a compaction.
-    ContextPruned {
-        decided: Option<crate::context::compaction::DecideReport>,
-        applied: Option<crate::context::compaction::ApplyReport>,
-        messages: Vec<AgentMessage>,
-        /// Cross-compaction state as it stands; a prune does not change it
-        /// but the app persists state and context together.
-        state: crate::context::CompactionState,
-        context_window: usize,
     },
     ContextCompactionEnd {
         reason: crate::context::CompactReason,

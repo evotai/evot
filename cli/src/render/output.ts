@@ -803,9 +803,6 @@ export function buildVerboseEvent(eventText: string): OutputLine[] {
 export function isVisibleEvent(text: string): boolean {
   return /^\[LLM\]\s+[↻✗⚠]/u.test(text)
     || /^\[COMPACT\]\s+✓\s+·\s+(?!skipped\b)/u.test(text)
-    // Only a prune that changed the context is a card; a judge round that
-    // merely recorded verdicts is bookkeeping and stays in the log.
-    || /^\[JEV\]\s+✂/u.test(text)
 }
 
 /**
@@ -854,7 +851,7 @@ export function buildLlmCard(text: string, privacyDetail?: () => PrivacyDetail |
  * Split a runtime event summary into the one figure that belongs on the
  * headline and the metadata that belongs on the status row below it.
  *
- * Every runtime card (`jev prune`, `compact`, `llm`) takes the same shape as a
+ * Every runtime card (`compact`, `llm`) takes the same shape as a
  * tool card: `<glyph> <name>  <arg>` then `  ✓ · <meta>`. For context work the
  * arg is the token transition (`70k → 63k`), the number the user scans for;
  * the counts and the trigger are detail and go on the status row. The
@@ -881,26 +878,11 @@ function eventStatus(mark: string, meta: string[]): OutputLine {
 
 /** The context gauge row without the saving the headline already states. */
 function eventContextRow(line: string): OutputLine {
-  const body = line.replace(/^\s*context\s*/u, '').replace(/\s*\(−\S+\)(\s*·\s*jev prune)?\s*$/u, '').trim()
+  const body = line.replace(/^\s*context\s*/u, '').replace(/\s*\(−\S+\)\s*$/u, '').trim()
   return { id: genId('tool-res'), kind: 'tool_result', text: `  ${body}` }
 }
 
 export function buildEventCard(text: string, privacyDetail?: () => PrivacyDetail | undefined): OutputLine[] {
-  if (text.startsWith('[JEV]')) {
-    // Judge prune: the header and the context line are the card; per-call
-    // verdicts stay in the verbose log where they can be studied.
-    const rawLines = text.split('\n')
-    const applied = /^\[JEV\]\s+✂/u.test(rawLines[0] ?? '')
-    const head = (rawLines[0] ?? '').replace(/^\[JEV\]\s+[✂·]?\s*·?\s*/u, '').trim()
-    const { arg, meta } = splitEventSummary(head)
-    const lines: OutputLine[] = [
-      eventHeadline(applied ? '✂' : '⚖', applied ? 'jev prune' : 'jev judge', arg),
-      eventStatus(applied ? '✓' : '·', meta),
-    ]
-    const context = rawLines.slice(1).find(line => /^\s*context\s/u.test(line))
-    if (context) lines.push(eventContextRow(context))
-    return stampToolCard(lines, 'success')
-  }
   if (text.startsWith('[COMPACT]')) {
     const rawLines = text.split('\n')
     const head = (rawLines[0] ?? '').replace(/^\[COMPACT\]\s+✓\s*·?\s*/u, '').trim()

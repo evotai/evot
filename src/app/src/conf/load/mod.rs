@@ -7,7 +7,6 @@ mod source;
 
 use self::apply_env::apply_env;
 use self::cloud::apply_cloud_provider;
-pub use self::cloud::current_judge_endpoint;
 use self::cloud::reconcile_cloud_env;
 use self::env_file::ensure_env_file;
 use self::env_file::load_env_file;

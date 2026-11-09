@@ -54,13 +54,6 @@ pub struct AgentLoopConfig {
     pub compaction_context: Option<crate::context::SummarizerContext>,
     pub compaction_fallback_context: Option<crate::context::SummarizerContext>,
 
-    /// Judge model for the lossless prune stage of auto-compaction (drops
-    /// tool calls that no longer matter before any summary is written).
-    /// `None` skips the stage.
-    pub judge: Option<Arc<dyn crate::judge::Judge>>,
-    /// Prune verdicts shared across runs of the session (see `PruneLedger`).
-    pub prune_ledger: Option<Arc<tokio::sync::Mutex<crate::context::compaction::PruneLedger>>>,
-
     /// Cross-compaction state restored from a persisted session (previous
     /// summary, cumulative file ops). Lets in-run auto-compaction update the
     /// existing summary instead of re-summarizing it as conversation text.
