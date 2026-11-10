@@ -6,6 +6,142 @@ use evotengine::types::*;
 
 use super::super::ctx;
 
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+#[tokio::test]
+async fn rejects_directories_before_reading_the_header() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let result = ReadFileTool::new()
+        .execute(serde_json::json!({"path": directory.path()}), ctx("read"))
+        .await;
+    assert!(matches!(result, Err(ToolError::Failed(message))
+        if message.contains("regular files only")));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reads_symlinks_to_regular_files() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let file = directory.path().join("actual.txt");
+    let link = directory.path().join("linked.txt");
+    std::fs::write(&file, "first\nsecond\nthird\n")?;
+    std::os::unix::fs::symlink(&file, &link)?;
+    let result = ReadFileTool::new()
+        .execute(
+            serde_json::json!({"path": link, "offset": 2, "limit": 1}),
+            ctx("read"),
+        )
+        .await?;
+    assert!(
+        matches!(result.content.first(), Some(Content::Text { text })
+        if text.starts_with("second") && !text.contains("first"))
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_special_files_without_consuming_stdin() -> TestResult {
+    use std::io::Read;
+    use std::os::unix::fs::symlink;
+    use std::os::unix::net::UnixListener;
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    const CHILD: &str = "EVOT_READ_SPECIAL_FILES_CHILD";
+    const INPUT: &[u8] = b"keyboard input belongs to the TUI";
+    if std::env::var_os(CHILD).is_none() {
+        use tokio::io::AsyncWriteExt;
+        // Never open the test runner's own stdin/TTY. A subprocess owns a
+        // controlled pipe, and can be killed if a regression strands a
+        // tokio blocking read (a future timeout alone cannot stop that read).
+        let mut child = tokio::process::Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "file::read::rejects_special_files_without_consuming_stdin",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?;
+        let mut stdin = child.stdin.take().ok_or("missing child stdin")?;
+        stdin.write_all(INPUT).await?;
+        // Keep the write end open: accidental stdin reads must not see EOF
+        // and appear harmless just because this is an automated test.
+        match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
+            Ok(status) => {
+                let status = status?;
+                let output = child.wait_with_output().await?;
+                assert!(
+                    status.success(),
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            Err(_) => {
+                child.kill().await?;
+                return Err("special-file read blocked instead of returning an error".into());
+            }
+        }
+        return Ok(());
+    }
+
+    let directory = tempfile::tempdir()?;
+    let fifo = directory.path().join("unconnected.fifo");
+    let created = std::process::Command::new("mkfifo").arg(&fifo).output()?;
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let fifo_link = directory.path().join("fifo-link");
+    let stdin_link = directory.path().join("stdin-link");
+    let device_link = directory.path().join("device-link");
+    let directory_link = directory.path().join("directory-link");
+    symlink(&fifo, &fifo_link)?;
+    symlink("/dev/stdin", &stdin_link)?;
+    symlink("/dev/zero", &device_link)?;
+    symlink(directory.path(), &directory_link)?;
+    let socket = directory.path().join("socket");
+    let _listener = UnixListener::bind(&socket)?;
+    let tool = ReadFileTool::new();
+    for path in [
+        std::path::Path::new("/dev/stdin"),
+        std::path::Path::new("/dev/null"),
+        std::path::Path::new("/dev/zero"),
+        &fifo,
+        &fifo_link,
+        &stdin_link,
+        &device_link,
+        &directory_link,
+        &socket,
+    ] {
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            tool.execute(serde_json::json!({"path": path}), ctx("read")),
+        )
+        .await?;
+        assert!(
+            matches!(result, Err(ToolError::Failed(ref message))
+            if message.contains("regular files only")),
+            "{}: {result:?}",
+            path.display()
+        );
+    }
+    let mut untouched = vec![0u8; INPUT.len()];
+    std::io::stdin().read_exact(&mut untouched)?;
+    assert_eq!(
+        untouched, INPUT,
+        "Read must not steal the terminal's keystrokes"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_read_file_with_offset_limit() {
     let tmp = std::env::temp_dir().join("yoagent-test-lines.txt");

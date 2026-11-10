@@ -130,7 +130,7 @@ impl AgentTool for ReadFileTool {
     }
 
     fn description(&self) -> &str {
-        "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). \
+        "Read the contents of a regular file. Supports text files and images (jpg, png, gif, webp). \
          Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB \
          (whichever is hit first). Use offset/limit for large files. When you need the full file, \
          continue with offset until complete."
@@ -205,10 +205,20 @@ impl AgentTool for ReadFileTool {
             return Err(ToolError::Cancelled);
         }
 
-        // Check file exists and size
+        // Follow symlinks, but reject special targets before opening anything.
+        // Reading a terminal (e.g. /dev/stdin) steals input from the TUI;
+        // opening a FIFO can block even before the first read. Dropping a
+        // tokio::fs future does not stop its underlying blocking operation.
         let metadata = tokio::fs::metadata(&path)
             .await
             .map_err(|e| ToolError::Failed(format!("Cannot access {}: {}", path.display(), e)))?;
+        if !metadata.is_file() {
+            return Err(ToolError::Failed(format!(
+                "Cannot read {}: read supports regular files only. \
+                 Terminals, devices, pipes, sockets, and directories are not supported.",
+                path.display(),
+            )));
+        }
 
         // An image is whatever the bytes say it is, never what the name says:
         // a `.png` that holds a JPEG must be sent as image/jpeg or the
