@@ -46,6 +46,24 @@ fn base_prompt_matches_pi_structure() {
 }
 
 #[test]
+fn side_session_prompt_opens_with_the_evot_identity_and_carries_its_instructions() {
+    let (prompt, sections) = SystemPrompt::side_session("/work", "Analyze the screen log.");
+    // The evot gateway rejects any request whose system prompt does not start
+    // with this sentence, the same one the main prompt opens with.
+    let lead = "You are an expert coding assistant running in evot, a coding agent harness.";
+    assert!(prompt.starts_with(lead));
+    assert!(base_prompt("/work").starts_with(lead));
+    assert_eq!(names(&sections), vec![
+        "identity",
+        "instructions",
+        "environment",
+        "dynamic_boundary"
+    ]);
+    assert_eq!(sections[1].text, "Analyze the screen log.");
+    assert!(!prompt.contains("Available tools:"));
+}
+
+#[test]
 fn base_prompt_uses_pi_conciseness_guideline_only() {
     let tmp = tempfile::TempDir::new().expect("failed to create temp dir");
     let prompt = base_prompt(&tmp.path().to_string_lossy());

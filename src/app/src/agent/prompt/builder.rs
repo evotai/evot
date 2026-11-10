@@ -18,6 +18,11 @@ const GUIDELINES_TRAILER: &[&str] = &[
 const IDENTITY_INTRO: &str =
     "You are an expert coding assistant running in evot, a coding agent harness. \
      You help users by reading files, executing commands, editing code, and writing new files.";
+/// Opens with the same sentence as `IDENTITY_INTRO`: the evot gateway accepts
+/// only requests whose system prompt starts with it.
+const SIDE_SESSION_IDENTITY: &str =
+    "You are an expert coding assistant running in evot, a coding agent harness. \
+     This is a read-only side session: follow the instructions below and do not modify any files.";
 const CHAT_IDENTITY: &str =
     "You are evot, an AI assistant embedded in another application. \
      This session has no tools: you cannot read files, run commands, browse, or call functions. \
@@ -78,6 +83,31 @@ impl SystemPrompt {
                 name: "identity",
                 text: CHAT_IDENTITY.to_string(),
             }],
+        }
+        .with_environment_static()
+        .with_dynamic_boundary()
+        .build_with_sections()
+    }
+
+    /// Base for a forked side session (`/log`): the evot identity followed by
+    /// the caller's instructions, without the main session's tool list, skills
+    /// or project context.
+    pub fn side_session(cwd: &str, instructions: &str) -> (String, Vec<Section>) {
+        Self {
+            cwd: cwd.to_string(),
+            has_bash: false,
+            has_dedicated_search: false,
+            tools_guidelines: Vec::new(),
+            sections: vec![
+                Section {
+                    name: "identity",
+                    text: SIDE_SESSION_IDENTITY.to_string(),
+                },
+                Section {
+                    name: "instructions",
+                    text: instructions.to_string(),
+                },
+            ],
         }
         .with_environment_static()
         .with_dynamic_boundary()

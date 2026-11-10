@@ -73,6 +73,8 @@ mod feishu_message_test;
 mod feishu_sink_test;
 #[path = "surface/feishu_state_test.rs"]
 mod feishu_state_test;
+#[path = "agent/fork_prompt_test.rs"]
+mod fork_prompt_test;
 #[path = "types/id_validation_test.rs"]
 mod id_validation_test;
 #[path = "session/input_provenance_test.rs"]

@@ -82,10 +82,11 @@ impl TurnAssembler {
     }
 
     /// Forks inherit limits and sandbox policy, but not skills, variables,
-    /// provider overrides, spill storage, or session process managers.
-    pub(super) fn fork(&self) -> Self {
+    /// provider overrides, spill storage, or session process managers. Their
+    /// system prompt is the given `sections`, not the parent's.
+    pub(super) fn fork(&self, sections: Vec<Section>) -> Self {
         Self {
-            system_prompt_sections: RwLock::new(Vec::new()),
+            system_prompt_sections: RwLock::new(sections),
             limits: RwLock::new(self.limits.read().clone()),
             skills_dirs: RwLock::new(Vec::new()),
             skill_names: RwLock::new(None),

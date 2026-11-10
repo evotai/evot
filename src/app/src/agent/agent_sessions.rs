@@ -7,6 +7,7 @@ use parking_lot::RwLock;
 use super::agent::Agent;
 use super::fork::ForkRequest;
 use super::fork::ForkedAgent;
+use super::prompt::SystemPrompt;
 use super::run::registry::RunRegistry;
 use crate::agent::models::ModelSelection;
 use crate::base::error::EvotError;
@@ -31,10 +32,13 @@ impl Agent {
             session_lifecycle_gates: _,
         } = self.as_ref();
 
+        // Turns are built from the assembler's sections, so the fork's
+        // instructions must live there or they never reach the model.
+        let (system_prompt, sections) = SystemPrompt::side_session(cwd, &request.system_prompt);
         let forked = Arc::new(Self {
             selection: ModelSelection::new(selection.snapshot()),
-            system_prompt: RwLock::new(request.system_prompt),
-            assembler: Arc::new(assembler.fork()),
+            system_prompt: RwLock::new(system_prompt),
+            assembler: Arc::new(assembler.fork(sections)),
             cwd: cwd.clone(),
             storage: Arc::new(MemoryStorage::new()),
             active_runs: Arc::new(RunRegistry::default()),
