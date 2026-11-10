@@ -38,7 +38,8 @@ pub fn skills_dir() -> Result<PathBuf> {
     Ok(state_root_dir()?.join("skills"))
 }
 
-/// Memory vault used by the builtin `memory` skill.
-pub fn memory_dir() -> Result<PathBuf> {
-    Ok(state_root_dir()?.join("memory"))
+/// Claude Code's user skills, scanned after evot's own so the user does not
+/// have to install a skill twice.
+pub fn claude_skills_dir() -> Result<PathBuf> {
+    Ok(home_dir()?.join(".claude").join("skills"))
 }

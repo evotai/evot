@@ -54,6 +54,9 @@ pub struct TurnAssembler {
     pub(super) limits: RwLock<ExecutionLimits>,
     pub(super) skills_dirs: RwLock<Vec<PathBuf>>,
     pub(super) skill_names: RwLock<Option<Vec<String>>>,
+    /// Memory vault the builtin `memory` skill reads and writes
+    /// (`<state root>/memory`). Resolved from the config, never from `HOME`.
+    pub(super) memory_dir: PathBuf,
     pub(super) spill_root: Option<PathBuf>,
     pub(super) variables: RwLock<Option<Arc<Variables>>>,
     pub(super) sandbox: SandboxPolicy,
@@ -62,18 +65,26 @@ pub struct TurnAssembler {
 }
 
 impl TurnAssembler {
-    pub fn new(config: &Config) -> Self {
-        Self {
+    /// Builtin skills are written under the config's storage root and seed the
+    /// skills directories, so every agent — including ephemeral and test
+    /// agents — loads them without consulting `HOME`.
+    pub fn new(config: &Config) -> Result<Self> {
+        let builtin = super::prompt::skill::ensure_builtin_skills_dir(&config.storage.fs.root_dir)
+            .map_err(|error| {
+                EvotError::Agent(format!("cannot initialize builtin skills: {error}"))
+            })?;
+        Ok(Self {
             system_prompt_sections: RwLock::new(Vec::new()),
             limits: RwLock::new(ExecutionLimits::default()),
-            skills_dirs: RwLock::new(Vec::new()),
+            skills_dirs: RwLock::new(vec![builtin]),
             skill_names: RwLock::new(None),
+            memory_dir: config.storage.fs.root_dir.join("memory"),
             spill_root: Some(config.storage.fs.root_dir.clone()),
             variables: RwLock::new(None),
             sandbox: SandboxPolicy::from_config(&config.sandbox),
             provider_override: RwLock::new(None),
             processes: ProcessRegistry::new(),
-        }
+        })
     }
 
     /// Root of the on-disk session archive, when storage is on disk.
@@ -90,6 +101,7 @@ impl TurnAssembler {
             limits: RwLock::new(self.limits.read().clone()),
             skills_dirs: RwLock::new(Vec::new()),
             skill_names: RwLock::new(None),
+            memory_dir: self.memory_dir.clone(),
             spill_root: None,
             variables: RwLock::new(None),
             sandbox: SandboxPolicy {
@@ -181,12 +193,13 @@ impl TurnAssembler {
             load_turn_skills(&skill_dirs, selected_skill_names.as_deref())?
         };
         let mut system_dirs = skill_dirs.clone();
-        if let Ok(memory_dir) = crate::base::paths::memory_dir() {
-            if let Err(e) = std::fs::create_dir_all(&memory_dir) {
-                tracing::warn!("cannot create memory dir {}: {e}", memory_dir.display());
-            }
-            system_dirs.push(memory_dir);
+        if let Err(e) = std::fs::create_dir_all(&self.memory_dir) {
+            tracing::warn!(
+                "cannot create memory dir {}: {e}",
+                self.memory_dir.display()
+            );
         }
+        system_dirs.push(self.memory_dir.clone());
         for skill in &skills {
             system_dirs.push(skill.base_dir.clone());
         }

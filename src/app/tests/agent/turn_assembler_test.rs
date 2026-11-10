@@ -62,7 +62,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
         Arc::new(MemoryStorage::new()),
     )
     .await?;
-    let assembler = TurnAssembler::new(&config);
+    let assembler = TurnAssembler::new(&config)?;
     let turn = assembler
         .build_turn(
             &llm,

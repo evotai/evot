@@ -271,6 +271,8 @@ fn same_root_collision_resolves_by_sorted_path() -> Result<(), Box<dyn std::erro
 
 #[test]
 fn nested_frontmatter_error_keeps_valid_siblings() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     let group = tmp.path().join("lark");
     create_skill(&group, "lark-im", "Lark IM");
@@ -278,7 +280,7 @@ fn nested_frontmatter_error_keeps_valid_siblings() -> Result<(), Box<dyn std::er
     fs::create_dir_all(&bad)?;
     fs::write(bad.join("SKILL.md"), "no frontmatter")?;
 
-    let specs = load_skills(&[tmp.path().to_path_buf()])?;
+    let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
     assert!(specs.iter().any(|s| s.name == "lark-im"));
     assert!(specs.iter().any(|s| s.name == "harden"));
     assert!(specs.iter().all(|s| s.name != "lark-bad"));
@@ -286,12 +288,15 @@ fn nested_frontmatter_error_keeps_valid_siblings() -> Result<(), Box<dyn std::er
 }
 
 // ---------------------------------------------------------------------------
-// Builtin skill tests
+// Builtin skill tests — every test materializes builtins under its own temp
+// state root, so nothing here reads `HOME`.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn builtin_directory_contains_all_builtin_skills() -> Result<(), Box<dyn std::error::Error>> {
-    let root = ensure_builtin_skills_dir()?;
+fn builtin_directory_lives_under_the_state_root() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let root = ensure_builtin_skills_dir(state.path())?;
+    assert_eq!(root, state.path().join("builtin-skills"));
     for name in ["harden", "memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
     }
@@ -300,8 +305,9 @@ fn builtin_directory_contains_all_builtin_skills() -> Result<(), Box<dyn std::er
 
 #[test]
 fn all_builtin_skills_load() -> Result<(), Box<dyn std::error::Error>> {
-    let empty: Vec<std::path::PathBuf> = vec![];
-    let specs = load_skills(&empty)?;
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
+    let specs = load_skills(&[builtin])?;
     let names: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
 
     assert_eq!(names, vec!["harden", "memory", "session-search"]);
@@ -311,31 +317,11 @@ fn all_builtin_skills_load() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn stale_builtin_dirs_are_removed() -> Result<(), Box<dyn std::error::Error>> {
-    const CHILD: &str = "EVOT_STALE_BUILTIN_TEST_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        let home = tempfile::tempdir()?;
-        let output = std::process::Command::new(std::env::current_exe()?)
-            .args([
-                "--exact",
-                "skill_loader_test::stale_builtin_dirs_are_removed",
-                "--nocapture",
-            ])
-            .env("HOME", home.path())
-            .env("USERPROFILE", home.path())
-            .env(CHILD, "1")
-            .output()?;
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Ok(());
-    }
     // `opencli` and `humanize` moved to the evot-skills catalog. An upgraded
     // binary must clear the copies it wrote in an earlier version, or they keep
     // loading and collide with the installed ones.
-    let root = ensure_builtin_skills_dir()?;
+    let state = TempDir::new()?;
+    let root = ensure_builtin_skills_dir(state.path())?;
     let stale = root.join("opencli");
     fs::create_dir_all(&stale)?;
     fs::write(
@@ -343,7 +329,7 @@ fn stale_builtin_dirs_are_removed() -> Result<(), Box<dyn std::error::Error>> {
         "---\nname: opencli\ndescription: stale\n---\n",
     )?;
 
-    let root = ensure_builtin_skills_dir()?;
+    let root = ensure_builtin_skills_dir(state.path())?;
     assert!(!stale.exists(), "stale builtin dir should be removed");
     for name in ["harden", "memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
@@ -353,8 +339,9 @@ fn stale_builtin_dirs_are_removed() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn builtin_harden_skill_loaded() -> Result<(), Box<dyn std::error::Error>> {
-    let empty: Vec<std::path::PathBuf> = vec![];
-    let specs = load_skills(&empty)?;
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
+    let specs = load_skills(&[builtin])?;
     let harden = match specs.iter().find(|s| s.name == "harden") {
         Some(skill) => skill,
         None => return Err("builtin harden skill should be present".into()),
@@ -367,8 +354,9 @@ fn builtin_harden_skill_loaded() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn builtin_memory_skill_loaded() -> Result<(), Box<dyn std::error::Error>> {
-    let empty: Vec<std::path::PathBuf> = vec![];
-    let specs = load_skills(&empty)?;
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
+    let specs = load_skills(&[builtin])?;
     let memory = match specs.iter().find(|s| s.name == "memory") {
         Some(skill) => skill,
         None => return Err("builtin memory skill should be present".into()),
@@ -383,29 +371,37 @@ fn builtin_memory_skill_loaded() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn fs_skill_overrides_builtin() {
-    let tmp = TempDir::new().unwrap();
+fn fs_skill_overrides_builtin() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
+    let tmp = TempDir::new()?;
     create_skill(tmp.path(), "harden", "Custom harden");
 
-    let specs = load_skills(&[tmp.path().to_path_buf()]).unwrap();
-    let harden = specs.iter().find(|s| s.name == "harden").unwrap();
+    let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
+    let harden = specs
+        .iter()
+        .find(|s| s.name == "harden")
+        .ok_or("harden should be present")?;
     assert_eq!(harden.description, "Custom harden");
     assert!(
         harden.file_path.ends_with("harden/SKILL.md"),
         "fs skill should point at SKILL.md"
     );
+    Ok(())
 }
 
 #[test]
 fn filesystem_skill_error_does_not_drop_builtins_or_valid_siblings(
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     let skill_dir = tmp.path().join("bad");
     fs::create_dir_all(&skill_dir)?;
     fs::write(skill_dir.join("SKILL.md"), "No frontmatter here.")?;
     create_skill(tmp.path(), "valid", "Valid sibling");
 
-    let specs = load_skills(&[tmp.path().to_path_buf()])?;
+    let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
     assert!(specs.iter().any(|s| s.name == "harden"));
     assert!(specs.iter().any(|s| s.name == "memory"));
     assert!(specs.iter().any(|s| s.name == "valid"));
@@ -415,11 +411,13 @@ fn filesystem_skill_error_does_not_drop_builtins_or_valid_siblings(
 
 #[test]
 fn selected_skills_can_mix_builtin_and_filesystem() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     create_skill(tmp.path(), "custom", "Custom skill");
     let names = vec!["harden".to_string(), "custom".to_string()];
 
-    let specs = load_skills_by_name(&[tmp.path().to_path_buf()], &names)?;
+    let specs = load_skills_by_name(&[builtin, tmp.path().to_path_buf()], &names)?;
     let loaded: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
     assert_eq!(loaded, vec!["custom", "harden"]);
     Ok(())
@@ -429,10 +427,12 @@ fn selected_skills_can_mix_builtin_and_filesystem() -> Result<(), Box<dyn std::e
 fn load_single_skill_uses_runtime_precedence() -> Result<(), Box<dyn std::error::Error>> {
     use evot::agent::prompt::skill::load_skill;
 
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     create_skill(tmp.path(), "memory", "Custom memory workflow");
 
-    let memory = load_skill(&[tmp.path().to_path_buf()], "memory")?;
+    let memory = load_skill(&[builtin, tmp.path().to_path_buf()], "memory")?;
     assert_eq!(memory.description, "Custom memory workflow");
     assert!(memory.file_path.ends_with("memory/SKILL.md"));
     Ok(())
@@ -446,20 +446,28 @@ fn empty_skill_selection_loads_nothing() -> Result<(), Box<dyn std::error::Error
 }
 
 #[test]
-fn unknown_selected_skill_returns_error() {
-    let empty: Vec<std::path::PathBuf> = Vec::new();
-    let error = load_skills_by_name(&empty, &["missing".to_string()])
-        .expect_err("missing skill should fail");
+fn unknown_selected_skill_returns_error() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
+    let error = match load_skills_by_name(&[builtin], &["missing".to_string()]) {
+        Ok(_) => return Err("missing skill should fail".into()),
+        Err(error) => error,
+    };
     assert!(error.to_string().contains("unknown skill 'missing'"));
+    assert!(error.to_string().contains("harden"));
+    Ok(())
 }
 
 #[test]
 fn filtered_skill_index_contains_only_selected_names() -> Result<(), Box<dyn std::error::Error>> {
+    let state = TempDir::new()?;
+    let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     create_skill(tmp.path(), "alpha", "Alpha skill");
     create_skill(tmp.path(), "beta", "Beta skill");
 
-    let selected = load_skills_by_name(&[tmp.path().to_path_buf()], &["beta".to_string()])?;
+    let selected =
+        load_skills_by_name(&[builtin, tmp.path().to_path_buf()], &["beta".to_string()])?;
     let prompt = format_skills_for_prompt(&selected);
     assert!(prompt.contains("<name>beta</name>"));
     assert!(!prompt.contains("<name>alpha</name>"));

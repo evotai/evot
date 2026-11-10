@@ -27,15 +27,14 @@ async fn build(conf: &Config, ephemeral: bool) -> Result<Arc<Agent>> {
     let model = conf.active_llm().map(|l| l.model).unwrap_or_default();
     let (system_prompt_text, system_prompt_sections) = SystemPrompt::base(&cwd, &tools, &model);
 
-    let mut skills_dirs = Vec::new();
-    let builtin = crate::agent::prompt::skill::ensure_builtin_skills_dir()
-        .map_err(|error| EvotError::Agent(format!("cannot initialize builtin skills: {error}")))?;
-    skills_dirs.push(builtin);
-    let global = crate::base::paths::skills_dir()?;
-    skills_dirs.push(global);
+    // The agent already scans its builtin skills; add the user's global dir,
+    // the configured dirs, and Claude Code's skills when that dir exists.
+    let mut skills_dirs = vec![crate::base::paths::skills_dir()?];
     skills_dirs.extend(conf.skills_dirs.clone());
-
-    tracing::info!(skills_dirs = ?skills_dirs, "agent skills directories");
+    let claude = crate::base::paths::claude_skills_dir()?;
+    if claude.is_dir() {
+        skills_dirs.push(claude);
+    }
 
     let agent = if ephemeral {
         Agent::new_ephemeral(conf, &cwd)?
@@ -44,7 +43,8 @@ async fn build(conf: &Config, ephemeral: bool) -> Result<Arc<Agent>> {
     };
     let agent = agent
         .with_system_prompt_sections(system_prompt_text, system_prompt_sections)
-        .with_skills_dirs(skills_dirs);
+        .add_skills_dirs(skills_dirs);
+    tracing::info!(skills_dirs = ?agent.skills_dirs(), "agent skills directories");
 
     // Preserve the existing startup fallback; changing persistence error policy
     // is separate from moving the composition root.

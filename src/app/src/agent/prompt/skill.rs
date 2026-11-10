@@ -61,28 +61,25 @@ pub enum SkillLoadError {
     MissingField { path: PathBuf, field: &'static str },
     #[error("SKILL.md in {path} has invalid frontmatter: {detail}")]
     InvalidFrontmatter { path: PathBuf, detail: String },
-    #[error("cannot resolve builtin skills directory: {0}")]
-    BuiltinDir(String),
     #[error("unknown skill '{name}'. Available: {available}")]
     UnknownSkill { name: String, available: String },
 }
 
 // ---------------------------------------------------------------------------
-// Public loader — builtin first, then filesystem (same name overrides)
+// Public loader — later directories override earlier ones by skill name
 // ---------------------------------------------------------------------------
 
+/// Load every skill under `dirs`, in order; a later directory overrides an
+/// earlier one with the same skill name. An invalid `SKILL.md` is logged and
+/// skipped so one broken skill cannot hide its siblings.
+///
+/// The loader reads only the directories it is given. The agent seeds its
+/// list with the builtin dir from [`ensure_builtin_skills_dir`], so this
+/// function never touches the process environment.
 pub fn load_skills(dirs: &[impl AsRef<Path>]) -> Result<Vec<SkillSpec>, SkillLoadError> {
-    let builtin_dir = ensure_builtin_skills_dir()?;
-    let mut all_dirs = vec![builtin_dir];
-    for dir in dirs {
-        let dir = dir.as_ref().to_path_buf();
-        if !all_dirs.contains(&dir) {
-            all_dirs.push(dir);
-        }
-    }
-
     let mut by_name: HashMap<String, SkillSpec> = HashMap::new();
-    for dir in &all_dirs {
+    for dir in dirs {
+        let dir = dir.as_ref();
         if !dir.exists() {
             continue;
         }
@@ -154,7 +151,8 @@ pub fn load_skill_instructions(skill: &SkillSpec) -> Result<String, SkillLoadErr
     Ok(strip_frontmatter(&content).to_string())
 }
 
-/// Load skills from filesystem directories only (no builtins).
+/// Strict variant of [`load_skills`]: the first invalid `SKILL.md` fails the
+/// whole load instead of being skipped.
 pub fn load_fs_skills(dirs: &[impl AsRef<Path>]) -> Result<Vec<SkillSpec>, SkillLoadError> {
     let mut by_name: HashMap<String, SkillSpec> = HashMap::new();
 
@@ -204,8 +202,12 @@ pub fn format_skills_for_prompt(skills: &[SkillSpec]) -> String {
     lines.join("\n")
 }
 
-pub fn ensure_builtin_skills_dir() -> Result<PathBuf, SkillLoadError> {
-    let root = builtin_skills_dir()?;
+/// Materialize the builtin skills under `<state_root>/builtin-skills` and
+/// return that directory. `state_root` is the evot state dir (`~/.evotai` in
+/// production, the config's storage root in general), passed in so the loader
+/// does not resolve `HOME` itself.
+pub fn ensure_builtin_skills_dir(state_root: &Path) -> Result<PathBuf, SkillLoadError> {
+    let root = state_root.join("builtin-skills");
     fs::create_dir_all(&root).map_err(|source| SkillLoadError::Io {
         path: root.clone(),
         source,
@@ -266,12 +268,6 @@ fn remove_stale_builtins(root: &Path) -> Result<(), SkillLoadError> {
         }
     }
     Ok(())
-}
-
-fn builtin_skills_dir() -> Result<PathBuf, SkillLoadError> {
-    crate::base::paths::state_root_dir()
-        .map(|root| root.join("builtin-skills"))
-        .map_err(|error| SkillLoadError::BuiltinDir(error.to_string()))
 }
 
 fn write_if_changed(path: &Path, content: &str) -> Result<(), SkillLoadError> {

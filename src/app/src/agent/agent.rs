@@ -46,7 +46,7 @@ impl Agent {
     /// spilled tool results, nothing left on disk after the process exits.
     pub fn new_ephemeral(config: &Config, cwd: impl Into<String>) -> Result<Arc<Self>> {
         let mut agent = Self::new_inner(config, cwd.into(), Arc::new(MemoryStorage::new()))?;
-        let mut assembler = TurnAssembler::new(config);
+        let mut assembler = TurnAssembler::new(config)?;
         assembler.spill_root = None;
         agent.assembler = Arc::new(assembler);
         Ok(Arc::new(agent))
@@ -61,7 +61,7 @@ impl Agent {
                     .unwrap_or_else(|_| LlmConfig::unconfigured()),
             ),
             system_prompt: RwLock::new(system_prompt),
-            assembler: Arc::new(TurnAssembler::new(config)),
+            assembler: Arc::new(TurnAssembler::new(config)?),
             cwd,
             storage,
             active_runs: Arc::new(RunRegistry::default()),
@@ -149,21 +149,18 @@ impl Agent {
         Arc::clone(self)
     }
 
-    pub fn with_skills_dirs(self: &Arc<Self>, dirs: Vec<PathBuf>) -> Arc<Self> {
-        *self.assembler.skills_dirs.write() = dirs;
-        self.with_claude_skills_dirs()
-    }
-
+    /// Append skills directories after the ones already scanned (the builtin
+    /// dir comes first and is seeded at construction). A later directory
+    /// overrides an earlier one by skill name; duplicates are ignored.
     pub fn add_skills_dirs(self: &Arc<Self>, dirs: Vec<PathBuf>) -> Arc<Self> {
-        {
-            let mut current = self.assembler.skills_dirs.write();
-            for dir in dirs {
-                if !current.contains(&dir) {
-                    current.push(dir);
-                }
+        let mut current = self.assembler.skills_dirs.write();
+        for dir in dirs {
+            if !current.contains(&dir) {
+                current.push(dir);
             }
         }
-        self.with_claude_skills_dirs()
+        drop(current);
+        Arc::clone(self)
     }
 
     pub fn set_skill_names(&self, names: Vec<String>) -> Result<()> {
@@ -171,19 +168,6 @@ impl Agent {
             .map_err(|error| EvotError::Agent(error.to_string()))?;
         *self.assembler.skill_names.write() = Some(names);
         Ok(())
-    }
-
-    fn with_claude_skills_dirs(self: &Arc<Self>) -> Arc<Self> {
-        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-            let claude_dir = PathBuf::from(home).join(".claude").join("skills");
-            if claude_dir.is_dir() {
-                let mut dirs = self.assembler.skills_dirs.write();
-                if !dirs.contains(&claude_dir) {
-                    dirs.push(claude_dir);
-                }
-            }
-        }
-        Arc::clone(self)
     }
 
     pub fn with_variables(self: &Arc<Self>, variables: Arc<Variables>) -> Arc<Self> {

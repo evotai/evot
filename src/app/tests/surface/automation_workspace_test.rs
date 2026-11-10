@@ -380,7 +380,7 @@ async fn scratch_is_allowed_by_the_file_sandbox_without_opening_the_startup_chec
         Arc::new(MemoryStorage::new()),
     )
     .await?;
-    let turn = TurnAssembler::new(&config)
+    let turn = TurnAssembler::new(&config)?
         .build_turn(
             &llm,
             ToolMode::Readonly,

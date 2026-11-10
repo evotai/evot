@@ -681,7 +681,9 @@ async fn execute_validates_arguments_and_caps_calls_per_run() -> TestResult {
 
 #[test]
 fn skill_prompt_contract_describes_tool_driven_search() -> TestResult {
-    let skill = load_skill(&[] as &[std::path::PathBuf], "session-search")?;
+    let state = tempfile::TempDir::new()?;
+    let builtin = evot::agent::prompt::skill::ensure_builtin_skills_dir(state.path())?;
+    let skill = load_skill(&[builtin], "session-search")?;
     let instructions = load_skill_instructions(&skill)?;
     assert!(instructions.contains("`session_search` tool"));
     assert!(instructions.contains("since_days"));

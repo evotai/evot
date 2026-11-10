@@ -342,8 +342,12 @@ fn cache_store_rejects_future_schema_and_rewrites_legacy_atomically() -> TestRes
         let leftovers = std::fs::read_dir(&root)?
             .filter_map(std::result::Result::ok)
             .filter(|entry| entry.path() != path)
-            .count();
-        assert_eq!(leftovers, 0, "atomic write left temporary files behind");
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "atomic write left temporary files behind: {leftovers:?}"
+        );
         Ok(())
     })();
 
