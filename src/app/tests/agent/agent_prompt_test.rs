@@ -172,7 +172,11 @@ fn tool_set_drives_identity_list_and_guidelines() {
 
     // Per-tool mechanics come from each tool's own guidelines, matching pi.
     assert!(prompt.contains("Use read to examine files instead of cat or sed."));
-    assert!(prompt.contains("Use edit for precise changes"));
+    assert!(prompt
+        .contains("Use edit for targeted changes. Batch changes to one file in a single call."));
+    assert!(
+        prompt.contains("Each edits[].oldText must exactly and uniquely match the original file.")
+    );
     assert!(prompt.contains("Use write only for new files or complete rewrites."));
     assert!(prompt.contains("Be concise in your responses"));
     assert!(prompt.contains("Show file paths clearly when working with files"));
@@ -288,8 +292,34 @@ fn interactive_mode_adds_language_section_only() {
 }
 
 #[test]
-fn headless_and_readonly_add_no_mode_section() {
-    assert!(dynamic_sections(&ctx(PromptMode::Headless)).is_empty());
+fn headless_mode_adds_finishing_work_and_communicating_sections() {
+    let sections = dynamic_sections(&ctx(PromptMode::Headless));
+    assert_eq!(names(&sections), vec!["finishing_work", "communicating"]);
+    let finishing = &sections[0].text;
+    assert!(finishing.starts_with("# Finishing work"));
+    assert!(finishing.contains("ordinary obstacles"));
+    assert!(finishing.contains("hard blocker"));
+    assert!(finishing.contains("confirmation on risky or destructive actions"));
+    let communicating = &sections[1].text;
+    assert!(communicating.starts_with("# Communicating clearly"));
+    assert!(communicating.contains("low-context reader"));
+}
+
+#[test]
+fn interactive_readonly_and_chat_skip_headless_sections() {
+    for mode in [
+        PromptMode::Interactive,
+        PromptMode::Readonly,
+        PromptMode::Chat,
+    ] {
+        let sections = dynamic_sections(&ctx(mode));
+        assert!(
+            !sections
+                .iter()
+                .any(|s| matches!(s.name, "finishing_work" | "communicating")),
+            "{mode:?} must not carry headless sections"
+        );
+    }
     assert!(dynamic_sections(&ctx(PromptMode::Readonly)).is_empty());
 }
 
@@ -300,9 +330,14 @@ fn sandbox_and_variables_layer_onto_mode_section() {
         sandbox: true,
         variables: vec!["TOKEN".to_string(), "REGION".to_string()],
     });
-    // Headless contributes no mode section; runtime state still applies.
-    assert_eq!(names(&sections), vec!["sandbox", "variables"]);
-    let vars = &sections[1].text;
+    // Mode sections come first; runtime state follows.
+    assert_eq!(names(&sections), vec![
+        "finishing_work",
+        "communicating",
+        "sandbox",
+        "variables"
+    ]);
+    let vars = &sections[3].text;
     assert!(vars.contains("TOKEN"));
     assert!(vars.contains("REGION"));
 }
