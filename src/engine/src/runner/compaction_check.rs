@@ -17,6 +17,9 @@ use crate::context::ModelId;
 use crate::context::SummarizerContext;
 use crate::context::SummaryContexts;
 use crate::context::UsageSnapshot;
+use crate::event::AgentErrorInfo;
+use crate::event::AgentErrorKind;
+use crate::event::AgentEvent;
 use crate::types::*;
 
 /// User-visible message emitted when overflow recovery is exhausted.

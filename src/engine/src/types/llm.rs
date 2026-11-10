@@ -202,3 +202,24 @@ impl ThinkingLevel {
         }
     }
 }
+
+/// Pre-computed message stats for an LLM call, computed at the engine layer
+/// from structured `Message`/`Content` types for accurate token accounting.
+///
+/// Does NOT include `message_count` or `tool_count` — those come from
+/// `request.messages.len()` / `request.tools.len()` to avoid dual sources.
+#[derive(Debug, Clone, Default)]
+pub struct LlmCallStats {
+    pub user_count: usize,
+    pub assistant_count: usize,
+    pub tool_result_count: usize,
+    pub image_count: usize,
+    pub image_path_count: usize,
+    pub image_base64_count: usize,
+    pub user_tokens: usize,
+    pub assistant_tokens: usize,
+    pub tool_result_tokens: usize,
+    pub image_tokens: usize,
+    /// Per-tool token breakdown: (name, estimated_tokens), sorted desc.
+    pub tool_details: Vec<(String, usize)>,
+}

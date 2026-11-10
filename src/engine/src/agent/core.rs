@@ -17,7 +17,7 @@ use crate::provider::StreamProvider;
 use crate::runner::AfterTurnFn;
 use crate::runner::BeforeTurnFn;
 use crate::spill::FsSpill;
-use crate::tools::guard::PathGuard;
+use crate::types::PathGuard;
 use crate::types::*;
 
 /// The main Agent. Owns state, tools, and provider.

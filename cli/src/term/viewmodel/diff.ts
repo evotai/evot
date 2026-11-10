@@ -2,8 +2,8 @@
 import stringWidth from 'string-width'
 import stripAnsi from 'strip-ansi'
 import { colorizeUnifiedDiffRows, parseDiffHunks } from '../../render/diff.js'
-import { wrapTextWithAnsi } from '../../render/wrap.js'
-import { getTheme } from '../../render/theme/index.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
+import { getTheme } from '../../ui/theme/index.js'
 import { line, plain, type StyledLine, type StyledSpan } from './types.js'
 
 /** Match opencode's inline edit breakpoint; narrower panes retain unified diff. */

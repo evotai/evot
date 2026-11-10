@@ -1,5 +1,5 @@
 import { ALL_COMMANDS } from '../../../commands/index.js'
-import { parseLoopArgs } from '../../../loop/parser.js'
+import { parseLoopArgs } from '../../../features/loop/parser.js'
 import type { CompletionCandidate } from '../../input/editor.js'
 
 export interface CommandInventory {

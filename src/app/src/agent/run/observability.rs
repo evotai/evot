@@ -2,14 +2,14 @@
 
 use std::collections::HashMap;
 
-use crate::observability::CompactRecord;
 use crate::observability::CompactionResult;
-use crate::observability::LlmCallMetrics;
-use crate::observability::RunSummaryData;
-use crate::observability::ToolAggStats;
 use crate::observability::TranscriptStats;
-use crate::observability::UsageSummary;
+use crate::types::CompactRecord;
+use crate::types::LlmCallMetrics;
+use crate::types::RunSummaryData;
+use crate::types::ToolAggStats;
 use crate::types::TranscriptItem;
+use crate::types::UsageSummary;
 
 // ---------------------------------------------------------------------------
 // Shared helpers

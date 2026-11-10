@@ -2,26 +2,26 @@
 //! channel ownership or lifecycle decisions belong here. Projection order is
 //! significant: persistence signals precede their corresponding public events.
 
-use super::event::AssistantContentType;
-use super::event::LlmMessageStats;
-use super::event::LlmToolCallSummary;
-use super::event::RunEventPayload;
-use super::event::ToolCallStreamPhase;
-use crate::conversation::convert::assistant_blocks_from_content;
-use crate::conversation::convert::extract_content_text;
-use crate::conversation::convert::from_agent_messages;
-use crate::conversation::convert::total_usage;
-use crate::conversation::convert::transcript_from_agent_message;
 use crate::observability::ContextCompactionStartedStats;
 use crate::observability::LlmCallCompletedStats;
-use crate::observability::LlmCallMetrics;
 use crate::observability::LlmCallRetryStats;
 use crate::observability::LlmCallStartedStats;
 use crate::observability::ToolDef;
 use crate::observability::ToolFinishedStats;
 use crate::observability::TranscriptStats;
-use crate::observability::UsageSummary;
+use crate::session::conversation::convert::assistant_blocks_from_content;
+use crate::session::conversation::convert::extract_content_text;
+use crate::session::conversation::convert::from_agent_messages;
+use crate::session::conversation::convert::total_usage;
+use crate::session::conversation::convert::transcript_from_agent_message;
+use crate::session::conversation::run_event::AssistantContentType;
+use crate::session::conversation::run_event::LlmMessageStats;
+use crate::session::conversation::run_event::LlmToolCallSummary;
+use crate::session::conversation::run_event::RunEventPayload;
+use crate::session::conversation::run_event::ToolCallStreamPhase;
+use crate::types::LlmCallMetrics;
 use crate::types::TranscriptItem;
+use crate::types::UsageSummary;
 
 // ---------------------------------------------------------------------------
 // RuntimeEvent — private orchestration signal

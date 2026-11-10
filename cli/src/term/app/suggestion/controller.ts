@@ -1,5 +1,5 @@
 import type { NativeSuggestion } from '../../../native/contracts/ports.js'
-import type { SuggestionTrigger } from '../composer-guidance.js'
+import type { SuggestionTrigger } from '../composer/composer-guidance.js'
 import type { SuggestionFeedback, SuggestionHints, SuggestionMessage, SuggestionPosition } from './types.js'
 import { SuggestionCandidates } from './candidates.js'
 import type { SuggestionSnapshot } from './context.js'

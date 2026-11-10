@@ -17,6 +17,7 @@ use crate::context::compaction::types::CompactionObserver;
 use crate::context::compaction::types::FileOps;
 use crate::provider::StreamConfig;
 use crate::provider::StreamEvent;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Previous summaries above this size get explicit convergence guidance so
@@ -306,11 +307,4 @@ fn format_file_ops_xml(file_ops: &FileOps) -> String {
     } else {
         format!("\n\n{}", sections.join("\n\n"))
     }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }

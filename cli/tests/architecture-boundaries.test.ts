@@ -1,15 +1,24 @@
 import { describe, expect, test } from 'bun:test'
+import { readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative, resolve } from 'node:path'
 
 async function source(path: string): Promise<string> {
   return Bun.file(new URL(path, import.meta.url)).text()
+}
+
+/** The REPL host: `repl.ts` wiring plus the controllers it assembles. */
+function hostSource(): string {
+  const dir = resolve(import.meta.dir, '../src/term')
+  const controllers = readdirSync(join(dir, 'host')).filter(name => name.endsWith('.ts')).sort()
+  return [join(dir, 'repl.ts'), ...controllers.map(name => join(dir, 'host', name))].map(path => readFileSync(path, 'utf8')).join('\n')
 }
 
 /** Architecture acceptance tests focus on explicit dependency edges rather
  * than file size. A move must update the production owner, not leave wrappers. */
 describe('module dependency boundaries', () => {
   test('generic selector and design rules do not import application features', async () => {
-    for (const file of ['selector.ts', 'design/key-hints.ts', 'render-wakeup.ts']) {
-      const text = await source(`../src/term/${file}`)
+    for (const file of ['ui/selector.ts', 'ui/key-hints.ts', 'term/screen/render-wakeup.ts']) {
+      const text = await source(`../src/${file}`)
       expect(text).not.toMatch(/from ['"].*(?:\/app\/|native\/|repl\.js)/)
     }
   })
@@ -19,10 +28,10 @@ describe('module dependency boundaries', () => {
       const text = await source(`../src/term/viewmodel/${file}.ts`)
       expect(text).not.toContain("from '../renderer.js'")
     }
-    const frame = await source('../src/term/render-frame.ts')
+    const frame = await source('../src/term/screen/render-frame.ts')
     expect(frame).not.toContain('process.')
     expect(frame).not.toContain('import ')
-    const host = await source('../src/term/repl.ts')
+    const host = hostSource()
     expect(host).toContain('buildShellFrame({')
     expect(host).not.toContain('bottomAnchorStart:')
   })
@@ -56,27 +65,27 @@ describe('module dependency boundaries', () => {
   })
 
   test('input and command controllers do not depend on the viewmodel barrel', async () => {
-    for (const file of ['commands', 'repl-control', 'overlay-state']) {
+    for (const file of ['composer/slash-commands', 'composer/repl-control', 'selector/overlay-state']) {
       const text = await source(`../src/term/app/${file}.ts`)
       expect(text).not.toContain('viewmodel/')
     }
   })
 
   test('background synchronization depends on injected ports, not the native binding', async () => {
-    const text = await source('../src/term/app/cloud-sync.ts')
+    const text = await source('../src/term/app/session/cloud-sync.ts')
     expect(text).not.toContain('native/')
     expect(text).not.toContain('setInterval(')
     expect(text).not.toContain('process.')
   })
 
   test('run reducers cannot bypass payload typing with any records', async () => {
-    for (const file of ['reducer', 'stream', 'compaction-record']) {
+    for (const file of ['run/reducer', 'run/stream', 'run/compaction-record']) {
       const text = await source(`../src/term/app/${file}.ts`)
       expect(text).not.toContain('Record<string, any>')
       expect(text).not.toMatch(/\bas any\b/)
       expect(text).not.toMatch(/\bas (?:number|string|boolean)\b/)
     }
-    const reducer = await source('../src/term/app/reducer.ts')
+    const reducer = await source('../src/term/app/run/reducer.ts')
     expect(reducer).not.toContain('as RunPayloads')
     expect(reducer).toContain('switch (event.kind)')
     expect(reducer).toContain('isKnownRunEvent(event)')
@@ -92,25 +101,25 @@ describe('module dependency boundaries', () => {
     for (const forbidden of ['binding.js', 'setTimeout', 'setInterval', 'loadContextTranscript', 'clearScreen', 'requestRender']) {
       expect(projection).not.toContain(forbidden)
     }
-    const host = await source('../src/term/repl.ts')
+    const host = hostSource()
     expect(host).toContain('manualCompactionLines(outcome)')
     expect(host).not.toContain('formatCompactionCompleted(')
   })
 
   test('busy submission and queue projections are independent of terminal side effects', async () => {
-    for (const file of ['busy-submission', 'prompt-queue', 'manual-compaction', 'file-completion', 'queue-edit']) {
+    for (const file of ['queue/busy-submission', 'queue/prompt-queue', 'run/manual-compaction', 'composer/file-completion-controller', 'queue/queue-edit']) {
       const text = await source(`../src/term/app/${file}.ts`)
       for (const forbidden of ['binding.js', 'renderer', 'process.', 'setTimeout', 'setInterval', ' as any']) {
         expect(text).not.toContain(forbidden)
       }
     }
-    const host = await source('../src/term/repl.ts')
+    const host = hostSource()
     expect(host).toContain('busySubmissionAction(')
     expect(host).toContain('reconcileQueuedUserMessages(')
-    const queueEdit = await source('../src/term/app/queue-edit.ts')
+    const queueEdit = await source('../src/term/app/queue/queue-edit.ts')
     expect(queueEdit).toContain('reconcilePromptQueue(')
     expect(host).not.toContain('function queueEntryText(')
-    expect(host).toContain('await manualCompaction.run(')
+    expect(host).toContain('manualCompaction.run(')
     expect(host).not.toContain('compactionTask = agent.compact(')
     expect(host).toContain('resources.add(() => fileCompletion.dispose())')
     expect(host).not.toContain('fdAbort')
@@ -123,3 +132,69 @@ describe('module dependency boundaries', () => {
     expect(text).not.toContain('process.')
   })
 })
+
+
+describe('REPL host', () => {
+  const dir = resolve(import.meta.dir, '../src/term/host')
+  const controllers = readdirSync(dir).filter(name => name.endsWith('.ts'))
+
+  test('mutable host state lives in ReplState, not in startRepl locals', () => {
+    const host = readFileSync(resolve(dir, '../repl.ts'), 'utf8')
+    expect(host).not.toMatch(/^ {2}let /m)
+    expect(host).toContain('const st = {} as ReplState')
+  })
+
+  test('controllers reach the host and each other only through declared ports', () => {
+    expect(controllers.length).toBeGreaterThan(5)
+    for (const name of controllers) {
+      const text = readFileSync(join(dir, name), 'utf8')
+      expect(text).not.toMatch(/from ['"]\.\.\/repl\.js['"]/)
+      for (const match of text.matchAll(/^import (type )?.*from ['"]\.\/([\w-]+)\.js['"]/gm)) {
+        if (match[2] !== 'timing') expect(`${name}: ${match[0]}`).toContain('import type ')
+      }
+    }
+  })
+})
+
+/** Lowest layer first: a directory may import only directories listed before
+ * it. `index.ts` and `cli.ts` are the entry points and sit above everything. */
+const LAYERS = ['native', 'ui', 'markdown', 'render', 'session', 'features', 'commands', 'update', 'term', 'headless'] as const
+
+describe('directory layering', () => {
+  const root = resolve(import.meta.dir, '../src')
+
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) return sources(path)
+      return /\.(?:ts|tsx)$/.test(entry.name) && !entry.name.endsWith('.d.ts') ? [path] : []
+    })
+  }
+
+  function layerOf(path: string): number {
+    const top = relative(root, path).split('/')[0]!
+    return LAYERS.indexOf(top as typeof LAYERS[number])
+  }
+
+  test('every source directory has a declared layer', () => {
+    const tops = readdirSync(root, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
+    expect(tops.sort()).toEqual([...LAYERS].sort())
+  })
+
+  test('imports only point at lower layers', () => {
+    const upward: string[] = []
+    for (const file of sources(root)) {
+      const from = layerOf(file)
+      if (from < 0) continue
+      const text = readFileSync(file, 'utf8')
+      for (const match of text.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)['"](\.{1,2}\/[^'"]+)['"]/g)) {
+        const target = resolve(dirname(file), match[1]!)
+        if (!target.startsWith(root + '/')) continue
+        const to = layerOf(target)
+        if (to > from) upward.push(`${relative(root, file)} -> ${relative(root, target)}`)
+      }
+    }
+    expect(upward).toEqual([])
+  })
+})
+

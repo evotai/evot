@@ -1,7 +1,7 @@
 // Offline browser fixture: serves actual console assets and deterministic APIs.
 // No real Agent, credentials, user sessions or remote requests are involved.
 import { resolve } from 'node:path'
-const root = resolve(import.meta.dir, '../../src/app/src/gateway/channels/http/static')
+const root = resolve(import.meta.dir, '../../src/app/src/surface/gateway/channels/http/static')
 const sessions = ['slow', 'fast'].map(id => ({ session_id: id, title: `Fixture ${id}`, model: 'fixture', cwd: '/fixture', turns: 1, updated_at: '2026-01-01T00:00:00Z' }))
 let finish: (() => void) | null = null
 const json = (value: unknown) => Response.json(value)

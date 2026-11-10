@@ -1,0 +1,1561 @@
+//! Cloud session sync: contract of `SessionMeta.cloud`, incremental push with
+//! compare-and-append, conflict surfacing, pull into an empty machine, and the
+//! cheap state classification used by the `/sessions` list.
+
+use std::sync::Arc;
+
+use evot::auth::AuthState;
+use evot::cloud::sync;
+use evot::conf::StorageConfig;
+use evot::session::storage::open_storage;
+use evot::session::storage::Storage;
+use evot::types::*;
+use serde::Deserialize;
+use serde_json::json;
+use tempfile::TempDir;
+use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+use wiremock::matchers::query_param;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+
+type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
+
+const META_V1_WITHOUT_CLOUD: &str =
+    include_str!("../fixtures/schema/session-meta-v1-no-cloud.json");
+const META_V1_WITH_CLOUD: &str = include_str!("../fixtures/schema/session-meta-v1-cloud.json");
+const META_V1_WITH_TEAM: &str = include_str!("../fixtures/schema/session-meta-v1-cloud-team.json");
+
+/// `cloud` as the release before team pages read it: visibility limited to
+/// the two original values, unknown keys ignored like the real struct.
+#[derive(Deserialize)]
+#[allow(dead_code)]
+struct LegacyCloudSync {
+    visibility: LegacyVisibility,
+    #[serde(default)]
+    synced_seq: u64,
+    #[serde(default)]
+    synced_at: String,
+    #[serde(default)]
+    origin_host: String,
+    #[serde(default)]
+    public_url: Option<String>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum LegacyVisibility {
+    Private,
+    Public,
+}
+
+#[derive(Deserialize)]
+struct LegacyMetaWithCloud {
+    cloud: LegacyCloudSync,
+}
+
+/// Shape a reader released before `cloud` existed requires. Strict, so a
+/// current writer that renames or drops a published field fails here.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)]
+struct LegacySessionMeta {
+    #[serde(default)]
+    schema_version: u32,
+    session_id: String,
+    cwd: String,
+    model: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    thinking_level: Option<String>,
+    title: Option<String>,
+    #[serde(default)]
+    custom_title: Option<String>,
+    #[serde(default)]
+    source: String,
+    turns: u32,
+    #[serde(default)]
+    message_count: u32,
+    #[serde(default)]
+    context_tokens: usize,
+    #[serde(default)]
+    context_budget: usize,
+    #[serde(default)]
+    total_input_tokens: u64,
+    #[serde(default)]
+    total_output_tokens: u64,
+    #[serde(default)]
+    span_count: Option<u32>,
+    #[serde(default)]
+    parent_session_id: Option<String>,
+    #[serde(default)]
+    fork_seq: Option<u64>,
+    created_at: String,
+    updated_at: String,
+}
+
+fn state(server: &MockServer) -> Result<AuthState, serde_json::Error> {
+    serde_json::from_value(json!({
+        "version":1, "server_base_url":server.uri(),
+        "user":{"id":"user", "name":"User", "email":"user@test.dev"},
+        "cli_token":"test-token", "refresh_token":"", "models_synced_at":0
+    }))
+}
+
+fn user(session: &str, seq: u64, text: &str) -> TranscriptEntry {
+    TranscriptEntry::new(session.into(), None, seq, 0, TranscriptItem::User {
+        provenance: None,
+        text: text.into(),
+        content: vec![],
+    })
+}
+
+fn fs_storage(root: &TempDir) -> Result<Arc<dyn Storage>, evot::base::error::EvotError> {
+    open_storage(&StorageConfig::fs(root.path().to_path_buf()))
+}
+
+#[test]
+fn session_meta_cloud_is_backward_and_forward_compatible() -> TestResult {
+    let old: SessionMeta = serde_json::from_str(META_V1_WITHOUT_CLOUD)?;
+    assert!(old.cloud.is_none());
+
+    let shared: SessionMeta = serde_json::from_str(META_V1_WITH_CLOUD)?;
+    let cloud = shared.cloud.as_ref().ok_or("fixture must carry cloud")?;
+    assert_eq!(cloud.visibility, CloudVisibility::Public);
+    assert_eq!(cloud.synced_seq, 12);
+    assert_eq!(
+        cloud.public_url.as_deref(),
+        Some("https://auto.evot.ai/s/abc")
+    );
+
+    // Current writer, legacy strict reader: a local-only session must not
+    // even mention `cloud`, so pre-sync readers see exactly what they wrote.
+    let written = serde_json::to_string(&old)?;
+    let legacy: LegacySessionMeta = serde_json::from_str(&written)?;
+    assert_eq!(legacy.session_id, old.session_id);
+    assert_eq!(legacy.schema_version, old.schema_version);
+    assert!(!written.contains("\"cloud\""));
+    Ok(())
+}
+
+#[tokio::test]
+async fn ordinary_saves_preserve_cloud_state() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut meta = SessionMeta::new("s1".into(), "/tmp".into(), "m".into());
+    storage.save_session(meta.clone()).await?;
+    storage
+        .set_session_cloud(
+            "s1",
+            Some(CloudSync::new(CloudVisibility::Private, "laptop")),
+        )
+        .await?;
+
+    // A run holding a stale snapshot without `cloud` saves afterwards.
+    meta.turns = 3;
+    storage.save_session(meta).await?;
+    let loaded = storage.get_session("s1").await?.ok_or("missing")?;
+    assert_eq!(loaded.turns, 3);
+    assert_eq!(
+        loaded.cloud.map(|c| c.origin_host),
+        Some("laptop".to_string())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn local_only_push_skips_auth_and_progress_even_when_forced() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let meta = SessionMeta::new("local".into(), "/w".into(), "m".into());
+    storage.save_session(meta.clone()).await?;
+    storage.append_entry(user("local", 1, "stay local")).await?;
+
+    // The native bridge supplies this lazy auth loader. Neither missing nor
+    // unreadable credentials should matter to an unshared session, on any run.
+    for force in [false, false, true] {
+        let outcome = sync::push_session_with_auth(
+            || panic!("local-only pushes must not read auth"),
+            &storage,
+            "local",
+            "test",
+            force,
+            &|_| panic!("local-only pushes must not prepare an upload"),
+        )
+        .await?;
+        assert!(matches!(outcome, sync::PushOutcome::NotShared));
+    }
+    let loaded = storage
+        .get_session("local")
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(serde_json::to_value(loaded)?, serde_json::to_value(meta)?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_push_still_reports_auth_failures_before_preparing_upload() -> TestResult {
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut meta = SessionMeta::new("shared".into(), "/w".into(), "m".into());
+    meta.cloud = Some(CloudSync::new(CloudVisibility::Private, "laptop"));
+    storage.save_session(meta.clone()).await?;
+
+    for message in [
+        "sharing requires sign-in; run /login",
+        "auth file is unreadable",
+    ] {
+        let outcome = sync::push_session_with_auth(
+            || Err(evot::base::error::EvotError::Conf(message.into())),
+            &storage,
+            "shared",
+            "test",
+            false,
+            &|_| panic!("auth failures must not prepare an upload"),
+        )
+        .await;
+        assert!(
+            matches!(outcome, Err(evot::base::error::EvotError::Conf(error)) if error == message)
+        );
+    }
+    let loaded = storage
+        .get_session("shared")
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(serde_json::to_value(loaded)?, serde_json::to_value(meta)?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn shared_push_loads_auth_and_uploads_through_the_native_entry_point() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut meta = SessionMeta::new("shared".into(), "/w".into(), "m".into());
+    meta.cloud = Some(CloudSync::new(CloudVisibility::Private, "laptop"));
+    storage.save_session(meta).await?;
+    storage.append_entry(user("shared", 1, "sync me")).await?;
+
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/shared"))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome =
+        sync::push_session_with_auth(|| Ok(state), &storage, "shared", "test", false, &|_| {})
+            .await?;
+    assert!(matches!(outcome, sync::PushOutcome::Synced {
+        pushed: 1,
+        ..
+    }));
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "a")).await?;
+    storage.append_entry(user("s1", 2, "b")).await?;
+
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(header("authorization", "Bearer test-token"))
+        .and(body_partial_json(
+            json!({"expected_seq": 0, "visibility": "private"}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "private", "updated_at": "t1"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome = sync::share_session(&state, &storage, "s1", None, "test", &|_| {}).await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 2);
+    assert_eq!(cloud.synced_seq, 2);
+    // The wire meta never carries per-machine sync state.
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert!(body["meta"].get("cloud").is_none());
+    assert_eq!(body["schema_version"], sync::SYNC_SCHEMA_VERSION);
+
+    // Next run appends one entry: only it goes up, at expected_seq 2.
+    storage.append_entry(user("s1", 3, "c")).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(json!({"expected_seq": 2})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 3, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 1);
+    assert_eq!(cloud.synced_seq, 3);
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[1].body)?;
+    assert_eq!(body["entries"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["entries"][0]["seq"], 3);
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn shares_never_upload_compute_machine_details() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::session::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let section = format!(
+        "{}\n- big-1: Rust builds on ubuntu@10.0.0.9\n{}",
+        evot::cloud::compute::prompt::PROMPT_OPEN,
+        evot::cloud::compute::prompt::PROMPT_CLOSE
+    );
+    storage.append_entry(user("s1", 1, "hi")).await?;
+    storage
+        .append_entry(TranscriptEntry::new(
+            "s1".into(),
+            None,
+            2,
+            0,
+            serde_json::from_value(json!({
+                "type": "stats", "kind": "llm_call_started", "data": {
+                    "system_prompt": format!("Base.\n\n{section}"),
+                    "tool_definitions": [
+                        {"name": "bash", "description": "", "parameters": {}}
+                    ],
+                }
+            }))?,
+        ))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+    assert!(!body.contains("big-1"), "machine names stay local");
+    assert!(!body.contains("10.0.0.9"));
+    assert!(!body.contains("compute_machines"));
+    assert!(
+        body.contains("Base."),
+        "the rest of the prompt is still shared"
+    );
+    // The local transcript keeps the full record.
+    let local = storage.load_active_entries("s1").await?;
+    assert!(serde_json::to_string(&local)?.contains("big-1"));
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_uploads_more_than_the_former_32_mib_limit() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::session::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    // Public sharing includes both the raw transcript and viewer document.
+    storage
+        .append_entry(user("s1", 1, &"x".repeat(17 * 1024 * 1024)))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(header("authorization", "Bearer test-token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 1);
+    assert_eq!(cloud.synced_seq, 1);
+    let requests = server.received_requests().await.ok_or("missing requests")?;
+    let request = requests.first().ok_or("missing upload")?;
+    assert!(request.body.len() > 32 * 1024 * 1024);
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_embeds_path_images_in_viewer_and_raw_transcript() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let image = root.path().join("photo.png");
+    std::fs::write(&image, b"image bytes")?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let entry = TranscriptEntry::new("s1".into(), None, 1, 1, TranscriptItem::User {
+        provenance: None,
+        text: "look at this".into(),
+        content: vec![
+            TranscriptUserContent::Text {
+                text: "look at this".into(),
+            },
+            TranscriptUserContent::Image {
+                mime_type: "image/png".into(),
+                source: TranscriptImageSource::Path {
+                    path: image.to_string_lossy().into_owned(),
+                },
+            },
+        ],
+    });
+    storage.append_entry(entry.clone()).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(
+        body["entries"][0]["item"]["content"][1]["source"],
+        json!({"type": "base64", "data": "aW1hZ2UgYnl0ZXM="})
+    );
+    assert!(body["viewer"].to_string().contains("aW1hZ2UgYnl0ZXM="));
+    // Sharing only changes the wire copy, not the local conversation.
+    let saved = storage
+        .list_entries(ListTranscriptEntries {
+            session_id: "s1".into(),
+            run_id: None,
+            after_seq: None,
+            limit: None,
+        })
+        .await?;
+    assert_eq!(
+        serde_json::to_value(&saved[0])?,
+        serde_json::to_value(&entry)?
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_push_preserves_thinking_metadata_and_tool_sequence() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let assistant = TranscriptEntry::new(
+        "s1".into(),
+        Some("run-1".into()),
+        1,
+        1,
+        TranscriptItem::Assistant {
+            content: vec![
+                AssistantBlock::Thinking {
+                    text: "private reasoning".into(),
+                    metadata: Some(evot_engine::ThinkingMetadata::Anthropic {
+                        signature: "sig".into(),
+                    }),
+                },
+                AssistantBlock::Text {
+                    text: "reading".into(),
+                },
+                AssistantBlock::ToolCall {
+                    id: "call-1".into(),
+                    name: "read".into(),
+                    input: json!({"path":"file"}),
+                    metadata: None,
+                },
+            ],
+            stop_reason: "tool_use".into(),
+            usage: Default::default(),
+            model: "m".into(),
+            provider: "p".into(),
+            timestamp: 42,
+            error_message: None,
+        },
+    );
+    storage.append_entry(assistant.clone()).await?;
+    storage
+        .append_entry(TranscriptEntry::new(
+            "s1".into(),
+            Some("run-1".into()),
+            2,
+            1,
+            TranscriptItem::ToolResult {
+                tool_call_id: "call-1".into(),
+                tool_name: "read".into(),
+                content: "file contents".into(),
+                is_error: false,
+                details: json!({"rows": 2}),
+            },
+        ))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["entries"][0], serde_json::to_value(&assistant)?);
+    assert_eq!(body["entries"][1]["item"]["details"], json!({"rows": 2}));
+    assert!(body["viewer"].to_string().contains("private reasoning"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_replaces_missing_path_image_with_placeholder_text() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let kept = root.path().join("kept.png");
+    std::fs::write(&kept, b"image bytes")?;
+    let gone = root.path().join("gone.png");
+    let gone_path = gone.to_string_lossy().into_owned();
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage
+        .append_entry(TranscriptEntry::new(
+            "s1".into(),
+            None,
+            1,
+            1,
+            TranscriptItem::User {
+                provenance: None,
+                text: "photos".into(),
+                content: vec![
+                    TranscriptUserContent::Image {
+                        mime_type: "image/png".into(),
+                        source: TranscriptImageSource::Path {
+                            path: kept.to_string_lossy().into_owned(),
+                        },
+                    },
+                    TranscriptUserContent::Image {
+                        mime_type: "image/png".into(),
+                        source: TranscriptImageSource::Path {
+                            path: gone_path.clone(),
+                        },
+                    },
+                ],
+            },
+        ))
+        .await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(requests.len(), 1);
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    let content = &body["entries"][0]["item"]["content"];
+    assert_eq!(
+        content[0]["source"],
+        json!({"type":"base64","data":"aW1hZ2UgYnl0ZXM="})
+    );
+    assert_eq!(
+        content[1],
+        json!({"type":"text","text":"[image unavailable: gone.png]"})
+    );
+    // The local directory of the missing file is never published.
+    assert!(!body.to_string().contains(&gone_path));
+    // The local transcript keeps the original path reference.
+    let entries = storage
+        .list_entries(evot::types::ListTranscriptEntries {
+            session_id: "s1".into(),
+            run_id: None,
+            after_seq: None,
+            limit: None,
+        })
+        .await?;
+    assert!(serde_json::to_string(&entries)?.contains(&gone_path));
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_embeds_images_in_compacted_engine_context_without_changing_tool_inputs() -> TestResult
+{
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let image = root.path().join("compacted.png");
+    std::fs::write(&image, b"snapshot bytes")?;
+    let image_path = image.to_string_lossy().into_owned();
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let compact = TranscriptEntry::new("s1".into(), None, 1, 1, TranscriptItem::Compact {
+        id: "compact-1".into(),
+        created_at: 1,
+        reason: CompactReason::Manual,
+        summary: "history".into(),
+        tokens_before: 1,
+        tokens_after: 1,
+        messages_before: 2,
+        messages_after: 2,
+        messages: vec![TranscriptItem::User {
+            provenance: None,
+            text: "image".into(),
+            content: vec![TranscriptUserContent::Image {
+                mime_type: "image/png".into(),
+                source: TranscriptImageSource::Path {
+                    path: image_path.clone(),
+                },
+            }],
+        }],
+        engine_messages: vec![
+            evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+                provenance: None,
+                content: vec![evot_engine::Content::Image {
+                    mime_type: "image/png".into(),
+                    source: evot_engine::ImageSource::Path {
+                        path: image_path.clone(),
+                    },
+                }],
+                timestamp: 1,
+            }),
+            evot_engine::AgentMessage::Llm(evot_engine::Message::Assistant {
+                content: vec![evot_engine::Content::ToolCall {
+                    id: "tool-1".into(),
+                    name: "read".into(),
+                    arguments: json!({"type":"image", "source":{"type":"path", "path":image_path}}),
+                    metadata: None,
+                }],
+                stop_reason: evot_engine::StopReason::ToolUse,
+                model: "m".into(),
+                provider: "p".into(),
+                usage: Default::default(),
+                timestamp: 2,
+                error_message: None,
+                response_id: None,
+            }),
+        ],
+        state: Box::default(),
+        details: Default::default(),
+    });
+    storage.append_entry(compact.clone()).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    let item = &body["entries"][0]["item"];
+    let encoded = "c25hcHNob3QgYnl0ZXM=";
+    assert_eq!(
+        item["messages"][0]["content"][0]["source"],
+        json!({"type":"base64","data":encoded})
+    );
+    assert_eq!(
+        item["engine_messages"][0]["content"][0]["source"],
+        json!({"type":"base64","data":encoded})
+    );
+    assert_eq!(
+        item["engine_messages"][1]["content"][0]["arguments"],
+        serde_json::to_value(&compact)?["item"]["engine_messages"][1]["content"][0]["arguments"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn widening_access_over_a_synced_path_image_replaces_the_cloud_copy() -> TestResult {
+    // The private copy was synced by a build that sent the image's path. Going
+    // team or public must not refuse and must not leave that entry behind: the
+    // push starts over from seq 0 as a replace, with the bytes embedded.
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let image = root.path().join("photo.png");
+    std::fs::write(&image, b"image bytes")?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage
+        .append_entry(TranscriptEntry::new(
+            "s1".into(),
+            None,
+            1,
+            1,
+            TranscriptItem::User {
+                provenance: None,
+                text: "photo".into(),
+                content: vec![TranscriptUserContent::Image {
+                    mime_type: "image/png".into(),
+                    source: TranscriptImageSource::Path {
+                        path: image.to_string_lossy().into_owned(),
+                    },
+                }],
+            },
+        ))
+        .await?;
+    storage.append_entry(user("s1", 2, "later")).await?;
+    let mut synced = CloudSync::new(CloudVisibility::Private, "host");
+    synced.synced_seq = 2;
+    storage.set_session_cloud("s1", Some(synced)).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let sync::PushOutcome::Synced { pushed, .. } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 2, "the whole transcript goes up again");
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["force"], json!(true));
+    assert_eq!(body["expected_seq"], json!(0));
+    assert_eq!(body["entries"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        body["entries"][0]["item"]["content"][0]["source"],
+        json!({"type": "base64", "data": "aW1hZ2UgYnl0ZXM="})
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn widening_access_without_images_stays_incremental() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    storage.append_entry(user("s1", 2, "two")).await?;
+    let mut synced = CloudSync::new(CloudVisibility::Private, "host");
+    synced.synced_seq = 1;
+    storage.set_session_cloud("s1", Some(synced)).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    assert_eq!(body["force"], json!(false));
+    assert_eq!(body["expected_seq"], json!(1));
+    assert_eq!(body["entries"].as_array().map(Vec::len), Some(1));
+    Ok(())
+}
+
+#[tokio::test]
+async fn push_conflict_is_reported_not_raised_and_leaves_state_untouched() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let mut cloud = CloudSync::new(CloudVisibility::Private, "laptop");
+    cloud.synced_seq = 2;
+    cloud.synced_at = "2020-01-01T00:00:00Z".into();
+    storage.set_session_cloud("s1", Some(cloud)).await?;
+    for seq in 1..=3 {
+        storage.append_entry(user("s1", seq, "x")).await?;
+    }
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(409).set_body_json(json!({"seq": 5})))
+        .mount(&server)
+        .await;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
+    let sync::PushOutcome::Diverged {
+        local_seq,
+        remote_seq,
+    } = outcome
+    else {
+        return Err(format!("expected Diverged, got {outcome:?}").into());
+    };
+    assert_eq!((local_seq, remote_seq), (3, 5));
+    let loaded = storage.get_session("s1").await?.ok_or("missing")?;
+    assert_eq!(loaded.cloud.map(|c| c.synced_seq), Some(2));
+    Ok(())
+}
+
+#[tokio::test]
+async fn pull_materialises_remote_session_on_a_fresh_machine() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let mut remote_meta = SessionMeta::new("s9".into(), "/elsewhere".into(), "m".into());
+    remote_meta.title = Some("db migration plan".into());
+    remote_meta.turns = 2;
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions/s9"))
+        .and(query_param("after_seq", "0"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "schema_version": 1,
+            "meta": remote_meta,
+            "seq": 2,
+            "visibility": "private",
+            "origin_host": "macbook",
+            "entries": [user("s9", 1, "hi"), user("s9", 2, "there")],
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let outcome = sync::pull_session(&state, &storage, "s9").await?;
+    let sync::PullOutcome::Pulled { meta, appended } = outcome else {
+        return Err(format!("expected Pulled, got {outcome:?}").into());
+    };
+    assert_eq!(appended, 2);
+    assert_eq!(meta.title.as_deref(), Some("db migration plan"));
+    let cloud = meta.cloud.ok_or("pulled session must be shared")?;
+    assert_eq!(cloud.synced_seq, 2);
+    assert_eq!(cloud.origin_host, "macbook");
+    let entries = storage
+        .list_entries(ListTranscriptEntries {
+            session_id: "s9".into(),
+            run_id: None,
+            after_seq: None,
+            limit: None,
+        })
+        .await?;
+    assert_eq!(entries.len(), 2);
+
+    // Pulled copy reads as in step: nothing pending on either side.
+    let loaded = storage.get_session("s9").await?.ok_or("missing")?;
+    let remote = sync::RemoteSession {
+        session_id: "s9".into(),
+        meta: remote_meta,
+        seq: 2,
+        visibility: CloudVisibility::Private,
+        origin_host: "macbook".into(),
+        updated_at: String::new(),
+        public_url: None,
+        team: false,
+        team_url: None,
+        team_name: None,
+    };
+    assert_eq!(
+        sync::cloud_state(Some(&loaded), Some(&remote)),
+        sync::CloudState::Synced
+    );
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn pull_with_local_unpushed_entries_distinguishes_ahead_from_diverged() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    let mut cloud = CloudSync::new(CloudVisibility::Private, "laptop");
+    cloud.synced_seq = 1;
+    storage.set_session_cloud("s1", Some(cloud)).await?;
+    storage.append_entry(user("s1", 1, "a")).await?;
+    storage.append_entry(user("s1", 2, "b")).await?;
+    let meta = SessionMeta::new("s1".into(), "/w".into(), "m".into());
+
+    // Server still at 1: local is simply ahead.
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions/s1"))
+        .and(query_param("after_seq", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "schema_version": 1, "meta": meta, "seq": 1, "visibility": "private", "entries": []
+        })))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    let outcome = sync::pull_session(&state, &storage, "s1").await?;
+    assert!(matches!(outcome, sync::PullOutcome::LocalAhead {
+        local_seq: 2,
+        remote_seq: 1
+    }));
+
+    // Server moved to 4 meanwhile: both sides appended.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "schema_version": 1, "meta": meta, "seq": 4, "visibility": "private", "entries": []
+        })))
+        .mount(&server)
+        .await;
+    let outcome = sync::pull_session(&state, &storage, "s1").await?;
+    assert!(matches!(outcome, sync::PullOutcome::Diverged {
+        local_seq: 2,
+        remote_seq: 4
+    }));
+    Ok(())
+}
+
+#[test]
+fn cloud_state_classifies_from_metadata_alone() {
+    let mut local = SessionMeta::new("s".into(), "/w".into(), "m".into());
+    let remote = sync::RemoteSession {
+        session_id: "s".into(),
+        meta: local.clone(),
+        seq: 5,
+        visibility: CloudVisibility::Private,
+        origin_host: String::new(),
+        updated_at: String::new(),
+        public_url: None,
+        team: false,
+        team_url: None,
+        team_name: None,
+    };
+    assert_eq!(sync::cloud_state(None, None), sync::CloudState::Local);
+    assert_eq!(
+        sync::cloud_state(None, Some(&remote)),
+        sync::CloudState::RemoteOnly
+    );
+    assert_eq!(
+        sync::cloud_state(Some(&local), Some(&remote)),
+        sync::CloudState::Local
+    );
+
+    local.updated_at = "2024-01-01T00:00:00Z".into();
+    let mut cloud = CloudSync::new(CloudVisibility::Private, "h");
+    cloud.synced_seq = 5;
+    cloud.synced_at = "2024-01-02T00:00:00Z".into();
+    local.cloud = Some(cloud.clone());
+    assert_eq!(
+        sync::cloud_state(Some(&local), Some(&remote)),
+        sync::CloudState::Synced
+    );
+    assert_eq!(
+        sync::cloud_state(Some(&local), None),
+        sync::CloudState::Synced
+    );
+
+    local.updated_at = "2024-01-03T00:00:00Z".into();
+    assert_eq!(
+        sync::cloud_state(Some(&local), Some(&remote)),
+        sync::CloudState::PushPending
+    );
+
+    let mut ahead = remote.clone();
+    ahead.seq = 7;
+    assert_eq!(
+        sync::cloud_state(Some(&local), Some(&ahead)),
+        sync::CloudState::Diverged
+    );
+    local.updated_at = "2024-01-01T00:00:00Z".into();
+    assert_eq!(
+        sync::cloud_state(Some(&local), Some(&ahead)),
+        sync::CloudState::PullPending
+    );
+}
+
+#[test]
+fn team_cloud_state_reads_old_data_and_stays_readable_by_old_builds() -> TestResult {
+    // Old data, current reader: no team keys means no team page.
+    let public: SessionMeta = serde_json::from_str(META_V1_WITH_CLOUD)?;
+    let cloud = public.cloud.ok_or("fixture must carry cloud")?;
+    assert!(!cloud.team);
+    assert_eq!(cloud.access(), CloudAccess::Public);
+
+    let team: SessionMeta = serde_json::from_str(META_V1_WITH_TEAM)?;
+    let cloud = team.cloud.clone().ok_or("fixture must carry cloud")?;
+    assert_eq!(cloud.access(), CloudAccess::Team);
+    assert_eq!(cloud.team_name.as_deref(), Some("Databend"));
+
+    // Current writer, legacy reader: a team session reads as plain private,
+    // so an old build narrows access rather than failing or widening it.
+    let written = serde_json::to_string(&team)?;
+    let legacy: LegacyMetaWithCloud = serde_json::from_str(&written)?;
+    assert_eq!(legacy.cloud.visibility, LegacyVisibility::Private);
+    assert_eq!(legacy.cloud.synced_seq, 4);
+
+    // Sessions without a team page write exactly what they did before.
+    let mut plain = CloudSync::new(CloudVisibility::Private, "h");
+    plain.set_access(CloudAccess::Private);
+    let written = serde_json::to_string(&plain)?;
+    assert!(!written.contains("team"));
+    Ok(())
+}
+
+#[test]
+fn cloud_access_round_trips_through_visibility_and_team() {
+    let mut cloud = CloudSync::new(CloudVisibility::Private, "h");
+    for access in [CloudAccess::Team, CloudAccess::Public, CloudAccess::Private] {
+        cloud.set_access(access);
+        assert_eq!(cloud.access(), access);
+    }
+    cloud.set_access(CloudAccess::Team);
+    assert_eq!(cloud.visibility, CloudVisibility::Private);
+    // Public wins over a stale flag.
+    cloud.visibility = CloudVisibility::Public;
+    assert_eq!(cloud.access(), CloudAccess::Public);
+}
+
+async fn one_entry_session(root: &TempDir) -> Result<Arc<dyn Storage>, Box<dyn std::error::Error>> {
+    let storage = fs_storage(root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "a")).await?;
+    Ok(storage)
+}
+
+#[tokio::test]
+async fn share_team_pushes_the_page_and_records_the_link() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = one_entry_session(&root).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(
+            json!({"visibility": "private", "team": true}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private", "team": true,
+            "team_url": "https://auto.evot.ai/team/abcdefghijklmnopqrstuv",
+            "team_name": "Databend"
+        })))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await?;
+    let sync::PushOutcome::Synced { cloud, .. } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(cloud.access(), CloudAccess::Team);
+    assert_eq!(cloud.team_name.as_deref(), Some("Databend"));
+    let requests = server.received_requests().await.unwrap_or_default();
+    let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
+    // The team page is rendered from the same viewer document as public.
+    assert!(body.get("viewer").is_some_and(|v| v.is_object()));
+
+    // Background pushes keep asking for the team page.
+    storage.append_entry(user("s1", 2, "b")).await?;
+    sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
+    let loaded = storage.get_session("s1").await?.ok_or("missing")?;
+    let cloud = loaded.cloud.ok_or("missing cloud")?;
+    assert_eq!(
+        cloud.team_url.as_deref(),
+        Some("https://auto.evot.ai/team/abcdefghijklmnopqrstuv")
+    );
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn share_team_on_a_server_without_team_pages_is_an_error() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = one_entry_session(&root).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"seq": 1, "visibility": "private"})),
+        )
+        .mount(&server)
+        .await;
+    let error = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await
+    .err()
+    .ok_or("an old server must not look like success")?;
+    assert!(error.to_string().contains("does not support team sharing"));
+    // What the server acknowledged is what is recorded: private, no team.
+    let loaded = storage.get_session("s1").await?.ok_or("missing")?;
+    assert_eq!(loaded.cloud.map(|c| c.access()), Some(CloudAccess::Private));
+    Ok(())
+}
+
+#[tokio::test]
+async fn team_refusal_carries_the_server_reason() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = one_entry_session(&root).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "error": "team sharing needs a team: this account is not in any group"
+        })))
+        .mount(&server)
+        .await;
+    let error = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Team),
+        "test",
+        &|_| {},
+    )
+    .await
+    .err()
+    .ok_or("expected a refusal")?;
+    assert!(error.to_string().contains("not in any group"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn pull_records_the_team_page() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    let remote_meta = SessionMeta::new("s9".into(), "/elsewhere".into(), "m".into());
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions/s9"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "schema_version": 1, "meta": remote_meta, "seq": 1, "visibility": "private",
+            "team": true, "team_url": "https://auto.evot.ai/team/t", "team_name": "Databend",
+            "entries": [user("s9", 1, "hi")],
+        })))
+        .mount(&server)
+        .await;
+    let sync::PullOutcome::Pulled { meta, .. } = sync::pull_session(&state, &storage, "s9").await?
+    else {
+        return Err("expected Pulled".into());
+    };
+    let cloud = meta.cloud.ok_or("missing cloud")?;
+    assert_eq!(cloud.access(), CloudAccess::Team);
+    assert_eq!(
+        cloud.team_url.as_deref(),
+        Some("https://auto.evot.ai/team/t")
+    );
+    Ok(())
+}
+
+/// A large first share goes up as several compare-and-append batches rather
+/// than one request. Only the last batch carries the viewer; the earlier ones
+/// ask the server to keep whatever page is already up. Every batch continues
+/// from the seq the server acknowledged, so an interruption resumes rather
+/// than restarting.
+#[tokio::test]
+async fn share_splits_a_large_upload_into_batches_with_the_viewer_last() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::session::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    // Three entries of ~3 MiB each against a 4 MiB batch ceiling: one per batch.
+    for seq in 1..=3 {
+        storage
+            .append_entry(user("s1", seq, &"x".repeat(3 * 1024 * 1024)))
+            .await?;
+    }
+    for seq in 1..=3u64 {
+        Mock::given(method("PUT"))
+            .and(path("/v1/sessions/s1"))
+            .and(body_partial_json(json!({"expected_seq": seq - 1})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "seq": seq, "visibility": "public", "public_url": "https://evot.ai/share/token"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    // Progress: preparing first, then bytes while each batch goes up and one
+    // tick per acknowledged batch.
+    let ticks = std::sync::Mutex::new(Vec::new());
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Public),
+        "test",
+        &|progress| {
+            if let Ok(mut ticks) = ticks.lock() {
+                ticks.push(progress);
+            }
+        },
+    )
+    .await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 3);
+    assert_eq!(cloud.synced_seq, 3);
+    let ticks = ticks.into_inner().map_err(|_| "poisoned")?;
+    assert_eq!(
+        ticks.first().map(|t| t.phase),
+        Some(sync::PushPhase::Preparing)
+    );
+    let mut seen: Vec<(usize, usize, usize, usize)> = ticks
+        .iter()
+        .skip(1)
+        .map(|t| (t.uploaded_entries, t.total_entries, t.batch, t.batches))
+        .collect();
+    seen.dedup();
+    assert_eq!(seen, vec![
+        (0, 3, 0, 3),
+        (1, 3, 1, 3),
+        (2, 3, 2, 3),
+        (3, 3, 3, 3)
+    ]);
+    let requests = server.received_requests().await.ok_or("missing requests")?;
+    assert_eq!(requests.len(), 3);
+    // Bytes never run past the total, and end exactly at what was sent.
+    let sent: u64 = requests
+        .iter()
+        .map(|request| request.body.len() as u64)
+        .sum();
+    let last = ticks.last().ok_or("no ticks")?;
+    assert_eq!((last.sent_bytes, last.total_bytes), (sent, sent));
+    assert!(ticks
+        .iter()
+        .all(|t| t.sent_bytes <= t.total_bytes.max(t.sent_bytes)));
+    assert!(ticks.iter().skip(1).all(|t| t.total_bytes > 0));
+    for request in &requests {
+        // Streamed for progress, but with its length declared, never chunked.
+        let length = request
+            .headers
+            .get("content-length")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok());
+        assert_eq!(length, Some(request.body.len()));
+        assert!(request.headers.get("transfer-encoding").is_none());
+    }
+    for (index, request) in requests.iter().enumerate() {
+        let body: serde_json::Value = serde_json::from_slice(&request.body)?;
+        let is_last = index == 2;
+        assert_eq!(body["entries"].as_array().map(Vec::len), Some(1));
+        assert_eq!(body["entries"][0]["seq"], index as u64 + 1);
+        assert_eq!(body.get("viewer").is_some(), is_last, "batch {index}");
+        // `keep_viewer` is omitted (not false) on the last batch, so a server
+        // that predates it sees exactly the old payload.
+        assert_eq!(
+            body.get("keep_viewer"),
+            (!is_last).then_some(&json!(true)),
+            "batch {index}"
+        );
+    }
+    server.verify().await;
+    Ok(())
+}
+
+/// A conflict on a later batch stops the upload and reports it; the batches
+/// already acknowledged stay recorded so the next push resumes after them.
+#[tokio::test]
+async fn share_conflict_mid_upload_keeps_acknowledged_batches() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let storage: Arc<dyn Storage> = Arc::new(evot::session::storage::MemoryStorage::new());
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    for seq in 1..=2 {
+        storage
+            .append_entry(user("s1", seq, &"x".repeat(3 * 1024 * 1024)))
+            .await?;
+    }
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(json!({"expected_seq": 0})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .and(body_partial_json(json!({"expected_seq": 1})))
+        .respond_with(ResponseTemplate::new(409).set_body_json(json!({"seq": 5})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    storage
+        .set_session_cloud(
+            "s1",
+            Some(CloudSync::new(CloudVisibility::Private, "laptop")),
+        )
+        .await?;
+    let outcome = sync::push_session(&state, &storage, "s1", "test", false, &|_| {}).await?;
+    let sync::PushOutcome::Diverged {
+        local_seq,
+        remote_seq,
+    } = outcome
+    else {
+        return Err(format!("expected Diverged, got {outcome:?}").into());
+    };
+    assert_eq!((local_seq, remote_seq), (2, 5));
+    let meta = storage.get_session("s1").await?.ok_or("missing session")?;
+    assert_eq!(meta.cloud.map(|cloud| cloud.synced_seq), Some(1));
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rate_limited_batch_is_retried_after_the_server_says_so() -> TestResult {
+    // The server's per-minute upload cap sees every batch of a chunked push.
+    // A 429 with `Retry-After` means "send that one again later", not "the
+    // upload failed"; the client waits and does so without resending the
+    // batches already acknowledged.
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "1")
+                .set_body_json(json!({"error": "too many sync requests, slow down"})),
+        )
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "seq": 1, "visibility": "private"
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let started = std::time::Instant::now();
+    let phases = std::sync::Mutex::new(Vec::new());
+    let outcome = sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Private),
+        "test",
+        &|progress| {
+            if let Ok(mut phases) = phases.lock() {
+                phases.push(progress.phase);
+            }
+        },
+    )
+    .await?;
+    let sync::PushOutcome::Synced { cloud, pushed } = outcome else {
+        return Err(format!("expected Synced, got {outcome:?}").into());
+    };
+    assert_eq!(pushed, 1);
+    assert_eq!(cloud.synced_seq, 1);
+    assert!(
+        started.elapsed() >= std::time::Duration::from_secs(1),
+        "honoured Retry-After"
+    );
+    // The wait is reported, so a stalled bar says why.
+    let phases = phases.into_inner().map_err(|_| "poisoned")?;
+    assert!(phases.contains(&sync::PushPhase::RateLimited {
+        retry_in: std::time::Duration::from_secs(1)
+    }));
+    Ok(())
+}
+
+/// A slow server answer shows as "sent, waiting for the server", with the
+/// bytes already counted, rather than as a bar stuck where it started.
+#[tokio::test]
+async fn a_sent_batch_waiting_for_the_server_reports_confirming() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    let root = TempDir::new()?;
+    let storage = fs_storage(&root)?;
+    storage
+        .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
+        .await?;
+    storage.append_entry(user("s1", 1, "one")).await?;
+    Mock::given(method("PUT"))
+        .and(path("/v1/sessions/s1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"seq": 1, "visibility": "private"}))
+                .set_delay(std::time::Duration::from_millis(700)),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let ticks = std::sync::Mutex::new(Vec::new());
+    sync::share_session(
+        &state,
+        &storage,
+        "s1",
+        Some(CloudAccess::Private),
+        "test",
+        &|progress| {
+            if let Ok(mut ticks) = ticks.lock() {
+                ticks.push(progress);
+            }
+        },
+    )
+    .await?;
+    let ticks = ticks.into_inner().map_err(|_| "poisoned")?;
+    let confirming = ticks
+        .iter()
+        .find(|t| t.phase == sync::PushPhase::Confirming)
+        .ok_or("no confirming tick")?;
+    assert_eq!(confirming.sent_bytes, confirming.total_bytes);
+    assert_eq!(confirming.uploaded_entries, 0);
+    server.verify().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_rate_limited_pull_is_not_retried() -> TestResult {
+    let server = MockServer::start().await;
+    let state = state(&server)?;
+    Mock::given(method("GET"))
+        .and(path("/v1/sessions"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "60")
+                .set_body_json(json!({"error": "too many sync requests, slow down"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let error = sync::remote_index(&state)
+        .await
+        .err()
+        .ok_or("expected an error")?;
+    assert!(
+        error.to_string().contains("too many sync requests"),
+        "{error}"
+    );
+    Ok(())
+}

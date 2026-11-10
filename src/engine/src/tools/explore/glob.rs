@@ -68,7 +68,7 @@ impl AgentTool for GlobTool {
         Some(("find files by name", "bash find or ls"))
     }
 
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<crate::types::AliasMap> {
         Some(&[
             ("pattern", &["patterns", "glob", "query"] as &[&str]),
             ("path", &["paths", "dir", "directory"] as &[&str]),

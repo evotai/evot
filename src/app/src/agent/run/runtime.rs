@@ -15,22 +15,22 @@ use async_trait::async_trait;
 use super::control::RunControl;
 use super::engine::build_engine;
 use super::engine::EngineOptions;
-use super::event::RunEventContext;
-use super::event::RunEventPayload;
 use super::outbox::event_channel;
 use super::outbox::EventSender;
 use super::projection::map_agent_event;
 use super::projection::RuntimeEvent;
 use super::run::Run;
-use crate::conversation::convert::from_agent_messages;
-use crate::error::Result;
-use crate::observability::CompactRecord;
+use crate::base::error::Result;
 use crate::observability::ContextCompactionCompletedStats;
 use crate::observability::RunFinishedStats;
 use crate::observability::TranscriptStats;
-use crate::observability::UsageSummary;
-use crate::sessions::Session;
+use crate::session::conversation::convert::from_agent_messages;
+use crate::session::conversation::run_event::RunEventContext;
+use crate::session::conversation::run_event::RunEventPayload;
+use crate::session::Session;
+use crate::types::CompactRecord;
 use crate::types::TranscriptItem;
+use crate::types::UsageSummary;
 
 // ---------------------------------------------------------------------------
 // TurnInput — prepared by agent, executed by runtime
@@ -283,14 +283,16 @@ async fn drive_one_turn(
         let current_expected = *expected;
         async move {
             let append = if new_items.is_empty() {
-                crate::sessions::TurnAppend {
+                crate::session::TurnAppend {
                     next_seq: current_expected,
                     interleaved_context_items: 0,
                 }
             } else {
                 session.write_items_at(new_items, current_expected).await?
             };
-            Ok::<(usize, crate::sessions::TurnAppend), crate::error::EvotError>((batch_len, append))
+            Ok::<(usize, crate::session::TurnAppend), crate::base::error::EvotError>((
+                batch_len, append,
+            ))
         }
     };
 
@@ -379,7 +381,7 @@ async fn drive_one_turn(
                                 ) && index < new_context.len()
                                 {
                                     new_context[index] =
-                                        crate::compact::context_view::compact_summary_item(summary);
+                                        crate::session::conversation::context_view::compact_summary_item(summary);
                                 }
                             }
                         }
@@ -551,7 +553,7 @@ fn emit_persistence_error(
     run_id: &str,
     session_id: &str,
     turn: u32,
-    error: &crate::error::EvotError,
+    error: &crate::base::error::EvotError,
 ) {
     tracing::error!(
         stage = "run",

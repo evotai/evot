@@ -5,8 +5,8 @@ use base64::Engine as _;
 use regex::Regex;
 
 use super::pack::DecodeDef;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 pub(super) struct Patterns {
     base64: Regex,

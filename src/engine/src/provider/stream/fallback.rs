@@ -6,8 +6,8 @@
 
 use tokio::sync::mpsc;
 
-use crate::context::now_ms;
 use crate::provider::traits::StreamEvent;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Builder that accumulates content blocks, emits [`StreamEvent`]s, and

@@ -1,9 +1,8 @@
 use serde_json::Value;
 
-// ── parameter alias normalization ────────────────────────────────────────
+use crate::types::AliasMap;
 
-/// Per-tool parameter alias mapping: canonical name → accepted alternatives.
-pub type AliasMap = &'static [(&'static str, &'static [&'static str])];
+// ── parameter alias normalization ────────────────────────────────────────
 
 /// Resolve known parameter aliases to their canonical names.
 ///
@@ -487,16 +486,6 @@ fn format_error(tool_name: &str, issues: &[String], input: &Value) -> String {
 }
 
 // ── tool result size limiting ───────────────────────────────────────────
-
-/// Maximum bytes for a single tool result text block.
-/// Prevents oversized outputs from blowing up the context window.
-///
-/// Claude Code uses `MAX_TOOL_RESULT_TOKENS = 100_000` (~400KB) for spill
-/// and `DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000` for per-tool truncation.
-/// We use 100KB as a reasonable middle ground — large enough that typical
-/// `gh pr diff` output (~50KB) stays inline, small enough to protect
-/// context on smaller models.
-pub const MAX_TOOL_RESULT_BYTES: usize = 100_000;
 
 /// Truncate a tool result text to `max_bytes`, keeping head + tail with a
 /// note in the middle.  UTF-8 safe.  Returns the original string unchanged

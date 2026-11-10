@@ -1,4 +1,4 @@
-import { backgroundChordLabel } from '../design/key-hints.js'
+import { backgroundChordLabel } from '../../ui/key-hints.js'
 import { selectorHints } from './selector-chrome.js'
 import { line, block, plain, dim, bold, colored, type StyledLine, type ViewBlock } from './types.js'
 

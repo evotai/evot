@@ -1,5 +1,5 @@
 import type { TranscriptItem } from '../../src/native/contracts/results.js'
-import type { UIMessage } from '../../src/term/app/types.js'
+import type { UIMessage } from '../../src/render/message-types.js'
 import { SuggestionContext, type WorkflowRuntime } from '../../src/term/app/suggestion/context.js'
 
 /** Adapt existing display-shaped test fixtures at the test boundary only. */

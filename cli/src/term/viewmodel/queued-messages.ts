@@ -1,4 +1,4 @@
-import { QUEUE_MANAGE_SHORTCUT_HINT } from '../app/queue-manage.js'
+import { QUEUE_MANAGE_SHORTCUT_HINT } from '../app/queue/queue-manage.js'
 
 /**
  * Visible copy for mid-stream queued user messages.

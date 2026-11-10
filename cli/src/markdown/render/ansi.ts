@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import type { Token, Tokens } from 'marked'
 import stripAnsi from 'strip-ansi'
-import { wrapTextWithAnsi } from '../../render/wrap.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
 import {
   EOL,
   SAFETY_MARGIN,
@@ -11,9 +11,9 @@ import {
   wrapDisplayTextWithIndent,
   wrapParagraph,
 } from '../primitives.js'
-import { createHyperlink, isWarpTerminal, supportsHyperlinks, wrapHyperlink } from '../../render/hyperlink.js'
-import { linkifyIssueRefs } from '../../render/linkify.js'
-import { getTheme, type Theme } from '../../render/theme/index.js'
+import { createHyperlink, isWarpTerminal, supportsHyperlinks, wrapHyperlink } from '../../ui/hyperlink.js'
+import { linkifyIssueRefs } from '../../ui/linkify.js'
+import { getTheme, type Theme } from '../../ui/theme/index.js'
 import { renderLatexMath } from '../math/ansi.js'
 import type { MathToken } from '../math/marked.js'
 

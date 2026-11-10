@@ -4,14 +4,14 @@ use evot_engine::provider::RouteCapabilityOverrides;
 use super::env_keys::parse_provider_env_key;
 use super::providers::normalize_provider_name;
 use super::providers::validate_provider_name;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::parse_protocol;
 use crate::conf::provider_to_env_name;
 use crate::conf::thinking_level_from_str;
 use crate::conf::Config;
 use crate::conf::Protocol;
 use crate::conf::ProviderProfile;
-use crate::error::EvotError;
-use crate::error::Result;
 
 fn url_host(url: &str) -> &str {
     let rest = url

@@ -6,8 +6,8 @@ use crate::auth::types::AuthState;
 use crate::auth::types::LoginCodeResponse;
 use crate::auth::types::ModelsResponse;
 use crate::auth::types::Notice;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 pub const DEFAULT_SERVER_URL: &str = "https://auto.evot.ai";
 
@@ -46,7 +46,7 @@ pub async fn fetch_catalog(state: &AuthState) -> CatalogOutcome {
         "{}/v1/config/models",
         state.server_base_url.trim_end_matches('/')
     );
-    let client = match crate::http::client() {
+    let client = match crate::base::http::client() {
         Ok(client) => client,
         Err(error) => return CatalogOutcome::Unavailable(format!("sync models: {error}")),
     };
@@ -86,7 +86,7 @@ pub async fn poll_status(base_url: &str, code: &str, expires_at: i64) -> Result<
         urlencode(code),
         expires_at
     );
-    let response = http_json(crate::http::client()?.get(&url)).await?;
+    let response = http_json(crate::base::http::client()?.get(&url)).await?;
     let status = response
         .get("status")
         .and_then(|value| value.as_str())
@@ -121,7 +121,7 @@ pub async fn poll_status(base_url: &str, code: &str, expires_at: i64) -> Result<
 
 pub async fn sync_notices(base_url: &str) -> Result<Vec<Notice>> {
     let url = [base_url.trim_end_matches('/'), "/v1/notices"].concat();
-    let response = crate::http::client()?
+    let response = crate::base::http::client()?
         .get(&url)
         .timeout(Duration::from_secs(30))
         .send()
@@ -144,7 +144,7 @@ pub async fn sync_models(state: &AuthState) -> Result<ModelsResponse> {
         "{}/v1/config/models",
         state.server_base_url.trim_end_matches('/')
     );
-    let response = crate::http::client()?
+    let response = crate::base::http::client()?
         .get(&url)
         .bearer_auth(&state.cli_token)
         .timeout(Duration::from_secs(30))
@@ -170,7 +170,7 @@ pub async fn set_default_model(state: &AuthState, model: &str) -> Result<()> {
         "{}/v1/config/default-model",
         state.server_base_url.trim_end_matches('/')
     );
-    let response = crate::http::client()?
+    let response = crate::base::http::client()?
         .put(&url)
         .bearer_auth(&state.cli_token)
         .json(&serde_json::json!({ "model": model }))
@@ -193,7 +193,7 @@ async fn post_json<T: DeserializeOwned>(
     body: &serde_json::Value,
 ) -> Result<T> {
     let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-    let client = crate::http::client()?;
+    let client = crate::base::http::client()?;
     let response = client
         .post(&url)
         .json(body)

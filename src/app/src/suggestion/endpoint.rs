@@ -37,18 +37,18 @@ impl SuggestionEndpoint {
     }
 }
 
-pub(super) async fn current() -> crate::error::Result<Option<SuggestionEndpoint>> {
-    crate::blocking::blocking_io("suggestion_config", read_current).await
+pub(super) async fn current() -> crate::base::error::Result<Option<SuggestionEndpoint>> {
+    crate::base::blocking::blocking_io("suggestion_config", read_current).await
 }
 
 fn read_current(
     cancel: &tokio_util::sync::CancellationToken,
-) -> crate::error::Result<Option<SuggestionEndpoint>> {
+) -> crate::base::error::Result<Option<SuggestionEndpoint>> {
     if crate::auth::load_auth()?.is_none() {
         return Ok(None);
     }
     if cancel.is_cancelled() {
-        return Err(crate::blocking::cancelled("suggestion_config"));
+        return Err(crate::base::blocking::cancelled("suggestion_config"));
     }
     let Some(cache) = crate::auth::load_models_cache()? else {
         return Ok(None);
@@ -64,6 +64,6 @@ fn read_current(
     SuggestionEndpoint::from_catalog(&cache.response)
         .map(Some)
         .ok_or_else(|| {
-            crate::error::EvotError::Conf("invalid suggestion service configuration".into())
+            crate::base::error::EvotError::Conf("invalid suggestion service configuration".into())
         })
 }

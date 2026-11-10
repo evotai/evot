@@ -24,7 +24,7 @@ use super::scrub;
 use super::scrub::UploadContext;
 use super::stream::StreamRestorer;
 use super::vault::Vault;
-use crate::error::Result;
+use crate::base::error::Result;
 
 /// The engine for the built-in packs plus `extra`; the built-in one alone
 /// is compiled once per process.
@@ -38,7 +38,7 @@ pub(super) fn engine(extra: &[Pack]) -> Result<Arc<Engine>> {
                 .map(Arc::new)
                 .map_err(|e| e.to_string())
         });
-        return built.clone().map_err(crate::error::EvotError::Conf);
+        return built.clone().map_err(crate::base::error::EvotError::Conf);
     }
     let mut packs = builtin_packs()?.to_vec();
     packs.extend(extra.iter().cloned());

@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { buildShellFrame } from '../src/term/viewmodel/shell.js'
-import { CURSOR_MARKER } from '../src/term/render-frame.js'
+import { CURSOR_MARKER } from '../src/term/screen/render-frame.js'
 import { previewScene, SCENES, type Scene } from './tui-scenes.js'
-import { truncateAnsiToWidth } from '../src/render/wrap.js'
+import { truncateAnsiToWidth } from '../src/ui/wrap.js'
 
 const args = process.argv.slice(2)
 if (args[0] === '--list') {

@@ -14,12 +14,12 @@ import chalk from 'chalk'
 import { homedir } from 'os'
 import stringWidth from 'string-width'
 
-import { getTheme } from '../../render/theme/index.js'
-import { sectionHeaderLines, SECTION_MUTED } from '../../render/section.js'
-import { renderCommandNotice } from '../../render/command-notice.js'
+import { getTheme } from '../../ui/theme/index.js'
+import { sectionHeaderLines, SECTION_MUTED } from '../../ui/section.js'
+import { renderCommandNotice } from '../../ui/command-notice.js'
 import { OFFICIAL_URL } from './source.js'
 import type { SkillDisplayResult } from './display.js'
-import { wrapTextWithAnsi } from '../../render/wrap.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
 
 const INDENT = 2
 const MEMBER_INDENT = 4

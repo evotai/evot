@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use super::llm::StopReason;
 use super::llm::Usage;
-use crate::context::now_ms;
+use crate::time::now_ms;
 
 // ---------------------------------------------------------------------------
 // Retention
@@ -90,30 +90,30 @@ impl ThinkingMetadata {
         }
     }
 
-    pub fn supports_api(&self, api: crate::provider::ApiProtocol) -> bool {
+    pub fn supports_api(&self, api: super::protocol::ApiProtocol) -> bool {
         matches!(
             (self, api),
             (
                 Self::Anthropic { .. },
-                crate::provider::ApiProtocol::AnthropicMessages
+                super::protocol::ApiProtocol::AnthropicMessages
             ) | (
                 Self::OpenAiResponses { .. },
-                crate::provider::ApiProtocol::OpenAiResponses
+                super::protocol::ApiProtocol::OpenAiResponses
             ) | (
                 Self::OpenAiCompletions { .. },
-                crate::provider::ApiProtocol::OpenAiCompletions
+                super::protocol::ApiProtocol::OpenAiCompletions
             )
         )
     }
 }
 
 impl ToolCallMetadata {
-    pub fn supports_api(&self, api: crate::provider::ApiProtocol) -> bool {
+    pub fn supports_api(&self, api: super::protocol::ApiProtocol) -> bool {
         matches!(
             (self, api),
             (
                 Self::OpenAiResponses { .. },
-                crate::provider::ApiProtocol::OpenAiResponses
+                super::protocol::ApiProtocol::OpenAiResponses
             )
         )
     }
@@ -167,7 +167,7 @@ impl Content {
                 }
                 ImageSource::Path { path } => match std::fs::read(path) {
                     Ok(bytes) => {
-                        let mime = crate::context::detect_image_mime_type(&bytes)
+                        let mime = crate::media::detect_image_mime_type(&bytes)
                             .unwrap_or(mime_type.as_str());
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
                         Some((b64, mime.to_string()))
@@ -183,7 +183,7 @@ impl Content {
         // Token budgeting uses pi's fixed 4,800-character image heuristic;
         // resizing still bounds the actual provider payload and cost.
         // If resize fails (e.g., unrecognized format), fall back to original data.
-        raw.map(|(data, mime)| crate::context::resize_image(&data, &mime).unwrap_or((data, mime)))
+        raw.map(|(data, mime)| crate::media::resize_image(&data, &mime).unwrap_or((data, mime)))
     }
 }
 
@@ -191,13 +191,13 @@ impl Content {
 fn sniffed_mime_type_from_base64(data: &str) -> Option<&'static str> {
     use base64::Engine;
     // 4 base64 chars per 3 bytes; take whole quads so the prefix decodes.
-    let prefix_len = (crate::context::IMAGE_SNIFF_BYTES / 3 + 1) * 4;
+    let prefix_len = (crate::media::IMAGE_SNIFF_BYTES / 3 + 1) * 4;
     let prefix = &data[..data.len().min(prefix_len)];
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(prefix)
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(prefix))
         .ok()?;
-    crate::context::detect_image_mime_type(&decoded)
+    crate::media::detect_image_mime_type(&decoded)
 }
 
 // ---------------------------------------------------------------------------
@@ -270,22 +270,6 @@ impl Message {
             Self::User { .. } => "user",
             Self::Assistant { .. } => "assistant",
             Self::ToolResult { .. } => "toolResult",
-        }
-    }
-
-    /// Check if this assistant message represents a context overflow error.
-    ///
-    /// Some providers (SSE-based: Anthropic, OpenAI) return overflow as a
-    /// `StopReason::Error` message rather than an HTTP error. This method
-    /// checks the `error_message` field against known overflow patterns.
-    pub fn is_context_overflow(&self) -> bool {
-        match self {
-            Self::Assistant {
-                stop_reason: StopReason::Error,
-                error_message: Some(msg),
-                ..
-            } => crate::provider::error::is_context_overflow_message(msg),
-            _ => false,
         }
     }
 }

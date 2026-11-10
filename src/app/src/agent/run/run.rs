@@ -11,8 +11,8 @@
 use tokio::sync::mpsc;
 
 use super::control::RunControl;
-use super::event::RunEvent;
 use super::outbox::EventReceiver;
+use crate::session::conversation::run_event::RunEvent;
 
 enum Receiver {
     Live(EventReceiver),

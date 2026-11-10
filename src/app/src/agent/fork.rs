@@ -5,8 +5,8 @@ use super::request::QueryRequest;
 use super::request::SubmitOutcome;
 use super::tools::ToolMode;
 use super::Run;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 pub struct ForkRequest {
     pub system_prompt: String,

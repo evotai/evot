@@ -39,7 +39,7 @@ import { installBinDir, runningInstallDir } from './paths.js'
 import { installedVersionForThisProcess, isManagedInstall } from './state.js'
 import { clearStaged, readStaged } from './stage.js'
 import { resolveUpdateProxy } from './proxy.js'
-import { argvForRestart } from '../restart-argv.js'
+import { argvForRestart } from './restart-argv.js'
 import { compareVersions } from './version.js'
 
 const APPLIED_UPDATE_ENV = 'EVOT_APPLIED_UPDATE'

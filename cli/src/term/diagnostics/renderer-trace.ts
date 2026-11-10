@@ -1,6 +1,6 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import type { RendererTraceEntry } from '../renderer.js'
+import type { RendererTraceEntry } from '../screen/renderer.js'
 import { RollingLogWriter } from './rolling-log.js'
 
 const MAX_BUFFERED_ENTRIES = 256

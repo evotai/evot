@@ -5,9 +5,9 @@ use super::tools::HostTools;
 use super::tools::ToolApprover;
 use super::tools::ToolMode;
 use super::Run;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::LlmConfig;
-use crate::error::EvotError;
-use crate::error::Result;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionLimits {
@@ -78,7 +78,7 @@ impl QueryRequest {
     }
 
     pub fn input_text(&self) -> String {
-        crate::conversation::convert::extract_content_text(&self.input)
+        crate::session::conversation::convert::extract_content_text(&self.input)
     }
 
     pub fn session_id(mut self, id: Option<String>) -> Self {
@@ -130,18 +130,18 @@ pub enum SubmitOutcome {
 /// Commands that run as an ordinary agent turn with a prepared prompt.
 pub(super) struct PromptCommandContext<'a> {
     pub skills_dirs: &'a [PathBuf],
-    pub storage: Arc<dyn crate::storage::Storage>,
-    pub session: &'a crate::sessions::Session,
+    pub storage: Arc<dyn crate::session::storage::Storage>,
+    pub session: &'a crate::session::Session,
 }
 
 pub(super) async fn expand_prompt_command(
     mut request: QueryRequest,
     ctx: &PromptCommandContext<'_>,
 ) -> Result<QueryRequest> {
-    use crate::command::clip_session_prompt;
-    use crate::command::command_prompt;
-    use crate::command::parse_command;
-    use crate::command::Command;
+    use crate::agent::command::clip_session_prompt;
+    use crate::agent::command::parse_command;
+    use crate::agent::command::Command;
+    use crate::session::conversation::command_envelope::command_prompt;
 
     let input_text = request.input_text();
     let text = match parse_command(&input_text) {
@@ -164,7 +164,7 @@ pub(super) async fn expand_prompt_command(
             let current_session_id = ctx.session.session_id().await;
             request
                 .extra_tools
-                .push(Arc::new(crate::search::SessionSearchTool::new(
+                .push(Arc::new(crate::session::search::SessionSearchTool::new(
                     ctx.storage.clone(),
                     current_session_id,
                 )));

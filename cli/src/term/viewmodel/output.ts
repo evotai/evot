@@ -3,10 +3,10 @@ import type { OutputLine, ToolCardMembership, ToolCardState } from '../../render
 import stringWidth from 'string-width'
 import { line, block, plain, dim, bold, colored, ansi, type ViewBlock, type StyledLine, type StyledSpan } from './types.js'
 import { spansWidth, wrapTextByWidth, truncateToWidth } from './width.js'
-import { wrapTextWithAnsi } from '../../render/wrap.js'
-import { clipDisplayText, formatWallClock } from '../../render/format.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
+import { clipDisplayText, formatWallClock } from '../../ui/format.js'
 import { BOX_DRAWING_RE } from '../../markdown/primitives.js'
-import { getTheme } from '../../render/theme/index.js'
+import { getTheme } from '../../ui/theme/index.js'
 import stripAnsi from 'strip-ansi'
 import { buildSystemBlock } from './system.js'
 

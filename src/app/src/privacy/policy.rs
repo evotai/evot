@@ -9,8 +9,8 @@ use serde::Serialize;
 use super::rules::Category;
 use super::rules::Confidence;
 use super::rules::Engine;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 

@@ -1,4 +1,4 @@
-import type { ComputeMachine } from '../../src/compute/types.js'
+import type { ComputeMachine } from '../../src/features/compute/types.js'
 
 export function machine(overrides: Partial<ComputeMachine> = {}): ComputeMachine {
   return {

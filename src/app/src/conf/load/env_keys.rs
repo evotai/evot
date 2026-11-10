@@ -3,12 +3,12 @@ use evot_engine::provider::RouteCapabilityOverrides;
 use indexmap::IndexMap;
 
 use super::providers::validate_provider_name;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::infer_protocol;
 use crate::conf::parse_protocol;
 use crate::conf::thinking_level_from_str;
 use crate::conf::ProviderProfile;
-use crate::error::EvotError;
-use crate::error::Result;
 
 const GLOBAL_ENV_KEYS: &[&str] = &["EVOT_LLM_PROVIDER", "EVOT_LLM_THINKING_LEVEL"];
 

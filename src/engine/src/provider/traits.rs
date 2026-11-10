@@ -105,17 +105,6 @@ impl StreamConfig {
     }
 }
 
-/// Tool definition sent to the LLM (schema only, no execute fn)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolDefinition {
-    pub name: String,
-    pub description: String,
-    pub parameters: serde_json::Value,
-}
-
-use serde::Deserialize;
-use serde::Serialize;
-
 /// Provider stream outcome.
 ///
 /// `message.model` is the requested model used for thinking replay.

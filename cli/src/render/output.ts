@@ -8,16 +8,16 @@
  * This module is pure logic — no React, no stdout. Easy to test.
  */
 
-import { providerFailurePresentation } from '../provider/error-presentation.js'
-import { parsePrivacyStop, privacyCard, privacyDestination, privacyOriginsRow, privacyRulesRow, type PrivacyDetail, type PrivacyStop } from '../privacy/notice.js'
+import { providerFailurePresentation } from './provider-error.js'
+import { parsePrivacyStop, privacyCard, privacyDestination, privacyOriginsRow, privacyRulesRow, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
-import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from './format.js'
+import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from '../ui/format.js'
 import { stripTaskSetup } from './task-label.js'
 import { formatCompactionCompleted } from './verbose.js'
-import { earlyWakeFromResult } from '../loop/early-wake.js'
-import { countPlan, formatPlanCounts, formatPlanRows, parsePlanRecord, planProgressFromResult } from '../loop/plan.js'
-import type { UICompaction, UIMessage, UIToolCall } from '../term/app/types.js'
+import { earlyWakeFromResult } from './loop-early-wake.js'
+import { countPlan, formatPlanCounts, formatPlanRows, parsePlanRecord, planProgressFromResult } from './loop-plan.js'
+import type { UICompaction, UIMessage, UIToolCall } from './message-types.js'
 
 // ---------------------------------------------------------------------------
 // Tool presentation — icon + primary argument per tool, followed by a stable

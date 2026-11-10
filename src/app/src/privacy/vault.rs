@@ -22,8 +22,8 @@ use sha2::Sha256;
 
 use super::scan::Finder;
 use super::scan::Span;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 /// Past this many values the oldest half is let go; a request that still
 /// carries them brings them back.

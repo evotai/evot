@@ -1,10 +1,10 @@
 import type { Agent, CloudPushProgress, CloudPushResult, SessionMeta } from '../native/index.js'
-import { resolveSessionByPrefix } from '../term/app/resume.js'
-import { createHyperlink } from '../render/hyperlink.js'
+import { resolveSessionByPrefix } from '../session/resume.js'
+import { createHyperlink } from '../ui/hyperlink.js'
 import { buildPrivacyCard, type OutputLine } from '../render/output.js'
-import { parsePrivacyStop } from '../privacy/notice.js'
+import { parsePrivacyStop } from '../render/privacy-notice.js'
 import { describeShareResult, shareAccess } from '../session/cloud-sessions.js'
-import type { ProgressBar, ProgressBarOptions } from '../term/progress-bar.js'
+import type { ProgressBar, ProgressBarOptions } from '../ui/progress-bar.js'
 
 export interface ShareContext {
   agent: Pick<Agent, 'listSessions' | 'cloudShareSession' | 'cloudUnshareSession' | 'cloudPushSession' | 'cloudForkRemoteSession' | 'importSharedSession'>

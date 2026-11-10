@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use super::env_keys::apply_provider_field;
 use super::env_keys::parse_legacy_env_key;
 use super::env_keys::parse_provider_env_key;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
+use crate::base::paths;
 use crate::conf::channels::FeishuChannelConfig;
-use crate::conf::paths;
 use crate::conf::thinking_level_from_str;
 use crate::conf::Config;
-use crate::error::EvotError;
-use crate::error::Result;
 
 pub(super) fn apply_env(config: &mut Config, vars: &[(String, String)]) -> Result<()> {
     // First pass: legacy keys (lower priority)

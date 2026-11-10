@@ -45,7 +45,7 @@ pub fn with_previous_local_summary(
                     "The conversation history before this point was compacted into the following summary:\n\n{summary}"
                 ),
             }],
-            timestamp: crate::context::now_ms(),
+            timestamp: crate::time::now_ms(),
         }));
     }
     input.extend_from_slice(evicted);
@@ -76,7 +76,7 @@ pub fn replacement_message(
         model: ctx.model.clone(),
         provider,
         usage: Usage::default(),
-        timestamp: crate::context::now_ms(),
+        timestamp: crate::time::now_ms(),
         error_message: None,
         response_id: None,
     })
@@ -92,59 +92,6 @@ pub fn is_replacement_message(message: &AgentMessage) -> bool {
             }] if matches!(item.get("type").and_then(|value| value.as_str()),
                 Some("compaction" | "compaction_summary")))
     )
-}
-
-/// Replace provider-native compaction items with their readable fallback text.
-/// Used for one retry when an upstream rejects replay (for example after an
-/// account/model boundary). Ordinary Responses reasoning items are preserved.
-pub fn downgrade_replay_messages(messages: &[Message]) -> (Vec<Message>, bool) {
-    let mut found = false;
-    let downgraded = messages
-        .iter()
-        .cloned()
-        .map(|message| match message {
-            Message::Assistant {
-                content,
-                stop_reason,
-                model,
-                provider,
-                usage,
-                timestamp,
-                error_message,
-                response_id,
-            } => {
-                let content = content
-                    .into_iter()
-                    .map(|block| match block {
-                        Content::Thinking {
-                            thinking,
-                            metadata: Some(ThinkingMetadata::OpenAiResponses { item }),
-                        } if matches!(
-                            item.get("type").and_then(|value| value.as_str()),
-                            Some("compaction" | "compaction_summary")
-                        ) =>
-                        {
-                            found = true;
-                            Content::Text { text: thinking }
-                        }
-                        other => other,
-                    })
-                    .collect();
-                Message::Assistant {
-                    content,
-                    stop_reason,
-                    model,
-                    provider,
-                    usage,
-                    timestamp,
-                    error_message,
-                    response_id,
-                }
-            }
-            other => other,
-        })
-        .collect();
-    (downgraded, found)
 }
 
 #[derive(Debug, Clone)]

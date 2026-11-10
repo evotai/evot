@@ -1,8 +1,8 @@
-import { wrapTextWithAnsi } from '../../render/wrap.js'
-import { getTheme } from '../../render/theme/index.js'
-import { clipDisplayText } from '../../render/format.js'
-import { CURSOR_MARKER } from '../render-frame.js'
-import type { SessionRenameState } from '../app/session-rename-editor.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
+import { getTheme } from '../../ui/theme/index.js'
+import { clipDisplayText } from '../../ui/format.js'
+import { CURSOR_MARKER } from '../screen/render-frame.js'
+import type { SessionRenameState } from '../app/session/session-rename-editor.js'
 import stringWidth from 'string-width'
 
 export function buildSessionRenameLines(state: SessionRenameState, width: number): string[] {

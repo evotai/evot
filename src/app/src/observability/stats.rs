@@ -8,11 +8,11 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::metrics::LlmCallMetrics;
-use super::metrics::UsageSummary;
 use crate::types::CompactReason;
 use crate::types::CompactionMethod;
+use crate::types::LlmCallMetrics;
 use crate::types::TranscriptItem;
+use crate::types::UsageSummary;
 
 // ---------------------------------------------------------------------------
 // Stats structs — one per observability event kind

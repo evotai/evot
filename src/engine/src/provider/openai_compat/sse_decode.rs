@@ -9,7 +9,6 @@ use tracing::debug;
 use super::reasoning_details;
 use super::request::ToolCallBuffer;
 use super::types::*;
-use crate::context::now_ms;
 use crate::provider::error::classify_stream_error;
 use crate::provider::error::ProviderError;
 use crate::provider::route::OpenAiCompat;
@@ -20,6 +19,7 @@ use crate::provider::stream::sse::SseReader;
 use crate::provider::traits::StreamConfig;
 use crate::provider::traits::StreamEvent;
 use crate::provider::traits::StreamOutcome;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Drive an OpenAI-compatible SSE stream from a raw HTTP response.

@@ -11,7 +11,7 @@ import closedFixture from '../../../src/app/tests/fixtures/schema/suggestion-req
 import externalWorkFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-external-work.json'
 import handoffFixture from '../../../src/app/tests/fixtures/schema/suggestion-request-handoff.json'
 import generalityCases from '../fixtures/suggestion-generality.json'
-import { getTheme } from '../../src/render/theme/index.js'
+import { getTheme } from '../../src/ui/theme/index.js'
 import { ScreenHarness } from '../helpers/screen.js'
 
 const EVOT_BIN = process.env.EVOT_TEST_BIN || join(import.meta.dirname, '..', '..', 'dist', 'evot')
@@ -1199,12 +1199,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     try {
       const base = `http://127.0.0.1:${server.port}/v1`
       session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
-      session.write('Read ../cli/tests/completion.te\t')
-      let screen = await session.waitForScreen(/Read \.\.\/cli\/tests\/completion\.test\.ts/)
+      session.write('Read ../cli/tests/commands/completion.te\t')
+      let screen = await session.waitForScreen(/Read \.\.\/cli\/tests\/commands\/completion\.test\.ts/)
       expect(screen).not.toContain('suggesting…')
       expect(requests).toHaveLength(0)
-      session.write('\x15/loop inspect ../cli/tests/completion.te\t')
-      screen = await session.waitForScreen(/\/loop inspect \.\.\/cli\/tests\/completion\.test\.ts/)
+      session.write('\x15/loop inspect ../cli/tests/commands/completion.te\t')
+      screen = await session.waitForScreen(/\/loop inspect \.\.\/cli\/tests\/commands\/completion\.test\.ts/)
       expect(screen).not.toContain('suggesting…')
       expect(requests).toHaveLength(0)
       // Once the path token is finished, a space returns Tab to intent input.

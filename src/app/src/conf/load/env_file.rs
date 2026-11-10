@@ -1,8 +1,8 @@
 use std::io::BufRead;
 use std::path::Path;
 
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 pub(super) fn load_env_file(path: &Path) -> Result<Vec<(String, String)>> {
     if !path.exists() {
@@ -48,7 +48,7 @@ pub(super) fn ensure_env_file(path: &Path) -> Result<()> {
     }
     // Never replace a user file that appears between the existence check and
     // creation (for example, during concurrent startup).
-    crate::atomic_file::create_private_atomic(path, default_env_content().as_bytes())?;
+    crate::base::atomic_file::create_private_atomic(path, default_env_content().as_bytes())?;
     Ok(())
 }
 

@@ -5,8 +5,8 @@ use fs2::FileExt;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 /// Private, in-memory revision of exact file bytes. Never serialized or logged.
 #[derive(Debug, Clone, PartialEq, Eq)]

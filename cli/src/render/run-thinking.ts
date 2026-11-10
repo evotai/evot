@@ -1,5 +1,5 @@
 import { isKnownRunEvent, type RunEvent } from '../native/contracts/query-event.js'
-import { formatElapsed } from './format.js'
+import { formatElapsed } from '../ui/format.js'
 
 /** Local, monotonic timing of streamed reasoning; never a persisted contract. */
 export class RunThinking {

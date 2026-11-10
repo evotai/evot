@@ -9,7 +9,7 @@
 
 import chalk from 'chalk'
 import { structuredPatch, diffWordsWithSpace } from 'diff'
-import { getTheme } from './theme/index.js'
+import { getTheme } from '../ui/theme/index.js'
 
 export interface DiffResult {
   text: string

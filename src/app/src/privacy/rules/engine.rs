@@ -26,8 +26,8 @@ use super::pack::Scope;
 use super::pack::SourcesDef;
 use super::pack::StructureDef;
 use super::pack::PACK_SCHEMA_VERSION;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::privacy::scan::Finder;
 use crate::privacy::scan::Span;
 

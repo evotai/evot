@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::base::error::Result;
 
 pub fn logout() -> Result<()> {
     super::clear_auth()?;

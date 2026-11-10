@@ -128,7 +128,8 @@ fn downgrades_only_compaction_replay_items() {
         response_id: None,
     }];
 
-    let (downgraded, found) = remote::downgrade_replay_messages(&messages);
+    let (downgraded, found) =
+        evotengine::provider::openai_responses::replay::downgrade_replay_messages(&messages);
     assert!(found);
     assert!(matches!(
         &downgraded[0],

@@ -35,14 +35,14 @@ use super::rules::PackInfo;
 use super::rules::UserStamp;
 use super::scrub::UploadContext;
 use super::vault::Vault;
-use crate::blocking::blocking_io;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::blocking::blocking_io;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 const KEY_SCHEMA_VERSION: u32 = 1;
 
 fn privacy_dir() -> Result<PathBuf> {
-    Ok(crate::conf::paths::state_root_dir()?.join("privacy"))
+    Ok(crate::base::paths::state_root_dir()?.join("privacy"))
 }
 
 fn settings_path() -> Result<PathBuf> {
@@ -119,7 +119,7 @@ fn load_key() -> Result<[u8; 32]> {
         schema_version: KEY_SCHEMA_VERSION,
         key: key.iter().map(|b| format!("{b:02x}")).collect(),
     };
-    if crate::atomic_file::create_private_atomic(&path, &serde_json::to_vec(&file)?)? {
+    if crate::base::atomic_file::create_private_atomic(&path, &serde_json::to_vec(&file)?)? {
         return Ok(key);
     }
     // Another process created it first: use theirs.
@@ -152,7 +152,7 @@ fn read_settings(path: &Path) -> Result<PrivacySettings> {
 /// saved it).
 pub(super) fn current(cancel: &CancellationToken) -> Result<Arc<Masker>> {
     if cancel.is_cancelled() {
-        return Err(crate::blocking::cancelled("privacy settings"));
+        return Err(crate::base::blocking::cancelled("privacy settings"));
     }
     let path = settings_path()?;
     let rules = rules_dir()?;
@@ -160,7 +160,7 @@ pub(super) fn current(cancel: &CancellationToken) -> Result<Arc<Masker>> {
     // so an old in-flight load cannot republish a cache after invalidation.
     let mut cached = CURRENT.lock();
     if cancel.is_cancelled() {
-        return Err(crate::blocking::cancelled("privacy settings"));
+        return Err(crate::base::blocking::cancelled("privacy settings"));
     }
     let modified = file_stamp(&path)?;
     let stamp: Stamp = (path.clone(), modified, user_stamp(&rules, cancel)?);
@@ -169,7 +169,7 @@ pub(super) fn current(cancel: &CancellationToken) -> Result<Arc<Masker>> {
     }
     let engine = masker::engine(&read_user_packs(&stamp.2, cancel)?)?;
     if cancel.is_cancelled() {
-        return Err(crate::blocking::cancelled("privacy settings"));
+        return Err(crate::base::blocking::cancelled("privacy settings"));
     }
     let masker = Arc::new(Masker::with_vault(
         &read_settings(&path)?,
@@ -201,14 +201,17 @@ pub async fn save_settings(mut settings: PrivacySettings) -> Result<PrivacySetti
         // compilation and validation must not run on an async worker.
         Masker::new(&settings, [0; 32])?;
         if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy settings"));
+            return Err(crate::base::blocking::cancelled("privacy settings"));
         }
         let path = settings_path()?;
         let mut cached = CURRENT.lock();
         if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy settings"));
+            return Err(crate::base::blocking::cancelled("privacy settings"));
         }
-        crate::atomic_file::write_private_atomic(&path, &serde_json::to_vec_pretty(&settings)?)?;
+        crate::base::atomic_file::write_private_atomic(
+            &path,
+            &serde_json::to_vec_pretty(&settings)?,
+        )?;
         *cached = None;
         Ok(settings)
     })
@@ -218,7 +221,7 @@ pub async fn save_settings(mut settings: PrivacySettings) -> Result<PrivacySetti
 /// A reply for a chat channel, scrubbed for good with `masker`. Only
 /// values not already in `seen` are recorded, so a progressively edited
 /// message records each value once. A blocked reply becomes the notice.
-pub(super) async fn scrub_delivery(
+pub(crate) async fn scrub_delivery(
     masker: &Arc<Masker>,
     text: &str,
     seen: &Mutex<std::collections::BTreeSet<String>>,
@@ -252,7 +255,7 @@ pub(super) async fn scrub_delivery(
 
 /// The masker for the current settings, or the privacy error saying why
 /// there is none.
-pub(super) async fn masker_or_unavailable() -> Result<Arc<Masker>> {
+pub(crate) async fn masker_or_unavailable() -> Result<Arc<Masker>> {
     current_masker()
         .await
         .map_err(|error| EvotError::Privacy(unavailable_message(error)))

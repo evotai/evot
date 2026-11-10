@@ -37,8 +37,8 @@ pub(super) fn build_engine(
         evot_engine::context::ContextConfig::from_model(&model_config, options.thinking_level);
     // Every transport, injected or built, goes through the privacy boundary.
     let transport = |protocol: &Protocol| match &options.provider_override {
-        Some(provider) => crate::models::transport::overridden(provider.clone()),
-        None => crate::models::transport::for_protocol(protocol),
+        Some(provider) => crate::agent::models::transport::overridden(provider.clone()),
+        None => crate::agent::models::transport::for_protocol(protocol),
     };
     let provider = transport(&options.protocol);
     let compaction_context = options.compaction_llm.map(|previous| {

@@ -7,7 +7,18 @@ use serde_json::json;
 
 use super::message::Content;
 use super::message::Retention;
-use crate::tools::guard::PathGuard;
+use super::path_guard::PathGuard;
+
+/// Per-tool parameter alias mapping: canonical name → accepted alternatives.
+pub type AliasMap = &'static [(&'static str, &'static [&'static str])];
+
+/// Tool definition sent to the LLM (schema only, no execute fn)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
 
 // ---------------------------------------------------------------------------
 // Tool definition
@@ -158,7 +169,7 @@ pub trait AgentTool: Send + Sync {
     /// Parameter alias mappings for input normalization.
     /// Returns canonical_name → accepted_alternatives pairs.
     /// Default: no aliases.
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<AliasMap> {
         None
     }
     /// Tool-specific compatibility shim for raw arguments before schema

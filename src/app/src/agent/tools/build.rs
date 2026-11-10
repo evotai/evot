@@ -171,7 +171,7 @@ impl evot_engine::AgentTool for SharedTool {
     fn prefer_over(&self) -> Option<(&str, &str)> {
         self.0.prefer_over()
     }
-    fn parameter_aliases(&self) -> Option<evot_engine::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<evot_engine::types::AliasMap> {
         self.0.parameter_aliases()
     }
     fn prepare_arguments(&self, args: &serde_json::Value) -> serde_json::Value {

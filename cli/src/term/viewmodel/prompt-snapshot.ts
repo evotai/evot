@@ -1,12 +1,12 @@
 import type { ConfigInfo } from '../../native/contracts/config-info.js'
-import type { AppState } from '../app/state.js'
-import type { SuggestionFeedback } from '../app/suggestion.js'
-import { providerDisplayName } from '../app/provider.js'
-import { shouldDownOpenPanel } from '../app/background-panel.js'
+import type { AppState } from '../app/run/state.js'
+import type { SuggestionFeedback } from '../app/suggestion/index.js'
+import { providerDisplayName } from '../../features/models/options.js'
+import { shouldDownOpenPanel } from '../app/background/background-panel.js'
 import { isEditorEmpty, type EditorState } from '../input/editor.js'
 import type { PromptVMInput } from './prompt.js'
-import { resolveComposerGuidance } from '../app/composer-guidance.js'
-import { resolveRunInteraction, type RunInteractionState } from '../app/run-interaction.js'
+import { resolveComposerGuidance } from '../app/composer/composer-guidance.js'
+import { resolveRunInteraction, type RunInteractionState } from '../app/run/run-interaction.js'
 
 export interface PromptSnapshot {
   editor: EditorState

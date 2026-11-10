@@ -11,10 +11,10 @@ import stringWidth from 'string-width'
 import { confirmationHint } from './confirmation-hint.js'
 import { line, block, plain, dim, colored, type ViewBlock, type StyledLine, type StyledSpan } from './types.js'
 import { finiteSize, spansWidth, truncateTailToWidth, truncateToWidth } from './width.js'
-import { BACKGROUND_PANEL_HINT_CHORD } from '../app/background-panel.js'
+import { BACKGROUND_PANEL_HINT_CHORD } from '../app/background/background-panel.js'
 import { FORK_GLYPH, formatForkTrail } from './fork-trail.js'
 import { GAUGE_CELL, effortCellHex, effortLabel } from './model-effort.js'
-import { getTheme } from '../../render/theme/index.js'
+import { getTheme } from '../../ui/theme/index.js'
 
 /** The subset of prompt state the footer reads. */
 export interface PromptFooterVM {

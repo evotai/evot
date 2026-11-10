@@ -1,5 +1,5 @@
 import stripAnsi from 'strip-ansi'
-import { wrapTextWithAnsi } from '../../render/wrap.js'
+import { wrapTextWithAnsi } from '../../ui/wrap.js'
 import { ansi, block, dim, line, type ViewBlock } from './types.js'
 
 /** Shared layout for system notices, including pre-styled command output. */

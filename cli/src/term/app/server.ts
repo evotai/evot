@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { inspectConsole } from '../../channels/console-client.js'
-import type { BackgroundScheduler } from '../../background/scheduler.js'
+import { inspectConsole } from '../../features/channels/console-client.js'
+import type { BackgroundScheduler } from './background/scheduler.js'
 
 export interface ServerState {
   port: number

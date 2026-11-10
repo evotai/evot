@@ -28,11 +28,11 @@ use super::tools::HostTools;
 use super::tools::ToolMode;
 use super::ExecutionLimits;
 use super::Variables;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::Config;
 use crate::conf::LlmConfig;
-use crate::error::EvotError;
-use crate::error::Result;
-use crate::sessions::Session;
+use crate::session::Session;
 
 pub struct TurnBuildRequest {
     pub input: Vec<evot_engine::Content>,
@@ -141,7 +141,7 @@ impl TurnAssembler {
             previous_llm,
             scratch_dir,
         } = request;
-        let mut input = crate::conversation::input::PreparedInput::user(input);
+        let mut input = crate::session::conversation::input::PreparedInput::user(input);
         let llm = llm.clone();
         if llm.provider.is_empty() {
             return Err(EvotError::Conf(
@@ -180,7 +180,7 @@ impl TurnAssembler {
             load_turn_skills(&skill_dirs, selected_skill_names.as_deref())?
         };
         let mut system_dirs = skill_dirs.clone();
-        if let Ok(memory_dir) = crate::conf::paths::memory_dir() {
+        if let Ok(memory_dir) = crate::base::paths::memory_dir() {
             if let Err(e) = std::fs::create_dir_all(&memory_dir) {
                 tracing::warn!("cannot create memory dir {}: {e}", memory_dir.display());
             }
@@ -217,7 +217,7 @@ impl TurnAssembler {
         let compute_section = if !tool_free && sandbox_rt.allow_bash {
             enabled_compute_machines()
                 .await
-                .and_then(|machines| crate::compute::prompt::prompt_section(&machines))
+                .and_then(|machines| crate::cloud::compute::prompt::prompt_section(&machines))
         } else {
             None
         };
@@ -345,8 +345,8 @@ fn last_assistant_model(messages: &[evot_engine::AgentMessage]) -> Option<&str> 
 
 /// Enabled Compute machines, or `None` when there are none or the store
 /// cannot be read (a broken file must not break the turn).
-async fn enabled_compute_machines() -> Option<Vec<crate::compute::ComputeMachine>> {
-    let service = crate::compute::ComputeService::default_location().ok()?;
+async fn enabled_compute_machines() -> Option<Vec<crate::cloud::compute::ComputeMachine>> {
+    let service = crate::cloud::compute::ComputeService::default_location().ok()?;
     let machines: Vec<_> = match service.list().await {
         Ok(machines) => machines.into_iter().filter(|m| m.enabled).collect(),
         Err(error) => {

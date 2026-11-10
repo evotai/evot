@@ -1,4 +1,4 @@
-import type { OverlayState } from '../app/overlay-state.js'
+import type { OverlayState } from '../app/selector/overlay-state.js'
 import type { ViewBlock } from './types.js'
 import { buildAskBlocks } from './ask.js'
 import { buildHelpBlocks } from './help.js'

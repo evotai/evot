@@ -1,5 +1,5 @@
 import type { PrivacyEvent, PrivacySettings, PrivacyStatus } from '../native/index.js'
-import { privacyOriginsRow } from '../privacy/notice.js'
+import { privacyOriginsRow } from '../render/privacy-notice.js'
 
 export interface PrivacyPort {
   status: (days: number) => Promise<PrivacyStatus>

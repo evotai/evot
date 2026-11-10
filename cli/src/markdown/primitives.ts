@@ -11,7 +11,7 @@
 
 import stripAnsi from 'strip-ansi'
 import stringWidth from 'string-width'
-import { wrapTextWithAnsi } from '../render/wrap.js'
+import { wrapTextWithAnsi } from '../ui/wrap.js'
 
 export const EOL = '\n'
 export const SAFETY_MARGIN = 4

@@ -1,13 +1,13 @@
 import type { ConfigInfo } from '../src/native/contracts/config-info.js'
-import { createAskState } from '../src/term/ask.js'
-import { createModelWindow, createResumeWindow } from '../src/term/app/selector-windows.js'
-import { createInitialState } from '../src/term/app/state.js'
+import { createAskState } from '../src/term/widgets/ask.js'
+import { createModelWindow, createResumeWindow } from '../src/term/app/selector/selector-windows.js'
+import { createInitialState } from '../src/term/app/run/state.js'
 import { createEditorState, insertText } from '../src/term/input/editor.js'
 import { promptFromSnapshot } from '../src/term/viewmodel/prompt-snapshot.js'
 import type { ShellSnapshot } from '../src/term/viewmodel/shell.js'
-import { createTaskWindow } from '../src/task/window.js'
-import { shareSelectorState } from '../src/term/app/share-selector.js'
-import { createBackgroundPanelState } from '../src/term/app/background-panel.js'
+import { createTaskWindow } from '../src/features/task/window.js'
+import { shareSelectorState } from '../src/term/app/session/share-selector.js'
+import { createBackgroundPanelState } from '../src/term/app/background/background-panel.js'
 
 export const SCENES = ['idle', 'streaming', 'model-preview', 'model-focused', 'resume', 'tasks', 'shares', 'background', 'ask', 'help', 'planning'] as const
 export type Scene = typeof SCENES[number]

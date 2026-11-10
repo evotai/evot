@@ -169,6 +169,6 @@ fn replacement_message(
         content: vec![Content::Text {
             text: result.text.clone(),
         }],
-        timestamp: crate::context::now_ms(),
+        timestamp: crate::time::now_ms(),
     })
 }

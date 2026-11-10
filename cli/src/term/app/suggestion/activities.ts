@@ -1,6 +1,6 @@
 import type { BackgroundProcess } from '../../../native/contracts/results.js'
 import type { SuggestionActivity } from '../../../native/contracts/suggestion.js'
-import type { LoopSnapshot } from '../../../loop/controller.js'
+import type { LoopSnapshot } from '../../../features/loop/controller.js'
 import { taskLabel } from './tasks.js'
 
 const COMMAND_LINES = 12

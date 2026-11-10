@@ -47,3 +47,5 @@ pub use stream::sink as stream_sink;
 pub use stream::sse;
 pub use system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY;
 pub use traits::*;
+
+pub use crate::types::ToolDefinition;

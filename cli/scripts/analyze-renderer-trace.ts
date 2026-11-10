@@ -6,7 +6,7 @@ import { sliceAnsi } from 'bun'
 import xterm from '@xterm/headless'
 import stripAnsi from 'strip-ansi'
 import stringWidth from 'string-width'
-import type { RendererTraceEntry } from '../src/term/renderer.js'
+import type { RendererTraceEntry } from '../src/term/screen/renderer.js'
 
 function usage(): never {
   console.error('Usage: bun run trace:renderer <renderer-run-directory>')

@@ -52,7 +52,7 @@ impl AgentTool for WriteFileTool {
         Some(("create files", "cat with a heredoc or echo redirection"))
     }
 
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<crate::types::AliasMap> {
         Some(&[("path", &["file_path", "filePath", "file"] as &[&str])])
     }
 

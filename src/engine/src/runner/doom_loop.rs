@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 
-use crate::context::now_ms;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// A canonical representation of one tool call (name + sorted JSON args).

@@ -7,9 +7,9 @@ use super::tools::ToolApprover;
 use super::tools::ToolMode;
 use super::turn_assembler::TurnAssembler;
 use super::turn_assembler::TurnBuildRequest;
+use crate::base::error::Result;
 use crate::conf::LlmConfig;
-use crate::error::Result;
-use crate::sessions::Session;
+use crate::session::Session;
 
 pub(super) struct AgentTurnFactory {
     pub assembler: Arc<TurnAssembler>,

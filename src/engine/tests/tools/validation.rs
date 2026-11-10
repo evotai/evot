@@ -525,8 +525,8 @@ fn extra_fields_preserved() {
 
 // ── tool result truncation ──────────────────────────────────────────────
 
+use evotengine::spill::MAX_TOOL_RESULT_BYTES;
 use evotengine::tools::validation::truncate_tool_text;
-use evotengine::tools::validation::MAX_TOOL_RESULT_BYTES;
 
 #[test]
 fn tool_text_within_limit_unchanged() {

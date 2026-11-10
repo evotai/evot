@@ -6,7 +6,7 @@
  * show and when to call. No terminal or renderer dependencies.
  */
 import type { CloudPushResult, RemoteSession, SessionMeta } from '../native/index.js'
-import { parsePrivacyStop, type PrivacyStop } from '../privacy/notice.js'
+import { parsePrivacyStop, type PrivacyStop } from '../render/privacy-notice.js'
 
 /** Who can read a cloud session, as `/share` names it. */
 export type ShareAccess = 'private' | 'team' | 'public'

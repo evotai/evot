@@ -1,4 +1,4 @@
-import { previewRows } from '../preview-scroll.js'
+import { previewRows } from '../../ui/preview-scroll.js'
 import { line, plain, dim, bold, colored, type StyledLine } from './types.js'
 
 /** Fixed-height viewport. Scrolling clamps at both ends and never wraps. */

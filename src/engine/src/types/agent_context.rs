@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::message::AgentMessage;
 use super::tool::AgentTool;
-use crate::tools::guard::PathGuard;
+use crate::types::PathGuard;
 
 // ---------------------------------------------------------------------------
 // Agent context (passed to the loop)

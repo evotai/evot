@@ -1,5 +1,8 @@
 //! Serde round-trip tests for core types.
 
+#[path = "types/path_guard.rs"]
+mod path_guard;
+
 use evotengine::types::ReasoningField;
 use evotengine::*;
 

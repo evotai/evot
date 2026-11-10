@@ -12,10 +12,10 @@ use self::env_file::ensure_env_file;
 use self::env_file::load_env_file;
 use self::env_file::load_process_env;
 use self::source::load_file_source;
+use crate::base::error::Result;
+use crate::base::paths;
 use crate::conf::default_config;
-use crate::conf::paths;
 use crate::conf::Config;
-use crate::error::Result;
 
 pub(super) fn load_config_inner(env_file: Option<&str>) -> Result<Config> {
     let mut config = default_config()?;
@@ -31,7 +31,7 @@ pub(super) fn load_config_inner(env_file: Option<&str>) -> Result<Config> {
     };
     if is_custom_env {
         if !env_path.exists() {
-            return Err(crate::error::EvotError::Conf(format!(
+            return Err(crate::base::error::EvotError::Conf(format!(
                 "env file not found: {}",
                 env_path.display()
             )));

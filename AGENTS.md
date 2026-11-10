@@ -12,11 +12,29 @@
 - **CLI**: TypeScript (Bun) in `cli/src/`, renders TUI, handles input, sessions, updates
 - `mod.rs` / `lib.rs`: only module declarations, re-exports, and `use` statements — no business logic
 
+## Layering
+
+Each list is lowest layer first. A module uses only modules listed before it; guard tests fail on an upward dependency.
+
+- **`src/engine/src`**: `time`, `media`, `spill` → `types` → `provider` → `context`, `retry` → `event`, `tools`, `host` → `runner` → `agent` (guard: `src/engine/tests/architecture.rs`)
+- **`src/app/src`**: `base` → `types` → `auth` → `conf` → `observability`, `privacy` → `session` → `cloud` → `agent` → `suggestion` → `surface` → `api` (guard: `src/app/tests/base/architecture_test.rs`)
+  - `base`: `error`, `blocking`, `atomic_file`, `http`, `paths`
+  - `session`: `conversation` → `storage` → `search` → session state (`Session`, `SessionService`, …) → `compact`
+  - `cloud`: `compute`, `share` → `sync`
+  - `agent`: agent runtime plus `bootstrap`, `models`, `command`
+  - `surface`: `delivery` → `gateway` → `automation`, `acp`, `contracts` → `service`
+- **`cli/src`**: `native` → `ui` → `markdown` → `render` → `session` → `features` → `commands` → `update` → `term` → `headless`; `index.ts` and `cli.ts` are the entry points (guard: `cli/tests/architecture-boundaries.test.ts`)
+  - `ui`: terminal primitives with no application knowledge (selector, keys, theme, wrap, progress)
+  - `features`: `task`, `compute`, `loop`, `channels`, `models`
+  - `term`: `repl.ts` wiring, `host/` REPL controllers, `app/` feature logic grouped by concern, `viewmodel/` layout, `screen/` terminal backend, `widgets/`, `input/` editor
+  - `term/host`: `state.ts` holds all mutable REPL state (`ReplState`); each controller is `createXController(st, deps)` with an explicit `XDeps` port interface. `repl.ts` owns services, startup and teardown, and exposes them through the `host` getter table. New mutable state goes in `ReplState`, never a `let` in `startRepl`; controllers import each other as types only.
+- Tests mirror the source layout: `src/app/tests/<module>/`, `cli/tests/<dir>/`
+
 # Blocking Filesystem Work
 
 - Write a batch of local file I/O (directory scans, read + parse, lock + write) as one synchronous worker `fn(..., cancel: &CancellationToken) -> Result<T>` instead of awaiting each `tokio::fs` call.
-- In `src/app`, enter workers only through `crate::blocking::blocking_io(label, worker)`; do not call `tokio::task::spawn_blocking` directly. Dropping the future cancels the token.
-- Workers that touch many files must poll `cancel.is_cancelled()` between operations and return `crate::blocking::cancelled(label)`; single-file workers may ignore the token.
+- In `src/app`, enter workers only through `crate::base::blocking::blocking_io(label, worker)`; do not call `tokio::task::spawn_blocking` directly. Dropping the future cancels the token.
+- Workers that touch many files must poll `cancel.is_cancelled()` between operations and return `crate::base::blocking::cancelled(label)`; single-file workers may ignore the token.
 - `src/engine` workers already use the same `&CancellationToken` signature (`walk`, `glob`, `grep`, search index); keep that shape.
 
 # Testing

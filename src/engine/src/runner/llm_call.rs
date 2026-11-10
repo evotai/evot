@@ -5,11 +5,14 @@ use tokio::sync::mpsc;
 use super::config::AgentLoopConfig;
 use super::event_sink::EventSink;
 use super::tool_exec::build_tool_definitions;
-use crate::context::now_ms;
+use crate::event::AgentEvent;
+use crate::event::LlmCallRequest;
+use crate::event::StreamDelta;
 use crate::provider::ApiProtocol;
 use crate::provider::ProviderError;
 use crate::provider::StreamConfig;
 use crate::provider::StreamEvent;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Quota recovery is controlled locally so every provider follows the same

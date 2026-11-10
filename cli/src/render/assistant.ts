@@ -1,5 +1,5 @@
 import { buildAssistantLines, buildThinkingLines, buildToolCard, type OutputLine } from './output.js'
-import type { UIAssistantBlock } from '../term/app/types.js'
+import type { UIAssistantBlock } from './message-types.js'
 
 /**
  * Per-block render cache for the live (still-streaming) assistant message.

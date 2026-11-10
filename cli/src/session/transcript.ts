@@ -4,9 +4,9 @@
  */
 
 import { replayUserInput } from './user-input.js'
-import { toolArgsRecord } from '../term/app/tool-args.js'
+import { toolArgsRecord } from './tool-args.js'
 import type { TranscriptItem } from '../native/index.js'
-import type { UIAssistantBlock, UIMessage } from '../term/app/types.js'
+import type { UIAssistantBlock, UIMessage } from '../render/message-types.js'
 
 // ---------------------------------------------------------------------------
 // Raw transcript item shapes (from Rust TranscriptItem serialization)

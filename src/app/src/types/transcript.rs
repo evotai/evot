@@ -4,7 +4,7 @@ pub use evot_engine::CompactionMethod;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::observability::UsageSummary;
+use crate::types::UsageSummary;
 
 // ---------------------------------------------------------------------------
 // MarkerKind — types of transcript markers that reset the context baseline

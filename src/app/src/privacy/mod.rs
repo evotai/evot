@@ -10,7 +10,6 @@
 //! Every rule, word list, exclusion, source and structural field is data:
 //! the packs in `rules/data/*.json` and the user's `~/.evotai/privacy/rules`.
 //! The Rust here is the engine that runs them.
-mod delivery;
 mod masker;
 mod notice;
 mod policy;
@@ -24,10 +23,9 @@ mod service;
 mod stream;
 mod vault;
 #[cfg(test)]
-#[path = "../../tests/privacy/worker_test.rs"]
+#[path = "../../tests/unit/privacy_worker_test.rs"]
 mod worker_tests;
 
-pub use delivery::ScrubbingSink;
 pub use masker::Masker;
 pub use masker::Report;
 pub use notice::blocked_message;
@@ -60,9 +58,11 @@ pub use rules::PACK_SCHEMA_VERSION;
 pub use scan::Finder;
 pub use scrub::UploadContext;
 pub use service::live_notices;
+pub(crate) use service::masker_or_unavailable;
 pub use service::remember_secrets;
 pub use service::rules_status;
 pub use service::save_settings;
+pub(crate) use service::scrub_delivery;
 pub use service::scrub_upload;
 pub use service::scrub_upload_with;
 pub use service::session_tags;

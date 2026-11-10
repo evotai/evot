@@ -1,6 +1,6 @@
-import { getTheme } from '../../render/theme/index.js'
+import { getTheme } from '../../ui/theme/index.js'
 import chalk from 'chalk'
-import { wrapHyperlink } from '../../render/hyperlink.js'
+import { wrapHyperlink } from '../../ui/hyperlink.js'
 
 export interface StyledSpan {
   text: string

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use crate::error::Result;
-use crate::storage::Storage;
+use crate::base::error::Result;
+use crate::session::storage::Storage;
 use crate::types::VariableRecord;
 
 // ---------------------------------------------------------------------------

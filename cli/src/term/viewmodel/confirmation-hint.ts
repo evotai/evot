@@ -1,4 +1,4 @@
-import { getTheme } from '../../render/theme/index.js'
+import { getTheme } from '../../ui/theme/index.js'
 import { line, styledLineToAnsi, type StyledSpan } from './types.js'
 
 /** Shared two-step confirmation treatment. Only foreground changes: never

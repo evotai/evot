@@ -16,8 +16,8 @@ use evot_engine::tools::ProcessStatus;
 use evot_engine::tools::ProcessSummary;
 use parking_lot::Mutex;
 
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 const PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_SESSION_PROCESS_MANAGERS: usize = 256;

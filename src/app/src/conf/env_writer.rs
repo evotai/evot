@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 /// Markers delimiting the evot-managed region of the env file. Everything the
 /// dashboard writes lives between these lines; anything a user adds outside is
@@ -226,5 +226,5 @@ fn render_block(groups: &[EnvGroup]) -> String {
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<()> {
-    crate::atomic_file::write_private_atomic(path, content.as_bytes())
+    crate::base::atomic_file::write_private_atomic(path, content.as_bytes())
 }

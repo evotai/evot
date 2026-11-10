@@ -4,7 +4,7 @@
 
 use super::types::CompactionState;
 use super::types::FileOps;
-use crate::context::now_ms;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Build the cumulative state from evicted messages + previous state.

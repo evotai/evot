@@ -1,8 +1,8 @@
 import chalk from 'chalk'
 
-import { formatElapsed, formatWallClock } from './format.js'
+import { formatElapsed, formatWallClock } from '../ui/format.js'
 import type { OutputLine } from './output.js'
-import { SECTION_MUTED } from './section.js'
+import { SECTION_MUTED } from '../ui/section.js'
 import { thinkingDuration } from './run-thinking.js'
 
 const MIN_FOOTER_MS = 1000

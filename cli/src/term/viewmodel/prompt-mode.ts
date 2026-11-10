@@ -1,6 +1,6 @@
 /** Log mode drives a forked agent, so name it at the composer and use its own placeholder. */
-import { getTheme } from '../../render/theme/index.js'
-import { MODE_HINTS } from '../app/composer-guidance.js'
+import { getTheme } from '../../ui/theme/index.js'
+import { MODE_HINTS } from '../app/composer/composer-guidance.js'
 
 export type PromptMode = 'default' | 'log'
 

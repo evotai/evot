@@ -4,7 +4,7 @@ import {
   parseTerminalControlSequence,
   type KeyEvent,
   type TerminalControlEvent,
-} from '../input.js'
+} from '../../ui/keys.js'
 
 const ESC = '\x1b'
 const BP_OPEN = '\x1b[200~'

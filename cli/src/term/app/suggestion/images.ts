@@ -2,8 +2,8 @@ import { readFile, stat } from 'node:fs/promises'
 import type { SuggestionImage } from '../../../native/contracts/suggestion.js'
 import { MAX_IMAGE_SIZE_BYTES } from '../../input/clipboard_image.js'
 import { parsePasteRefs } from '../../input/paste_refs.js'
-import type { PastedImage } from '../paste-input.js'
-import type { PendingImages } from '../pending-images.js'
+import type { PastedImage } from '../composer/paste-input.js'
+import type { PendingImages } from '../composer/pending-images.js'
 
 /** Share the paste load rather than probing or uploading the clipboard twice.
  * Only referenced images enter the side request; the editor and store stay intact. */

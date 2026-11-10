@@ -76,7 +76,7 @@ impl AgentTool for SearchTool {
         ))
     }
 
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<crate::types::AliasMap> {
         Some(&[
             ("query", &["q", "question", "pattern"] as &[&str]),
             ("path", &["dir", "directory", "root"] as &[&str]),

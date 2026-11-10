@@ -23,7 +23,7 @@ use super::scan;
 use super::scan::Hit;
 use super::scan::Origin;
 use super::vault::Vault;
-use crate::error::Result;
+use crate::base::error::Result;
 
 /// Where a string sits in a request.
 #[derive(Clone, Copy, PartialEq, Eq)]

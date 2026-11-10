@@ -7,9 +7,9 @@ use std::sync::Arc;
 use evot_engine::PathGuard;
 use evot_engine::SandboxSupport;
 
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::SandboxConfig;
-use crate::error::EvotError;
-use crate::error::Result;
 
 /// Runtime output of sandbox policy evaluation.
 pub struct SandboxRuntime {

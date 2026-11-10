@@ -12,8 +12,8 @@ fn json<T: serde::Serialize>(value: &T) -> NapiResult<String> {
     serde_json::to_string(value).map_err(to_napi)
 }
 
-fn service() -> NapiResult<evot::compute::ComputeService> {
-    evot::compute::ComputeService::default_location().map_err(to_napi)
+fn service() -> NapiResult<evot::cloud::compute::ComputeService> {
+    evot::cloud::compute::ComputeService::default_location().map_err(to_napi)
 }
 
 #[napi]
@@ -35,13 +35,15 @@ pub async fn compute_probe(target: String) -> NapiResult<String> {
 
 #[napi]
 pub async fn compute_create(input_json: String) -> NapiResult<String> {
-    let input: evot::compute::NewMachine = serde_json::from_str(&input_json).map_err(to_napi)?;
+    let input: evot::cloud::compute::NewMachine =
+        serde_json::from_str(&input_json).map_err(to_napi)?;
     json(&service()?.create(input).await.map_err(to_napi)?)
 }
 
 #[napi]
 pub async fn compute_update(id: String, patch_json: String) -> NapiResult<String> {
-    let patch: evot::compute::MachinePatch = serde_json::from_str(&patch_json).map_err(to_napi)?;
+    let patch: evot::cloud::compute::MachinePatch =
+        serde_json::from_str(&patch_json).map_err(to_napi)?;
     json(&service()?.update(&id, patch).await.map_err(to_napi)?)
 }
 

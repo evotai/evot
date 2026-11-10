@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use super::error::*;
 use super::traits::*;
-use crate::context::now_ms;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// A mock response: either plain text or tool calls

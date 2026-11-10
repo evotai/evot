@@ -1,4 +1,8 @@
 mod agent;
+mod agent_models;
+mod agent_processes;
+mod agent_sessions;
+mod agent_variables;
 mod auth;
 mod compaction;
 mod compute;

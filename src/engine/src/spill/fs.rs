@@ -15,7 +15,7 @@ impl FsSpill {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             dir,
-            threshold_bytes: crate::tools::validation::MAX_TOOL_RESULT_BYTES,
+            threshold_bytes: crate::spill::MAX_TOOL_RESULT_BYTES,
             preview_bytes: 4_000,
         }
     }

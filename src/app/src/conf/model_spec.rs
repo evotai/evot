@@ -9,8 +9,8 @@
 //! still reports a typo. Anything read back from storage comes through here.
 
 use super::Config;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 impl Config {
     /// Resolve a persisted spec into a `(provider, model)` pair this config

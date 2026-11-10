@@ -1,7 +1,7 @@
-import type { RunInteractionState } from '../app/run-interaction.js'
-import { backgroundChord } from '../design/key-hints.js'
-import { truncateAnsiToWidth } from '../../render/wrap.js'
-import { clipDisplayText } from '../../render/format.js'
+import type { RunInteractionState } from '../app/run/run-interaction.js'
+import { backgroundChord } from '../../ui/key-hints.js'
+import { truncateAnsiToWidth } from '../../ui/wrap.js'
+import { clipDisplayText } from '../../ui/format.js'
 import type { ViewBlock } from './types.js'
 import { finiteSize } from './width.js'
 

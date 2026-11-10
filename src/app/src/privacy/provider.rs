@@ -17,8 +17,8 @@ use super::notice::blocked_message;
 use super::notice::unavailable_message;
 use super::record::Target;
 use super::service;
-use crate::blocking::blocking_io;
-use crate::error::EvotError;
+use crate::base::blocking::blocking_io;
+use crate::base::error::EvotError;
 
 /// Wrap `inner` with masking under the user's current settings.
 pub fn wrap(inner: Arc<dyn StreamProvider>) -> Arc<dyn StreamProvider> {

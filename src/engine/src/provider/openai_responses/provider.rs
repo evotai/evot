@@ -74,8 +74,7 @@ impl OpenAiResponsesProvider {
         // with the readable fallback carried beside the blob. Auth/routing
         // errors are not replay failures and are left to normal retry handling.
         if matches!(response.status().as_u16(), 400 | 422) {
-            let (messages, found) =
-                crate::context::compaction::remote::downgrade_replay_messages(&config.messages);
+            let (messages, found) = super::replay::downgrade_replay_messages(&config.messages);
             if found {
                 tracing::warn!(
                     status = response.status().as_u16(),

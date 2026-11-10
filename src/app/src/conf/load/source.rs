@@ -4,13 +4,13 @@ use indexmap::IndexMap;
 
 use super::env_keys::ConfiguredCapabilities;
 use super::providers::merge_provider_source;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
+use crate::base::paths;
 use crate::conf::channels::FeishuChannelConfig;
-use crate::conf::paths;
 use crate::conf::thinking_level_from_str;
 use crate::conf::ChannelsConfig;
 use crate::conf::Config;
-use crate::error::EvotError;
-use crate::error::Result;
 
 #[derive(Debug, Default, serde::Deserialize)]
 #[serde(default)]

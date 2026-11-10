@@ -1,7 +1,7 @@
 //! Thinking-only guard: detect when the model produces only thinking tokens
 //! without any visible text or tool calls, and nudge it to produce output.
 
-use crate::context::now_ms;
+use crate::time::now_ms;
 use crate::types::*;
 
 /// Maximum number of thinking-only retries before giving up.

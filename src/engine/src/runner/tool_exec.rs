@@ -5,10 +5,11 @@ use std::sync::Arc;
 use super::config::GetMessagesFn;
 use super::event_sink::EventSink;
 use crate::context;
-use crate::context::now_ms;
+use crate::event::AgentEvent;
 use crate::provider::ToolDefinition;
 use crate::spill::FsSpill;
-use crate::tools::guard::PathGuard;
+use crate::time::now_ms;
+use crate::types::PathGuard;
 use crate::types::*;
 
 /// Resolve per-model tool names and descriptions into provider definitions.
@@ -758,7 +759,7 @@ fn truncate_result(result: ToolResult) -> ToolResult {
     ToolResult {
         content: crate::tools::validation::cap_tool_result_content(
             content,
-            crate::tools::validation::MAX_TOOL_RESULT_BYTES,
+            crate::spill::MAX_TOOL_RESULT_BYTES,
         ),
         details,
         retention,

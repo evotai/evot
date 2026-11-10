@@ -43,7 +43,7 @@ async function main() {
   // periodic background job, so a session left open stays current too.
   if (opts.command === 'login' || opts.command === 'prompt') {
     try {
-      const { startOfficialSkillMaintenance } = await import('./commands/skill.js')
+      const { startOfficialSkillMaintenance } = await import('./commands/skill/index.js')
       void startOfficialSkillMaintenance().catch(() => { /* never block launch on skill sync */ })
     } catch { /* never block launch on skill sync bookkeeping */ }
   }
@@ -63,7 +63,7 @@ async function main() {
     }
 
     case 'prompt': {
-      const { runPrompt } = await import('./prompt.js')
+      const { runPrompt } = await import('./headless/prompt.js')
       await runPrompt(opts)
       break
     }

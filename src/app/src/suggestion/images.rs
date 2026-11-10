@@ -44,17 +44,19 @@ pub(super) fn valid(hints: &SuggestionHints) -> bool {
 /// thread. Reuse the same size/format normalization as ordinary image input.
 pub(super) async fn prepare(
     images: Vec<SuggestionImage>,
-) -> crate::error::Result<Vec<SuggestionImage>> {
-    crate::blocking::blocking_io("suggestion_images", move |cancel| {
+) -> crate::base::error::Result<Vec<SuggestionImage>> {
+    crate::base::blocking::blocking_io("suggestion_images", move |cancel| {
         images
             .into_iter()
             .map(|image| {
                 if cancel.is_cancelled() {
-                    return Err(crate::blocking::cancelled("suggestion_images"));
+                    return Err(crate::base::blocking::cancelled("suggestion_images"));
                 }
                 let (data, media_type) = evot_engine::resize_image(&image.data, &image.media_type)
                     .map_err(|_| {
-                        crate::error::EvotError::Run("Unable to decode suggestion image".into())
+                        crate::base::error::EvotError::Run(
+                            "Unable to decode suggestion image".into(),
+                        )
                     })?;
                 Ok(SuggestionImage {
                     data,

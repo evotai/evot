@@ -1,12 +1,12 @@
 use indexmap::IndexMap;
 
 use super::source::ProviderSource;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::infer_protocol;
 use crate::conf::parse_protocol;
 use crate::conf::thinking_level_from_str;
 use crate::conf::ProviderProfile;
-use crate::error::EvotError;
-use crate::error::Result;
 
 pub(super) fn normalize_provider_name(name: &str) -> String {
     name.to_lowercase()

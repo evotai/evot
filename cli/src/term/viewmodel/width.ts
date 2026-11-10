@@ -8,7 +8,7 @@
  */
 
 import stringWidth from 'string-width'
-import { visibleWidth } from '../../render/wrap.js'
+import { visibleWidth } from '../../ui/wrap.js'
 import { wrapEditorText } from '../input/grapheme.js'
 import type { StyledSpan } from './types.js'
 

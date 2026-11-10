@@ -269,7 +269,7 @@ fn remove_stale_builtins(root: &Path) -> Result<(), SkillLoadError> {
 }
 
 fn builtin_skills_dir() -> Result<PathBuf, SkillLoadError> {
-    crate::conf::paths::state_root_dir()
+    crate::base::paths::state_root_dir()
         .map(|root| root.join("builtin-skills"))
         .map_err(|error| SkillLoadError::BuiltinDir(error.to_string()))
 }
@@ -461,12 +461,14 @@ fn escape_xml(value: &str) -> String {
 pub(crate) fn load_turn_skills(
     dirs: &[PathBuf],
     names: Option<&[String]>,
-) -> crate::error::Result<Vec<SkillSpec>> {
+) -> crate::base::error::Result<Vec<SkillSpec>> {
     match names {
         Some(names) => load_skills_by_name(dirs, names),
         None => load_skills(dirs),
     }
-    .map_err(|error| crate::error::EvotError::Agent(format!("failed to load skills: {error}")))
+    .map_err(|error| {
+        crate::base::error::EvotError::Agent(format!("failed to load skills: {error}"))
+    })
 }
 
 pub(crate) fn skills_prompt_section(skills: &[SkillSpec]) -> Option<super::Section> {

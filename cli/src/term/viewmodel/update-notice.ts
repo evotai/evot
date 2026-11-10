@@ -1,4 +1,4 @@
-import { getTheme } from '../../render/theme/index.js'
+import { getTheme } from '../../ui/theme/index.js'
 import type { StyledSpan, ViewBlock } from './types.js'
 import { joinLeftRight, spansWidth, truncateSpansToWidth } from './width.js'
 

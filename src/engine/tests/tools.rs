@@ -6,8 +6,6 @@ mod bash;
 mod explore;
 #[path = "tools/file/mod.rs"]
 mod file;
-#[path = "tools/guard.rs"]
-mod guard;
 #[path = "tools/host_tool.rs"]
 mod host_tool;
 #[path = "tools/naming.rs"]

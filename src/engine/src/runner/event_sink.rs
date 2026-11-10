@@ -3,7 +3,7 @@
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::types::AgentEvent;
+use crate::event::AgentEvent;
 
 #[derive(Clone)]
 pub(crate) enum EventSink {

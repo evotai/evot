@@ -15,8 +15,8 @@
  * column costs nothing.
  */
 
-import { getTheme } from '../../render/theme/index.js'
-import type { SelectorEffort, SelectorItem } from '../selector.js'
+import { getTheme } from '../../ui/theme/index.js'
+import type { SelectorEffort, SelectorItem } from '../../ui/selector.js'
 import type { StyledSpan } from './types.js'
 
 /**

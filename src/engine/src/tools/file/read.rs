@@ -9,8 +9,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 
-use crate::context::detect_image_mime_type;
-use crate::context::IMAGE_SNIFF_BYTES;
+use crate::media::detect_image_mime_type;
+use crate::media::IMAGE_SNIFF_BYTES;
 use crate::types::*;
 
 /// Max lines returned by a single Read call (matches industry standard).
@@ -148,7 +148,7 @@ impl AgentTool for ReadFileTool {
         Some(("read or examine files", "cat, head, tail, or sed"))
     }
 
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<crate::types::AliasMap> {
         Some(&[("path", &["file_path", "filePath", "file"] as &[&str])])
     }
 

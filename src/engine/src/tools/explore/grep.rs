@@ -62,7 +62,7 @@ impl AgentTool for GrepTool {
         Some(("search file contents", "bash grep or rg"))
     }
 
-    fn parameter_aliases(&self) -> Option<crate::tools::validation::AliasMap> {
+    fn parameter_aliases(&self) -> Option<crate::types::AliasMap> {
         Some(&[
             ("pattern", &["query", "regex", "search"] as &[&str]),
             ("path", &["dir", "directory", "file"] as &[&str]),

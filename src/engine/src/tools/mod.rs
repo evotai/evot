@@ -1,7 +1,6 @@
 pub mod bash;
 pub mod explore;
 pub mod file;
-pub mod guard;
 pub mod naming;
 pub mod process;
 pub mod sandbox;
@@ -16,7 +15,6 @@ pub use file::EditFileTool;
 pub use file::ReadFileTool;
 pub use file::WriteFileTool;
 pub use file::FILE_UNCHANGED_STUB;
-pub use guard::PathGuard;
 pub use naming::resolve_tool_refs;
 pub use process::task_label;
 pub use process::BackgroundReason;

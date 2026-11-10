@@ -4,9 +4,9 @@ use evot_engine::provider::ModelConfig;
 use evot_engine::provider::StreamProvider;
 
 use super::SuggestionEndpoint;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::LlmConfig;
-use crate::error::EvotError;
-use crate::error::Result;
 
 /// Runtime-only request identity. Keep the complete resolved route rather
 /// than round-tripping the current model through a published service DTO.
@@ -93,6 +93,6 @@ impl SuggestionModel {
     }
 
     pub(super) fn provider(&self) -> Arc<dyn StreamProvider> {
-        crate::models::transport::for_api(self.config.protocol())
+        crate::agent::models::transport::for_api(self.config.protocol())
     }
 }

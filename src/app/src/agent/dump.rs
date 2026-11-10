@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use super::run::runtime;
 use super::tools::ToolMode;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::observability::PromptDump;
 use crate::observability::SectionDump;
 use crate::observability::SystemPromptDump;

@@ -1,5 +1,5 @@
-import { getTheme } from '../../render/theme/index.js'
-import type { SelectorItem } from '../selector.js'
+import { getTheme } from '../../ui/theme/index.js'
+import type { SelectorItem } from '../../ui/selector.js'
 import { colored, dim, line, plain, type StyledLine, type StyledSpan } from './types.js'
 import { spansWidth, truncateSpansToWidth, truncateToWidth, wrapTextByWidth } from './width.js'
 

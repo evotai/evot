@@ -339,7 +339,7 @@ async fn overflow_falls_back_to_emergency_when_summarizer_fails() {
         output: 0,
         total_tokens: 0,
         model: model_id(),
-        timestamp: evotengine::context::now_ms() + 60_000,
+        timestamp: evotengine::time::now_ms() + 60_000,
         stop_reason: StopReason::Error,
         error_message: Some("prompt is too long: 50000 tokens > 10000 maximum".into()),
     };
@@ -409,7 +409,7 @@ async fn cancelled_summarizer_does_not_fall_back_or_compact() {
         output: 0,
         total_tokens: 0,
         model: model_id(),
-        timestamp: evotengine::context::now_ms() + 60_000,
+        timestamp: evotengine::time::now_ms() + 60_000,
         stop_reason: StopReason::Error,
         error_message: Some("prompt is too long: 50000 tokens > 10000 maximum".into()),
     };
@@ -885,7 +885,7 @@ async fn overflow_exhausted_signals_after_second_overflow() {
     // The first overflow's compaction records last_compaction_ts = now_ms().
     // The second usage must carry a timestamp after that, otherwise it would
     // be skipped as stale rather than treated as overflow-exhausted.
-    let future_ts = evotengine::context::now_ms() + 60_000;
+    let future_ts = evotengine::time::now_ms() + 60_000;
     let overflow_usage = |ts: u64| UsageSnapshot {
         input: 0,
         cache_read: 0,
@@ -939,7 +939,7 @@ async fn estimate_compaction_does_not_reset_overflow_recovery() {
         output: 0,
         total_tokens: 0,
         model: model_id(),
-        timestamp: evotengine::context::now_ms() + 60_000,
+        timestamp: evotengine::time::now_ms() + 60_000,
         stop_reason: StopReason::Error,
         error_message: Some("prompt is too long: 50000 tokens > 10000 maximum".into()),
     };
@@ -1074,7 +1074,7 @@ async fn threshold_suppression_skips_repeat_until_usage_recovers() {
         stop_reason: StopReason::Stop,
         error_message: None,
     };
-    let base_ts = evotengine::context::now_ms() + 60_000;
+    let base_ts = evotengine::time::now_ms() + 60_000;
 
     // First over-threshold usage compacts and arms the suppression.
     let mut messages = big_messages();
@@ -1150,7 +1150,7 @@ async fn threshold_suppression_is_scoped_to_the_model() {
         }
         messages
     };
-    let base_ts = evotengine::context::now_ms() + 60_000;
+    let base_ts = evotengine::time::now_ms() + 60_000;
 
     let mut messages = big_messages();
     let first = ctrl
@@ -1252,7 +1252,7 @@ async fn overflow_summarizes_even_when_local_estimate_fits() {
             output: 0,
             total_tokens: 0,
             model: model_id(),
-            timestamp: evotengine::context::now_ms() + 60_000,
+            timestamp: evotengine::time::now_ms() + 60_000,
             stop_reason: StopReason::Error,
             error_message: Some("HTTP 413: request too large".into()),
         };
@@ -1351,7 +1351,7 @@ async fn refusal_compacts_and_retries_then_exhausts() {
     messages.push(user_msg("recent"));
     messages.push(assistant_msg("refused"));
     let original = messages.len();
-    let future_ts = evotengine::context::now_ms() + 60_000;
+    let future_ts = evotengine::time::now_ms() + 60_000;
 
     let first = ctrl
         .after_response(
@@ -1430,7 +1430,7 @@ async fn refusal_on_single_tool_turn_summarizes_the_whole_turn() {
     let response = ctrl
         .after_response(
             &mut messages,
-            &refusal_usage(evotengine::context::now_ms() + 60_000),
+            &refusal_usage(evotengine::time::now_ms() + 60_000),
             &model_id(),
             None,
             CancellationToken::new(),

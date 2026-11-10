@@ -18,7 +18,7 @@ use super::policy::Action;
 use super::rules::Confidence;
 use super::scan::Finder;
 use super::scan::Hit;
-use crate::error::Result;
+use crate::base::error::Result;
 
 pub const RECORD_SCHEMA_VERSION: u32 = 1;
 const KEEP_DAYS: i64 = 30;

@@ -23,10 +23,13 @@ use super::tool_exec::build_tool_definitions;
 use super::tool_exec::execute_tool_calls;
 use super::tool_exec::fail_truncated_tool_calls;
 use super::tool_exec::skip_tool_call_doom_loop;
-use crate::context::now_ms;
 use crate::context::ContextTracker;
 use crate::context::ExecutionTracker;
 use crate::context::{self};
+use crate::event::AgentErrorInfo;
+use crate::event::AgentErrorKind;
+use crate::event::AgentEvent;
+use crate::time::now_ms;
 use crate::types::*;
 
 pub(crate) struct AgentLoopOutcome {

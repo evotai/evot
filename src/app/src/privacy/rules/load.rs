@@ -8,8 +8,8 @@ use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 
 use super::pack::Pack;
-use crate::error::EvotError;
-use crate::error::Result;
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 
 /// In merge order: `core` defines the kinds, sources and structure the
 /// others build on.
@@ -87,7 +87,7 @@ fn user_files(dir: &Path, cancel: &CancellationToken) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in entries {
         if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy rules"));
+            return Err(crate::base::blocking::cancelled("privacy rules"));
         }
         let path = entry?.path();
         if path.extension().is_some_and(|ext| ext == "json") {
@@ -107,7 +107,7 @@ pub(in crate::privacy) fn read_user_packs(
     let mut packs = Vec::new();
     for (path, _) in files {
         if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy rules"));
+            return Err(crate::base::blocking::cancelled("privacy rules"));
         }
         packs.push(parse(
             &path.display().to_string(),
@@ -121,12 +121,12 @@ pub(in crate::privacy) fn read_user_packs(
 /// not masquerade as an empty directory and reuse an unrelated cache entry.
 pub(in crate::privacy) fn user_stamp(dir: &Path, cancel: &CancellationToken) -> Result<UserStamp> {
     if cancel.is_cancelled() {
-        return Err(crate::blocking::cancelled("privacy rules"));
+        return Err(crate::base::blocking::cancelled("privacy rules"));
     }
     let mut stamp = Vec::new();
     for path in user_files(dir, cancel)? {
         if cancel.is_cancelled() {
-            return Err(crate::blocking::cancelled("privacy rules"));
+            return Err(crate::base::blocking::cancelled("privacy rules"));
         }
         let modified = file_stamp(&path)?;
         stamp.push((path, modified));

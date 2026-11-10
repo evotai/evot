@@ -53,18 +53,18 @@ pub async fn run_acp(
     ephemeral: Option<bool>,
 ) -> Result<()> {
     init_tracing();
-    let mode = evot::acp::tool_mode(tools.as_deref().unwrap_or("full"))
+    let mode = evot::surface::acp::tool_mode(tools.as_deref().unwrap_or("full"))
         .map_err(|e| Error::from_reason(e.to_string()))?;
-    let ask_permission = evot::acp::ask_permission(permission.as_deref().unwrap_or("ask"))
+    let ask_permission = evot::surface::acp::ask_permission(permission.as_deref().unwrap_or("ask"))
         .map_err(|e| Error::from_reason(e.to_string()))?;
     let config = load_config(None, model, env_file)?;
-    let options = evot::acp::AcpOptions {
+    let options = evot::surface::acp::AcpOptions {
         mode,
         ask_permission,
         ephemeral: ephemeral.unwrap_or(false),
         agent_version: version(),
     };
-    evot::acp::serve_stdio(config, options)
+    evot::surface::acp::serve_stdio(config, options)
         .await
         .map_err(|e| Error::from_reason(format!("acp error: {e}")))
 }

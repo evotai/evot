@@ -9,10 +9,10 @@ use super::run::run::Run;
 use super::Agent;
 use super::QueryRequest;
 use crate::agent::SubmitOutcome;
-use crate::error::Result;
-use crate::sessions::Session;
-use crate::sessions::SessionGates;
-use crate::sessions::SessionLocator;
+use crate::base::error::Result;
+use crate::session::Session;
+use crate::session::SessionGates;
+use crate::session::SessionLocator;
 
 pub enum SendOutcome {
     Started(Run),
@@ -65,7 +65,7 @@ impl RunManager {
         // Busy commands are not prompts on any entry point. Keep channel
         // commands out of the model queue just as TUI and HTTP do.
         if self.agent.has_active_run(&session_id)
-            && crate::command::is_queued_command(&request.input_text())
+            && crate::agent::command::is_queued_command(&request.input_text())
         {
             return Ok(SendOutcome::Command(
                 "Commands don't queue while a response is running. Stop it or wait for the turn to finish.".into(),

@@ -12,9 +12,9 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::control::RunControl;
-use super::event::RunEvent;
-use super::event::RunEventPayload;
-use super::event::ToolCallStreamPhase;
+use crate::session::conversation::run_event::RunEvent;
+use crate::session::conversation::run_event::RunEventPayload;
+use crate::session::conversation::run_event::ToolCallStreamPhase;
 
 /// Once more than this many events are queued, adjacent deltas merge.
 const COALESCE_AFTER_EVENTS: usize = 64;

@@ -1,4 +1,4 @@
-import type { SuggestionTrigger } from '../composer-guidance.js'
+import type { SuggestionTrigger } from '../composer/composer-guidance.js'
 
 /** The slice of `PromptSuggestion` a state trigger drives. */
 export interface SuggestionTarget {

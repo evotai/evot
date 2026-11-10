@@ -3,6 +3,8 @@ use std::path::Path;
 use evot_engine::provider::CompatCaps;
 use indexmap::IndexMap;
 
+use crate::base::error::EvotError;
+use crate::base::error::Result;
 use crate::conf::channels::FeishuChannelConfig;
 use crate::conf::env_writer::EnvGroup;
 use crate::conf::parse_protocol;
@@ -10,8 +12,6 @@ use crate::conf::thinking_level_from_str;
 use crate::conf::Config;
 use crate::conf::Protocol;
 use crate::conf::ProviderProfile;
-use crate::error::EvotError;
-use crate::error::Result;
 
 /// Encode a provider name for use in an env key segment: lowercase + hyphen
 /// becomes uppercase + underscore. Inverse of `env_name_to_provider` in

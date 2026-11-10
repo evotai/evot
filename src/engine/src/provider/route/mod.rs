@@ -1,7 +1,6 @@
 mod compat;
 mod features;
 mod known;
-mod protocol;
 
 pub use compat::CompatCaps;
 pub use compat::MaxTokensField;
@@ -12,4 +11,5 @@ pub use features::RouteCapabilityOverrides;
 pub use known::default_base_url;
 pub use known::is_native_openai_responses_route;
 pub use known::is_official_openai_route;
-pub use protocol::ApiProtocol;
+
+pub use crate::types::ApiProtocol;

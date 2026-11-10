@@ -1,7 +1,7 @@
 use super::env_transaction::EnvTransaction;
+use crate::base::error::Result;
 use crate::conf::config_to_env_groups;
 use crate::conf::Config;
-use crate::error::Result;
 
 /// Commit a config mutation only if the loaded env file is still current.
 /// Validation and durable write finish before publishing the in-memory copy.
@@ -15,7 +15,7 @@ pub fn update_config<T>(
     let mut candidate = config.clone();
     let result = mutate(&mut candidate)?;
     if candidate.env_file_path != config.env_file_path {
-        return Err(crate::error::EvotError::Conf(
+        return Err(crate::base::error::EvotError::Conf(
             "configuration transaction cannot change its destination path".into(),
         ));
     }

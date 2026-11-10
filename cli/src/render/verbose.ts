@@ -4,9 +4,9 @@
  * Used by both reducer.ts (real-time streaming) and transcript.ts (history replay)
  * to produce identical output from stats event data.
  */
-import { formatDuration, humanTokens, renderBar } from './format.js'
+import { formatDuration, humanTokens, renderBar } from '../ui/format.js'
 import { formatCacheHitPercent } from './cache.js'
-import { streamTokenRate } from '../provider/stream-rate.js'
+import { streamTokenRate } from './stream-rate.js'
 
 interface MessageStats {
   user_count?: number
