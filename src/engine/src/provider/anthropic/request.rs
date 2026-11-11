@@ -305,6 +305,11 @@ fn is_tool_call(block: &Content) -> bool {
 
 fn is_placeholder_context(block: &Content) -> bool {
     match block {
+        // An opaque signature is replay state even when there is no visible thought.
+        Content::Thinking {
+            metadata: Some(ThinkingMetadata::Anthropic { signature }),
+            ..
+        } if !signature.is_empty() => false,
         Content::Text { text } | Content::Thinking { thinking: text, .. } => {
             is_placeholder_text(text)
         }

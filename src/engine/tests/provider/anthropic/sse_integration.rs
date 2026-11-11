@@ -516,6 +516,104 @@ async fn anthropic_sse_error_before_tool_input_still_errors() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn anthropic_sse_signature_only_thinking_replays_on_turn_two(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use evotengine::context::transform_messages_for_model;
+    use evotengine::provider::anthropic::request::build_request_body;
+    use evotengine::provider::ApiProtocol;
+
+    let signatures = ["droid-google:opaque-read", "droid-google:opaque-bash"];
+    let calls = [("call_read", "read"), ("call_bash", "bash")];
+    let mut frames = vec![anthropic_sse::message_start(50, 0)];
+    for (index, (id, name)) in calls.iter().enumerate() {
+        let index = index as u64 * 2;
+        frames.extend([
+            anthropic_sse::thinking_block_start(index),
+            // No thinking_delta: Google tool signatures arrive with empty visible thinking.
+            format!("event: content_block_delta\ndata: {}", serde_json::json!({
+                "type": "content_block_delta", "index": index,
+                "delta": {"type": "signature_delta", "signature": signatures[index as usize / 2]},
+            })),
+            anthropic_sse::block_stop(index),
+            anthropic_sse::tool_block_start(index + 1, id, name),
+            anthropic_sse::tool_input_delta(index + 1, r#"{"path":"README.md"}"#),
+            anthropic_sse::block_stop(index + 1),
+        ]);
+    }
+    frames.extend([
+        anthropic_sse::message_delta("tool_use", 5),
+        anthropic_sse::message_stop(),
+    ]);
+    let config = StreamConfigBuilder::anthropic()
+        .model("gemini-4-carbon")
+        .cache_disabled()
+        .build();
+    let (message, _) = run_provider_sse(
+        &AnthropicProvider,
+        config,
+        &anthropic_sse::body(frames),
+        200,
+    )
+    .await?;
+    // Include persisted-session reload, then the real provider/model history normalization.
+    let saved = serde_json::to_vec(&message)?;
+    let restored: Message = serde_json::from_slice(&saved)?;
+    let Message::Assistant {
+        model,
+        provider,
+        stop_reason,
+        ..
+    } = &restored
+    else {
+        panic!("expected assistant tool turn");
+    };
+    assert_eq!(*stop_reason, StopReason::ToolUse);
+    let model = model.clone();
+    let provider = provider.clone();
+    let mut history = vec![Message::user("read and inspect"), restored];
+    for (id, name) in calls {
+        history.push(Message::ToolResult {
+            tool_call_id: id.into(),
+            tool_name: name.into(),
+            content: vec![Content::Text {
+                text: "done".into(),
+            }],
+            is_error: false,
+            timestamp: 0,
+            retention: Retention::Normal,
+        });
+    }
+    let messages =
+        transform_messages_for_model(history, &provider, &model, ApiProtocol::AnthropicMessages);
+    let body = build_request_body(
+        &StreamConfigBuilder::anthropic()
+            .model(&model)
+            .messages(messages)
+            .cache_disabled()
+            .build(),
+        false,
+    );
+    assert_eq!(
+        body["messages"][1]["content"],
+        serde_json::json!([
+            {"type": "thinking", "thinking": "", "signature": signatures[0]},
+            {"type": "thinking", "thinking": "", "signature": signatures[1]},
+            {"type": "tool_use", "id": "call_read", "name": "read", "input": {"path": "README.md"}},
+            {"type": "tool_use", "id": "call_bash", "name": "bash", "input": {"path": "README.md"}},
+        ])
+    );
+    assert_eq!(
+        body["messages"][2]["content"][0]["tool_use_id"],
+        "call_read"
+    );
+    assert_eq!(
+        body["messages"][2]["content"][1]["tool_use_id"],
+        "call_bash"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn anthropic_sse_thinking_then_text() {
     let sse = anthropic_sse::body(vec![
         anthropic_sse::message_start(80, 0),

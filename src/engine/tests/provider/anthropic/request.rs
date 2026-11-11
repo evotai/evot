@@ -824,7 +824,7 @@ fn test_content_to_anthropic_filters_empty_text() {
 }
 
 #[test]
-fn assistant_placeholder_thinking_after_tools_is_dropped() {
+fn assistant_unsigned_placeholder_thinking_after_tools_is_dropped() {
     let content = vec![
         Content::Text {
             text: "compare the two renderers".into(),
@@ -843,9 +843,7 @@ fn assistant_placeholder_thinking_after_tools_is_dropped() {
         },
         Content::Thinking {
             thinking: "...".into(),
-            metadata: Some(ThinkingMetadata::Anthropic {
-                signature: "foreign-sig".into(),
-            }),
+            metadata: None,
         },
     ];
 
@@ -883,6 +881,79 @@ fn assistant_meaningful_text_after_tools_moves_before_tool_use() {
     assert_eq!(result[1]["text"], "why I called it");
     assert_eq!(result[2]["type"], "tool_use");
     assert_eq!(result[2]["id"], "call_1");
+}
+
+#[test]
+fn assistant_signed_placeholder_thinking_survives_parallel_tool_turn() {
+    for text in ["", " \n\t", "...", "…"] {
+        let mut content = Vec::new();
+        for id in ["call_read", "call_bash"] {
+            content.push(Content::ToolCall {
+                id: id.into(),
+                name: "read".into(),
+                arguments: serde_json::json!({"path": id}),
+                metadata: None,
+            });
+            content.push(Content::Thinking {
+                thinking: text.into(),
+                metadata: Some(ThinkingMetadata::Anthropic {
+                    signature: format!("opaque-{id}"),
+                }),
+            });
+        }
+        let result = assistant_content_to_anthropic(&content);
+        assert_eq!(result.len(), 4, "signed placeholder {text:?} must survive");
+        for (index, id) in ["call_read", "call_bash"].iter().enumerate() {
+            assert_eq!(
+                result[index],
+                serde_json::json!({
+                    "type": "thinking", "thinking": text, "signature": format!("opaque-{id}"),
+                })
+            );
+            assert_eq!(result[index + 2]["type"], "tool_use");
+            assert_eq!(result[index + 2]["id"], *id);
+        }
+    }
+}
+
+#[test]
+fn assistant_signed_empty_thinking_without_tools_is_preserved() {
+    let result = assistant_content_to_anthropic(&[Content::Thinking {
+        thinking: String::new(),
+        metadata: Some(ThinkingMetadata::Anthropic {
+            signature: "opaque-replay-state".into(),
+        }),
+    }]);
+    assert_eq!(result, vec![serde_json::json!({
+        "type": "thinking", "thinking": "", "signature": "opaque-replay-state",
+    })]);
+}
+
+#[test]
+fn assistant_unsigned_or_foreign_placeholder_thinking_is_still_dropped() {
+    for metadata in [
+        None,
+        Some(ThinkingMetadata::Anthropic {
+            signature: String::new(),
+        }),
+        Some(ThinkingMetadata::OpenAiResponses {
+            item: serde_json::json!({"encrypted_content": "foreign"}),
+        }),
+        Some(ThinkingMetadata::OpenAiCompletions {
+            field: ReasoningField::ReasoningContent,
+            details: Some(vec![
+                serde_json::json!({"type": "reasoning.encrypted", "data": "foreign"}),
+            ]),
+        }),
+    ] {
+        for text in ["", " \n\t", "...", "…"] {
+            assert!(assistant_content_to_anthropic(&[Content::Thinking {
+                thinking: text.into(),
+                metadata: metadata.clone(),
+            }])
+            .is_empty());
+        }
+    }
 }
 
 #[test]
