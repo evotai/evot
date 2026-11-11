@@ -195,6 +195,37 @@ fn test_kimi_k3_thinking_uses_enabled_wire_with_effort() {
 }
 
 #[test]
+fn test_gemini_4_anthropic_route_sends_effort_with_budget() {
+    // llmproxy's Droid channel serves Gemini 4 over Anthropic Messages and maps
+    // `output_config.effort` to Google's thinkingLevel; without it every level
+    // arrived as budget-only thinking and was served as HIGH.
+    for model in ["gemini-4-carbon", "gemini-4-argon"] {
+        for (level, effort) in [
+            (ThinkingLevel::Off, "low"),
+            (ThinkingLevel::Low, "low"),
+            (ThinkingLevel::Medium, "medium"),
+            (ThinkingLevel::High, "high"),
+            (ThinkingLevel::Max, "high"),
+        ] {
+            let config = StreamConfigBuilder::anthropic()
+                .model(model)
+                .model_config(ModelConfig::anthropic(model, "Gemini 4"))
+                .thinking(level)
+                .build();
+            let body = build_request_body(&config, false);
+            assert_eq!(body["thinking"]["type"], "enabled", "{model} {level:?}");
+            assert!(
+                body["thinking"]["budget_tokens"]
+                    .as_u64()
+                    .is_some_and(|budget| budget >= 1024),
+                "{model} {level:?}"
+            );
+            assert_eq!(body["output_config"]["effort"], effort, "{model} {level:?}");
+        }
+    }
+}
+
+#[test]
 fn test_glm_5_3_thinking_uses_enabled_wire_with_effort_and_budget() {
     let config = StreamConfigBuilder::anthropic()
         .model("glm-5.3")

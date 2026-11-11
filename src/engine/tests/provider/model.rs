@@ -288,8 +288,13 @@ fn grok_profiles_match_xai_contracts() {
 fn gemini_4_argon_profile_matches_models_dev_contract() {
     use evotengine::ThinkingLevel::*;
 
-    for id in ["gemini-4-argon", "google/gemini-4-argon"] {
-        let argon = ModelConfig::openai(id, "Gemini 4 Argon");
+    for id in [
+        "gemini-4-argon",
+        "google/gemini-4-argon",
+        "gemini-4-carbon",
+        "google/gemini-4-carbon",
+    ] {
+        let argon = ModelConfig::openai(id, "Gemini 4");
         assert_eq!(argon.context_window(), 1_015_808, "{id}");
         assert_eq!(argon.advertised_context_window(), 1_048_576, "{id}");
         assert_eq!(argon.max_tokens(), 32_768, "{id}");
