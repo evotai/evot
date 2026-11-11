@@ -74,7 +74,6 @@ const GPT_5_5: ModelProfile = ModelProfile {
     advertised_context_window: Some(1_000_000),
     max_output_tokens: 128_000,
     reasoning: GPT_REASONING,
-    remote_compaction: true,
     default_verbosity: Some(Verbosity::Low),
     ..BASE
 };
@@ -87,7 +86,6 @@ const GPT_5_6: ModelProfile = ModelProfile {
     advertised_context_window: None,
     max_output_tokens: 128_000,
     reasoning: GPT_5_6_REASONING,
-    remote_compaction: true,
     compaction_limit: Some(244_800),
     default_verbosity: Some(Verbosity::Low),
     ..BASE
@@ -100,10 +98,10 @@ const GPT_6_MANDATORY: ModelProfile = ModelProfile {
 
 #[rustfmt::skip]
 const PROFILES: &[(&str, ModelProfile)] = &[
-    ("gpt-5.4",       ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_REASONING, remote_compaction: true, ..BASE }),
-    ("gpt-5.4-pro",   ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_REASONING, remote_compaction: true, ..BASE }),
+    ("gpt-5.4",       ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_REASONING, ..BASE }),
+    ("gpt-5.4-pro",   ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_REASONING, ..BASE }),
     ("gpt-5.5",       GPT_5_5),
-    ("gpt-5.5-pro",   ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_5_5_PRO_REASONING, remote_compaction: true, ..BASE }),
+    ("gpt-5.5-pro",   ModelProfile { max_input_tokens: 922_000, advertised_context_window: Some(1_000_000), max_output_tokens: 128_000, reasoning: GPT_5_5_PRO_REASONING, ..BASE }),
     ("gpt-5.6-luna",  GPT_5_6),
     ("gpt-5.6-sol",   GPT_5_6),
     ("gpt-5.6-terra", GPT_5_6),
@@ -120,14 +118,13 @@ pub(super) fn resolve(id: &str) -> Option<ModelProfile> {
 }
 
 /// Conservative metadata for uncatalogued OpenAI reasoning families.
-/// GPT 5.6+ inherits the 272k profile (minus the remote compaction and
-/// verbosity allowlists, and without `none` since newer models reject it);
+/// GPT 5.6+ inherits the 272k profile (minus the verbosity
+/// allowlist, and without `none` since newer models reject it);
 /// 5.4/5.5 inherit the 1M window; older ids stay on 128k.
 pub(super) fn fallback(id: &str) -> Option<ModelProfile> {
     if id.starts_with("gpt-") || id.starts_with("codex-") {
         if super::profile::version_at_least(id, "gpt-", (5, 6)) {
             return Some(ModelProfile {
-                remote_compaction: false,
                 default_verbosity: None,
                 ..GPT_6_MANDATORY
             });

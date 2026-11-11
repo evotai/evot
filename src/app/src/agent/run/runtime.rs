@@ -373,18 +373,7 @@ async fn drive_one_turn(
                             "skipping stale automatic compaction: another writer added context items during this run"
                         );
                     } else {
-                        let mut new_context = from_agent_messages(&messages);
-                        if let Some(summary) = summary.as_deref() {
-                            for (index, message) in messages.iter().enumerate() {
-                                if evot_engine::context::compaction::remote::is_replacement_message(
-                                    message,
-                                ) && index < new_context.len()
-                                {
-                                    new_context[index] =
-                                        crate::session::conversation::context_view::compact_summary_item(summary);
-                                }
-                            }
-                        }
+                        let new_context = from_agent_messages(&messages);
                         let item = automatic_compact_item(
                             reason.clone(),
                             &result,
@@ -517,18 +506,7 @@ fn automatic_compact_item(
             crate::observability::CompactionResult::Compacted { method, .. } => *method,
             crate::observability::CompactionResult::NoOp => None,
         },
-        remote_blob_bytes: match result {
-            crate::observability::CompactionResult::Compacted {
-                remote_blob_bytes, ..
-            } => *remote_blob_bytes,
-            crate::observability::CompactionResult::NoOp => None,
-        },
-        fallback_reason: match result {
-            crate::observability::CompactionResult::Compacted {
-                fallback_reason, ..
-            } => fallback_reason.clone(),
-            crate::observability::CompactionResult::NoOp => None,
-        },
+        ..Default::default()
     };
     TranscriptItem::Compact {
         id: crate::types::new_id(),

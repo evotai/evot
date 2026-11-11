@@ -55,8 +55,6 @@ pub async fn compact(
             compaction_level: 3,
             used_fallback: result.used_fallback,
             method: details.method,
-            remote_blob_bytes: details.remote_blob_bytes,
-            fallback_reason: details.fallback_reason,
         }),
         _ => Ok(ManualCompactionOutcome::NothingToCompact),
     }

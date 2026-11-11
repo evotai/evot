@@ -101,8 +101,10 @@ pub struct CompactDetails {
     pub modified_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<CompactionMethod>,
+    /// Legacy field from retired provider-native compaction; never set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_blob_bytes: Option<usize>,
+    /// Legacy field from retired provider-native compaction; never set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
 }

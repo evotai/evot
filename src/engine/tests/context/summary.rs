@@ -155,16 +155,6 @@ async fn missing_llm_context_uses_deterministic_summary() {
 }
 
 #[tokio::test]
-async fn unsupported_remote_is_not_reported_as_a_failure() {
-    let provider = Arc::new(RecordingProvider::new(vec![Reply::text("LOCAL SUMMARY")]));
-    let ctx = context("local", provider);
-    let result = run(&[user("history")], SummaryContexts::same(Some(&ctx))).await;
-    assert_eq!(result.method, evotengine::context::CompactionMethod::Local);
-    assert_eq!(result.fallback_reason, None);
-    assert!(!result.used_fallback);
-}
-
-#[tokio::test]
 async fn tiny_window_caps_summary_generation_and_storage() {
     let provider = Arc::new(RecordingProvider::new(vec![Reply::text(format!(
         "<summary>{}</summary>",

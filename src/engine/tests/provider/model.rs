@@ -126,7 +126,6 @@ fn route_resolution_is_endpoint_aware_and_explicitly_overridable() {
         RouteCapabilityOverrides::default(),
     );
     assert!(official_route.verbosity);
-    assert!(official_route.remote_compaction);
 
     let databend_route = RouteCapabilities::for_route(
         ApiProtocol::OpenAiResponses,
@@ -135,7 +134,6 @@ fn route_resolution_is_endpoint_aware_and_explicitly_overridable() {
         RouteCapabilityOverrides::default(),
     );
     assert!(databend_route.verbosity);
-    assert!(databend_route.remote_compaction);
 
     let proxy_route = RouteCapabilities::for_route(
         ApiProtocol::OpenAiResponses,
@@ -143,14 +141,14 @@ fn route_resolution_is_endpoint_aware_and_explicitly_overridable() {
         "https://proxy.example.com/v1",
         RouteCapabilityOverrides {
             verbosity: true,
-            remote_compaction: true,
+            remote_compaction: false,
         },
     );
     assert!(proxy_route.verbosity);
-    assert!(proxy_route.remote_compaction);
 
-    let chat_route = RouteCapabilities::for_route(
-        ApiProtocol::OpenAiCompletions,
+    // The legacy `remote_compaction` name is accepted but enables nothing.
+    let legacy_route = RouteCapabilities::for_route(
+        ApiProtocol::OpenAiResponses,
         "openai",
         "https://proxy.example.com/v1",
         RouteCapabilityOverrides {
@@ -158,14 +156,13 @@ fn route_resolution_is_endpoint_aware_and_explicitly_overridable() {
             remote_compaction: true,
         },
     );
-    assert!(!chat_route.remote_compaction);
+    assert_eq!(legacy_route, RouteCapabilities::default());
 }
 
 #[test]
 fn route_and_model_capabilities_are_intersected() {
     let official = ModelConfig::openai_responses("gpt-5.6-sol", "GPT-5.6 Sol");
     assert_eq!(official.effective_verbosity(), Some(Verbosity::Low));
-    assert!(official.can_remote_compact());
 
     let proxy = resolved(
         ApiProtocol::OpenAiResponses,
@@ -177,7 +174,6 @@ fn route_and_model_capabilities_are_intersected() {
         ModelOverrides::default(),
     );
     assert_eq!(proxy.effective_verbosity(), None);
-    assert!(!proxy.can_remote_compact());
 
     let verbosity_only = resolved(
         ApiProtocol::OpenAiResponses,
@@ -185,38 +181,10 @@ fn route_and_model_capabilities_are_intersected() {
         "gpt-5.6-sol",
         "https://proxy.example.com/v1",
         Some(OpenAiCompat::openai()),
-        RouteCapabilities {
-            verbosity: true,
-            remote_compaction: false,
-        },
+        RouteCapabilities { verbosity: true },
         ModelOverrides::default(),
     );
     assert_eq!(verbosity_only.effective_verbosity(), Some(Verbosity::Low));
-    assert!(!verbosity_only.can_remote_compact());
-}
-
-#[test]
-fn remote_compaction_is_allowlisted_by_model_and_route() {
-    for id in ["gpt-5.6-sol", "gpt-5.5", "gpt-6-astra"] {
-        assert!(
-            ModelConfig::openai_responses(id, id).can_remote_compact(),
-            "{id}"
-        );
-    }
-    for id in [
-        "o3",
-        "codex-mini",
-        "gpt-5.7-nova",
-        "grok-4.5",
-        "grok-4.6",
-        "claude-opus-4-6",
-        "unknown-model",
-    ] {
-        assert!(
-            !ModelConfig::openai_responses(id, id).can_remote_compact(),
-            "{id}"
-        );
-    }
 }
 
 #[test]
@@ -419,10 +387,6 @@ fn gpt_5_6_plus_profiles_follow_codex_and_pi() {
         );
         assert_eq!(config.default_thinking_level(), Medium, "{id}");
         assert_eq!(config.clamp_thinking_level(Max), Max, "{id}");
-        assert!(
-            ModelConfig::openai_responses(id, id).can_remote_compact(),
-            "{id}"
-        );
     }
 
     // `effort: none` is still accepted on these.
@@ -468,7 +432,6 @@ fn unknown_openai_families_keep_reasoning_fallback_without_extensions() {
             "{id}"
         );
         assert_eq!(config.effective_verbosity(), None, "{id}");
-        assert!(!config.can_remote_compact(), "{id}");
     }
 
     // GPT-5.6+ successors inherit the 272k window and low..max ladder (no
@@ -479,7 +442,6 @@ fn unknown_openai_families_keep_reasoning_fallback_without_extensions() {
         Low, Medium, High, Xhigh, Max
     ]);
     assert_eq!(nova.effective_verbosity(), None);
-    assert!(!nova.can_remote_compact());
 }
 
 #[test]
@@ -732,7 +694,6 @@ fn newer_uncatalogued_ids_inherit_family_windows() {
     assert_eq!(gpt.context_window(), 272_000);
     assert_eq!(gpt.advertised_context_window(), 272_000);
     assert_eq!(gpt.max_tokens(), 128_000);
-    assert!(!gpt.can_remote_compact());
 
     let gpt_5_5 = ModelConfig::openai("gpt-5.5-mini", "GPT-5.5 Mini");
     assert_eq!(gpt_5_5.context_window(), 922_000);
@@ -906,7 +867,6 @@ fn unknown_models_use_modern_capacity_and_route_safe_reasoning() {
         assert_eq!(config.input(), [InputModality::Text, InputModality::Image]);
         assert!(config.reasoning());
         assert_eq!(config.default_thinking_level(), High);
-        assert!(!config.can_remote_compact());
         assert_eq!(config.effective_verbosity(), None);
         if config.honors_reasoning_effort() {
             assert_eq!(config.supported_thinking_levels(), vec![

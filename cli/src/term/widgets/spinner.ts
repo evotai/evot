@@ -29,9 +29,7 @@ const SLOW_THRESHOLD_MS = 8000
 const SLOW_THRESHOLD_BY_TOOL_MS: Record<string, number> = {
   bash: 30_000,
   compact: 30_000,
-  compact_remote: 30_000,
   compact_local: 30_000,
-  compact_local_fallback: 30_000,
   compact_waiting: 30_000,
   compact_generating: 30_000,
   log_shot_render: 30_000,
@@ -88,16 +86,10 @@ export function isPassiveWaitPhase(phase: SpinnerPhase): boolean {
 
 /** Share compaction phase/activity presentation between automatic and manual runs. */
 export function compactionToolName(phase: string | null, activity?: string | null): string {
-  if (phase === 'local' || phase === 'local_fallback') {
-    if (activity === 'waiting') return 'compact_waiting'
-    if (activity === 'generating') return 'compact_generating'
-  }
-  switch (phase) {
-    case 'remote': return 'compact_remote'
-    case 'local_fallback': return 'compact_local_fallback'
-    case 'local': return 'compact_local'
-    default: return 'compact'
-  }
+  if (phase !== 'local') return 'compact'
+  if (activity === 'waiting') return 'compact_waiting'
+  if (activity === 'generating') return 'compact_generating'
+  return 'compact_local'
 }
 
 /**
@@ -115,9 +107,7 @@ export function toolActionLabel(toolName: string): string {
     case 'web_fetch': case 'webfetch': return 'Fetching'
     case 'skill': return 'Loading skill'
     case 'compact': return 'Compacting'
-    case 'compact_remote': return 'Compacting remote'
     case 'compact_local': return 'Compacting local'
-    case 'compact_local_fallback': return 'Compacting local fallback'
     case 'compact_waiting': return 'Compacting · waiting for summary'
     case 'compact_generating': return 'Compacting · generating summary'
     case 'log_shot_render': return 'Rendering shot'

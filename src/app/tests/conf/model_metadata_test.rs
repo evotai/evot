@@ -157,7 +157,6 @@ fn custom_route_extensions_require_explicit_transport_capabilities() {
         None,
     );
     assert_eq!(without_caps.effective_verbosity(), None);
-    assert!(!without_caps.can_remote_compact());
 
     let with_caps = build_model_config_with_route(
         Protocol::OpenAiResponses,
@@ -167,14 +166,13 @@ fn custom_route_extensions_require_explicit_transport_capabilities() {
         CompatCaps::NONE,
         RouteCapabilityOverrides {
             verbosity: true,
-            remote_compaction: true,
+            remote_compaction: false,
         },
     );
     assert_eq!(
         with_caps.effective_verbosity(),
         Some(evot_engine::provider::Verbosity::Low)
     );
-    assert!(with_caps.can_remote_compact());
 }
 
 #[test]
@@ -193,7 +191,6 @@ fn databend_openai_responses_route_enables_native_extensions_without_user_caps()
     assert!(mc
         .compat()
         .is_some_and(|compat| compat.caps.contains(CompatCaps::STORE)));
-    assert!(mc.can_remote_compact());
     assert_eq!(
         mc.effective_verbosity(),
         Some(evot_engine::provider::Verbosity::Low)
@@ -316,7 +313,6 @@ fn same_named_openai_proxy_keeps_catalog_and_openai_transport_metadata() {
         .compat()
         .is_some_and(|compat| compat.caps.contains(CompatCaps::REASONING_EFFORT)));
     assert!(mc.honors_reasoning_effort());
-    assert!(!mc.can_remote_compact());
     assert_eq!(mc.effective_verbosity(), None);
 }
 
@@ -374,7 +370,6 @@ fn openai_provider_defaults_base_url_when_blank() {
         None,
     );
     assert_eq!(mc.base_url(), "https://api.openai.com/v1");
-    assert!(mc.can_remote_compact());
 }
 
 #[test]

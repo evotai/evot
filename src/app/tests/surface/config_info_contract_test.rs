@@ -35,8 +35,6 @@ fn native_result_fixtures_match_rust_readers_and_writers() -> TestResult {
         compaction_level: 3,
         used_fallback: true,
         method: None,
-        remote_blob_bytes: None,
-        fallback_reason: None,
     };
     assert_eq!(serde_json::to_value(compacted)?, fixtures["compaction"]);
     Ok(())

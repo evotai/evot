@@ -34,7 +34,7 @@ pub(super) const STANDARD_REASONING: ReasoningProfile = ReasoningProfile {
 
 /// Optimistic baseline for opaque cloud aliases and uncatalogued models.
 /// Keep the wire generic: capacity and selectable reasoning do not imply
-/// support for adaptive thinking, remote compaction, or verbosity extensions.
+/// support for adaptive thinking or verbosity extensions.
 const FALLBACK_REASONING: ReasoningProfile = ReasoningProfile {
     levels: &[
         (ThinkingLevel::Off, None),
@@ -79,7 +79,6 @@ pub(super) struct ModelProfile {
     pub max_output_tokens: u32,
     pub vision: bool,
     pub reasoning: ReasoningProfile,
-    pub remote_compaction: bool,
     /// Optional explicit compaction threshold for models whose usable input
     /// is smaller than the advertised window (e.g. Anthropic 200k models with
     /// output headroom carved out). `None` follows pi: compaction triggers at
@@ -94,7 +93,6 @@ pub(super) const BASE: ModelProfile = ModelProfile {
     max_output_tokens: 8_192,
     vision: true,
     reasoning: STANDARD_REASONING,
-    remote_compaction: false,
     compaction_limit: None,
     default_verbosity: None,
 };
@@ -129,7 +127,6 @@ impl ModelProfile {
             ),
             default_verbosity: self.default_verbosity,
             compaction_limit: self.compaction_limit,
-            remote_compaction: self.remote_compaction,
         }
     }
 }

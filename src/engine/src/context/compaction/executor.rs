@@ -9,7 +9,6 @@ use tokio_util::sync::CancellationToken;
 use super::config::CompactionConfig;
 use super::memory;
 use super::plan::CompactionPlan;
-use super::remote;
 use super::summary;
 use super::summary::LlmPolicy;
 use super::summary::SummaryContexts;
@@ -42,7 +41,7 @@ pub enum ExecutionResult {
     Skipped(Vec<AgentMessage>),
 }
 
-/// Execute using one context for both remote and local LLM stages.
+/// Execute using the active request context as the summary model.
 pub async fn execute(
     messages: Vec<AgentMessage>,
     plan: &CompactionPlan,
@@ -62,7 +61,7 @@ pub async fn execute(
     .await
 }
 
-/// Execute with independent remote and local summary contexts.
+/// Execute with independent active-request and summary contexts.
 pub async fn execute_with_contexts(
     messages: Vec<AgentMessage>,
     plan: &CompactionPlan,
@@ -118,17 +117,22 @@ pub async fn execute_with_contexts(
     // Step 3: assemble the summary and retained tail without replay repairs.
     // These messages can be persisted in a compact snapshot. Missing-outcome
     // placeholders and failed-turn filtering belong only to the outgoing view.
-    let is_remote = result.remote.is_some();
-    let summary_message = replacement_message(&result, contexts.remote);
+    let summary_message = AgentMessage::Llm(Message::User {
+        provenance: None,
+        content: vec![Content::Text {
+            text: result.text.clone(),
+        }],
+        timestamp: crate::time::now_ms(),
+    });
     let mut rebuilt = Vec::with_capacity(1 + messages.len() - plan.first_kept);
     rebuilt.push(summary_message);
     rebuilt.extend_from_slice(&messages[plan.first_kept..]);
 
     // Step 4: cross-compaction state. The exact context message is recorded so
-    // the next compaction can dedupe it; remote state has no text message.
+    // the next compaction can dedupe it.
     let mut state = memory::build_state(evicted, turn_prefix, prev_state);
     state.last_summary = Some(result.text.clone());
-    state.context_summary_message = (!is_remote).then(|| result.text.clone());
+    state.context_summary_message = Some(result.text.clone());
 
     let stats = CompactionStats {
         summary: Some(result.text),
@@ -138,12 +142,7 @@ pub async fn execute_with_contexts(
         after_tokens: total_tokens(&rebuilt),
         messages_evicted: plan.first_kept,
         current_run_reclaimed,
-        method: Some(result.method),
-        remote_blob_bytes: result
-            .remote
-            .as_ref()
-            .map(|compaction| compaction.encrypted_bytes),
-        fallback_reason: result.fallback_reason,
+        method: Some(CompactionMethod::Local),
     };
 
     ExecutionResult::Compacted(Box::new(CompactionOutcome {
@@ -151,24 +150,4 @@ pub async fn execute_with_contexts(
         state,
         stats,
     }))
-}
-
-/// The message that replaces the evicted zone: an opaque provider-native item
-/// when remote compaction ran, otherwise a plain user summary message.
-fn replacement_message(
-    result: &summary::SummaryResult,
-    summarizer_ctx: Option<&SummarizerContext>,
-) -> AgentMessage {
-    if let (Some(remote_compaction), Some(ctx)) = (result.remote.clone(), summarizer_ctx) {
-        if result.method == CompactionMethod::Remote {
-            return remote::replacement_message(ctx, remote_compaction, result.text.clone());
-        }
-    }
-    AgentMessage::Llm(Message::User {
-        provenance: None,
-        content: vec![Content::Text {
-            text: result.text.clone(),
-        }],
-        timestamp: crate::time::now_ms(),
-    })
 }

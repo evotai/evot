@@ -179,19 +179,13 @@ fn normalize_engine_summary_boundary(
     state: &mut evot_engine::CompactionState,
 ) {
     let mut local_context_summary = None;
-    let mut remote_summary = false;
 
     if let Some(first) = messages.first_mut() {
-        remote_summary = evot_engine::context::compaction::remote::is_replacement_message(first);
-        if remote_summary {
-            normalize_remote_fallback(first);
-        } else if let evot_engine::AgentMessage::Llm(evot_engine::Message::User {
-            content, ..
-        }) = first
-        {
+        let migrated = migrate_legacy_native_summary(first);
+        if let evot_engine::AgentMessage::Llm(evot_engine::Message::User { content, .. }) = first {
             if let [evot_engine::Content::Text { text }] = content.as_mut_slice() {
                 let matches_state = state.context_summary_message.as_deref() == Some(text.as_str());
-                if matches_state || is_summary_boundary_text(text, persisted_summary) {
+                if migrated || matches_state || is_summary_boundary_text(text, persisted_summary) {
                     *text = bounded_summary(text);
                     local_context_summary = Some(text.clone());
                 }
@@ -204,9 +198,7 @@ fn normalize_engine_summary_boundary(
         None if !persisted_summary.is_empty() => Some(bounded_summary(persisted_summary)),
         None => None,
     };
-    state.context_summary_message = if remote_summary {
-        None
-    } else if local_context_summary.is_some() {
+    state.context_summary_message = if local_context_summary.is_some() {
         local_context_summary
     } else {
         state
@@ -216,14 +208,38 @@ fn normalize_engine_summary_boundary(
     };
 }
 
-fn normalize_remote_fallback(message: &mut evot_engine::AgentMessage) {
-    let evot_engine::AgentMessage::Llm(evot_engine::Message::Assistant { content, .. }) = message
+/// Sessions compacted by the retired provider-native path start with an
+/// assistant message carrying an opaque `compaction` item beside a readable
+/// summary. Nothing replays that item anymore, so the readable summary takes
+/// its place as an ordinary summary message.
+fn migrate_legacy_native_summary(message: &mut evot_engine::AgentMessage) -> bool {
+    let evot_engine::AgentMessage::Llm(evot_engine::Message::Assistant {
+        content, timestamp, ..
+    }) = message
     else {
-        return;
+        return false;
     };
-    if let [evot_engine::Content::Thinking { thinking, .. }] = content.as_mut_slice() {
-        *thinking = bounded_summary(thinking);
+    let [evot_engine::Content::Thinking {
+        thinking,
+        metadata: Some(evot_engine::ThinkingMetadata::OpenAiResponses { item }),
+    }] = content.as_slice()
+    else {
+        return false;
+    };
+    if !matches!(
+        item.get("type").and_then(|value| value.as_str()),
+        Some("compaction" | "compaction_summary")
+    ) {
+        return false;
     }
+    *message = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+        provenance: None,
+        content: vec![evot_engine::Content::Text {
+            text: compact_summary_text(thinking),
+        }],
+        timestamp: *timestamp,
+    });
+    true
 }
 
 pub(crate) fn is_summary_boundary_text(text: &str, summary: &str) -> bool {

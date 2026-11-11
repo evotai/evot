@@ -2,13 +2,12 @@
 //! agent-loop path and the manual `/compact` orchestrator:
 //!
 //! ```text
-//! override text → provider-native remote → LLM text summary → emergency
+//! override text → LLM text summary → emergency
 //! ```
 //!
 //! Each stage that fails records why and falls through to the next; user
 //! cancellation aborts the chain without producing a summary.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
@@ -16,29 +15,25 @@ use tokio_util::sync::CancellationToken;
 use super::config::truncate_summary;
 use super::config::CompactionConfig;
 use super::emergency;
-use super::remote;
 use super::summarizer::mode::SummarizerContext;
 use super::summarizer::serialize;
 use super::summarizer::types::SummarizerError;
 use super::summarizer::types::SummarizerInput;
-use super::types::bounded_fallback_reason;
 use super::types::notify_compaction_phase;
-use super::types::CompactionMethod;
 use super::types::CompactionObserver;
 use super::types::CompactionPhase;
 use super::types::CompactionState;
-use super::types::CompactionUpdate;
 use super::types::FileOps;
 use crate::types::AgentMessage;
 
-/// Provider contexts used by independent summary stages.
+/// Provider contexts used by the summary chain.
 ///
-/// Remote compaction must use the active request's model/transport because its
-/// opaque state is replayed there. Local LLM summarization may use a dedicated
-/// compaction model, with an optional fallback model.
+/// `active` describes the request shape retained history is replayed to. LLM
+/// summarization may use a dedicated compaction model, with an optional
+/// fallback model.
 #[derive(Clone, Copy, Default)]
 pub struct SummaryContexts<'a> {
-    pub remote: Option<&'a SummarizerContext>,
+    pub active: Option<&'a SummarizerContext>,
     pub llm: Option<&'a SummarizerContext>,
     pub llm_fallback: Option<&'a SummarizerContext>,
 }
@@ -46,19 +41,19 @@ pub struct SummaryContexts<'a> {
 impl<'a> SummaryContexts<'a> {
     pub fn same(ctx: Option<&'a SummarizerContext>) -> Self {
         Self {
-            remote: ctx,
+            active: ctx,
             llm: ctx,
             llm_fallback: None,
         }
     }
 
     pub fn separate(
-        remote: Option<&'a SummarizerContext>,
+        active: Option<&'a SummarizerContext>,
         llm: Option<&'a SummarizerContext>,
         llm_fallback: Option<&'a SummarizerContext>,
     ) -> Self {
         Self {
-            remote,
+            active,
             llm,
             llm_fallback,
         }
@@ -66,9 +61,9 @@ impl<'a> SummaryContexts<'a> {
 
     /// Tokens occupied by the active request shape. Dedicated summary models
     /// are intentionally ignored because retained history is replayed to the
-    /// active model, represented by `remote`.
+    /// active model.
     pub fn request_overhead_tokens(&self) -> usize {
-        let Some(ctx) = self.remote else {
+        let Some(ctx) = self.active else {
             return 0;
         };
         let system = crate::context::estimate_tokens(&ctx.system_prompt);
@@ -114,14 +109,14 @@ pub struct SummaryRequest<'a> {
     pub custom_instructions: Option<&'a str>,
     /// Planner-extracted file ops, merged into the serialized input.
     pub file_ops: FileOps,
-    /// Pre-supplied summary text: skips remote and LLM stages entirely.
+    /// Pre-supplied summary text: skips the LLM stage entirely.
     pub override_text: Option<String>,
 }
 
 /// Runtime controls for one chain run.
 pub struct SummaryOptions {
     pub llm_policy: LlmPolicy,
-    /// Wall-clock bound per stage (remote / LLM). `None` = unbounded.
+    /// Wall-clock bound for the LLM stage. `None` = unbounded.
     pub timeout: Option<Duration>,
     pub observer: Option<CompactionObserver>,
     pub cancel: CancellationToken,
@@ -137,14 +132,8 @@ pub enum SummaryOutcome {
 }
 
 pub struct SummaryResult {
-    /// Bounded readable summary. For remote compaction this is the
-    /// deterministic portability text shown to non-Responses providers.
+    /// Bounded readable summary.
     pub text: String,
-    /// Provider-native compaction item, when the remote stage succeeded.
-    pub remote: Option<remote::RemoteCompaction>,
-    pub method: CompactionMethod,
-    /// Why remote compaction was unavailable or failed before local fallback.
-    pub fallback_reason: Option<String>,
     /// True when the deterministic summary replaced a requested LLM summary.
     pub used_fallback: bool,
 }
@@ -154,63 +143,24 @@ pub async fn summarize(
     request: SummaryRequest<'_>,
     contexts: SummaryContexts<'_>,
     config: &CompactionConfig,
-    mut options: SummaryOptions,
+    options: SummaryOptions,
 ) -> SummaryOutcome {
     let input = prepare_input(&request, config, serialize::SerializationOptions::default());
 
-    // Stage 0: explicit override — stays local, keeps the split-turn context.
+    notify_compaction_phase(&options.observer, CompactionPhase::Local);
+
+    // Stage 0: explicit override — keeps the split-turn context.
     if let Some(text) = request.override_text {
-        notify_compaction_phase(&options.observer, CompactionPhase::Local);
         return SummaryOutcome::Ready(SummaryResult {
             text: finalize(
                 with_turn_context(text, input.turn_prefix.as_deref()),
                 config,
             ),
-            remote: None,
-            method: CompactionMethod::Local,
-            fallback_reason: None,
             used_fallback: false,
         });
     }
 
-    // Stage 1: provider-native remote compaction.
-    let mut method = CompactionMethod::Local;
-    let mut fallback_reason = None;
-    match run_remote_stage(&request, contexts.remote, &options).await {
-        RemoteStage::Ready(compaction) => {
-            // The opaque item is authoritative; the deterministic text rides
-            // along as the portability fallback for non-Responses providers.
-            return SummaryOutcome::Ready(SummaryResult {
-                text: finalize(emergency::summarize(&input).summary, config),
-                remote: Some(compaction),
-                method: CompactionMethod::Remote,
-                fallback_reason: None,
-                used_fallback: false,
-            });
-        }
-        RemoteStage::Cancelled => return SummaryOutcome::Cancelled,
-        RemoteStage::Failed(reason) => {
-            tracing::warn!("remote compaction failed, falling back to local: {reason}");
-            method = CompactionMethod::RemoteFailedLocal;
-            fallback_reason = Some(bounded_fallback_reason(&reason));
-            notify_compaction_phase(&options.observer, CompactionPhase::LocalFallback);
-            // Streaming activity refines this phase, rather than making older
-            // clients think we left the remote-failure fallback path.
-            options.observer = options.observer.take().map(|observer| {
-                Arc::new(move |mut update: CompactionUpdate| {
-                    if update.phase == CompactionPhase::Local {
-                        update.phase = CompactionPhase::LocalFallback;
-                    }
-                    observer(update);
-                }) as CompactionObserver
-            });
-        }
-        RemoteStage::Unsupported => {
-            notify_compaction_phase(&options.observer, CompactionPhase::Local);
-        }
-    }
-
-    // Stage 2: LLM text summary.
+    // Stage 1: LLM text summary.
     let mut used_fallback = false;
     if options.llm_policy != LlmPolicy::Skip {
         if let Some(ctx) = contexts.llm {
@@ -227,9 +177,6 @@ pub async fn summarize(
                 LlmStage::Ready(text) => {
                     return SummaryOutcome::Ready(SummaryResult {
                         text: finalize(text, config),
-                        remote: None,
-                        method,
-                        fallback_reason,
                         used_fallback: false,
                     });
                 }
@@ -245,15 +192,12 @@ pub async fn summarize(
         }
     }
 
-    // Stage 3: deterministic emergency summary — never issues a model request.
+    // Stage 2: deterministic emergency summary — never issues a model request.
     if options.cancel.is_cancelled() {
         return SummaryOutcome::Cancelled;
     }
     SummaryOutcome::Ready(SummaryResult {
         text: finalize(emergency::summarize(&input).summary, config),
-        remote: None,
-        method,
-        fallback_reason,
         used_fallback,
     })
 }
@@ -261,62 +205,6 @@ pub async fn summarize(
 // ---------------------------------------------------------------------------
 // Stages
 // ---------------------------------------------------------------------------
-
-enum RemoteStage {
-    Ready(remote::RemoteCompaction),
-    Failed(String),
-    Cancelled,
-    Unsupported,
-}
-
-async fn run_remote_stage(
-    request: &SummaryRequest<'_>,
-    ctx: Option<&SummarizerContext>,
-    options: &SummaryOptions,
-) -> RemoteStage {
-    let Some(ctx) = ctx.filter(|ctx| remote::supports(ctx)) else {
-        return RemoteStage::Unsupported;
-    };
-    notify_compaction_phase(&options.observer, CompactionPhase::Remote);
-
-    // A prior local summary transitions into provider-native state exactly once.
-    let previous_local_summary = request.prev_state.and_then(|state| {
-        state
-            .context_summary_message
-            .as_ref()
-            .and(state.last_summary.as_deref())
-    });
-    let mut remote_input =
-        remote::with_previous_local_summary(request.evicted, previous_local_summary);
-    if let Some(prefix) = request.turn_prefix {
-        remote_input.extend_from_slice(prefix);
-    }
-
-    let cancel = stage_cancel(options);
-    let result = match options.timeout {
-        Some(timeout) => {
-            match tokio::time::timeout(timeout, remote::compact(ctx, &remote_input, cancel.clone()))
-                .await
-            {
-                Ok(result) => result,
-                Err(_) => {
-                    cancel.cancel();
-                    Err(remote::RemoteError::Failed(timeout_reason(timeout)))
-                }
-            }
-        }
-        None => remote::compact(ctx, &remote_input, cancel).await,
-    };
-
-    match result {
-        Ok(compaction) => RemoteStage::Ready(compaction),
-        Err(remote::RemoteError::Cancelled) => RemoteStage::Cancelled,
-        Err(remote::RemoteError::Failed(_)) if options.cancel.is_cancelled() => {
-            RemoteStage::Cancelled
-        }
-        Err(remote::RemoteError::Failed(reason)) => RemoteStage::Failed(reason),
-    }
-}
 
 enum LlmStage {
     Ready(String),

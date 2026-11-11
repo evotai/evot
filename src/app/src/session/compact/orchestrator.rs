@@ -2,7 +2,7 @@
 //!
 //! Thin app-layer frontend over the engine's shared compaction pipeline:
 //! plan via `plan_compaction`, summarize via the engine summary chain
-//! (remote → LLM → deterministic emergency), then persist a
+//! (LLM → deterministic emergency), then persist a
 //! `TranscriptItem::Compact` for the session.
 
 use std::sync::Arc;
@@ -84,10 +84,6 @@ pub enum ManualCompactionOutcome {
         used_fallback: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         method: Option<CompactionMethod>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        remote_blob_bytes: Option<usize>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fallback_reason: Option<String>,
     },
     NothingToCompact,
     Cancelled,
@@ -103,9 +99,6 @@ impl ManualCompactionOutcome {
                 messages_after,
                 context_window,
                 used_fallback,
-                method,
-                remote_blob_bytes,
-                fallback_reason,
                 ..
             } => {
                 let mut line = format!(
@@ -115,30 +108,6 @@ impl ManualCompactionOutcome {
                     line.push_str(
                         "\nNote: the LLM summary was unavailable; a deterministic fallback summary was used.",
                     );
-                }
-                match method {
-                    Some(evot_engine::CompactionMethod::Remote) => {
-                        line.push_str("\nProvider-native remote compaction was used.");
-                        if let Some(bytes) = remote_blob_bytes {
-                            line.push_str(&format!(" Native blob: {bytes} bytes."));
-                        }
-                    }
-                    Some(evot_engine::CompactionMethod::RemoteFailedLocal) => {
-                        line.push_str(
-                            "\nProvider-native remote compaction failed; local summarization was used.",
-                        );
-                        if let Some(reason) = fallback_reason {
-                            line.push_str(&format!(" Reason: {reason}"));
-                        }
-                    }
-                    Some(evot_engine::CompactionMethod::Local) if fallback_reason.is_some() => {
-                        if let Some(reason) = fallback_reason {
-                            line.push_str(&format!(
-                                "\nProvider-native remote compaction was unavailable; local summarization was used. Reason: {reason}"
-                            ));
-                        }
-                    }
-                    _ => {}
                 }
                 if *context_window > 0 && tokens_after >= context_window {
                     line.push_str(&format!(
@@ -286,27 +255,13 @@ pub async fn compact_session_with_status(
     };
     let summary::SummaryResult {
         text: summary,
-        remote,
-        method,
-        fallback_reason,
         used_fallback: llm_fell_back,
     } = result;
     let used_fallback = llm_fell_back || deterministic_only;
 
     // Assemble the compact item: summary message + retained tail.
     let summary_item = compact_summary_item(&summary);
-    let remote_blob_bytes = remote.as_ref().map(|compaction| compaction.encrypted_bytes);
-    let is_remote = remote.is_some();
-    let summary_message = match (remote, ctx.as_ref()) {
-        (Some(compaction), Some(ctx)) => {
-            evot_engine::context::compaction::remote::replacement_message(
-                ctx,
-                compaction,
-                summary.clone(),
-            )
-        }
-        _ => convert::agent_message_from_transcript(&summary_item),
-    };
+    let summary_message = convert::agent_message_from_transcript(&summary_item);
 
     let mut new_context = vec![summary_item];
     new_context.extend(app_context[plan.first_kept..].iter().cloned());
@@ -315,13 +270,7 @@ pub async fn compact_session_with_status(
     let messages_after = new_context.len();
     let tokens_after = evot_engine::context::total_tokens(&new_engine_context);
 
-    let details = build_details(
-        &previous_state,
-        &plan,
-        method,
-        fallback_reason,
-        remote_blob_bytes,
-    );
+    let details = build_details(&previous_state, &plan);
 
     // Cross-compaction state: accumulate file ops, chain the new summary.
     let mut state = previous_state.unwrap_or_default();
@@ -340,12 +289,7 @@ pub async fn compact_session_with_status(
     state.timestamp = evot_engine::now_ms();
     state.generation = state.generation.saturating_add(1);
     state.last_summary = Some(summary.clone());
-    // Remote state has no text message in context to dedupe next time.
-    state.context_summary_message = if is_remote {
-        None
-    } else {
-        new_engine_context.first().and_then(exact_user_text)
-    };
+    state.context_summary_message = new_engine_context.first().and_then(exact_user_text);
 
     let mut item = TranscriptItem::Compact {
         id: crate::types::new_id(),
@@ -393,9 +337,6 @@ fn cancelled() -> CompactSessionOutcome {
 fn build_details(
     previous_state: &Option<evot_engine::CompactionState>,
     plan: &evot_engine::CompactionPlan,
-    method: CompactionMethod,
-    fallback_reason: Option<String>,
-    remote_blob_bytes: Option<usize>,
 ) -> CompactDetails {
     let mut details = CompactDetails::default();
     if let Some(previous) = previous_state.as_ref() {
@@ -416,9 +357,7 @@ fn build_details(
     details.read_files.dedup();
     details.modified_files.sort();
     details.modified_files.dedup();
-    details.method = Some(method);
-    details.remote_blob_bytes = remote_blob_bytes;
-    details.fallback_reason = fallback_reason;
+    details.method = Some(CompactionMethod::Local);
     details
 }
 

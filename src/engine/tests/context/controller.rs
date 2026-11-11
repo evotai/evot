@@ -10,36 +10,11 @@ use evotengine::context::compaction::types::ModelId;
 use evotengine::context::compaction::types::UsageSnapshot;
 use evotengine::context::SummarizerContext;
 use evotengine::context::SummarizerMode;
-use evotengine::provider::ApiProtocol;
-use evotengine::provider::MockProvider;
-use evotengine::provider::MockResponse;
-use evotengine::provider::ModelConfig;
 use evotengine::types::*;
 use tokio_util::sync::CancellationToken;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
 
 use super::fixtures::recording_provider::RecordingProvider;
 use super::fixtures::recording_provider::Reply;
-
-fn responses_model(base_url: &str) -> ModelConfig {
-    ModelConfig::resolve(evotengine::provider::ResolveModelRequest {
-        protocol: ApiProtocol::OpenAiResponses,
-        provider: "openai".into(),
-        model_id: "gpt-5.6-sol".into(),
-        base_url: base_url.into(),
-        headers: Default::default(),
-        compat: None,
-        route_capabilities: evotengine::provider::RouteCapabilities {
-            verbosity: false,
-            remote_compaction: true,
-        },
-        overrides: Default::default(),
-    })
-}
 
 fn user_msg(text: &str) -> AgentMessage {
     AgentMessage::Llm(Message::User {
@@ -725,119 +700,6 @@ async fn controller_restores_seeded_summary_when_there_is_no_plan() {
         matches!(&messages[0], AgentMessage::Llm(Message::User { content, .. })
         if matches!(content.as_slice(), [Content::Text { text }] if text == "summary message"))
     );
-}
-
-#[tokio::test]
-async fn controller_retries_remote_after_an_earlier_compaction_failure() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/responses"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("transient remote failure"))
-        .mount(&server)
-        .await;
-    let provider = Arc::new(MockProvider::new(vec![
-        MockResponse::Text("first local summary".into()),
-        MockResponse::Text("second local summary".into()),
-    ]));
-    let ctx = SummarizerContext {
-        provider,
-        model: "gpt-5.6-sol".into(),
-        api_key: "test-key".into(),
-        thinking_level: ThinkingLevel::Off,
-        system_prompt: String::new(),
-        tools: vec![],
-        max_tokens: Some(1024),
-        cache_config: CacheConfig::default(),
-        prompt_cache_key: None,
-        model_config: Some(responses_model(&server.uri())),
-    };
-    let mut ctrl = CompactionController::new(config_small());
-    let mut messages = vec![user_msg(&big_text(200)), assistant_msg(&big_text(200))];
-    for _ in 0..20 {
-        messages.push(user_msg(&big_text(300)));
-        messages.push(assistant_msg(&big_text(300)));
-    }
-    messages.push(user_msg("recent"));
-    messages.push(assistant_msg("recent answer"));
-
-    let first = ctrl
-        .force_compact(&mut messages, Some(&ctx), CancellationToken::new())
-        .await;
-    assert!(matches!(
-        first.and_then(|stats| stats.method),
-        Some(evotengine::CompactionMethod::RemoteFailedLocal)
-    ));
-
-    for _ in 0..20 {
-        messages.push(user_msg(&big_text(300)));
-        messages.push(assistant_msg(&big_text(300)));
-    }
-    let second = ctrl
-        .force_compact(&mut messages, Some(&ctx), CancellationToken::new())
-        .await;
-    assert!(matches!(
-        second.and_then(|stats| stats.method),
-        Some(evotengine::CompactionMethod::RemoteFailedLocal)
-    ));
-
-    let requests = server.received_requests().await.unwrap_or_default();
-    assert_eq!(requests.len(), 2, "each compaction must retry remote");
-}
-
-#[tokio::test]
-async fn controller_reports_live_remote_fallback_phase_order() {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/responses"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("transient remote failure"))
-        .mount(&server)
-        .await;
-    let provider = Arc::new(MockProvider::new(vec![MockResponse::Text(
-        "local fallback summary".into(),
-    )]));
-    let ctx = SummarizerContext {
-        provider,
-        model: "gpt-5.6-sol".into(),
-        api_key: "test-key".into(),
-        thinking_level: ThinkingLevel::Off,
-        system_prompt: String::new(),
-        tools: vec![],
-        max_tokens: Some(1024),
-        cache_config: CacheConfig::default(),
-        prompt_cache_key: None,
-        model_config: Some(responses_model(&server.uri())),
-    };
-
-    let phases = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let observed = Arc::clone(&phases);
-    let observer: evotengine::CompactionObserver = Arc::new(move |update| {
-        if update.activity.is_none() {
-            if let Ok(mut phases) = observed.lock() {
-                phases.push(update.phase);
-            }
-        }
-    });
-    let mut ctrl = CompactionController::new(config_small()).with_observer(observer);
-    let mut messages = vec![user_msg(&big_text(200)), assistant_msg(&big_text(200))];
-    for _ in 0..20 {
-        messages.push(user_msg(&big_text(300)));
-        messages.push(assistant_msg(&big_text(300)));
-    }
-
-    let stats = ctrl
-        .force_compact(&mut messages, Some(&ctx), CancellationToken::new())
-        .await;
-    assert!(matches!(
-        stats.and_then(|stats| stats.method),
-        Some(evotengine::CompactionMethod::RemoteFailedLocal)
-    ));
-    let phases = phases.lock().unwrap_or_else(|error| error.into_inner());
-    assert_eq!(phases.as_slice(), [
-        CompactionPhase::Planning,
-        CompactionPhase::Remote,
-        CompactionPhase::LocalFallback,
-        CompactionPhase::Complete,
-    ]);
 }
 
 #[tokio::test]

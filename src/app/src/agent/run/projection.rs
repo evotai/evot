@@ -542,8 +542,8 @@ pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
                     messages_evicted: stats.messages_evicted,
                     current_run_reclaimed: stats.current_run_reclaimed,
                     method: stats.method,
-                    remote_blob_bytes: stats.remote_blob_bytes,
-                    fallback_reason: stats.fallback_reason.clone(),
+                    remote_blob_bytes: None,
+                    fallback_reason: None,
                 }
             } else {
                 crate::observability::CompactionResult::NoOp

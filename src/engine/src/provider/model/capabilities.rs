@@ -129,7 +129,6 @@ pub(super) struct ModelCapabilities {
     /// Explicit profile compaction threshold. `None` means no profile limit;
     /// context management compacts at `window - reserve` (pi-style).
     pub(super) compaction_limit: Option<u32>,
-    pub(super) remote_compaction: bool,
 }
 
 impl ModelCapabilities {

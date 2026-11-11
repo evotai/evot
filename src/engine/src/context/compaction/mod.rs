@@ -3,7 +3,7 @@
 //! Architecture (WHEN / WHAT / HOW / APPLY):
 //! - `trigger` — WHEN: usage-based threshold and overflow detection
 //! - `plan` — WHAT: single planner (cut point, split turn, file ops)
-//! - `summary` — HOW: one chain (remote → LLM → deterministic emergency)
+//! - `summary` — HOW: one chain (LLM → deterministic emergency)
 //! - `executor` — APPLY: reclaim + assemble for in-memory message lists
 //! - `controller` — stateful integration point for the agent loop
 //! - `memory` / `transforms/` — extraction helpers and lossless reclaim
@@ -15,7 +15,6 @@ pub mod executor;
 mod legacy;
 pub mod memory;
 pub mod plan;
-pub mod remote;
 pub mod summarizer;
 pub mod summary;
 pub mod transforms;

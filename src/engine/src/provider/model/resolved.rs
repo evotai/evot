@@ -186,23 +186,6 @@ impl ModelConfig {
             .flatten()
     }
 
-    pub fn can_remote_compact(&self) -> bool {
-        self.remote_compaction_unavailable_reason().is_none()
-    }
-
-    pub fn remote_compaction_unavailable_reason(&self) -> Option<&'static str> {
-        if self.protocol() != ApiProtocol::OpenAiResponses {
-            return Some("protocol is not OpenAI Responses");
-        }
-        if !self.route.capabilities.remote_compaction {
-            return Some("route does not advertise remote compaction");
-        }
-        if !self.capabilities.remote_compaction {
-            return Some("model is not allowlisted for remote compaction");
-        }
-        None
-    }
-
     pub(crate) fn thinking_level_policy(&self, level: ThinkingLevel) -> ThinkingLevelPolicy<'_> {
         self.capabilities.reasoning.policy(level)
     }

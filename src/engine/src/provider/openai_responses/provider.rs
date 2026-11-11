@@ -67,26 +67,7 @@ impl OpenAiResponsesProvider {
             config.model, url
         );
 
-        let mut response = send(&url, model_config, &config, body).await?;
-
-        // A native compaction blob can become invalid after an upstream account
-        // or compatibility boundary. On semantic client rejection, retry once
-        // with the readable fallback carried beside the blob. Auth/routing
-        // errors are not replay failures and are left to normal retry handling.
-        if matches!(response.status().as_u16(), 400 | 422) {
-            let (messages, found) = super::replay::downgrade_replay_messages(&config.messages);
-            if found {
-                tracing::warn!(
-                    status = response.status().as_u16(),
-                    "Responses rejected remote compaction replay; retrying with local summary"
-                );
-                let mut fallback = config.clone();
-                fallback.messages = messages;
-                let fallback_body = request::build_request_body(&fallback);
-                response = send(&url, model_config, &fallback, fallback_body).await?;
-            }
-        }
-
+        let response = send(&url, model_config, &config, body).await?;
         let response = http::check_error_status(response).await?;
         match http::classify_response(&response) {
             http::StreamResponseKind::Streaming => {

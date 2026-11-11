@@ -1136,7 +1136,7 @@ async fn open_bounds_legacy_poisoned_summary_without_touching_live_user() -> Tes
 }
 
 #[tokio::test]
-async fn open_bounds_remote_fallback_without_mutating_opaque_state() -> TestResult {
+async fn open_migrates_legacy_native_compaction_item_to_summary_message() -> TestResult {
     let dir = TempDir::new()?;
     let storage = open_storage(&StorageConfig::fs(dir.path().to_path_buf()))?;
     let session_id = "sess-legacy-remote-summary";
@@ -1186,8 +1186,8 @@ async fn open_bounds_remote_fallback_without_mutating_opaque_state() -> TestResu
     {
         *messages = transcript_context;
         *engine_messages = vec![remote_message];
-        // Older data may have incorrectly retained a local context pointer for
-        // a provider-native replacement. Resume must clear it.
+        // Older data may carry a stale pointer; resume must repoint it at
+        // the migrated summary message.
         state.context_summary_message = Some(fallback.clone());
     }
     storage
@@ -1198,40 +1198,29 @@ async fn open_bounds_remote_fallback_without_mutating_opaque_state() -> TestResu
         .await?
         .ok_or_else(|| missing_error("missing reopened remote session"))?;
     assert_eq!(reopened.meta().await.model, "configured-model");
+    // The retired provider-native item is dropped; its readable summary
+    // becomes an ordinary bounded summary message.
     let (engine, state, _) = reopened.context_snapshot().await;
-    match engine.first() {
-        Some(evot_engine::AgentMessage::Llm(evot_engine::Message::Assistant {
-            content,
-            model,
-            provider,
-            timestamp,
+    let boundary = engine
+        .first()
+        .and_then(engine_user_text)
+        .ok_or_else(|| missing_error("missing migrated summary message"))?;
+    assert!(boundary.len() <= limit);
+    assert!(boundary.contains("REMOTE_FALLBACK_HEAD"));
+    assert!(boundary.ends_with("REMOTE_FALLBACK_TAIL"));
+    assert!(matches!(
+        engine.first(),
+        Some(evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+            timestamp: 7,
             ..
-        })) => {
-            assert_eq!(model, "gpt-5.6-sol");
-            assert_eq!(provider, "explicit-provider");
-            assert_eq!(*timestamp, 7);
-            match content.as_slice() {
-                [evot_engine::Content::Thinking { thinking, metadata }] => {
-                    assert!(thinking.len() <= limit);
-                    assert!(thinking.starts_with("REMOTE_FALLBACK_HEAD"));
-                    assert!(thinking.ends_with("REMOTE_FALLBACK_TAIL"));
-                    assert!(matches!(
-                        metadata,
-                        Some(evot_engine::ThinkingMetadata::OpenAiResponses { item })
-                            if item == &opaque_item
-                    ));
-                }
-                _ => return Err(missing_error("unexpected remote replacement content").into()),
-            }
-        }
-        _ => return Err(missing_error("missing remote replacement message").into()),
-    }
+        }))
+    ));
     let state = state.ok_or_else(|| missing_error("missing remote compaction state"))?;
     assert!(state
         .last_summary
         .as_ref()
         .is_some_and(|summary| summary.len() <= limit));
-    assert!(state.context_summary_message.is_none());
+    assert_eq!(state.context_summary_message.as_deref(), Some(boundary));
     Ok(())
 }
 

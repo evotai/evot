@@ -102,8 +102,8 @@ impl CompactionController {
         self.overflow_recovery_attempted = false;
     }
 
-    /// Evaluate compaction using one model context for both remote and local
-    /// summary stages.
+    /// Evaluate compaction using the active request context as the summary
+    /// model.
     pub async fn after_response(
         &mut self,
         messages: &mut Vec<AgentMessage>,
@@ -124,7 +124,7 @@ impl CompactionController {
     }
 
     /// Evaluate whether compaction should run after an assistant response.
-    /// Remote and local LLM stages may use different model contexts.
+    /// The summary may use a model context other than the active one.
     pub async fn after_response_with_contexts(
         &mut self,
         messages: &mut Vec<AgentMessage>,

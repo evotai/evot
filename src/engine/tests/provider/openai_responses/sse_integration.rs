@@ -46,101 +46,6 @@ async fn bounded_responses_preserves_terminal_and_delta_order(
 }
 
 #[tokio::test]
-async fn rejected_compaction_replay_retries_once_with_fallback_text(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/responses"))
-        .respond_with(ResponseTemplate::new(400).set_body_string("invalid compaction item"))
-        .up_to_n_times(1)
-        .mount(&server)
-        .await;
-    let sse = concat!(
-        "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"role\":\"assistant\",\"content\":[]}}\n\n",
-        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"recovered\"}\n\n",
-        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5.5\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n",
-    );
-    Mock::given(method("POST"))
-        .and(path("/responses"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_raw(sse, "text/event-stream"),
-        )
-        .mount(&server)
-        .await;
-
-    let model = resolved_model_config(
-        evotengine::provider::ApiProtocol::OpenAiResponses,
-        "openai",
-        "gpt-5.5",
-        &server.uri(),
-        Some(evotengine::provider::OpenAiCompat::openai()),
-        evotengine::provider::RouteCapabilities {
-            verbosity: true,
-            remote_compaction: true,
-        },
-        Default::default(),
-    );
-    let config = StreamConfigBuilder::openai()
-        .model("gpt-5.5")
-        .model_config(model)
-        .prompt_cache_key("session-replay-123")
-        .messages(vec![Message::Assistant {
-            content: vec![Content::Thinking {
-                thinking: "portable fallback".into(),
-                metadata: Some(ThinkingMetadata::OpenAiResponses {
-                    item: serde_json::json!({
-                        "type": "compaction",
-                        "encrypted_content": "opaque",
-                    }),
-                }),
-            }],
-            stop_reason: StopReason::Stop,
-            model: "gpt-5.5".into(),
-            provider: "openai".into(),
-            usage: Usage::default(),
-            timestamp: 0,
-            error_message: None,
-            response_id: None,
-        }])
-        .build();
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let outcome = OpenAiResponsesProvider
-        .stream(config, tx, CancellationToken::new())
-        .await?;
-    assert!(matches!(
-        outcome.message(),
-        Message::Assistant { content, .. }
-            if matches!(content.first(), Some(Content::Text { text }) if text == "recovered")
-    ));
-
-    let requests = server
-        .received_requests()
-        .await
-        .ok_or("request recording unavailable")?;
-    assert_eq!(requests.len(), 2);
-    for request in &requests {
-        assert_eq!(
-            request
-                .headers
-                .get("session-id")
-                .ok_or("missing session header")?
-                .to_str()?,
-            "session-replay-123",
-        );
-    }
-    let first: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
-    let second: serde_json::Value = serde_json::from_slice(&requests[1].body)?;
-    assert_eq!(first["input"][0]["type"], "compaction");
-    assert_eq!(
-        second["input"][0]["content"][0]["text"],
-        "portable fallback"
-    );
-    Ok(())
-}
-
-#[tokio::test]
 async fn native_openai_posts_responses_payload_to_responses_endpoint(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let server = MockServer::start().await;
@@ -165,10 +70,7 @@ async fn native_openai_posts_responses_payload_to_responses_endpoint(
         "gpt-5.5",
         &server.uri(),
         Some(evotengine::provider::OpenAiCompat::openai()),
-        evotengine::provider::RouteCapabilities {
-            verbosity: true,
-            remote_compaction: true,
-        },
+        evotengine::provider::RouteCapabilities { verbosity: true },
         Default::default(),
     );
     let config = StreamConfigBuilder::openai()

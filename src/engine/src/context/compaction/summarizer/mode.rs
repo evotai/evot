@@ -30,15 +30,14 @@ impl Default for SummarizerMode {
     }
 }
 
-/// Context needed for an LLM summary or provider-native remote compaction.
+/// Context needed for an LLM summary.
 #[derive(Clone)]
 pub struct SummarizerContext {
     pub provider: Arc<dyn StreamProvider>,
     pub model: String,
     pub api_key: String,
     pub thinking_level: ThinkingLevel,
-    /// Normal-turn request shape. Remote compaction mirrors these fields so
-    /// provider-native state includes the same instructions/tools/settings.
+    /// Normal-turn request shape, used to size the fixed request overhead.
     pub system_prompt: String,
     pub tools: Vec<crate::provider::ToolDefinition>,
     pub max_tokens: Option<u32>,

@@ -5,6 +5,8 @@ use super::ApiProtocol;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RouteCapabilityOverrides {
     pub verbosity: bool,
+    /// Legacy config name with no runtime effect. Still parsed and written
+    /// back so existing provider entries survive a settings rewrite.
     pub remote_compaction: bool,
 }
 
@@ -35,14 +37,13 @@ impl RouteCapabilityOverrides {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RouteCapabilities {
     pub verbosity: bool,
-    pub remote_compaction: bool,
 }
 
 impl RouteCapabilities {
     /// Compose known endpoint support with explicit overrides. Model support is
     /// intersected separately by `ModelConfig`.
     pub fn for_route(
-        protocol: ApiProtocol,
+        _protocol: ApiProtocol,
         provider: &str,
         base_url: &str,
         explicit: RouteCapabilityOverrides,
@@ -50,8 +51,6 @@ impl RouteCapabilities {
         let native_responses = is_native_openai_responses_route(provider, base_url);
         Self {
             verbosity: native_responses || explicit.verbosity,
-            remote_compaction: protocol == ApiProtocol::OpenAiResponses
-                && (native_responses || explicit.remote_compaction),
         }
     }
 }

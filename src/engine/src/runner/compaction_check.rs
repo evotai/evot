@@ -163,13 +163,13 @@ pub(super) async fn check_compaction(
         CompactionCheckPhase::RunEnd => Checkpoint::RunEnd,
         CompactionCheckPhase::BeforePrompt | CompactionCheckPhase::ToolTurn => Checkpoint::MidRun,
     };
-    let remote_ctx = request_shape.summarizer_context(config);
-    let llm_ctx = config.compaction_context.as_ref().unwrap_or(&remote_ctx);
+    let active_ctx = request_shape.summarizer_context(config);
+    let llm_ctx = config.compaction_context.as_ref().unwrap_or(&active_ctx);
     let fallback_ctx = config
         .compaction_fallback_context
         .as_ref()
-        .or(config.compaction_context.as_ref().map(|_| &remote_ctx));
-    let contexts = SummaryContexts::separate(Some(&remote_ctx), Some(llm_ctx), fallback_ctx);
+        .or(config.compaction_context.as_ref().map(|_| &active_ctx));
+    let contexts = SummaryContexts::separate(Some(&active_ctx), Some(llm_ctx), fallback_ctx);
     let response = ctrl
         .after_response_with_contexts(
             messages,

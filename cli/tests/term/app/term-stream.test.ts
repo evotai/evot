@@ -12,8 +12,6 @@ describe('term stream machine', () => {
     const initial = createStreamMachineState(createInitialState('model', '/tmp'), createSpinnerState())
     const cases = [
       ['planning', 'compact'],
-      ['remote', 'compact_remote'],
-      ['local_fallback', 'compact_local_fallback'],
       ['local', 'compact_local'],
     ] as const
 

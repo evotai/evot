@@ -50,7 +50,7 @@ pub struct AgentLoopConfig {
     pub context_config: Option<ContextConfig>,
 
     /// Dedicated model for local compaction summaries. `None` follows the
-    /// active model. Remote compaction always uses the active request context.
+    /// active model.
     pub compaction_context: Option<crate::context::SummarizerContext>,
     pub compaction_fallback_context: Option<crate::context::SummarizerContext>,
 

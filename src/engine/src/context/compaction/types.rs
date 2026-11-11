@@ -19,22 +19,17 @@ pub enum CompactReason {
     Refusal,
 }
 
-pub fn bounded_fallback_reason(reason: &str) -> String {
-    let normalized = reason.split_whitespace().collect::<Vec<_>>().join(" ");
-    normalized.chars().take(500).collect()
-}
-
 /// How the evicted context was summarized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionMethod {
     /// Historical method, retained only to read existing sessions. Never emitted.
     Prune,
-    /// Provider-native server-side compaction (opaque encrypted item).
+    /// Historical provider-native compaction. Never emitted.
     Remote,
     /// Local text summarization.
     Local,
-    /// Remote compaction was attempted but failed; fell back to local.
+    /// Historical fallback after provider-native compaction. Never emitted.
     RemoteFailedLocal,
 }
 
@@ -45,7 +40,9 @@ pub enum CompactionPhase {
     /// Historical wire phase. No runtime path emits it.
     Pruning,
     Planning,
+    /// Historical wire phase. No runtime path emits it.
     Remote,
+    /// Historical wire phase. No runtime path emits it.
     LocalFallback,
     Local,
     Complete,
@@ -221,12 +218,6 @@ pub struct CompactionStats {
     /// How the summary was produced (None for legacy/no-op stats).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub method: Option<CompactionMethod>,
-    /// Why provider-native compaction was unavailable or failed before local fallback.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fallback_reason: Option<String>,
-    /// Size of the provider-native compaction payload, when remote ran.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote_blob_bytes: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------

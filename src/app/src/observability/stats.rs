@@ -116,10 +116,10 @@ pub enum CompactionResult {
         current_run_reclaimed: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         method: Option<CompactionMethod>,
-        /// Encrypted provider-native payload size, when remote succeeded.
+        /// Legacy field from retired provider-native compaction; never set.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         remote_blob_bytes: Option<usize>,
-        /// Why provider-native compaction was unavailable or failed.
+        /// Legacy field from retired provider-native compaction; never set.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fallback_reason: Option<String>,
     },
