@@ -5,9 +5,12 @@ use crate::types::Content;
 use crate::types::Message;
 
 /// Preserve replayable thinking only for the exact provider/model/protocol that
-/// produced it. Foreign or unsigned thinking remains useful context, but is
-/// downgraded to ordinary text so provider-specific opaque state is never sent
-/// to the wrong API.
+/// produced it, and drop thinking from any other model (pi's
+/// `transformMessages`, pi#10995). Sent as plain text, another model's
+/// reasoning reads as part of the visible reply: the new model starts writing
+/// its reasoning into the answer, and Anthropic refuses histories carrying
+/// Gemini thought-summarizer output as `reasoning_extraction`. Visible text and
+/// tool calls are kept.
 pub fn transform_messages_for_model(
     messages: Vec<Message>,
     target_provider: &str,
@@ -55,21 +58,25 @@ fn transform_message(
     let content = content
         .into_iter()
         .filter_map(|block| match block {
+            Content::Thinking { .. } if !same_model => None,
             // Same model and API: keep the block with its metadata even when
             // the visible text is empty, because an opaque replay payload
             // (encrypted reasoning) is what the provider needs back.
-            Content::Thinking { thinking, metadata }
-                if same_model
-                    && metadata
-                        .as_ref()
-                        .is_some_and(|value| value.supports_api(target_api))
-                    && (!thinking.trim().is_empty()
-                        || metadata
-                            .as_ref()
-                            .is_some_and(|value| value.has_replay_payload())) =>
-            {
-                Some(Content::Thinking { thinking, metadata })
-            }
+            Content::Thinking {
+                thinking,
+                metadata: Some(metadata),
+            } if metadata.supports_api(target_api) => (!thinking.trim().is_empty()
+                || metadata.has_replay_payload())
+            .then_some(Content::Thinking {
+                thinking,
+                metadata: Some(metadata),
+            }),
+            // Same names on another protocol is another model too.
+            Content::Thinking {
+                metadata: Some(_), ..
+            } => None,
+            // Unsigned thinking from this model (an interrupted stream) has no
+            // replay state; keep what it said as text.
             Content::Thinking { thinking, .. } if thinking.trim().is_empty() => None,
             Content::Thinking { thinking, .. } => Some(Content::Text { text: thinking }),
             Content::ToolCall {

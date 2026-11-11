@@ -123,14 +123,13 @@ fn normalized_history_serializes_all_parallel_results_in_the_next_message() {
     let body = build_request_body(&config, false);
     assert_eq!(body["messages"][1]["role"], "assistant");
     let assistant_blocks = body["messages"][1]["content"].as_array().unwrap();
-    // Cross-model thinking stays visible, but a tool_use turn must end on
-    // tool_use: DeepSeek's Anthropic-compatible API treats a later text block
-    // as interrupting the pair with the next message's tool_result.
+    // Thinking from another model is dropped, not replayed as text, and the
+    // tool_use turn still ends on tool_use.
     assert_eq!(assistant_blocks[0]["type"], "text");
     assert_eq!(assistant_blocks[0]["text"], "reading files");
-    assert_eq!(assistant_blocks[1]["type"], "text");
-    assert_eq!(assistant_blocks[1]["text"], "plan");
-    assert_eq!(assistant_blocks[2]["type"], "tool_use");
+    assert_eq!(assistant_blocks[1]["type"], "tool_use");
+    assert_eq!(assistant_blocks.len(), 5);
+    assert!(!body.to_string().contains("\"plan\""));
     assert_eq!(assistant_blocks.last().unwrap()["type"], "tool_use");
     assert_eq!(body["messages"][2]["role"], "user");
     for (index, id) in ["b", "a", "c", "d"].iter().enumerate() {

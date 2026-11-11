@@ -348,8 +348,9 @@ pub fn content_to_anthropic(content: &[Content]) -> Vec<serde_json::Value> {
                     "signature": signature,
                 })
             }
-            // Like pi's transformMessages, unsigned or foreign thinking is
-            // visible context but not replayable provider state.
+            // Like pi's Anthropic converter, unsigned thinking (an interrupted
+            // stream of this model; other models' thinking was already dropped
+            // by transform_messages_for_model) is sent as text, not replay state.
             Content::Thinking { thinking, .. } => serde_json::json!({
                 "type": "text",
                 "text": thinking,

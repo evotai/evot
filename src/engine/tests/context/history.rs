@@ -230,8 +230,51 @@ fn cross_model_encrypted_only_thinking_is_dropped_not_replayed() {
     ));
 }
 
+// pi#10995 / prod 2026-11-11: Gemini 4 Carbon (Factory) returns its thought
+// summarizer's own reasoning as thinking. Replayed as text to
+// claude-fable-5.2, Anthropic refused every request with
+// `reasoning_extraction`, and compaction could not remove it.
 #[test]
-fn cross_model_thinking_is_downgraded_to_text() {
+fn cross_model_thinking_is_dropped_and_visible_content_kept() {
+    let message = assistant("evot-premium", "gemini-4-carbon", vec![
+        Content::Thinking {
+            thinking:
+                "Thinking Process:\n1. **Analyze the Request:** Summarize the provided thoughts..."
+                    .into(),
+            metadata: Some(ThinkingMetadata::Anthropic {
+                signature: "droid-google:opaque".into(),
+            }),
+        },
+        Content::Text {
+            text: "Let me check the TLS versions.".into(),
+        },
+        Content::ToolCall {
+            id: "call_1".into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "curl -v"}),
+            metadata: None,
+        },
+    ]);
+
+    let transformed = transform_messages_for_model(
+        vec![message],
+        "evot-premium",
+        "claude-fable-5.2",
+        ApiProtocol::AnthropicMessages,
+    );
+
+    assert!(matches!(
+        &transformed[0],
+        Message::Assistant { content, .. }
+            if matches!(&content[..], [
+                Content::Text { text },
+                Content::ToolCall { id, .. },
+            ] if text == "Let me check the TLS versions." && id == "call_1")
+    ));
+}
+
+#[test]
+fn cross_model_unsigned_thinking_is_dropped() {
     let message = assistant("openai", "old-model", vec![Content::Thinking {
         thinking: "useful plan".into(),
         metadata: Some(ThinkingMetadata::OpenAiCompletions {
@@ -249,13 +292,64 @@ fn cross_model_thinking_is_downgraded_to_text() {
 
     assert!(matches!(
         &transformed[0],
-        Message::Assistant { content, .. }
-            if matches!(&content[..], [Content::Text { text }] if text == "useful plan")
+        Message::Assistant { content, .. } if content.is_empty()
     ));
 }
 
 #[test]
-fn foreign_protocol_metadata_is_downgraded_even_when_names_match() {
+fn alternating_models_keep_thinking_only_from_the_target_model() {
+    let turn = |model: &str, thinking: &str, text: &str| {
+        assistant("proxy", model, vec![
+            Content::Thinking {
+                thinking: thinking.into(),
+                metadata: Some(ThinkingMetadata::Anthropic {
+                    signature: format!("sig-{thinking}"),
+                }),
+            },
+            Content::Text { text: text.into() },
+        ])
+    };
+    let messages = vec![
+        Message::user("1"),
+        turn("claude", "claude 1", "a"),
+        Message::user("2"),
+        turn("gemini", "gemini 1", "b"),
+        Message::user("3"),
+        turn("claude", "claude 2", "c"),
+        Message::user("4"),
+        turn("gemini", "gemini 2", "d"),
+        Message::user("hi"),
+    ];
+
+    let transformed =
+        transform_messages_for_model(messages, "proxy", "claude", ApiProtocol::AnthropicMessages);
+
+    let replayed: Vec<Vec<String>> = transformed
+        .iter()
+        .filter_map(|message| match message {
+            Message::Assistant { content, .. } => Some(
+                content
+                    .iter()
+                    .map(|block| match block {
+                        Content::Thinking { thinking, .. } => format!("thinking:{thinking}"),
+                        Content::Text { text } => format!("text:{text}"),
+                        other => format!("{other:?}"),
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replayed, vec![
+        vec!["thinking:claude 1".to_string(), "text:a".to_string()],
+        vec!["text:b".to_string()],
+        vec!["thinking:claude 2".to_string(), "text:c".to_string()],
+        vec!["text:d".to_string()],
+    ]);
+}
+
+#[test]
+fn foreign_protocol_metadata_is_dropped_even_when_names_match() {
     let message = assistant("proxy", "model", vec![Content::Thinking {
         thinking: "plan".into(),
         metadata: Some(ThinkingMetadata::Anthropic {
@@ -272,13 +366,12 @@ fn foreign_protocol_metadata_is_downgraded_even_when_names_match() {
 
     assert!(matches!(
         &transformed[0],
-        Message::Assistant { content, .. }
-            if matches!(&content[..], [Content::Text { text }] if text == "plan")
+        Message::Assistant { content, .. } if content.is_empty()
     ));
 }
 
 #[test]
-fn placeholder_thinking_after_tools_stays_in_history_as_text() {
+fn cross_model_placeholder_thinking_after_tools_is_dropped() {
     let message = assistant("openai", "gpt-5.6-sol", vec![
         Content::Text {
             text: "compare the two renderers".into(),
@@ -312,10 +405,7 @@ fn placeholder_thinking_after_tools_stays_in_history_as_text() {
                 [
                     Content::Text { text: opening },
                     Content::ToolCall { id, .. },
-                    Content::Text { text: placeholder },
-                ] if opening == "compare the two renderers"
-                    && id == "call_1"
-                    && placeholder == "..."
+                ] if opening == "compare the two renderers" && id == "call_1"
             )
     ));
 }

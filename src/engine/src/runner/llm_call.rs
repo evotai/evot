@@ -92,7 +92,7 @@ pub(super) async fn stream_assistant_response(
     // Normalize tool exchanges after custom conversion, then provider-opaque
     // history at the LLM boundary. Replayable
     // thinking survives only for the exact provider/model/protocol that emitted
-    // it; foreign thinking is retained as ordinary text context.
+    // it; thinking from any other model is dropped.
     let (target_provider, target_model, target_api) = target_model(config);
     let mut llm_messages = crate::context::transform_messages_for_model(
         llm_messages,
