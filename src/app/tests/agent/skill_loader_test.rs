@@ -492,5 +492,7 @@ fn formats_skill_index_for_prompt() -> Result<(), Box<dyn std::error::Error>> {
     assert!(prompt.contains("<location>"));
     assert!(prompt.contains("SKILL.md"));
     assert!(prompt.contains("Use the read tool to load a skill's file"));
+    assert!(prompt.contains("when the task or a required subtask matches its description"));
+    assert!(prompt.contains("Match the capability needed, not only the user's exact wording"));
     Ok(())
 }

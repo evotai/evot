@@ -152,14 +152,29 @@ fn base_sections_are_ordered_static_then_dynamic_boundary() {
 }
 
 #[test]
-fn tool_set_drives_identity_list_and_guidelines() {
-    let tmp = tempfile::TempDir::new().expect("failed to create temp dir");
+fn tool_set_drives_identity_list_and_guidelines() -> TestResult {
+    let tmp = tempfile::TempDir::new()?;
     let prompt = base_prompt(&tmp.path().to_string_lossy());
 
     // Identity "Available tools" list is derived from each tool's snippet.
     assert!(prompt.contains("Available tools:"));
     assert!(prompt.contains("- read: Read file contents"));
     assert!(prompt.contains("- write: Create or overwrite files"));
+
+    let discovery_pos = prompt
+        .find(
+            "For each task and required subtask, check the available tools and skill descriptions",
+        )
+        .ok_or_else(|| std::io::Error::other("missing capability discovery guidance"))?;
+    let exploration_pos = prompt
+        .find("Use bash for file operations like ls, rg, find")
+        .ok_or_else(|| std::io::Error::other("missing file exploration guidance"))?;
+    assert!(discovery_pos < exploration_pos);
+    assert!(prompt.contains("Load a matching skill's instructions before using its CLI or scripts"));
+    assert!(prompt.contains("verify access with a minimal read-only call"));
+    assert!(prompt.contains("only if one is actually available; never invent tool names or APIs"));
+    assert!(prompt.contains("a concrete error remains after supported recovery"));
+    assert!(prompt.contains("verify ambiguous submissions before switching"));
 
     // With the pi-aligned default coding set (read/bash/edit/write and no
     // dedicated search tools), file exploration is steered through bash rather
@@ -181,6 +196,7 @@ fn tool_set_drives_identity_list_and_guidelines() {
     assert!(prompt.contains("Be concise in your responses"));
     assert!(prompt.contains("Show file paths clearly when working with files"));
     assert!(!prompt.contains("To edit files, use `edit` instead of sed or awk."));
+    Ok(())
 }
 
 #[test]

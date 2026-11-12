@@ -6,6 +6,12 @@ const PROJECT_CONTEXT_FILES: &[&str] = &["EVOT.md", "CLAUDE.md", "AGENTS.md"];
 
 const GUIDELINES_HEADER: &str = "Guidelines:";
 const BASH_EXPLORE_GUIDELINE: &str = "Use bash for file operations like ls, rg, find";
+const CAPABILITY_DISCOVERY_GUIDELINES: &[&str] = &[
+    "For each task and required subtask, check the available tools and skill descriptions before choosing a route. Respect an explicitly requested route; otherwise prefer a matching dedicated capability over browser automation, scraping, raw HTTP, or a hand-written client. Do not search the machine for credentials before checking these capabilities.",
+    "Use a matching listed tool rather than recreating it with shell commands. Load a matching skill's instructions before using its CLI or scripts; running a documented CLI through the execution tool is an intended route, not a workaround.",
+    "An unfamiliar service domain, a missing executable on PATH, or one failed call does not prove a capability is unavailable. Follow documented setup and recovery; when readiness is uncertain, verify access with a minimal read-only call. Use a capability-discovery tool only if one is actually available; never invent tool names or APIs.",
+    "Fall back only when the dedicated capability does not cover the operation or a concrete error remains after supported recovery. Preserve progress and verify ambiguous submissions before switching to avoid duplicate actions. Preserve credentials, access controls, required consent, and session isolation; if no authorized route remains, report the exact blocker and attempts without claiming completion.",
+];
 /// Parallel tool-call guidance. Named "tool calls" so models emit N independent
 /// calls instead of packing several argument objects into one call.
 const PARALLEL_TOOL_CALLS_GUIDELINE: &str =
@@ -183,6 +189,9 @@ impl SystemPrompt {
             }
         };
 
+        for guideline in CAPABILITY_DISCOVERY_GUIDELINES {
+            add(guideline);
+        }
         if self.has_bash && !self.has_dedicated_search {
             add(BASH_EXPLORE_GUIDELINE);
         }
