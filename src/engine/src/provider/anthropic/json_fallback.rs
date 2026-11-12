@@ -86,9 +86,14 @@ fn parse_success_response(
         Some("tool_use") => StopReason::ToolUse,
         Some("max_tokens") => StopReason::Length,
         Some(reason @ ("refusal" | "sensitive")) => {
-            return Err(ProviderError::Api(crate::provider::error::refusal_message(
-                reason,
-            )));
+            return Err(ProviderError::Api(
+                crate::provider::error::refusal_message_with_category(
+                    reason,
+                    value
+                        .pointer("/stop_details/category")
+                        .and_then(|value| value.as_str()),
+                ),
+            ));
         }
         Some(reason) => {
             return Err(ProviderError::Api(format!(

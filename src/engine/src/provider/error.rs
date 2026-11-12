@@ -360,6 +360,16 @@ pub fn refusal_message(stop_reason: &str) -> String {
     format!("Provider ended the response with stop reason '{stop_reason}' {REFUSAL_MARKER}")
 }
 
+/// Keep the provider's refusal category without copying its free-form output
+/// into the error. The stable marker still drives compact-and-retry detection.
+pub(crate) fn refusal_message_with_category(stop_reason: &str, category: Option<&str>) -> String {
+    let message = refusal_message(stop_reason);
+    match category.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(category) => format!("{message}; category={category}"),
+        None => message,
+    }
+}
+
 /// Whether an error message is a provider safety refusal.
 pub fn is_refusal_message(message: &str) -> bool {
     message.contains(REFUSAL_MARKER)

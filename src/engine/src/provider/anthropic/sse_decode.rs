@@ -358,7 +358,14 @@ async fn process_sse_event(
             if let Some(reason) = data.delta.stop_reason.as_deref() {
                 state.stop_reason = map_stop_reason(reason)?;
                 if state.stop_reason == StopReason::Error {
-                    state.error_message = Some(crate::provider::error::refusal_message(reason));
+                    let category = data
+                        .delta
+                        .stop_details
+                        .as_ref()
+                        .and_then(|details| details.category.as_deref());
+                    state.error_message = Some(
+                        crate::provider::error::refusal_message_with_category(reason, category),
+                    );
                 }
             }
             // Preserve message_start values for fields omitted by message_delta.

@@ -393,6 +393,68 @@ async fn anthropic_sse_refusal_stop_reason_carries_error_message() {
 }
 
 #[tokio::test]
+async fn anthropic_refusal_category_survives_sse_and_json_decoding(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let details = serde_json::json!({
+        "type": "refusal", "category": "reasoning_extraction",
+        "explanation": "free-form provider explanation",
+    });
+    let sse = anthropic_sse::body(vec![
+        anthropic_sse::message_start(100, 0),
+        format!(
+            "event: message_delta\ndata: {}",
+            serde_json::json!({
+                "type": "message_delta",
+                "delta": {"stop_reason": "refusal", "stop_details": details},
+                "usage": {"output_tokens": 0},
+            })
+        ),
+        anthropic_sse::message_stop(),
+    ]);
+    let (message, _) = run_provider_sse(
+        &AnthropicProvider,
+        StreamConfigBuilder::anthropic().build(),
+        &sse,
+        200,
+    )
+    .await?;
+    let Message::Assistant {
+        stop_reason,
+        error_message: Some(error),
+        ..
+    } = message
+    else {
+        panic!("expected refusal with an error message");
+    };
+    assert_eq!(stop_reason, StopReason::Error);
+    assert!(error.contains("category=reasoning_extraction"));
+    assert!(evotengine::provider::error::is_refusal_message(&error));
+    assert!(!error.contains("free-form provider explanation"));
+
+    let json = serde_json::json!({
+        "type": "message", "role": "assistant", "content": [],
+        "stop_reason": "refusal", "stop_details": details,
+        "usage": {"input_tokens": 100, "output_tokens": 0},
+    });
+    let Err(error) = run_provider_json(
+        &AnthropicProvider,
+        StreamConfigBuilder::anthropic().build(),
+        &json.to_string(),
+        200,
+    )
+    .await
+    else {
+        panic!("expected JSON refusal");
+    };
+    assert!(error.to_string().contains("category=reasoning_extraction"));
+    assert!(evotengine::provider::error::is_refusal_message(
+        &error.to_string()
+    ));
+    assert!(!error.to_string().contains("free-form provider explanation"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn anthropic_sse_tool_call() {
     let sse = anthropic_sse::body(vec![
         anthropic_sse::message_start(50, 0),

@@ -110,4 +110,12 @@ pub(crate) struct AnthropicMessageDelta {
 #[derive(Deserialize)]
 pub(crate) struct AnthropicMessageDeltaInner {
     pub stop_reason: Option<String>,
+    #[serde(default)]
+    pub stop_details: Option<AnthropicStopDetails>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AnthropicStopDetails {
+    #[serde(default)]
+    pub category: Option<String>,
 }
