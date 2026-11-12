@@ -411,7 +411,7 @@ fn cross_model_placeholder_thinking_after_tools_is_dropped() {
 }
 
 #[test]
-fn unsigned_same_model_thinking_is_downgraded_to_text() {
+fn unsigned_same_model_thinking_is_omitted_without_promoting_it_to_text() {
     let message = assistant("anthropic", "claude", vec![Content::Thinking {
         thinking: "plan".into(),
         metadata: None,
@@ -427,7 +427,7 @@ fn unsigned_same_model_thinking_is_downgraded_to_text() {
     assert!(matches!(
         &transformed[0],
         Message::Assistant { content, .. }
-            if matches!(&content[..], [Content::Text { text }] if text == "plan")
+            if content.is_empty()
     ));
 }
 

@@ -808,7 +808,7 @@ fn responses_tool_metadata_does_not_leak_into_anthropic_tool_ids() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_content_to_anthropic_keeps_native_signature_but_downgrades_openai_field_marker() {
+fn test_content_to_anthropic_keeps_native_signature_but_omits_non_replayable_thinking() {
     let content = vec![
         Content::Thinking {
             thinking: "native".into(),
@@ -827,16 +827,24 @@ fn test_content_to_anthropic_keeps_native_signature_but_downgrades_openai_field_
             thinking: "unsigned".into(),
             metadata: None,
         },
+        Content::Thinking {
+            thinking: "empty signature".into(),
+            metadata: Some(ThinkingMetadata::Anthropic {
+                signature: String::new(),
+            }),
+        },
+        Content::Text {
+            text: "visible answer".into(),
+        },
     ];
 
     let result = content_to_anthropic(&content);
 
     assert_eq!(result[0]["type"], "thinking");
     assert_eq!(result[0]["signature"], "cryptographic-signature");
+    assert_eq!(result.len(), 2);
     assert_eq!(result[1]["type"], "text");
-    assert_eq!(result[1]["text"], "cross-provider");
-    assert_eq!(result[2]["type"], "text");
-    assert_eq!(result[2]["text"], "unsigned");
+    assert_eq!(result[1]["text"], "visible answer");
 }
 
 #[test]
@@ -1139,7 +1147,9 @@ fn test_legacy_sentinel_is_only_removed_as_sole_assistant_content() {
             Message::Assistant {
                 content: vec![Content::Thinking {
                     thinking: "[empty response]".into(),
-                    metadata: None,
+                    metadata: Some(ThinkingMetadata::Anthropic {
+                        signature: "native-signature".into(),
+                    }),
                 }],
                 stop_reason: StopReason::Stop,
                 model: "test".into(),
@@ -1162,7 +1172,8 @@ fn test_legacy_sentinel_is_only_removed_as_sole_assistant_content() {
         msgs[1]["content"][0]["text"],
         "prefix [empty response] suffix"
     );
-    assert_eq!(msgs[3]["content"][0]["text"], "[empty response]");
+    assert_eq!(msgs[3]["content"][0]["type"], "thinking");
+    assert_eq!(msgs[3]["content"][0]["thinking"], "[empty response]");
 }
 
 #[test]

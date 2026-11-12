@@ -250,7 +250,7 @@ async fn repeated_context_overflow_retries_with_abbreviated_tools() {
     let abbreviated = prompt(1);
     assert!(detailed.contains("/large/private/file.rs"));
     assert!(detailed.contains("TOOL_PAYLOAD"));
-    assert!(detailed.contains("large private reasoning"));
+    assert!(!detailed.contains("large private reasoning"));
     assert!(!abbreviated.contains("/large/private/file.rs"));
     assert!(!abbreviated.contains("TOOL_PAYLOAD"));
     assert!(!abbreviated.contains("large private reasoning"));

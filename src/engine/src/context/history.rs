@@ -9,8 +9,9 @@ use crate::types::Message;
 /// `transformMessages`, pi#10995). Sent as plain text, another model's
 /// reasoning reads as part of the visible reply: the new model starts writing
 /// its reasoning into the answer, and Anthropic refuses histories carrying
-/// Gemini thought-summarizer output as `reasoning_extraction`. Visible text and
-/// tool calls are kept.
+/// Gemini thought-summarizer output as `reasoning_extraction`. Unsigned thinking
+/// is omitted even for the same model: turning it into text loses its provenance
+/// and lets it survive a later model switch. Visible text and tool calls are kept.
 pub fn transform_messages_for_model(
     messages: Vec<Message>,
     target_provider: &str,
@@ -75,10 +76,9 @@ fn transform_message(
             Content::Thinking {
                 metadata: Some(_), ..
             } => None,
-            // Unsigned thinking from this model (an interrupted stream) has no
-            // replay state; keep what it said as text.
-            Content::Thinking { thinking, .. } if thinking.trim().is_empty() => None,
-            Content::Thinking { thinking, .. } => Some(Content::Text { text: thinking }),
+            // No replay metadata: omit the thought, never teach the model to
+            // reproduce its reasoning as visible text on the next turn.
+            Content::Thinking { .. } => None,
             Content::ToolCall {
                 id,
                 name,

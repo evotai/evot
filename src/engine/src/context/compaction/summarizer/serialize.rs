@@ -124,15 +124,14 @@ fn serialize_message_parts(
             }
             AgentMessage::Llm(Message::Assistant { content, .. }) => {
                 let mut text_parts: Vec<&str> = Vec::new();
-                let mut thinking_parts: Vec<&str> = Vec::new();
                 let mut tool_calls: Vec<String> = Vec::new();
 
                 for block in content {
                     match block {
                         Content::Text { text } => text_parts.push(text),
-                        Content::Thinking { thinking, .. } if !options.abbreviate_tools => {
-                            thinking_parts.push(thinking)
-                        }
+                        // A summary can be replayed to another model. Preserve
+                        // visible answers and actions, never serialize private
+                        // thinking (signed or not) as ordinary prompt text.
                         Content::Thinking { .. } => {}
                         Content::ToolCall {
                             name, arguments, ..
@@ -148,12 +147,6 @@ fn serialize_message_parts(
                     }
                 }
 
-                if !thinking_parts.is_empty() {
-                    message_parts.push(format!(
-                        "[Assistant thinking]: {}",
-                        thinking_parts.join("\n")
-                    ));
-                }
                 if !text_parts.is_empty() {
                     message_parts.push(format!("[Assistant]: {}", text_parts.join("\n")));
                 }

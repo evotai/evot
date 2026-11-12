@@ -613,6 +613,102 @@ async fn anthropic_sse_signature_only_thinking_replays_on_turn_two(
     Ok(())
 }
 
+// Carbon emits visible thoughts separately from an empty signed replay block.
+// Exercise decode -> session reload -> same-model continuation -> model switch.
+#[tokio::test]
+async fn same_model_continuation_never_promotes_unsigned_thinking_to_text(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use evotengine::context::transform_messages_for_model;
+    use evotengine::provider::anthropic::request::build_request_body;
+    use evotengine::provider::ApiProtocol;
+
+    let private = "Thinking Process: private summary generation";
+    // This is intentionally reasoning-like *visible* text: no regex stripping.
+    let visible = "The log contains the literal heading Thinking Process:";
+    let signature = "droid-google:opaque-tool-replay";
+    let frames = vec![
+        anthropic_sse::message_start(50, 0),
+        anthropic_sse::thinking_block_start(0),
+        anthropic_sse::thinking_delta(0, private),
+        anthropic_sse::block_stop(0),
+        anthropic_sse::text_block_start(1),
+        anthropic_sse::text_delta(1, visible),
+        anthropic_sse::block_stop(1),
+        anthropic_sse::thinking_block_start(2),
+        format!(
+            "event: content_block_delta\ndata: {}",
+            serde_json::json!({
+                "type": "content_block_delta", "index": 2,
+                "delta": {"type": "signature_delta", "signature": signature},
+            })
+        ),
+        anthropic_sse::block_stop(2),
+        anthropic_sse::tool_block_start(3, "call_read", "read"),
+        anthropic_sse::tool_input_delta(3, r#"{"path":"README.md"}"#),
+        anthropic_sse::block_stop(3),
+        anthropic_sse::message_delta("tool_use", 20),
+        anthropic_sse::message_stop(),
+    ];
+    let (message, _) = run_provider_sse(
+        &AnthropicProvider,
+        StreamConfigBuilder::anthropic()
+            .model("gemini-4-carbon")
+            .build(),
+        &anthropic_sse::body(frames),
+        200,
+    )
+    .await?;
+    let restored: Message = serde_json::from_slice(&serde_json::to_vec(&message)?)?;
+    assert!(matches!(&restored, Message::Assistant { content, .. }
+        if matches!(&content[0], Content::Thinking { thinking, metadata: None } if thinking == private)));
+    let mut history = vec![
+        Message::user("read the file"),
+        restored,
+        Message::ToolResult {
+            tool_call_id: "call_read".into(),
+            tool_name: "read".into(),
+            content: vec![Content::Text {
+                text: "file contents".into(),
+            }],
+            is_error: false,
+            timestamp: 0,
+            retention: Retention::Normal,
+        },
+    ];
+    for model in ["gemini-4-carbon", "gemini-4-carbon", "claude-fable-5.2"] {
+        history = transform_messages_for_model(
+            history,
+            "anthropic",
+            model,
+            ApiProtocol::AnthropicMessages,
+        );
+        let body = build_request_body(
+            &StreamConfigBuilder::anthropic()
+                .model(model)
+                .messages(history.clone())
+                .cache_disabled()
+                .build(),
+            false,
+        );
+        let encoded = body.to_string();
+        assert!(!encoded.contains(private));
+        assert!(encoded.contains(visible));
+        assert_eq!(
+            body["messages"][2]["content"][0]["tool_use_id"],
+            "call_read"
+        );
+        let mut expected = vec![serde_json::json!({"type": "text", "text": visible})];
+        if model == "gemini-4-carbon" {
+            expected.push(
+                serde_json::json!({"type": "thinking", "thinking": "", "signature": signature}),
+            );
+        }
+        expected.push(serde_json::json!({"type": "tool_use", "id": "call_read", "name": "read", "input": {"path": "README.md"}}));
+        assert_eq!(body["messages"][1]["content"], serde_json::json!(expected));
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn anthropic_sse_thinking_then_text() {
     let sse = anthropic_sse::body(vec![

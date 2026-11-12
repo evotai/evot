@@ -326,60 +326,58 @@ pub fn content_to_anthropic(content: &[Content]) -> Vec<serde_json::Value> {
     content
         .iter()
         .filter(|c| !matches!(c, Content::Text { text } if text.trim().is_empty()))
-        .map(|c| match c {
-            Content::Text { text } => serde_json::json!({"type": "text", "text": text}),
-            Content::Image { .. } => {
-                if let Some((data, mime_type)) = c.resolve_image_data() {
-                    serde_json::json!({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": mime_type, "data": data},
-                    })
-                } else {
-                    serde_json::json!({"type": "text", "text": "[image unavailable]"})
+        .filter_map(|c| {
+            Some(match c {
+                Content::Text { text } => serde_json::json!({"type": "text", "text": text}),
+                Content::Image { .. } => {
+                    if let Some((data, mime_type)) = c.resolve_image_data() {
+                        serde_json::json!({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": mime_type, "data": data},
+                        })
+                    } else {
+                        serde_json::json!({"type": "text", "text": "[image unavailable]"})
+                    }
                 }
-            }
-            Content::Thinking {
-                thinking,
-                metadata: Some(ThinkingMetadata::Anthropic { signature }),
-            } if !signature.is_empty() => {
-                serde_json::json!({
-                    "type": "thinking",
-                    "thinking": thinking,
-                    "signature": signature,
-                })
-            }
-            // Like pi's Anthropic converter, unsigned thinking (an interrupted
-            // stream of this model; other models' thinking was already dropped
-            // by transform_messages_for_model) is sent as text, not replay state.
-            Content::Thinking { thinking, .. } => serde_json::json!({
-                "type": "text",
-                "text": thinking,
-            }),
-            Content::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            } => {
-                // Sanitise malformed tool_use input that can crash Bedrock's
-                // Anthropic-to-Converse translator. When the model produces
-                // garbled JSON (e.g. empty-string keys, nested objects where
-                // strings are expected) the gateway returns
-                // UnknownOperationException. Replace such inputs with an empty
-                // object — the original error is already captured in the
-                // corresponding tool_result.
-                let input = if is_malformed_tool_input(arguments) {
-                    serde_json::json!({})
-                } else {
-                    arguments.clone()
-                };
-                serde_json::json!({
-                    "type": "tool_use",
-                    "id": id,
-                    "name": name,
-                    "input": input,
-                })
-            }
+                Content::Thinking {
+                    thinking,
+                    metadata: Some(ThinkingMetadata::Anthropic { signature }),
+                } if !signature.is_empty() => {
+                    serde_json::json!({
+                        "type": "thinking",
+                        "thinking": thinking,
+                        "signature": signature,
+                    })
+                }
+                // Never promote unsigned/foreign thinking to visible text, even
+                // when called without the provider-aware history transform.
+                Content::Thinking { .. } => return None,
+                Content::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                } => {
+                    // Sanitise malformed tool_use input that can crash Bedrock's
+                    // Anthropic-to-Converse translator. When the model produces
+                    // garbled JSON (e.g. empty-string keys, nested objects where
+                    // strings are expected) the gateway returns
+                    // UnknownOperationException. Replace such inputs with an empty
+                    // object — the original error is already captured in the
+                    // corresponding tool_result.
+                    let input = if is_malformed_tool_input(arguments) {
+                        serde_json::json!({})
+                    } else {
+                        arguments.clone()
+                    };
+                    serde_json::json!({
+                        "type": "tool_use",
+                        "id": id,
+                        "name": name,
+                        "input": input,
+                    })
+                }
+            })
         })
         .collect()
 }

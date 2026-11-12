@@ -1256,6 +1256,201 @@ async fn refusal_compacts_and_retries_then_exhausts() {
     );
 }
 
+// Exercise both the LLM summary and refusal -> deterministic fallback paths.
+// Evicted thinking must not enter a summary; retained thinking must not become
+// text when resuming with Carbon or switching the compacted session to Fable.
+#[tokio::test]
+async fn compacted_carbon_history_switches_models_without_replaying_thinking(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use evotengine::context::transform_messages_for_model;
+    use evotengine::provider::anthropic::request::build_request_body;
+    use evotengine::provider::ApiProtocol;
+
+    use super::fixtures::stream_config::StreamConfigBuilder;
+
+    let private = "PRIVATE_CARBON_THOUGHT";
+    let signature = "opaque-carbon-replay-signature";
+    let carbon = |content| {
+        AgentMessage::Llm(Message::Assistant {
+            content,
+            stop_reason: StopReason::ToolUse,
+            model: "gemini-4-carbon".into(),
+            provider: "anthropic".into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        })
+    };
+    for summarizer_refuses in [false, true] {
+        let mut messages = Vec::new();
+        for _ in 0..20 {
+            messages.push(user_msg(&big_text(300)));
+            messages.push(carbon(vec![
+                Content::Thinking {
+                    thinking: private.repeat(40),
+                    metadata: None,
+                },
+                Content::Thinking {
+                    thinking: format!("{private} signed"),
+                    metadata: Some(ThinkingMetadata::Anthropic {
+                        signature: signature.into(),
+                    }),
+                },
+                Content::Text {
+                    text: big_text(300),
+                },
+            ]));
+        }
+        messages.extend([
+            user_msg("inspect the file and continue"),
+            carbon(vec![
+                Content::Thinking {
+                    thinking: private.into(),
+                    metadata: None,
+                },
+                Content::Text {
+                    text: "Reading the file now.".into(),
+                },
+                Content::Thinking {
+                    thinking: String::new(),
+                    metadata: Some(ThinkingMetadata::Anthropic {
+                        signature: signature.into(),
+                    }),
+                },
+                Content::ToolCall {
+                    id: "recent_read".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({"path": "big.log"}),
+                    metadata: None,
+                },
+            ]),
+            tool_result_msg(
+                "recent_read",
+                "The file contains the literal heading Thinking Process:",
+            ),
+            assistant_msg("refused"),
+        ]);
+        let reply = if summarizer_refuses {
+            Reply::error(evotengine::provider::error::refusal_message("refusal"))
+        } else {
+            Reply::text("Keep investigating the file. Earlier checks are complete.")
+        };
+        // Both the evicted history and the split-turn prefix are summarized.
+        let provider = Arc::new(RecordingProvider::new(vec![reply; 2]));
+        let captured = provider.captured();
+        let ctx = SummarizerContext {
+            provider,
+            model: "gemini-4-carbon".into(),
+            api_key: "key".into(),
+            thinking_level: ThinkingLevel::Off,
+            system_prompt: String::new(),
+            tools: vec![],
+            max_tokens: Some(1024),
+            cache_config: CacheConfig::default(),
+            prompt_cache_key: None,
+            model_config: None,
+        };
+        let mut ctrl = CompactionController::new(config_small());
+        let response = ctrl
+            .after_response(
+                &mut messages,
+                &refusal_usage(evotengine::time::now_ms() + 60_000),
+                &model_id(),
+                Some(&ctx),
+                CancellationToken::new(),
+            )
+            .await;
+        assert_eq!(response.action, AfterResponseAction::Retry);
+        let Some(stats) = response.stats else {
+            panic!("expected compaction")
+        };
+        let Some(summary) = stats.summary else {
+            panic!("expected summary")
+        };
+        assert!(!summary.contains(private));
+        assert!(!summary.contains(signature));
+        assert!(!summary.contains("[Assistant thinking]"));
+        assert_eq!(
+            captured.lock().len(),
+            if summarizer_refuses { 1 } else { 2 }
+        );
+        for request in captured.lock().iter() {
+            let prompt = serde_json::to_string(&request.messages)?;
+            assert!(!prompt.contains(private));
+            assert!(!prompt.contains(signature));
+            assert!(!prompt.contains("[Assistant thinking]"));
+        }
+        // Confirm this test really retains the signed tool turn, rather than
+        // passing just because compaction evicted every assistant message.
+        assert!(messages.iter().any(|message| matches!(message,
+            AgentMessage::Llm(Message::Assistant { content, .. })
+                if content.iter().any(|block| matches!(block, Content::Thinking { thinking, .. } if thinking == private))
+        )));
+        let restored: Vec<AgentMessage> = serde_json::from_slice(&serde_json::to_vec(&messages)?)?;
+        let history: Vec<Message> = restored
+            .into_iter()
+            .filter_map(|message| match message {
+                AgentMessage::Llm(message) => Some(message),
+                AgentMessage::Extension(_) => None,
+            })
+            .collect();
+        let continued = transform_messages_for_model(
+            history,
+            "anthropic",
+            "gemini-4-carbon",
+            ApiProtocol::AnthropicMessages,
+        );
+        for model in ["gemini-4-carbon", "claude-fable-5.2"] {
+            let transformed = transform_messages_for_model(
+                continued.clone(),
+                "anthropic",
+                model,
+                ApiProtocol::AnthropicMessages,
+            );
+            let body = build_request_body(
+                &StreamConfigBuilder::anthropic()
+                    .model(model)
+                    .messages(transformed)
+                    .cache_disabled()
+                    .build(),
+                false,
+            );
+            let wire = body.to_string();
+            if model == "claude-fable-5.2" {
+                assert!(!wire.contains(private));
+            }
+            assert_eq!(wire.contains(signature), model == "gemini-4-carbon");
+            assert!(wire.contains("Reading the file now."));
+            assert!(wire.contains("The file contains the literal heading Thinking Process:"));
+            let Some(wire_messages) = body["messages"].as_array() else {
+                panic!("expected messages")
+            };
+            // Carbon may still replay signed thoughts, but no thought may be
+            // promoted to a visible text block on either model.
+            assert!(wire_messages
+                .iter()
+                .flat_map(|m| m["content"].as_array().into_iter().flatten())
+                .filter_map(|block| block.get("text").and_then(|text| text.as_str()))
+                .all(|text| !text.contains(private)));
+            let calls = wire_messages
+                .iter()
+                .flat_map(|m| m["content"].as_array().into_iter().flatten())
+                .filter(|block| block["type"] == "tool_use" && block["id"] == "recent_read")
+                .count();
+            let results = wire_messages
+                .iter()
+                .flat_map(|m| m["content"].as_array().into_iter().flatten())
+                .filter(|block| {
+                    block["type"] == "tool_result" && block["tool_use_id"] == "recent_read"
+                })
+                .count();
+            assert_eq!((calls, results), (1, 1));
+        }
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn refusal_on_single_tool_turn_summarizes_the_whole_turn() {
     let mut ctrl = CompactionController::new(config_small());

@@ -144,12 +144,18 @@ fn serialize_messages_truncates_multibyte_tool_results_at_char_boundary() {
 }
 
 #[test]
-fn serialize_messages_includes_thinking() {
+fn serialize_messages_omits_signed_and_unsigned_thinking() {
     let msg = AgentMessage::Llm(Message::Assistant {
         content: vec![
             Content::Thinking {
                 thinking: "Let me analyze this".to_string(),
                 metadata: None,
+            },
+            Content::Thinking {
+                thinking: "signed private reasoning".into(),
+                metadata: Some(ThinkingMetadata::Anthropic {
+                    signature: "sig".into(),
+                }),
             },
             Content::Text {
                 text: "Here's my answer".to_string(),
@@ -164,7 +170,9 @@ fn serialize_messages_includes_thinking() {
         response_id: None,
     });
     let text = serialize::serialize_messages(&[msg]);
-    assert!(text.contains("[Assistant thinking]: Let me analyze this"));
+    assert!(!text.contains("[Assistant thinking]"));
+    assert!(!text.contains("Let me analyze this"));
+    assert!(!text.contains("signed private reasoning"));
     assert!(text.contains("[Assistant]: Here's my answer"));
 }
 

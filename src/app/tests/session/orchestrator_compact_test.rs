@@ -363,7 +363,8 @@ async fn manual_compaction_uses_shared_pi_style_serialization() -> TestResult {
 
     let prompt = first_user_prompt(&captured)?;
     assert!(prompt.contains("[User]: inspect the gateway"));
-    assert!(prompt.contains("[Assistant thinking]: need to inspect retry settings"));
+    assert!(!prompt.contains("[Assistant thinking]"));
+    assert!(!prompt.contains("need to inspect retry settings"));
     assert!(prompt.contains("[Assistant]: I will inspect the file."));
     assert!(prompt.contains("[Assistant tool calls]: read("));
     assert!(prompt.contains("src/gateway/retry.rs"));
