@@ -28,31 +28,33 @@ function selectionBackgroundAnsi(): string {
 const PTY_RELAY = `
 import os, pty, select, sys, signal, fcntl, termios, struct, json
 status = 0
-resize_fd = 3 if os.environ.get('EVOT_TEST_RESIZE_CONTROL') == '1' else None
-resize_pending = ''
+framed_stdin = os.environ.get('EVOT_TEST_RESIZE_CONTROL') == '1'
+stdin_pending = b''
 pid, fd = pty.fork()
 if pid == 0:
     os.environ['TERM'] = 'xterm-256color'
     os.execv(sys.argv[1], sys.argv[1:])
 try:
     while True:
-        inputs = [sys.stdin.buffer, fd] + ([resize_fd] if resize_fd is not None else [])
-        r, _, _ = select.select(inputs, [], [], 0.1)
-        if resize_fd is not None and resize_fd in r:
-            command = os.read(resize_fd, 4096)
-            if not command:
-                resize_fd = None
-            else:
-                resize_pending += command.decode()
-                while '\\n' in resize_pending:
-                    line, resize_pending = resize_pending.split('\\n', 1)
-                    columns, rows = json.loads(line)
-                    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
-        if sys.stdin.buffer in r:
-            data = sys.stdin.buffer.read1(4096)
+        r, _, _ = select.select([0, fd], [], [], 0.1)
+        if 0 in r:
+            data = os.read(0, 65536)
             if not data:
                 break
-            os.write(fd, data)
+            if framed_stdin:
+                stdin_pending += data
+                while b'\\n' in stdin_pending:
+                    line, stdin_pending = stdin_pending.split(b'\\n', 1)
+                    if not line:
+                        continue
+                    message = json.loads(line.decode('utf-8'))
+                    if 'resize' in message:
+                        columns, rows = message['resize']
+                        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, columns, 0, 0))
+                    elif 'write' in message:
+                        os.write(fd, message['write'].encode('utf-8'))
+            else:
+                os.write(fd, data)
         if fd in r:
             try:
                 data = os.read(fd, 65536)
@@ -242,7 +244,7 @@ async function startEvot(
   if (seedPreviewCacheMiss) seedResumePreviewCacheMiss(stateHome)
   setup?.(stateHome)
   const child = spawn('python3', ['-c', PTY_RELAY, EVOT_BIN, ...startupArgs], {
-    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...smokeEnvironment(isolatedHome), ...environment?.(stateHome), EVOT_TEST_RESIZE_CONTROL: '1' },
   })
   let all = ''
@@ -279,13 +281,22 @@ async function startEvot(
   const waitFor = (match: string | RegExp, timeoutMs?: number) => waitForOutput(match, timeoutMs)
   const waitForScreen = (match: string | RegExp, timeoutMs?: number) => waitForOutput(match, timeoutMs, true)
 
+  const sendInput = (data: string): void => {
+    if (child.exitCode === null && child.signalCode === null && !child.stdin.destroyed) {
+      child.stdin.write(`${JSON.stringify({ write: data })}\n`)
+    }
+  }
+
   const kill = async (): Promise<void> => {
     seen = all.length
-    child.stdin!.write('\x03')
+    sendInput('\x03')
     await wait(300)
-    child.stdin!.write('\x03')
+    sendInput('\x03')
     await wait(500)
     child.kill('SIGKILL')
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise<void>(resolve => child.once('close', () => resolve()))
+    }
     screen.terminal.dispose()
     rmSync(isolatedHome, { recursive: true, force: true })
   }
@@ -299,11 +310,12 @@ async function startEvot(
     throw err
   }
   return {
-    write: data => { child.stdin!.write(data) },
+    write: sendInput,
     resize: (columns, rows) => {
       screen.resize(columns, rows)
-      const control = child.stdio[3] as import('node:stream').Writable
-      control.write(`${JSON.stringify([columns, rows])}\n`)
+      if (child.exitCode === null && child.signalCode === null && !child.stdin.destroyed) {
+        child.stdin.write(`${JSON.stringify({ resize: [columns, rows] })}\n`)
+      }
     },
     outputSince,
     waitFor,
@@ -448,9 +460,11 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('a command window previews live, then the first arrow focuses and navigates', async () => {
     const session = await startEvot()
-    // This test asserts the full selector's details, not its compact layout.
-    session.resize(100, 50)
     try {
+      // This test asserts the full selector's details, not its compact layout.
+      session.checkpoint()
+      session.resize(100, 50)
+      await session.waitFor('─'.repeat(100))
       // A unique prefix immediately renders the formal model window above the
       // composer, but the highlighted row already uses the selector's complete
       // current-row treatment while keyboard focus remains in the composer.
@@ -529,8 +543,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('skill command window opens live and stays stable through focus', async () => {
     const session = await startEvot()
-    session.resize(100, 50)
     try {
+      session.checkpoint()
+      session.resize(100, 50)
+      await session.waitFor('─'.repeat(100))
       // `/ski` uniquely identifies `/skill`; no Enter is needed to open the
       // installed-skill inventory and the composer keeps keyboard focus.
       session.checkpoint()
@@ -592,8 +608,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('resume preview stays responsive through rapid typing and deletion', async () => {
     const session = await startEvot(true)
-    session.resize(100, 50)
     try {
+      session.checkpoint()
+      session.resize(100, 50)
+      await session.waitFor('─'.repeat(100))
       const createdSessionId = SEEDED_SESSION_ID.slice(0, 8)
 
       // The whole command can arrive in one input burst. Delete it completely

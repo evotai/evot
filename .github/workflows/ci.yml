@@ -79,7 +79,7 @@ jobs:
 
   test-cli-macos:
     name: Test CLI (macOS arm64)
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: check
     steps:
       - uses: actions/checkout@v5
@@ -92,5 +92,5 @@ jobs:
       - run: cd cli && bun run build:napi
       - run: cd cli && bun test tests/ --path-ignore-patterns 'tests/tui/**'
       - run: cd cli && bun run build:cli
-      - run: cd cli && EVOT_TEST_NATIVE_CONTRACT=1 bun test tests/native-config-contract.test.ts
+      - run: cd cli && EVOT_TEST_NATIVE_CONTRACT=1 bun test tests/native/native-config-contract.test.ts
       - run: cd cli && bun run test:tui
