@@ -206,7 +206,7 @@ impl Server {
             .agent_capabilities(
                 acp::AgentCapabilities::new()
                     .load_session(false)
-                    .prompt_capabilities(acp::PromptCapabilities::new())
+                    .prompt_capabilities(acp::PromptCapabilities::new().image(true))
                     .session_capabilities(
                         acp::SessionCapabilities::new()
                             .list(acp::SessionListCapabilities::new())

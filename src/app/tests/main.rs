@@ -3,6 +3,8 @@ use evot::types;
 
 #[path = "surface/acp_config_reload_test.rs"]
 mod acp_config_reload_test;
+#[path = "surface/acp_image_test.rs"]
+mod acp_image_test;
 #[path = "surface/acp_models_test.rs"]
 mod acp_models_test;
 #[path = "surface/acp_test.rs"]
