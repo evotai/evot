@@ -6,6 +6,7 @@
 //! storage, tool execution, and cancellation stay in the application layer.
 
 mod connection;
+mod models;
 mod options;
 mod permission;
 mod projection;

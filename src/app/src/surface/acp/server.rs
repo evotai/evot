@@ -22,6 +22,7 @@ use super::connection::to_value;
 use super::connection::write_frames;
 use super::connection::Connection;
 use super::connection::Inbound;
+use super::models::model_options;
 use super::permission::AcpApprover;
 use super::projection::TurnProjection;
 use super::prompt::prompt_input;
@@ -406,28 +407,15 @@ impl Server {
         }
     }
 
-    /// The model selector: every configured `provider:model`, plus the
-    /// session's current choice when it is not among them.
+    /// The model selector: configured specs and legacy cloud group aliases,
+    /// plus the session's current choice when it is not among them.
     fn config_options(&self, selection: &ModelSelection) -> Vec<acp::SessionConfigOption> {
         let current = selection.snapshot();
         if current.provider.is_empty() || current.model.is_empty() {
             return Vec::new();
         }
         let current_value = format!("{}:{}", current.provider, current.model);
-        let mut options: Vec<acp::SessionConfigSelectOption> = self
-            .config
-            .providers
-            .iter()
-            .flat_map(|(provider, profile)| {
-                profile.models.iter().map(move |model| {
-                    acp::SessionConfigSelectOption::new(
-                        format!("{provider}:{model}"),
-                        model.clone(),
-                    )
-                    .description(provider.clone())
-                })
-            })
-            .collect();
+        let mut options = model_options(&self.config);
         if !options
             .iter()
             .any(|option| option.value.0.as_ref() == current_value)

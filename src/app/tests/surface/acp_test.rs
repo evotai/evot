@@ -27,9 +27,9 @@ use tokio::io::Lines;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-type TestResult = Result<(), Box<dyn std::error::Error>>;
+pub(super) type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-fn config(tmp: &TempDir) -> Config {
+pub(super) fn config(tmp: &TempDir) -> Config {
     let mut config = Config::new(tmp.path().join("state"));
     config.providers.insert("test".into(), ProviderProfile {
         protocol: Protocol::OpenAi,
@@ -48,7 +48,7 @@ fn config(tmp: &TempDir) -> Config {
 }
 
 /// In-process ACP client speaking to `evot::surface::acp::serve` over duplex pipes.
-struct Client {
+pub(super) struct Client {
     input: DuplexStream,
     output: Lines<BufReader<DuplexStream>>,
     server: JoinHandle<evot::base::error::Result<()>>,
@@ -70,7 +70,16 @@ impl Client {
         ask_permission: bool,
         provider: impl StreamProvider + 'static,
     ) -> Result<(Self, Arc<Agent>), Box<dyn std::error::Error>> {
-        let config = config(tmp);
+        Self::start_config(tmp, config(tmp), mode, ask_permission, provider)
+    }
+
+    pub(super) fn start_config(
+        tmp: &TempDir,
+        config: Config,
+        mode: ToolMode,
+        ask_permission: bool,
+        provider: impl StreamProvider + 'static,
+    ) -> Result<(Self, Arc<Agent>), Box<dyn std::error::Error>> {
         let agent = Agent::new_with_provider_for_test(
             &config,
             tmp.path().to_string_lossy(),
@@ -121,7 +130,7 @@ impl Client {
 
     /// Send a request and collect notifications until its response arrives.
     /// Agent → client requests fail the test; use [`Self::request_answering`].
-    async fn request(
+    pub(super) async fn request(
         &mut self,
         method: &str,
         params: Value,
@@ -170,14 +179,14 @@ impl Client {
         Ok(response.session_id.0.to_string())
     }
 
-    async fn close(self) -> TestResult {
+    pub(super) async fn close(self) -> TestResult {
         drop(self.input);
         tokio::time::timeout(Duration::from_secs(10), self.server).await???;
         Ok(())
     }
 }
 
-fn text_prompt(session_id: &str, text: &str) -> Value {
+pub(super) fn text_prompt(session_id: &str, text: &str) -> Value {
     json!({"sessionId": session_id, "prompt": [{"type": "text", "text": text}]})
 }
 
