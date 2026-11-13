@@ -4,6 +4,7 @@ pub mod file;
 pub mod naming;
 pub mod process;
 pub mod sandbox;
+mod syntax;
 pub mod validation;
 pub mod web_fetch;
 

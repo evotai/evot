@@ -54,6 +54,8 @@ export function lightTheme(): Theme {
     diffRemovedWordBg: '#f0b0bc',
     diffGutterFg: '#7a8092',
     diffContextFg: '#5b6070',
+    diffHeaderFg: '#24547a',
+    diffHeaderBg: '#ddf1ff',
 
     text: plain,
     // See darkTheme: emphasis needs a hue, darker gold to hold contrast on white.

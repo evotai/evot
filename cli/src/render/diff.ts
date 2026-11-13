@@ -8,6 +8,7 @@
  */
 
 import chalk from 'chalk'
+import stripAnsi from 'strip-ansi'
 import { structuredPatch, diffWordsWithSpace } from 'diff'
 import { getTheme } from '../ui/theme/index.js'
 
@@ -24,6 +25,7 @@ const style = {
   added: (s: string) => chalk.hex(getTheme().diffAddedFg)(s),
   removed: (s: string) => chalk.hex(getTheme().diffRemovedFg)(s),
   context: (s: string) => chalk.hex(getTheme().diffContextFg)(s),
+  header: (s: string) => chalk.hex(getTheme().diffHeaderFg)(s),
   gutter: (s: string) => chalk.hex(getTheme().diffGutterFg)(s),
   ellipsis: (s: string) => chalk.hex(getTheme().diffGutterFg)(s),
   /**
@@ -85,7 +87,14 @@ export interface DiffHunk {
   newStart: number
   oldLines: number
   newLines: number
+  /** Optional enclosing function signature from the unified-diff header. */
+  section?: string
   lines: string[]
+}
+
+/** A section heading is metadata about the excerpt, never a source-code row. */
+export function formatDiffHunkHeader(hunk: DiffHunk): string {
+  return `  @@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@${hunk.section ? ` ${hunk.section}` : ''}`
 }
 
 /** Display partial patches too: streaming previews need not match hunk counts yet. */
@@ -93,9 +102,11 @@ export function parseDiffHunks(diff: string): DiffHunk[] {
   const hunks: DiffHunk[] = []
   let current: DiffHunk | undefined
   for (const text of diff.split('\n')) {
-    const header = text.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/)
+    const header = text.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)/)
     if (header) {
       current = { oldStart: Number(header[1]), newStart: Number(header[3]), oldLines: Number(header[2] ?? 1), newLines: Number(header[4] ?? 1), lines: [] }
+      const section = stripAnsi(header[5] ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim()
+      if (section) current.section = section
       hunks.push(current)
     } else if (text.startsWith('diff ') || text.startsWith('Index:')) {
       current = undefined
@@ -106,7 +117,7 @@ export function parseDiffHunks(diff: string): DiffHunk[] {
   return hunks
 }
 
-export type DiffRowKind = 'add' | 'remove' | 'context' | 'ellipsis'
+export type DiffRowKind = 'add' | 'remove' | 'context' | 'ellipsis' | 'header'
 
 export interface DiffRow {
   /** Foreground-styled row text (gutter + sigil + code). */
@@ -141,7 +152,9 @@ export function colorizeUnifiedDiffRows(diff: string, showSigns = true, minGutte
   const numW = gutterWidth(perHunk.flat(), minGutter)
 
   for (let hi = 0; hi < perHunk.length; hi++) {
-    if (hi > 0) output.push({ text: style.ellipsis('  …'), kind: 'ellipsis' })
+    const hunk = hunks[hi]!
+    if (hi > 0 && !hunk.section) output.push({ text: style.ellipsis('  …'), kind: 'ellipsis' })
+    if (hunk.section) output.push({ text: style.header(formatDiffHunkHeader(hunk)), kind: 'header' })
     for (const line of perHunk[hi]!) {
       output.push({
         text: renderLine(line, numW, showSigns), kind: line.type,

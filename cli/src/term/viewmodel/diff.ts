@@ -1,7 +1,7 @@
 /** Responsive patch layout shared by live and completed edit cards. */
 import stringWidth from 'string-width'
 import stripAnsi from 'strip-ansi'
-import { colorizeUnifiedDiffRows, parseDiffHunks } from '../../render/diff.js'
+import { colorizeUnifiedDiffRows, formatDiffHunkHeader, parseDiffHunks } from '../../render/diff.js'
 import { wrapTextWithAnsi } from '../../ui/wrap.js'
 import { getTheme } from '../../ui/theme/index.js'
 import { line, plain, type StyledLine, type StyledSpan } from './types.js'
@@ -52,7 +52,8 @@ export function buildDiffLines(patch: string, columns?: number, minGutter = 0): 
       const fragments = wrapTextWithAnsi(separate ? row.code! : row.text, separate ? width - gutterWidth : width)
       return fragments.map((text, index) => ({
         ...line(plain((separate ? index === 0 ? row.gutter! : ' '.repeat(gutterWidth) : '') + text)),
-        bg: row.kind === 'add' ? theme.diffAddedBg : row.kind === 'remove' ? theme.diffRemovedBg : undefined,
+        bg: row.kind === 'header' ? theme.diffHeaderBg
+          : row.kind === 'add' ? theme.diffAddedBg : row.kind === 'remove' ? theme.diffRemovedBg : undefined,
       }))
     })
   }
@@ -93,7 +94,13 @@ export function buildDiffLines(patch: string, columns?: number, minGutter = 0): 
     minGutter,
   )
   for (const hunk of hunks) {
-    if (result.length) result.push(hunkSeparator(columns))
+    // The blue metadata row already separates excerpts, like GitHub Web.
+    if (result.length && !hunk.section) result.push(hunkSeparator(columns))
+    if (hunk.section) {
+      const theme = getTheme()
+      result.push(...wrapTextWithAnsi(formatDiffHunkHeader(hunk), columns)
+        .map(text => ({ ...line({ text, hex: theme.diffHeaderFg }), bg: theme.diffHeaderBg })))
+    }
     let old = hunk.oldStart
     let next = hunk.newStart
     const append = (left?: Cell, right?: Cell) => {

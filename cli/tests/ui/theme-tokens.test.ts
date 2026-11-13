@@ -9,6 +9,16 @@ describe('semantic muted text token', () => {
     expect(lightTheme().mutedHex).toBe('#777777')
   })
 
+  test('diff hunk metadata has distinct ink and fill in both palettes', () => {
+    for (const theme of [darkTheme(), lightTheme()]) {
+      expect(theme.diffHeaderFg).not.toBe(theme.diffContextFg)
+      expect(theme.diffHeaderFg).not.toBe(theme.diffGutterFg)
+      expect(theme.diffHeaderBg).not.toBe(theme.toolCardBg)
+      expect(theme.diffHeaderBg).not.toBe(theme.diffAddedBg)
+      expect(theme.diffHeaderBg).not.toBe(theme.diffRemovedBg)
+    }
+  })
+
   test('span rendering resolves the active token lazily, not a literal color', () => {
     const theme = getTheme()
     const before = theme.mutedHex

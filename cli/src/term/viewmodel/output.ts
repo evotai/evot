@@ -67,6 +67,7 @@ function diffRowBg(kind: OutputLine['diffRow']): string | undefined {
   const theme = getTheme()
   if (kind === 'add') return theme.diffAddedBg
   if (kind === 'remove') return theme.diffRemovedBg
+  if (kind === 'header') return theme.diffHeaderBg
   return undefined
 }
 

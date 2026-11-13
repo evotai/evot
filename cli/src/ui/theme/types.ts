@@ -81,6 +81,9 @@ export interface Theme {
   diffGutterFg: string
   /** Unchanged context rows inside a diff. */
   diffContextFg: string
+  /** Hunk metadata, not a source line: distinct ink and a full-width cool fill. */
+  diffHeaderFg: string
+  diffHeaderBg: string
 
   // Inline
   text: Style

@@ -1,6 +1,7 @@
 //! File operation tools — edit, read, write — and their shared infrastructure.
 
 pub mod diff;
+mod diff_context;
 pub mod edit;
 pub mod hint;
 pub mod mutex;

@@ -20,6 +20,68 @@ test('wide diff pairs old and new lines; narrow diff stays unified', () => {
   expect(render('old\n', 'new\n', 80).join('\n')).not.toContain('│')
 })
 
+test('function headings appear once per hunk in unified and split layouts', () => {
+  const patch = '@@ -8 +8 @@ async fn first() -> Result<()> {\n-old\n+new\n@@ -30 +30 @@ fn second() {\n-before\n+after'
+  for (const width of [undefined, 80, 140]) {
+    const styled = buildDiffLines(patch, width)
+    const rows = blocksToLines([{ lines: styled }]).map(stripAnsi)
+    const first = rows.findIndex(row => row.includes('async fn first()'))
+    const second = rows.findIndex(row => row.includes('fn second()'))
+    expect(first).toBe(0)
+    expect(second).toBeGreaterThan(first)
+    expect(rows.filter(row => row.includes('async fn first()'))).toHaveLength(1)
+    expect(rows.filter(row => row.includes('fn second()'))).toHaveLength(1)
+    expect(rows[first]).not.toContain('│')
+    expect(rows[second]).not.toContain('│')
+    expect(rows.some(row => row.includes('┄') || row.trim() === '…')).toBe(false)
+    expect(rows[first + 1]).toContain('old')
+    expect(rows[second + 1]).toContain('before')
+    expect(rows[first]).toStartWith('  @@ -8,1 +8,1 @@ ')
+    expect(rows[second]).toStartWith('  @@ -30,1 +30,1 @@ ')
+    expect(styled[first]?.bg).toBe(getTheme().diffHeaderBg)
+    expect(styled[second]?.bg).toBe(getTheme().diffHeaderBg)
+  }
+})
+
+test('metadata headings never turn the real declaration into a header row', () => {
+  const patch = '@@ -1,3 +1,3 @@ fn load() {\n fn load() {\n-old();\n+new();\n }'
+  for (const width of [80, 140]) {
+    const rows = buildDiffLines(patch, width)
+    const text = blocksToLines([{ lines: rows }]).map(stripAnsi)
+    expect(text[0]).toBe('  @@ -1,3 +1,3 @@ fn load() {')
+    expect(rows[0]?.bg).toBe(getTheme().diffHeaderBg)
+    expect(text[1]).toMatch(/^1\s+fn load\(\) \{/)
+    expect(rows[1]?.bg).toBeUndefined()
+    expect(rows[1]?.spans.some(span => span.hex === getTheme().diffHeaderFg)).toBe(false)
+  }
+})
+
+test('long function headings wrap at the full card width without losing Unicode', () => {
+  const signature = `fn load_${'中文🙂'.repeat(80)}() {`
+  const patch = `@@ -8 +8 @@ ${signature}\n-old\n+new`
+  for (const width of [40, 80, 140]) {
+    const rows = blocksToLines([{ lines: buildDiffLines(patch, width) }]).map(stripAnsi)
+    const codeIndex = rows.findIndex(row => row.includes('old'))
+    expect(rows.slice(0, codeIndex).join('').trim()).toBe(`@@ -8,1 +8,1 @@ ${signature}`)
+    expect(buildDiffLines(patch, width).slice(0, codeIndex).every(row => row.bg === getTheme().diffHeaderBg)).toBe(true)
+    expect(rows.every(row => stringWidth(row) <= width)).toBe(true)
+  }
+})
+
+test('completed edit cards retain the engine function heading', () => {
+  const patch = '@@ -8 +8 @@ fn load() {\n-old\n+new'
+  for (const width of [80, 150]) {
+    const card = buildToolCard({ id: 'edit', name: 'edit', args: { path: 'a.rs' }, status: 'done', details: { diff: patch }, result: 'updated' })
+    const blocks = buildOutputBlocks(card, { columns: width })
+    const rows = blocksToLines(blocks).map(stripAnsi)
+    expect(rows.filter(row => row.includes('fn load() {'))).toHaveLength(1)
+    const header = blocks.flatMap(block => block.lines).find(row =>
+      stripAnsi(row.spans.map(span => span.text).join('')).includes('@@ -8,1 +8,1 @@'))!
+    expect(header.bg).toBe(getTheme().diffHeaderBg)
+    expect(stringWidth(blocksToLines([{ lines: [header] }]).map(stripAnsi)[0]!)).toBe(width)
+  }
+})
+
 test('split handles unequal changes and independent line numbers', () => {
   const lines = render('a\nb\nc\n', 'a\nx\ny\nc\n', 140)
   const context = lines.find(text => /3\s+c/.test(text))

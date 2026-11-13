@@ -6,8 +6,9 @@
 
 use std::path::Path;
 
-use tree_sitter::Language;
 use tree_sitter::Parser;
+
+use crate::tools::syntax::language_for_ext;
 
 /// A searchable unit of code with its location and tokenized content.
 #[derive(Debug, Clone)]
@@ -30,24 +31,6 @@ const MAX_CHUNK_LINES: usize = 60;
 const FALLBACK_WINDOW: usize = 30;
 /// Skip files larger than this; generated/minified blobs add cost, not signal.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
-
-/// Resolve a tree-sitter language for a file extension. `None` = no grammar.
-fn language_for_ext(ext: &str) -> Option<Language> {
-    let lang = match ext {
-        "rs" => tree_sitter_rust::LANGUAGE.into(),
-        "py" | "pyi" => tree_sitter_python::LANGUAGE.into(),
-        "js" | "jsx" | "mjs" | "cjs" => tree_sitter_javascript::LANGUAGE.into(),
-        "ts" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        "tsx" => tree_sitter_typescript::LANGUAGE_TSX.into(),
-        "go" => tree_sitter_go::LANGUAGE.into(),
-        "java" => tree_sitter_java::LANGUAGE.into(),
-        "c" | "h" => tree_sitter_c::LANGUAGE.into(),
-        "cc" | "cpp" | "cxx" | "hpp" | "hh" => tree_sitter_cpp::LANGUAGE.into(),
-        "rb" => tree_sitter_ruby::LANGUAGE.into(),
-        _ => return None,
-    };
-    Some(lang)
-}
 
 /// Node kinds that represent a meaningful, named definition chunk.
 fn is_chunk_node(kind: &str) -> bool {

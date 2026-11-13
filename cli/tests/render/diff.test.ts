@@ -1,6 +1,8 @@
 import { beforeAll, describe, test, expect } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { applyPatch, parsePatch } from 'diff'
 import chalk from 'chalk'
-import { formatDiff, colorizeUnifiedDiffRows } from '../../src/render/diff.js'
+import { formatDiff, colorizeUnifiedDiffRows, parseDiffHunks } from '../../src/render/diff.js'
 import { getTheme } from '../../src/ui/theme/index.js'
 import stripAnsi from 'strip-ansi'
 
@@ -52,6 +54,39 @@ describe('formatDiff', () => {
     const result = formatDiff(oldLines, newLines)
     const plain = stripAnsi(result.text)
     expect(plain).toContain('…')
+  })
+})
+
+describe('hunk sections', () => {
+  test('engine fixture is readable by the CLI and strict standard patch readers', () => {
+    const patch = readFileSync(new URL('../../../src/engine/tests/fixtures/diff/function.patch', import.meta.url), 'utf8')
+    expect(parseDiffHunks(patch)[0]?.section).toBe('fn load() {')
+    expect(parsePatch(patch, { strict: true })).toHaveLength(1)
+    expect(applyPatch('fn load() {\n    old();\n}\n', patch)).toBe('fn load() {\n    new();\n}\n')
+  })
+
+  test('reads legacy bare headers and GitHub-style function headings', () => {
+    const hunks = parseDiffHunks('@@ -1 +1 @@\n-old\n+new\n@@ -20,2 +20,2 @@ async fn load() -> Result<()> {\n ctx\n-old\n+new')
+    expect(hunks[0]).toEqual({ oldStart: 1, newStart: 1, oldLines: 1, newLines: 1, lines: ['-old', '+new'] })
+    expect(hunks[1]?.section).toBe('async fn load() -> Result<()> {')
+    expect(hunks[1]?.lines).toEqual([' ctx', '-old', '+new'])
+  })
+
+  test('renders the heading once, before the code, without counting it as code', () => {
+    const rows = colorizeUnifiedDiffRows('@@ -8 +8 @@ fn load() {\n-old\n+new')
+    expect(rows.map(row => row.kind)).toEqual(['header', 'remove', 'add'])
+    expect(stripAnsi(rows[0]!.text)).toBe('  @@ -8,1 +8,1 @@ fn load() {')
+    expect(rows[0]!.text).toBe(chalk.hex(getTheme().diffHeaderFg)('  @@ -8,1 +8,1 @@ fn load() {'))
+    expect(rows[0]!.gutter).toBeUndefined()
+    expect(rows[0]!.code).toBeUndefined()
+    expect(stripAnsi(rows[1]!.text)).toMatch(/^8 -old$/)
+  })
+
+  test('keeps partial streaming hunks and removes terminal controls from headings', () => {
+    const patch = '@@ -8,2 +8,2 @@ \x1b[31mfn load() {\x1b[0m\x07\r\n-old'
+    expect(parseDiffHunks(patch)[0]?.section).toBe('fn load() {')
+    expect(colorizeUnifiedDiffRows(patch).map(row => row.kind)).toEqual(['header', 'remove'])
+    expect(parseDiffHunks('@@ -1 +1 @@   \n-old')[0]?.section).toBeUndefined()
   })
 })
 

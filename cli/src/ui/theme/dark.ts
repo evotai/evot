@@ -73,6 +73,8 @@ export function darkTheme(): Theme {
     diffRemovedWordBg: '#7a2b3a',
     diffGutterFg: '#6f7488',
     diffContextFg: '#8b90a4',
+    diffHeaderFg: '#9ecbff',
+    diffHeaderBg: '#25364b',
 
     text: plain,
     // Hue, not just weight: terminals whose font lacks a bold face drop SGR 1,
