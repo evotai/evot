@@ -41,6 +41,7 @@ export interface PromptVMInput extends PromptFooterVM {
   suggestionExplicit?: boolean
   suggestionFrame?: number
   guidance?: ComposerGuidance
+  inputHint?: string
   rows: number
   placeholder: boolean
   exitHint: boolean
@@ -154,6 +155,7 @@ export function buildPromptBlocks(input: PromptVMInput, options: PromptLayoutOpt
   const modeLabels = promptModeLabels(input)
   const frame = createFrame(columns, { rows })
 
+  const operationHint = input.inputHint ?? (visibleSuggestion(input) ? composerGuidance(input).operationHint : undefined)
   const visual = buildInputLines(input, frame.contentWidth, columns)
   const maxInputRows = Math.max(MAX_INPUT_ROWS_FLOOR, Math.floor(rows * MAX_INPUT_ROWS_RATIO))
   const start = Math.max(0, Math.min(visual.cursorIndex - maxInputRows + 1, visual.lines.length - maxInputRows))
@@ -168,7 +170,7 @@ export function buildPromptBlocks(input: PromptVMInput, options: PromptLayoutOpt
     - (frame.framed ? 1 : 0)
     - (input.exitHint ? 1 : 0)
     - (input.backgroundProcessCount > 0 ? 1 : 0)
-    - (visibleSuggestion(input) && composerGuidance(input).operationHint ? 1 : 0)
+    - (operationHint ? 1 : 0)
     - 2) // repository footer + trailing blank; background status is budgeted above
   const completionLines = buildCompletionLines(
     input.completion,
@@ -215,8 +217,8 @@ export function buildPromptBlocks(input: PromptVMInput, options: PromptLayoutOpt
   if (input.exitHint) blocks.push(block([line(confirmationHint(truncateToWidth('  Press Ctrl+C again to exit', columns), true))]))
   // The border label carries the mode whenever it is drawn, so the footer only
   // repeats it on terminals too short for a border.
-  if (visibleSuggestion(input) && composerGuidance(input).operationHint) {
-    blocks.push(block([line(dim(truncateToWidth(`  ${composerGuidance(input).operationHint}`, columns)))]))
+  if (operationHint) {
+    blocks.push(block([line(dim(truncateToWidth(`  ${operationHint}`, columns)))]))
   }
   blocks.push(...buildPromptFooterBlocks(input, { modeShownAbove: frame.ruled }))
   return blocks

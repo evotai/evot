@@ -7,10 +7,11 @@ import type { PendingImages } from '../app/composer/pending-images.js'
 import type { RunInteraction, RunInteractionInput } from '../app/run/run-interaction.js'
 import type { ResumeSessionCache } from '../app/session/resume-cache.js'
 import { activeWork } from '../app/suggestion/activities.js'
-import type { CommandInventory } from '../app/suggestion/arguments.js'
+import type { CommandInventory } from '../app/composer/command-arguments.js'
 import type { WorkflowRuntime } from '../app/suggestion/context.js'
 import type { PromptSuggestion } from '../app/suggestion/index.js'
 import type { ReplState } from './state.js'
+import { currentQueueTarget, visiblePendingEntries } from '../app/queue/pending-queue.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface SuggestDeps {
@@ -39,13 +40,13 @@ export function createSuggestController(st: ReplState, deps: SuggestDeps): Sugge
     const interaction = deps.runInteraction.snapshot(deps.runInteractionInput())
     return resolveComposerGuidance({ interaction,
       mode: st.logMode ? 'log' : 'normal',
-      queuedCount: st.queuedUserMessages.length + st.queuedCompactionSubmissions.length })
+      queuedCount: visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length })
   }
   // Explicit Tab can wait for referenced image bytes without blocking input.
   // A submit already parked on an image load still owns the composer.
   function suggestionInputReady(): boolean {
     return st.suggestionsReady && !st.destroyed && st.overlay.kind === 'none' && !st.commandWindowPreview
-      && !st.editor.completion && !deps.pendingImages.awaiting
+      && !st.editor.completion && !deps.pendingImages.awaiting && !st.pendingEnqueue && !st.queueEditState
   }
   function automaticSuggestionEligible(): boolean {
     // Run interaction distinguishes active work from a blocking tool wait;
@@ -77,7 +78,7 @@ export function createSuggestController(st: ReplState, deps: SuggestDeps): Sugge
         : ['retrying', 'quota_waiting', 'outage_waiting'].includes(st.spinnerState.phase) ? 'retrying' : 'running')
         : loop?.active || background.length > 0 ? 'waiting' : 'idle',
       mode: st.logMode ? 'log' : 'normal',
-      queued: st.queuedUserMessages.length + st.queuedCompactionSubmissions.length,
+      queued: visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length,
       background: background.length,
       activities: activeWork(background, loop, deps.loopSession.runInFlight),
     }

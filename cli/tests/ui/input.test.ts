@@ -83,6 +83,16 @@ describe('parseInput', () => {
   })
 
   describe('arrow keys', () => {
+    test('Shift+Up is distinct in CSI, SS3 and Kitty protocols', () => {
+      for (const sequence of ['\x1b[1;2A', '\x1bO1;2A', '\x1b[57352;2u', '\x1b[1;66A']) {
+        expect(parse(sequence)).toEqual([{ type: 'shift-up' }])
+      }
+      for (const sequence of ['\x1b[1;4A', '\x1b[1;6A', '\x1b[57352;6u']) {
+        expect(parse(sequence)).toEqual([{ type: 'up' }])
+      }
+      expect(parse('\x1b[1;2:3A')).toEqual([])
+    })
+
     test('up', () => {
       expect(parse('\x1b[A')).toEqual([{ type: 'up' }])
     })

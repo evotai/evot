@@ -253,6 +253,8 @@ pub struct Config {
     pub channels: ChannelsConfig,
     pub sandbox: SandboxConfig,
     pub skills_dirs: Vec<PathBuf>,
+    /// Optional executable for the CLI's best-effort lifecycle event bridge.
+    pub session_hook: Option<String>,
     /// The env file path actually used during config loading.
     pub env_file_path: PathBuf,
     /// Revision captured during load/save; not part of any published format.
@@ -297,6 +299,7 @@ impl Config {
             channels: ChannelsConfig::default(),
             sandbox: SandboxConfig::default(),
             skills_dirs: Vec::new(),
+            session_hook: None,
             env_file_path: PathBuf::new(),
             env_revision: None,
             cloud_thinking_levels: HashMap::new(),

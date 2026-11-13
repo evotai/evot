@@ -2,10 +2,6 @@ import { TermRenderer } from './screen/renderer.js'
 import { RenderDiagnostics } from './screen/render-diagnostics.js'
 import { watchOutputFile } from './app/run/output-watch.js'
 import { readOutputTail } from './app/run/output-tail.js'
-import {
-  enableRawMode,
-  enableEnhancedKeyboard,
-} from '../ui/keys.js'
 import { TerminalInputBuffer } from './input/buffer.js'
 import { createSpinnerState, setSpinnerPhase } from './widgets/spinner.js'
 import { forkNotice } from './app/session/fork-nav.js'
@@ -20,6 +16,8 @@ import { assistantToolCalls } from './app/run/assistant-content.js'
 import { HistoryManager } from '../session/history.js'
 import { ScreenLog } from './diagnostics/screen-log.js'
 import { SessionHook } from '../session/hook.js'
+import { getSkillEntries } from '../commands/skill/scan.js'
+import { promptInput } from '../commands/skill/invocation.js'
 import { RendererTrace } from './diagnostics/renderer-trace.js'
 import { BannerCache } from './widgets/banner-cache.js'
 import { createAdSlotState, triggerAdSlot } from './viewmodel/ad-slot.js'
@@ -36,7 +34,7 @@ import {
   type EditorState,
 } from './input/editor.js'
 import { UndoStack } from './input/undo-stack.js'
-import { commandIdentity, validCommandInput } from './app/suggestion/arguments.js'
+import { commandIdentity, validCommandInput } from './app/composer/command-arguments.js'
 import { SuggestionContext } from './app/suggestion/context.js'
 import { suggestionImages } from './app/suggestion/images.js'
 import { prepareSuggestion } from './app/suggestion/request.js'
@@ -63,6 +61,8 @@ import { ManualCompaction } from './app/run/manual-compaction.js'
 import { PendingImages } from './app/composer/pending-images.js'
 import { createPasteHandlers, createPasteStore } from './app/composer/paste-input.js'
 import { createQueueEdit } from './app/queue/queue-edit.js'
+import { createQueueLifecycle } from './app/queue/queue-lifecycle.js'
+import { PendingQueue, createPendingQueueState, currentQueueTarget } from './app/queue/pending-queue.js'
 import { BackgroundTerminals } from './app/background/background-terminals.js'
 import { awaitedTaskIds } from './app/background/background-panel.js'
 import { FileCompletion } from './app/composer/file-completion-controller.js'
@@ -145,6 +145,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get computeSession() { return computeSession },
     get flushDeferredCloudUpdates() { return cloudCtl.flushDeferredCloudUpdates },
     get queueEdit() { return queueEdit },
+    get queueLifecycle() { return queueLifecycle },
+    get pendingQueue() { return pendingQueue },
     get renderer() { return renderer },
     get resumeCache() { return resumeCache },
     get resumeItems() { return resumeItems },
@@ -228,6 +230,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get suggestionInput() { return suggestionInput },
       get keys() { return keys },
     get terminalInput() { return terminalInput },
+    get terminal() { return terminal },
   }
   const commandWindow = createCommandWindowController(st, host)
   const scrollback = createScrollbackController(st, host)
@@ -250,7 +253,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const { version } = await import('../native/index.js')
   const appVersion = version()
   const rendererTrace = new RendererTrace()
-  const sessionHook = new SessionHook({ cwd: agent.cwd })
+  const sessionHook = new SessionHook({ cwd: agent.cwd, command: agent.configInfo().sessionHook })
   sessionHook.startProcess(agent.cwd)
   st.historyRowCount = 0
   // Created before the renderer so render diagnostics have a sink from the very
@@ -298,7 +301,54 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   st.runTurnCount = 0
   const runThinking = new RunThinking()
   const manualCompaction = new ManualCompaction()
-  st.queuedCompactionSubmissions = []
+  st.queueStartupTarget = { startup: 0 }
+  st.pendingQueue = createPendingQueueState()
+  const pendingQueue = new PendingQueue(st.pendingQueue)
+  st.queueEditState = null
+  st.draftEpoch = 0
+  st.draftImageEpoch = 0
+  st.pendingEnqueue = null
+  st.queueDispatchId = null
+  const queueLifecycle = createQueueLifecycle({
+    queue: pendingQueue,
+    getTarget: () => currentQueueTarget(st),
+    getStream: () => st.streamRef,
+    preparing: () => st.pendingEnqueue !== null || pendingImages.awaiting,
+    editing: () => st.queueEditState !== null,
+    busy: () => st.isLoading || manualCompaction.active || st.destroyed,
+    getDispatch: () => st.queueDispatchId,
+    setDispatch: id => { st.queueDispatchId = id },
+    consumed: entries => {
+      for (const entry of entries) scrollback.commitUserMessage(entry.text)
+      const edit = st.queueEditState
+      if (edit && entries.some(entry => entry.id === edit.entry.id)) edit.consumed = true
+      renderer.requestRender()
+    },
+    notify: message => { scrollback.commitSystem('sys-queue', `  ${message}`); renderer.requestRender() },
+    runQueued: async entry => {
+      if (typeof entry.target === 'object' && entry.target !== null && !('startup' in entry.target)) {
+        await slashCtl.runLogQuery(entry.target, entry.expandedText, entry.contentJson)
+      } else {
+        const extension = taskSession.followUpExtension(st.sessionId) ?? computeSession.followUpExtension(st.sessionId)
+        await runCtl.runQuery(entry.expandedText, entry.contentJson, undefined, extension)
+      }
+    },
+    requestRender: () => renderer.requestRender(),
+  })
+  const queueEdit = createQueueEdit({
+    queue: pendingQueue, lifecycle: queueLifecycle,
+    getTarget: () => currentQueueTarget(st),
+    getEditing: () => st.queueEditState,
+    setEditing: edit => { st.queueEditState = edit },
+    snapshot: composer.snapshot,
+    restore: composer.restore,
+    preparing: () => st.pendingEnqueue !== null || pendingImages.awaiting,
+    getEditor: () => st.editor,
+    expand: text => promptInput(text, st.skillEntries),
+    setOverlay: next => { st.overlay = next },
+    commitSystem: scrollback.commitSystem,
+    requestRender: () => renderer.requestRender(),
+  })
   st.spinnerTimer = null
   const terminalTitle = new TerminalTitle(agent.cwd, () => ownedDashboardPort(st.serverState))
   const setTerminalTitle = terminalTitle.set.bind(terminalTitle)
@@ -309,8 +359,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       if (userLine) scrollback.commitUserMessage(userLine)
       void runCtl.runQuery(prompt, undefined, undefined, extension)
     },
-    canWake: () => !st.isLoading && !st.destroyed
-      && st.queuedUserMessages.length + st.queuedCompactionSubmissions.length === 0
+    canWake: () => !st.isLoading && !st.destroyed && !st.pendingEnqueue
+      && pendingQueue.visible(currentQueueTarget(st)).length === 0
       && st.overlay.kind !== 'ask-user',
     notify: text => scrollback.commitSystem('sys-loop', `  ${text}`),
     requestRender: () => renderer.requestRender(),
@@ -519,9 +569,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     changed: () => renderer.requestRender(),
     dismissed: () => runInteraction.clear(),
     inventory: suggest.suggestionInventory,
+    skills: () => st.skillEntries,
     showArguments: completion => { st.editor = showCompletions(st.editor, completion.items, completion.start, completion.end, completion.note) },
   })
   resources.add(() => { suggestions.cancel(); suggestionTicker.dispose() })
+  st.terminalSuspended = false
   st.disableRaw = null
   st.enhancedKeyboard = null
   st.inputBuffer = null
@@ -530,6 +582,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   st.lastLineage = []
   st.nextBackgroundLineId = 1
   st.logMode = null
+  st.logDiscardTarget = null
   st.exitHint = false
   st.exitHintTimer = null
   st.overlay = { kind: 'none' }
@@ -556,7 +609,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   st.pendingTaskModel = null
 
   st.streamMachine = null
-  st.queuedUserMessages = []
+  st.skillEntries = getSkillEntries(agent.skillsDirs())
   st.expanded = false
   // Rendered-history cache — see HistoryRenderCache. Committed history is
   // append-only (or fully cleared), never mutated in place, so the flattened
@@ -783,7 +836,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // A run drains the notification queue itself between turns, so waking is
     // only for the idle case.
     runInFlight: () => st.isLoading,
-    queuedMessages: () => st.queuedUserMessages.length + st.queuedCompactionSubmissions.length,
+    queuedMessages: () => pendingQueue.visible(currentQueueTarget(st)).length,
     // An ask overlay is the agent waiting on the user: seizing the turn would
     // answer a question they have not answered yet.
     overlayBlocking: () => st.overlay.kind === 'ask-user',
@@ -814,24 +867,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     getEditor: () => st.editor,
     mutateEditor: composer.mutateEditor,
     isDestroyed: () => st.destroyed,
+    ownership: () => st.draftImageEpoch,
+    notify: message => scrollback.commitSystem('sys-image-error', `  ${message}`),
     requestRender: () => renderer.requestRender(),
     getDisplayText: composer.getDisplayText,
     getExpandedText: composer.getExpandedText,
-  })
-
-  const queueEdit = createQueueEdit({
-    getStream: () => st.streamRef,
-    getQueued: () => st.queuedUserMessages,
-    setQueued: messages => { st.queuedUserMessages = messages },
-    getEditor: () => st.editor,
-    setEditor: next => { st.editor = next },
-    getOverlay: () => st.overlay,
-    setOverlay: next => { st.overlay = next },
-    commitSystem: scrollback.commitSystem,
-    commitLines: scrollback.commitLines,
-    commitUser: scrollback.commitUserMessage,
-    clearAll: composer.clearAll,
-    requestRender: () => renderer.requestRender(),
   })
 
   st.inflightSync = null
@@ -896,20 +936,12 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const modelAnnouncer = new ModelAnnouncer()
   modelAnnouncer.seed(cloudModels().map(m => m.model))
 
-  st.disableRaw = enableRawMode(process.stdin)
   const terminalInput = new TerminalInputBuffer({
     onEmptyPaste: tryPasteImage,
     onControl: terminal.handleTerminalControl,
   })
   st.inputBuffer = terminalInput
-  st.onInputData = terminal.inputHandler
-  process.stdin.on('data', terminal.inputHandler)
-  st.enhancedKeyboard = enableEnhancedKeyboard(process.stdout)
-  // Query terminal theme (OSC 11 + color-scheme DSR) and subscribe to mode 2031
-  // palette-change notifications. Unsupported terminals simply never reply.
-  process.stdout.write('\x1b]11;?\x07\x1b[?996n\x1b[?2031h')
-
-  process.stdout.write('\x1b[?2004h')
+  terminal.start()
   st.suggestionsReady = true
   if (st.startupSuggestion) { const trigger = st.startupSuggestion; st.startupSuggestion = null; suggest.requestProductSuggestion(trigger) }
   renderer.requestRender()
@@ -919,7 +951,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     st.destroyed = true
     taskSession.dispose()
     computeSession.dispose()
-    st.queuedCompactionSubmissions = []
+    st.pendingEnqueue = null
+    pendingQueue.cancelReservation()
     asks.resolvePendingTaskModel()
     idle.unfreezeTerminalTitle()
     manualCompaction.abort()
@@ -937,23 +970,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     sessionCtl.invalidateExplicitResumeSelector()
     commandWindow.cancelSearchTextWarm()
     committer.flushReveals()
-    if (st.escapeFlushTimer) {
-      clearTimeout(st.escapeFlushTimer)
-      st.escapeFlushTimer = undefined
-    }
-    if (st.onInputData) {
-      process.stdin.off('data', st.onInputData)
-      st.onInputData = null
-    }
-    st.inputBuffer?.discard()
+    terminal.stop()
     st.inputBuffer = null
-    process.stdout.write('\x1b[?2004l')
-    process.stdout.write('\x1b[?2031l')
-    st.enhancedKeyboard?.dispose()
-    st.enhancedKeyboard = null
     setTerminalTitle()
-    st.disableRaw?.()
-    st.disableRaw = null
     renderer.destroy()
     rendererTrace.close()
     // Every exit path ends in fastExit, which skips Rust Drop impls and async
@@ -961,6 +980,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     // would survive as orphans unless signalled synchronously right here.
     // The controller absorbs its own failures: cleanup must never throw.
     backgroundCleanup.dispose()
+    const pendingCount = st.pendingQueue.entries.length
+    if (pendingCount > 0) process.stderr.write(`\n  Discarding ${pendingCount} pending prompt${pendingCount === 1 ? '' : 's'}; the queue is not persisted.\n`)
   }
 
   function restartAfterCleanup(): void {

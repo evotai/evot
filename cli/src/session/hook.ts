@@ -1,9 +1,10 @@
 /**
  * Generic external session-hook bridge.
  *
- * evot emits versioned NDJSON lifecycle events to an executable supplied by
- * EVOT_SESSION_HOOK. The executable owns integration-specific behavior; evot
- * deliberately does not know which service consumes these events.
+ * evot emits versioned NDJSON lifecycle events to the executable configured as
+ * `session_hook` (evot.toml) or EVOT_SESSION_HOOK (env file, process env). The
+ * executable owns integration-specific behavior; evot deliberately does not
+ * know which service consumes these events.
  *
  * Two rules keep a third-party adapter from ever affecting evot:
  * - every write is best-effort; a dead or wedged adapter is dropped, not retried
@@ -46,7 +47,9 @@ interface HookProcess {
 }
 
 export interface SessionHookOptions {
-  env?: NodeJS.ProcessEnv
+  /** From `ConfigInfo.sessionHook`: config already resolved TOML < env file <
+   * process env, so this module never reads the environment itself. */
+  command?: string
   cwd?: string
   spawn?: (command: string, cwd?: string) => HookProcess
 }
@@ -110,8 +113,7 @@ export class SessionHook {
   private closing: Promise<void> | null = null
 
   constructor(options: SessionHookOptions = {}) {
-    const env = options.env ?? process.env
-    this.command = normalize(env.EVOT_SESSION_HOOK) ?? null
+    this.command = normalize(options.command) ?? null
     this.cwd = options.cwd
     this.spawn = options.spawn ?? defaultSpawn
   }

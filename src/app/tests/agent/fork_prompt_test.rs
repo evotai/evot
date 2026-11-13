@@ -66,3 +66,64 @@ async fn forked_agent_sends_evot_identity_then_its_instructions() -> TestResult 
     assert!(!system.contains("Available tools:"));
     Ok(())
 }
+
+#[tokio::test]
+async fn forked_structured_query_stays_on_its_readonly_side_session() -> TestResult {
+    use evot::agent::tools::ToolMode;
+    use evot::agent::QueryRequest;
+    use evot_engine::Content;
+    use evot_engine::ImageSource;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(SSE, "text/event-stream"))
+        .expect(2)
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir()?;
+    let mut config = Config::new(dir.path().to_path_buf());
+    config.providers.insert("test".into(), ProviderProfile {
+        protocol: Protocol::OpenAi,
+        api_key: "fixture".into(),
+        base_url: server.uri(),
+        models: vec!["fixture".into()],
+        compat_caps: Default::default(),
+        route_capabilities: Default::default(),
+        thinking_level: None,
+        context_window: None,
+        max_tokens: None,
+        supports_image: Some(true),
+    });
+    config.llm.provider = "test".into();
+    let agent = Agent::new_ephemeral(&config, dir.path().to_string_lossy())?;
+    let mut fork = agent.fork(ForkRequest {
+        system_prompt: "Read these logs only.".into(),
+    })?;
+    let mut initial = fork.query("log initial").await?;
+    let fork_session = initial.session_id.clone();
+    while initial.next().await.is_some() {}
+    let mut request = QueryRequest::with_input(vec![
+        Content::Text { text: "log follow-up".into() },
+        Content::Image { mime_type: "image/png".into(), source: ImageSource::Base64 {
+            data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==".into(),
+        } },
+    ]).session_id(Some("wrong-target".into())).mode(ToolMode::Interactive);
+    request
+        .extra_tools
+        .push(std::sync::Arc::new(evot_engine::tools::WriteFileTool::new()));
+    let mut follow_up = fork.query_input(request).await?;
+    assert_eq!(follow_up.session_id, fork_session);
+    while follow_up.next().await.is_some() {}
+    let requests = server.received_requests().await.ok_or("no requests")?;
+    let body: serde_json::Value = serde_json::from_slice(&requests[1].body)?;
+    let serialized = body.to_string();
+    assert!(serialized.contains("log initial"));
+    assert!(serialized.contains("log follow-up"));
+    assert!(serialized.contains("data:image/png;base64,"));
+    let tools = body["tools"].as_array().ok_or("missing readonly tools")?;
+    assert!(!tools.iter().any(|tool| matches!(
+        tool["function"]["name"].as_str(),
+        Some("write" | "edit" | "ask_user")
+    )));
+    Ok(())
+}

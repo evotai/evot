@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import { decodeConfigInfo } from '../../src/native/contracts/config-info.js'
 import legacy from '../fixtures/contracts/config-info-legacy.json'
 import current from '../fixtures/contracts/config-info-current.json'
+import hookFixture from '../fixtures/contracts/config-info-hook.json'
 
 // Frozen shape from native/index.ts at c922f341. Independent of the production
 // decoder so a future field removal/type change cannot update both unnoticed.
 function legacyReader(json: string): void {
   const value = JSON.parse(json)
   // Top-level additive-optional fields a c922f341 reader simply ignored.
-  const additive = ['judge', 'defaultModel']
+  const additive = ['judge', 'defaultModel', 'sessionHook']
   expect(Object.keys(value).filter(key => !additive.includes(key)).sort()).toEqual([
     'availableModels', 'baseUrl', 'envPath', 'hasApiKey', 'protocol', 'provider', 'thinkingLevel',
   ])
@@ -46,6 +47,12 @@ function legacyReader(json: string): void {
 }
 
 describe('ConfigInfo boundary', () => {
+  test('session hook is optional, validated, and backward-readable', () => {
+    expect(decodeConfigInfo(JSON.stringify(legacy)).sessionHook).toBeUndefined()
+    expect(decodeConfigInfo(JSON.stringify(hookFixture))).toEqual(hookFixture)
+    legacyReader(JSON.stringify(hookFixture))
+    expect(() => decodeConfigInfo(JSON.stringify({ ...legacy, sessionHook: 7 }))).toThrow('$.sessionHook')
+  })
   test('legacy optional metadata remains absent, not fabricated', () => {
     const decoded = decodeConfigInfo(JSON.stringify(legacy))
     expect(decoded).toEqual(legacy)

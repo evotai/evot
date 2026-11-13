@@ -10,7 +10,6 @@ import type { SessionHook } from '../../session/hook.js'
 import type { ShareNotices } from '../../session/share-notices.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
 import type { PrivacyFeed } from '../app/privacy-feed.js'
-import type { createQueueEdit } from '../app/queue/queue-edit.js'
 import type { ManualCompaction } from '../app/run/manual-compaction.js'
 import type { RunInteraction, RunInteractionInput } from '../app/run/run-interaction.js'
 import type { RunOwnership } from '../app/run/run-ownership.js'
@@ -49,7 +48,7 @@ export interface RunDeps {
   readonly loopSession: LoopSession
   readonly manualCompaction: ManualCompaction
   readonly privacyFeed: PrivacyFeed
-  readonly queueEdit: ReturnType<typeof createQueueEdit>
+  readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
   readonly renderer: TermRenderer
   readonly rendererTrace: RendererTrace
   readonly runInteraction: RunInteraction
@@ -153,6 +152,13 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     hostToolExtension?: HostToolExtension,
   ) {
     if (deps.cloudCtl.queryBlockedByCloudLogin()) return
+    if (st.pendingQueue.blocked) {
+      prebuiltStream?.abort()
+      deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before starting work.')
+      return
+    }
+    const startupTarget = st.sessionId ?? st.queueStartupTarget
+    const queueChain = deps.queueLifecycle.begin(startupTarget)
     // Only a turn the loop itself launched is a loop run. A message the user
     // types while the loop is parked runs as an ordinary turn: the wakeup
     // timer keeps counting and the loop's reschedule contract does not apply.
@@ -176,6 +182,8 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.renderer.requestRender()
 
     let completed = false
+    let terminalError = false
+    let finished = false
     try {
       const stream = prebuiltStream
         ?? await deps.agent.query(text, st.sessionId ?? undefined, 'interactive', contentJson, hostToolExtension?.specsJson ?? HOST_TOOL_SPECS_JSON)
@@ -185,6 +193,8 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       }
       st.streamRef = stream
       st.sessionId = stream.sessionId ?? st.sessionId
+      deps.queueLifecycle.started(stream, st.sessionId ?? undefined)
+      if (st.pendingEnqueue?.target === startupTarget && st.pendingEnqueue.chain === queueChain) st.pendingEnqueue.target = st.sessionId
       if (st.sessionId) {
         deps.taskSession.bindFlowSession(st.sessionId, hostToolExtension)
         deps.computeSession.bindFlowSession(st.sessionId, hostToolExtension)
@@ -225,8 +235,10 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
           deps.sessionHook.startSession(event.session_id, deps.agent.cwd)
           deps.sessionHook.runStarted(event.run_id)
         } else if (event.kind === 'run_finished') {
+          finished = true
           deps.sessionHook.runFinished(event.run_id)
         } else if (event.kind === 'error') {
+          terminalError = true
           deps.sessionHook.runFailed(event.run_id, String(event.payload?.message ?? ''))
         }
 
@@ -274,7 +286,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         // queued prompts at this boundary.
         if (event.kind === 'turn_started') {
           st.runTurnCount++
-          deps.queueEdit.reconcileQueuedUserMessages()
+          deps.queueLifecycle.reconcile()
         }
 
         // writeLines are log-only: LLM/COMPACT/SPILL stats that don't render in
@@ -298,9 +310,8 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       }
       // Safety net: commit only prompts the engine actually consumed. A prompt
       // queued during the final poll can still be pending when the run settles.
-      deps.queueEdit.reconcileQueuedUserMessages()
-      deps.queueEdit.restoreQueuedUserMessagesToEditor()
-      completed = true
+      deps.queueLifecycle.reconcile()
+      completed = finished && !terminalError
     } catch (err) {
       // An interrupted run is expected to reject after its ownership has been
       // revoked. Its interruption notice was already committed synchronously;
@@ -315,14 +326,14 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       deps.suggestionContext.fail()
       deps.scrollback.commitSystem('sys-err', message, 'error')
       deps.sessionHook.runFailed(undefined, message)
-      deps.queueEdit.reconcileQueuedUserMessages()
-      deps.queueEdit.restoreQueuedUserMessagesToEditor()
+      deps.queueLifecycle.reconcile()
     } finally {
       if (ownsRun(generation)) {
         // Safety net for a run that ended without run_finished/error (e.g. the
         // stream just stopped). No-op when the run already settled above.
         deps.sessionHook.settleRun()
         deps.idle.unfreezeTerminalTitle()
+        deps.queueLifecycle.settled(st.streamRef, queueChain, completed)
         st.streamRef = null
         st.isLoading = false
         st.streamMachine = null
@@ -345,6 +356,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         if (st.sessionId) deps.cloudSessions.schedulePush(st.sessionId)
         triggerAdSlot(st.adSlot, Date.now())
         deps.renderer.requestRender()
+        deps.queueLifecycle.dispatchNext()
       }
     }
 
@@ -362,11 +374,14 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
    *  stream, once it arrives, from rebinding the old session and writing its
    *  snapshot of the old state (title, share badge) back over the new one. */
   function abandonRun() {
+    st.pendingEnqueue = null
     if (!st.isLoading) return
     revokeRun()
+    deps.manualCompaction.abort()
     const interruptedStream = st.streamRef
-    st.streamRef = null
     interruptedStream?.abort()
+    deps.queueLifecycle.pause(interruptedStream)
+    st.streamRef = null
     st.isLoading = false
     flushStreamContent()
     st.streamMachine = null
@@ -401,16 +416,14 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.asks.resolvePendingAsk()
     deps.asks.resolvePendingTaskModel()
     const interruptedStream = st.streamRef
-    st.streamRef = null
     interruptedStream?.abort()
+    deps.queueLifecycle.pause(interruptedStream)
+    st.streamRef = null
     st.isLoading = false
     flushStreamContent()
     st.streamMachine = null
     stopSpinner()
-    // Mid-stream queue was steered but the run is aborted — put it back in the
-    // editor so the user can edit and press Enter, instead of committing it as
-    // history under the cancellation notice.
-    deps.queueEdit.restoreQueuedUserMessagesToEditor()
+    // Unconsumed work stays paused and individually recoverable with Shift+Up.
     // The transcript has no record of a user-side interrupt, so this line is
     // captured as a client notice and survives into a shared session.
     deps.committer.commitNotice([{ id, kind: 'cancelled', text }])

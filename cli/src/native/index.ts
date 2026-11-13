@@ -487,8 +487,8 @@ export class Agent {
 export class ForkedAgent {
   constructor(private readonly raw: NativeForkedAgent) {}
 
-  async query(prompt: string): Promise<QueryStream> {
-    const raw = await this.raw.query(prompt)
+  async query(prompt: string, contentJson?: string): Promise<QueryStream> {
+    const raw = await this.raw.query(prompt, contentJson ?? null)
     return new QueryStream(raw)
   }
 }

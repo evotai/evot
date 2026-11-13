@@ -76,7 +76,8 @@ export function createCommandWindowController(st: ReplState, deps: CommandWindow
   }
 
   function skillSelectorState(): SelectorState {
-    return { ...createSkillSelectorState(getSkillEntries(deps.agent.skillsDirs())), listFocused: false }
+    st.skillEntries = getSkillEntries(deps.agent.skillsDirs())
+    return { ...createSkillSelectorState(st.skillEntries), listFocused: false }
   }
 
   function resumeSelectorState(items: SelectorItem[], initialQuery?: string): SelectorState {

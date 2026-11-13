@@ -1,6 +1,6 @@
 import { ALL_COMMANDS } from '../../../commands/index.js'
 import { completeSlashCommand } from '../../../commands/completion.js'
-import type { SuggestionCommand } from './types.js'
+import type { SuggestionCommand } from '../../../native/contracts/suggestion.js'
 
 /** Command names and literal subcommands use local completion. Once the
  * spelling is complete, registered argument help grounds model suggestions. */

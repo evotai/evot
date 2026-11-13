@@ -35,7 +35,7 @@ export async function runPrompt(opts: CliOptions) {
 
   const resumeSessionId = await resolveResumeSessionId(agent, opts)
 
-  const sessionHook = new SessionHook({ cwd: agent.cwd })
+  const sessionHook = new SessionHook({ cwd: agent.cwd, command: agent.configInfo().sessionHook })
   sessionHook.startProcess(agent.cwd)
   let closeReason = 'completed'
   try {

@@ -1,10 +1,85 @@
 //! Steering behavior: user messages injected mid-run and their accounting
 //! in `LlmCallStart`.
 
+use evotengine::agent::QueueMode;
 use evotengine::provider::mock::*;
+use evotengine::types::AgentContext;
 use evotengine::*;
 
+use super::common::ProgressTool;
+use crate::fixtures::agent_harness::make_config;
 use crate::fixtures::agent_harness::TestHarness;
+
+#[tokio::test]
+async fn follow_ups_wait_for_all_tools_and_enter_context_one_at_a_time() {
+    use std::sync::Arc;
+    let tool = || {
+        MockResponse::ToolCalls(vec![MockToolCall {
+            name: "progress_tool".into(),
+            arguments: serde_json::json!({}),
+        }])
+    };
+    let mut config = make_config(MockProvider::new(vec![
+        tool(),
+        tool(),
+        MockResponse::Text("A complete".into()),
+        MockResponse::Text("B complete".into()),
+        MockResponse::Text("C complete".into()),
+    ]));
+    let queue = PromptQueue::new();
+    queue.enqueue(AgentMessage::Llm(Message::user("queue-B")));
+    queue.enqueue(AgentMessage::Llm(Message::user("queue-C")));
+    config.get_follow_up_messages = Some(Box::new(move || {
+        queue.drain_messages(QueueMode::OneAtATime)
+    }));
+    let requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let recorded = requests.clone();
+    config.before_turn = Some(Arc::new(move |messages, _| {
+        recorded.lock().push(
+            messages
+                .iter()
+                .filter_map(|message| match message {
+                    AgentMessage::Llm(Message::User { content, .. }) => Some(
+                        content
+                            .iter()
+                            .filter_map(|part| match part {
+                                Content::Text { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+        );
+        true
+    }));
+    let mut context = AgentContext {
+        system_prompt: "fixture".into(),
+        messages: Vec::new(),
+        tools: vec![Box::new(ProgressTool)],
+        cwd: std::path::PathBuf::new(),
+        path_guard: Arc::new(PathGuard::open()),
+        prompt_cache_key: None,
+    };
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    agent_loop(
+        vec![AgentMessage::Llm(Message::user("queue-A"))],
+        &mut context,
+        &config,
+        tx,
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+    assert_eq!(*requests.lock(), vec![
+        vec!["queue-A"],
+        vec!["queue-A"],
+        vec!["queue-A"],
+        vec!["queue-A", "queue-B"],
+        vec!["queue-A", "queue-B", "queue-C"],
+    ]);
+}
 
 // ---------------------------------------------------------------------------
 // Steering tests

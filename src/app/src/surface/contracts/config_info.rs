@@ -21,4 +21,7 @@ pub struct ConfigInfo {
     /// the picker can mark it. Absent when the account has no pin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    /// Resolved user-level lifecycle executable. Older addons omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_hook: Option<String>,
 }

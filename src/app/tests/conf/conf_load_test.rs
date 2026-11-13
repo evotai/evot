@@ -23,6 +23,65 @@ fn restore_env_var(key: &str, value: Option<OsString>) {
 }
 
 #[test]
+fn session_hook_uses_normal_config_precedence_and_survives_settings_rewrites() -> TestResult {
+    let _guard = env_lock()
+        .lock()
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let home = tempfile::tempdir()?;
+    let root = home.path().join(".evotai");
+    std::fs::create_dir_all(&root)?;
+    let original_home = std::env::var_os("HOME");
+    let original_hook = std::env::var_os("EVOT_SESSION_HOOK");
+    std::env::set_var("HOME", home.path());
+    std::env::remove_var("EVOT_SESSION_HOOK");
+    let result = (|| -> TestResult {
+        std::fs::write(
+            root.join("evot.toml"),
+            "session_hook = '/fixture/toml-hook'\n",
+        )?;
+        std::fs::write(root.join("evot.env"), "# user preamble\nFOREIGN=value\n")?;
+        assert_eq!(
+            Config::load()?.session_hook.as_deref(),
+            Some("/fixture/toml-hook")
+        );
+        std::fs::write(
+            root.join("evot.env"),
+            "# user preamble\nFOREIGN=value\nEVOT_SESSION_HOOK=/fixture/file-hook\n",
+        )?;
+        let config = Config::load()?;
+        assert_eq!(config.session_hook.as_deref(), Some("/fixture/file-hook"));
+        evot::conf::env_writer::write_grouped(
+            &config.env_file_path,
+            &evot::conf::config_to_env_groups(&config),
+        )?;
+        assert_eq!(
+            Config::load()?.session_hook.as_deref(),
+            Some("/fixture/file-hook")
+        );
+        let written = std::fs::read_to_string(&config.env_file_path)?;
+        assert!(written
+            .starts_with("# user preamble\nFOREIGN=value\nEVOT_SESSION_HOOK=/fixture/file-hook\n"));
+        std::env::set_var("EVOT_SESSION_HOOK", "/fixture/process-hook");
+        assert_eq!(
+            Config::load()?.session_hook.as_deref(),
+            Some("/fixture/process-hook")
+        );
+        std::env::set_var("EVOT_SESSION_HOOK", "");
+        assert_eq!(Config::load()?.session_hook, None);
+        std::env::remove_var("EVOT_SESSION_HOOK");
+        std::fs::write(root.join("evot.env"), "EVOT_SESSION_HOOK=\n")?;
+        assert_eq!(Config::load()?.session_hook, None);
+        std::fs::write(root.join("evot.toml"), "")?;
+        std::fs::write(root.join("evot.env"), "")?;
+        assert_eq!(Config::load()?.session_hook, None);
+        Ok(())
+    })();
+    restore_env_var("HOME", original_home);
+    restore_env_var("EVOT_SESSION_HOOK", original_hook);
+    result
+}
+
+#[test]
 fn default_provider_is_empty() {
     let config = Config::new(std::path::PathBuf::from("/tmp"));
     assert_eq!(config.llm.provider, "");

@@ -85,10 +85,10 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'escape' }, editor: completionEditor })).toEqual(['close-completion'])
   })
 
-  test('escape restores newest queued prompt without interrupting', () => {
+  test('Shift+Up restores newest queued prompt without interrupting', () => {
     expect(kinds({
       ...base,
-      event: { type: 'escape' },
+      event: { type: 'shift-up' },
       isLoading: true,
       hasStream: true,
       hasQueuedPrompt: true,
@@ -138,8 +138,7 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'ctrl', key: 'b' } })).toEqual(['normal-key'])
   })
 
-  test('a queued prompt still outranks interrupting on escape', () => {
-    // Pulling back text the user typed is the more recent intent.
+  test('escape interrupts even with a queued prompt; dequeue has its own chord', () => {
     expect(kinds({
       ...base,
       event: { type: 'escape' },
@@ -147,7 +146,7 @@ describe('repl control', () => {
       hasStream: true,
       hasQueuedPrompt: true,
       canReclaimTurn: true,
-    })).toEqual(['restore-queued'])
+    })).toEqual(['interrupt'])
   })
 
   test('ctrl-c does not become a stop gesture while work is backgroundable', () => {

@@ -997,7 +997,100 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('Tab assists input during foreground work and keeps the cached batch after completion', async () => {
+  test('installed skill completion invokes model input immediately and from the busy FIFO', async () => {
+    const requests: string[] = []
+    const arrived = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { model: string; messages: unknown }
+      const suggestion = body.model === 'suggestion-fixture'
+      if (!suggestion) {
+        requests.push(JSON.stringify(body.messages))
+        if (requests.length === 1) { arrived.resolve(); await release.promise }
+      }
+      const content = suggestion ? '[]' : `Skill response ${requests.length}`
+      const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => {
+        seedSuggestionService(home, base)
+        const skill = join(home, 'skills', 'x-review')
+        mkdirSync(skill, { recursive: true })
+        writeFileSync(join(skill, 'SKILL.md'), '---\nname: x-review\ndescription: Readonly fixture\n---\nReview the supplied changes.\n')
+      })
+      session.write('Hold the active response\x0d')
+      await arrived.promise
+      session.write('/x-r\t')
+      await session.waitForScreen('/x-review')
+      session.write('inspect changes\t')
+      await session.waitForScreen(/\[next\].*\/x-review inspect changes/)
+      expect(requests).toHaveLength(1)
+      release.resolve()
+      await session.waitForScreen('Skill response 2')
+      expect(requests[1]).toContain('/x-review/SKILL.md')
+      expect(requests[1]).toContain('inspect changes')
+      await session.waitForScreen('Enter a coding task')
+      session.write('/x-review inspect again\x0d')
+      await session.waitForScreen('Skill response 3')
+      expect(requests[2]).toContain('/x-review/SKILL.md')
+      expect(requests[2]).toContain('inspect again')
+      expect(session.historyEntries()).toEqual(['Hold the active response', '/x-review inspect changes', '/x-review inspect again'])
+    } finally {
+      release.resolve()
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 30_000)
+
+  test('busy Tab queues FIFO; raw Shift+Up dequeues and restores the newest draft', async () => {
+    const requests: { role: string; content: unknown }[][] = []
+    const arrived = Array.from({ length: 3 }, () => Promise.withResolvers<void>())
+    const finish: (() => void)[] = []
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const body = await request.json() as { model: string; messages: { role: string; content: unknown }[] }
+      const response = (content: string) => `data: ${JSON.stringify({ id: 'queue-fixture', model: body.model,
+        choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
+      if (body.model === 'suggestion-fixture') return new Response(response('[]'), { headers: { 'content-type': 'text/event-stream' } })
+      const index = requests.length
+      requests.push(body.messages)
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(': waiting\n\n'))
+        finish[index] = () => { controller.enqueue(new TextEncoder().encode(response(`Queue response ${index + 1}`))); controller.close() }
+        arrived[index]?.resolve()
+      } }), { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      const base = `http://127.0.0.1:${server.port}/v1`
+      session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
+      session.write('Queue prompt A\x0d')
+      await arrived[0]!.promise
+      session.write('Queue prompt B\tQueue prompt C\t')
+      await session.waitForScreen(/\[next\].*Queue prompt C/)
+      expect(requests).toHaveLength(1)
+      session.write('\x1b[1;2A')
+      await session.waitForScreen(/^(?![\s\S]*\[next\][^\n]*Queue prompt C)[\s\S]*Queue prompt C/)
+      expect(requests).toHaveLength(1)
+      session.write('\t')
+      await session.waitForScreen(/\[next\].*Queue prompt C/)
+      finish[0]!(); await arrived[1]!.promise
+      expect(JSON.stringify(requests[1])).toContain('Queue prompt B')
+      expect(JSON.stringify(requests[1])).not.toContain('Queue prompt C')
+      finish[1]!(); await arrived[2]!.promise
+      expect(JSON.stringify(requests[2])).toContain('Queue prompt C')
+      finish[2]!()
+      await session.waitForScreen(/Queue response 3/)
+      expect(requests).toHaveLength(3)
+      expect(session.historyEntries()).toEqual(['Queue prompt A', 'Queue prompt B', 'Queue prompt C'])
+    } finally {
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 60_000)
+
+  test('Ctrl+N assists input during foreground work and keeps the cached batch after completion', async () => {
     let foreground = 0
     let suggestions = 0
     let finishForeground: (() => void) | undefined
@@ -1031,12 +1124,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
       session.write('Run the long task\x0d')
       await session.waitForScreen(/Guide.*works/)
-      session.write('Change the\t')
+      session.write('Change the\x0e')
       await session.waitForScreen(/suggesting…/)
       await session.waitForScreen(/target\s+1\/3 ⇥/)
-      session.write('\t')
+      session.write('\x0e')
       await session.waitForScreen(/approach\s+2\/3 ⇥/)
-      session.write('\t')
+      session.write('\x0e')
       await session.waitForScreen(/schedule\s+3\/3 ⇥/)
       expect(foreground).toBe(1)
       expect(suggestions).toBe(1)
@@ -1130,13 +1223,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session = await startEvot(false, false, false, base, home => seedSuggestionService(home, base))
       session.write('Run the task\x0d')
       await session.waitForScreen(/Guide.*works/)
-      session.write('Run old\x01' + '\x1b[C'.repeat(4) + '\t')
+      session.write('Run old\x01' + '\x1b[C'.repeat(4) + '\x0e')
       await session.waitForScreen(/new\s+1\/3.*replace rest/)
       session.write('\x1b')
       const screen = await session.waitForScreen(/Run old/)
       expect(screen).not.toMatch(/esc\s+again\s+to\s+interrupt/)
       expect(screen).not.toContain('Interrupted.')
-      session.write('\t')
+      session.write('\x0e')
       await session.waitForScreen(/new\s+1\/3.*replace rest/)
       expect(predictions).toBe(1)
       session.write('\x1b[C')

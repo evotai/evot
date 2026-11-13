@@ -26,7 +26,10 @@ export type ManagedQueuedPrompt = {
   text: string
 }
 
+export const RESUME_QUEUE_ID = 'resume-paused-queue'
+
 export type QueueManageAction =
+  | { kind: 'resume' }
   | { kind: 'edit'; entry: ManagedQueuedPrompt }
   | { kind: 'remove'; entry: ManagedQueuedPrompt }
   | { kind: 'none' }
@@ -75,8 +78,9 @@ export function formatQueueSelectorItems(entries: ManagedQueuedPrompt[]): Select
 }
 
 /** Open the queue manager selector for the given entries. */
-export function createQueueSelectorState(entries: ManagedQueuedPrompt[]): SelectorState {
+export function createQueueSelectorState(entries: ManagedQueuedPrompt[], paused = false): SelectorState {
   const items = formatQueueSelectorItems(entries)
+  if (paused) items.unshift({ id: RESUME_QUEUE_ID, label: 'Resume paused queue' })
   return {
     ...createAppSelectorState('queue', QUEUE_SELECTOR_TITLE, items),
     subtitle: entries.length === 0 ? 'No queued prompts' : `${entries.length} queued`,
@@ -89,6 +93,7 @@ export function decideQueueSelectorAction(
   event: 'enter' | 'delete',
 ): QueueManageAction {
   if (!item) return { kind: 'none' }
+  if (item.id === RESUME_QUEUE_ID) return event === 'enter' ? { kind: 'resume' } : { kind: 'none' }
   const entry = parseQueueSelectorItem(item)
   if (!entry) return { kind: 'none' }
   if (event === 'enter') return { kind: 'edit', entry }

@@ -1,9 +1,9 @@
-import { extractAtPrefix } from '../../../commands/file-completion.js'
-import { fileCompletionTarget } from '../../../commands/completion.js'
+import type { SkillEntry } from '../../../commands/skill/scan.js'
 import { editorCursorOffset, getEditorText, type EditorState } from '../../input/editor.js'
+import { tabAction } from '../composer/input-action.js'
 import type { PromptSuggestion } from './controller.js'
-import { suggestionCommand } from './command.js'
-import { argumentCompletion, type CommandInventory } from './arguments.js'
+import { suggestionCommand } from '../composer/command-usage.js'
+import type { argumentCompletion, CommandInventory } from '../composer/command-arguments.js'
 
 /** Input routing only. Local menus, paths and @ references take precedence
  * over any cached model candidate, even when the path has no matches. */
@@ -15,6 +15,7 @@ export function createSuggestionInput(host: {
   changed(): void
   dismissed?(): void
   inventory?(): CommandInventory
+  skills?(): readonly SkillEntry[]
   showArguments?(completion: NonNullable<ReturnType<typeof argumentCompletion>>): void
 }): { handle(event: { type: string }): boolean } {
   return { handle(event) {
@@ -25,25 +26,14 @@ export function createSuggestionInput(host: {
     }
     if (event.type !== 'tab' && event.type !== 'right') return false
     const editor = host.editor()
-    const currentLine = editor.lines[editor.cursorLine] ?? ''
-    const before = currentLine.slice(0, editor.cursorCol)
-    if (editor.completion || extractAtPrefix(before)) {
+    const action = tabAction(editor, { busy: false, editing: false, skills: host.skills?.(), inventory: host.inventory?.() })
+    if (action.kind === 'local' || action.kind === 'arguments') {
       host.controller.yieldToLocalInput()
-      return false
-    }
-    // Finite command arguments (model/session IDs) own their namespace even
-    // when an ID contains a slash and resembles a filesystem path.
-    if (event.type === 'tab' && host.eligible() && host.inventory && host.showArguments && editor.cursorLine === 0) {
-      const completion = argumentCompletion(getEditorText(editor), editorCursorOffset(editor), host.inventory())
-      if (completion) {
-        host.controller.yieldToLocalInput()
-        host.showArguments(completion)
+      if (action.kind === 'arguments' && event.type === 'tab' && host.eligible() && host.showArguments) {
+        host.showArguments(action.completion)
         host.changed()
         return true
       }
-    }
-    if (fileCompletionTarget(currentLine, editor.cursorCol)) {
-      host.controller.yieldToLocalInput()
       return false
     }
     if (event.type === 'tab' && host.controller.next()) {

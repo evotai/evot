@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { argumentCompletion, validCommandInput, type CommandInventory } from '../../../src/term/app/suggestion/arguments.js'
+import { argumentCompletion, validCommandInput, type CommandInventory } from '../../../src/term/app/composer/command-arguments.js'
 
 import { context } from '../../helpers/suggestion-context.js'
 import { createSuggestionInput } from '../../../src/term/app/suggestion/input.js'

@@ -25,6 +25,14 @@ export class UndoStack<S> {
     this.stack.length = 0
   }
 
+  snapshot(): S[] {
+    return structuredClone(this.stack)
+  }
+
+  restore(states: S[]): void {
+    this.stack = structuredClone(states)
+  }
+
   get length(): number {
     return this.stack.length
   }

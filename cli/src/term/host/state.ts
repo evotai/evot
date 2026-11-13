@@ -4,7 +4,10 @@ import type { ConfigInfo, ForkedAgent, QueryStream, SessionMeta } from '../../na
 import type { UIAssistantBlock } from '../../render/message-types.js'
 import type { AuthWatcher } from '../app/auth/auth-watch.js'
 import type { SuggestionTrigger } from '../app/composer/composer-guidance.js'
-import type { QueuedUserMessage } from '../app/queue/prompt-queue.js'
+import type { SkillEntry } from '../../commands/skill/scan.js'
+import type { PendingQueueState, QueueTarget, StartupQueueTarget } from '../app/queue/pending-queue.js'
+import type { ComposerSnapshot } from '../app/composer/snapshot.js'
+import type { ManagedQueuedPrompt } from '../app/queue/queue-manage.js'
 import type { AppState } from '../app/run/state.js'
 import type { StreamMachineState } from '../app/run/stream.js'
 import type { OverlayState } from '../app/selector/overlay-state.js'
@@ -19,7 +22,6 @@ import type { EnhancedKeyboardSession } from '../../ui/keys.js'
 import type { PreviewViewport } from '../../ui/preview-scroll.js'
 import type { SelectorState } from '../../ui/selector.js'
 
-export type QueuedCompactionSubmission = { displayText: string; expandedText: string; contentJson?: string }
 export type CommandWindowPreview =
   | { kind: 'selector'; trigger: 'model' | 'resume' | 'skill' | 'task' | 'compute' | 'share'; sourceText: string; generation: number; state: SelectorState }
   | { kind: 'help'; trigger: 'help'; sourceText: string; generation: number }
@@ -56,7 +58,13 @@ export interface ReplState {
   streamRef: QueryStream | null
   runStartedAt: number | null
   runTurnCount: number
-  queuedCompactionSubmissions: QueuedCompactionSubmission[]
+  queueStartupTarget: StartupQueueTarget
+  pendingQueue: PendingQueueState
+  queueEditState: { entry: ManagedQueuedPrompt; stash: ComposerSnapshot; consumed: boolean } | null
+  draftEpoch: number
+  draftImageEpoch: number
+  pendingEnqueue: { epoch: number; target: QueueTarget; chain: number; sequence: number } | null
+  queueDispatchId: string | null
   spinnerTimer: ReturnType<typeof setInterval> | null
   shareSelector: ShareSelector | null
   // Sessions on the cloud follow the user across machines: pushed after each
@@ -67,6 +75,7 @@ export interface ReplState {
   suggestionContextId: number
   suggestionsReady: boolean
   startupSuggestion: SuggestionTrigger | null
+  terminalSuspended: boolean
   disableRaw: (() => void) | null
   enhancedKeyboard: EnhancedKeyboardSession | null
   inputBuffer: TerminalInputBuffer | null
@@ -77,6 +86,7 @@ export interface ReplState {
   lastLineage: SessionMeta[]
   nextBackgroundLineId: number
   logMode: ForkedAgent | null
+  logDiscardTarget: ForkedAgent | null
   exitHint: boolean
   exitHintTimer: ReturnType<typeof setTimeout> | null
   overlay: OverlayState
@@ -105,10 +115,8 @@ export interface ReplState {
   pendingAsk: ((answers: AskUserAnswer[] | null) => void) | null
   pendingTaskModel: ((selection: TaskModelSelection | null) => void) | null
   streamMachine: StreamMachineState | null
-  // Messages sent mid-stream: held in the prompt zone (pi-style ❯ queue) and
-  // committed to history when steering consumes them at the next safe boundary,
-  // so they never render above the still-streaming reply.
-  queuedUserMessages: QueuedUserMessage[]
+  /** Installed skill inventory shared by completion, dispatch and the skill window. */
+  skillEntries: SkillEntry[]
   expanded: boolean
   /**
    * Height of the committed prefix's two parts as last painted. The renderer

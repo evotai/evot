@@ -19,13 +19,34 @@ function kindsFrom(lines: string[]): string[] {
 
 function newHook(lines: string[], command = 'evot-hook', cwd?: string) {
   return new SessionHook({
-    env: { EVOT_SESSION_HOOK: command } as NodeJS.ProcessEnv,
+    command,
     cwd,
     spawn: recordingSpawn(lines),
   })
 }
 
 describe('SessionHook', () => {
+  test('only the resolved config command enables the bridge; the environment is never consulted', async () => {
+    const previous = process.env.EVOT_SESSION_HOOK
+    process.env.EVOT_SESSION_HOOK = 'environment-must-be-ignored'
+    try {
+      const commands: string[] = []
+      const hook = new SessionHook({ command: ' /fixture/from-config ',
+        spawn: command => { commands.push(command); return { stdin: { write: () => 1 } } } })
+      hook.startProcess('/repo')
+      await hook.close()
+      expect(commands).toEqual(['/fixture/from-config'])
+      for (const command of ['', '  ', undefined]) {
+        const disabled = new SessionHook({ command, spawn: () => { throw new Error('must not spawn') } })
+        disabled.startProcess('/repo')
+        expect(disabled.enabled).toBe(false)
+        await disabled.close()
+      }
+    } finally {
+      if (previous === undefined) delete process.env.EVOT_SESSION_HOOK
+      else process.env.EVOT_SESSION_HOOK = previous
+    }
+  })
   test('announces an idle process before a persisted session exists', () => {
     const lines: string[] = []
     const hook = newHook(lines)
@@ -42,7 +63,6 @@ describe('SessionHook', () => {
   test('is inert when no external hook is configured', () => {
     let spawned = false
     const hook = new SessionHook({
-      env: {} as NodeJS.ProcessEnv,
       spawn: () => {
         spawned = true
         throw new Error('must not spawn')
@@ -113,7 +133,7 @@ describe('SessionHook', () => {
 
   test('isolates adapter startup failures', () => {
     const hook = new SessionHook({
-      env: { EVOT_SESSION_HOOK: 'missing-hook' } as NodeJS.ProcessEnv,
+      command: 'missing-hook',
       spawn: recordingSpawn([], true),
     })
 
@@ -204,7 +224,7 @@ describe('SessionHook', () => {
     const lines: string[] = []
     let ended = false
     const hook = new SessionHook({
-      env: { EVOT_SESSION_HOOK: 'evot-hook' } as NodeJS.ProcessEnv,
+      command: 'evot-hook',
       // A long-lived adapter: `exited` never settles. Awaiting it would hang evot.
       spawn: () => ({
         stdin: {
@@ -228,7 +248,7 @@ describe('SessionHook', () => {
     let writes = 0
     let ended = false
     const hook = new SessionHook({
-      env: { EVOT_SESSION_HOOK: 'evot-hook' } as NodeJS.ProcessEnv,
+      command: 'evot-hook',
       spawn: () => ({
         stdin: {
           // Bun's FileSink returns a Promise once the pipe is full.
@@ -258,7 +278,7 @@ describe('SessionHook', () => {
   test('gives up on a wedged adapter instead of blocking shutdown', async () => {
     let ended = false
     const hook = new SessionHook({
-      env: { EVOT_SESSION_HOOK: 'evot-hook' } as NodeJS.ProcessEnv,
+      command: 'evot-hook',
       spawn: () => ({
         stdin: {
           // An adapter that never drains stdin: every write stays pending forever.
@@ -297,7 +317,7 @@ describe('SessionHook', () => {
     const lines: string[] = []
     let spawns = 0
     const hook = new SessionHook({
-      env: { EVOT_SESSION_HOOK: 'evot-hook' } as NodeJS.ProcessEnv,
+      command: 'evot-hook',
       spawn: () => {
         spawns += 1
         return {

@@ -61,6 +61,51 @@ async function renderFrame(renderer: TermRenderer): Promise<void> {
 }
 
 describe('TermRenderer', () => {
+  test('resume restores the viewport after shell output without deleting scrollback, then resumes differential rendering', async () => {
+    const screen = new ScreenHarness(40, 6)
+    const renderer = new TermRenderer({ stdout: screen.stdout })
+    renderer.init()
+    let lines = Array.from({ length: 12 }, (_, i) => `app row ${i}`)
+    renderer.setRenderCallback(() => lines)
+    await renderFrame(renderer)
+    renderer.suspend()
+    screen.stdout.write(Array.from({ length: 10 }, (_, i) => `shell row ${i}\r\n`).join(''))
+    await screen.settle()
+    const buffer = screen.terminal.buffer.active
+    const retained = Array.from({ length: buffer.baseY }, (_, i) => buffer.getLine(i)?.translateToString(true))
+    renderer.resume()
+    await renderFrame(renderer)
+    await screen.settle()
+    expect(screen.viewport()).toEqual(lines.slice(-6))
+    expect(retained.map((_, i) => buffer.getLine(i)?.translateToString(true))).toEqual(retained)
+    lines = [...lines.slice(0, -1), 'updated after resume']
+    await renderFrame(renderer)
+    await screen.settle()
+    expect(screen.viewport().at(-1)).toBe('updated after resume')
+    renderer.destroy()
+    screen.terminal.dispose()
+  })
+
+  test('suspend suppresses pending renders and resume repaints with the original callback', async () => {
+    const { renderer, stdout } = createRenderer()
+    renderer.init()
+    let text = 'before suspension'
+    renderer.setRenderCallback(() => [text])
+    await renderFrame(renderer)
+    renderer.suspend()
+    expect(stdout.output).toContain('\x1b[?25h')
+    stdout.clear()
+    text = 'after continuation'
+    renderer.requestRender(true)
+    await renderFrame(renderer)
+    expect(stdout.output).toBe('')
+    renderer.resume()
+    await renderFrame(renderer)
+    expect(stdout.output).toContain('after continuation')
+    expect(stdout.output).toContain('\x1b[?25l')
+    expect(stdout.output).not.toContain('\x1b[3J')
+    renderer.destroy()
+  })
   describe('init / destroy', () => {
     test('init hides cursor', () => {
       const { renderer, stdout } = createRenderer()

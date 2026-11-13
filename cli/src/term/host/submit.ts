@@ -1,4 +1,5 @@
 import { isSlashCommand } from '../../commands/index.js'
+import { promptInput } from '../../commands/skill/invocation.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { TaskSession } from '../../features/task/session.js'
 import type { ContentBlock } from '../../native/index.js'
@@ -11,6 +12,10 @@ import { formatLogPaths } from '../command-handlers.js'
 import type { RendererTrace } from '../diagnostics/renderer-trace.js'
 import type { ScreenLog } from '../diagnostics/screen-log.js'
 import type { RunController } from './run.js'
+import type { ComposerController } from './composer.js'
+import { currentQueueTarget, type PendingQueue } from '../app/queue/pending-queue.js'
+import { draftImageIds, type PendingImages } from '../app/composer/pending-images.js'
+import { errorText } from '../../ui/format.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SlashController } from './slash.js'
 import type { ReplState } from './state.js'
@@ -20,6 +25,9 @@ import type { TermRenderer } from '../screen/renderer.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface SubmitDeps {
+  readonly composer: ComposerController
+  readonly pendingQueue: PendingQueue
+  readonly pendingImages: PendingImages
   readonly backgroundTerminals: BackgroundTerminals
   readonly buildImageContentBlocks: () => { blocks: ContentBlock[]; resolvedIds: Set<number>; } | null
   readonly clearAll: () => void
@@ -29,6 +37,7 @@ export interface SubmitDeps {
   readonly getHistoryText: () => string
   readonly manualCompaction: ManualCompaction
   readonly queueEdit: ReturnType<typeof createQueueEdit>
+  readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
   readonly renderDiagnostics: RenderDiagnostics
   readonly renderer: TermRenderer
   readonly rendererTrace: RendererTrace
@@ -44,10 +53,90 @@ export interface SubmitDeps {
 export interface SubmitController {
   handleLoadingEnter(): void
   submitDraft(): void
+  enqueueDraft(): void
 }
 
 /** Enter on the composer: submits a draft when idle; steers, queues or blocks it while a turn runs. */
 export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitController {
+  function acceptDraft(queue: 'steering' | 'follow_up', sequence?: number): boolean {
+    if (st.pendingQueue.blocked) {
+      deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before submitting.')
+      deps.renderer.requestRender()
+      return false
+    }
+    const imageResult = deps.buildImageContentBlocks()
+    if (draftImageIds(getEditorText(st.editor)).some(id => !imageResult?.resolvedIds.has(id))) {
+      deps.scrollback.commitSystem('sys-queue-image-error', '  Image content is unavailable; draft was not queued.')
+      deps.renderer.requestRender()
+      return false
+    }
+    const rawText = deps.getExpandedText(imageResult?.resolvedIds)
+    const expandedText = promptInput(rawText, st.skillEntries)
+    const displayText = deps.getDisplayText()
+    if (expandedText === null) {
+      deps.scrollback.commitSystem('sys-queue-command', "  Commands don't queue. Complete the command or press Enter.")
+      deps.renderer.requestRender()
+      return false
+    }
+    if (!expandedText && !imageResult) return false
+    if (imageResult && expandedText !== rawText) {
+      for (const block of imageResult.blocks) if (block.type === 'text') block.text = promptInput(block.text, st.skillEntries) ?? block.text
+    }
+    const history = deps.getHistoryText()
+    const entry = deps.pendingQueue.accept({
+      target: currentQueueTarget(st), queue, text: displayText || '(image prompt)', expandedText,
+      contentJson: imageResult ? JSON.stringify(imageResult.blocks) : undefined,
+      snapshot: deps.composer.snapshot(),
+    }, sequence)
+    try {
+      if (st.streamRef) deps.pendingQueue.attach(st.streamRef)
+    } catch (err) {
+      // A local entry is safely removable only before native registration.
+      if (!entry.native) deps.pendingQueue.remove(entry, entry.version)
+      deps.scrollback.commitSystem('sys-queue-error', `  Queue failed: ${errorText(err)}`)
+      deps.renderer.requestRender()
+      return false
+    }
+    deps.suggestions.cancel()
+    if (history) deps.saveInputHistory(history)
+    deps.clearAll()
+    deps.queueLifecycle.reconcile()
+    deps.queueLifecycle.dispatchNext()
+    deps.renderer.requestRender()
+    return true
+  }
+
+  function enqueueDraft() {
+    if ((!st.isLoading && !deps.manualCompaction.active) || st.pendingEnqueue || deps.queueEdit.editingEntry() || st.foregroundCommand) return
+    const waits = deps.pendingImages.blocking(getEditorText(st.editor))
+    if (!waits.length) { acceptDraft('follow_up'); return }
+    const token = { epoch: st.draftEpoch, ...deps.pendingQueue.reserve(currentQueueTarget(st)) }
+    st.pendingEnqueue = token
+    deps.suggestions.cancel()
+    deps.scrollback.commitSystem('sys-queue-image', '  Preparing queued images · editing or clearing cancels submission')
+    deps.renderer.requestRender()
+    void Promise.all(waits).then(() => {
+      if (st.destroyed || st.pendingEnqueue !== token || token.epoch !== st.draftEpoch
+        || token.chain !== st.pendingQueue.chain || currentQueueTarget(st) !== token.target) return
+      st.pendingEnqueue = null
+      deps.pendingQueue.release(token)
+      if (!deps.buildImageContentBlocks()) {
+        deps.scrollback.commitSystem('sys-queue-image-error', '  Image loading failed; draft was not queued.')
+        deps.queueLifecycle.dispatchNext()
+        deps.renderer.requestRender()
+        return
+      }
+      if (!acceptDraft('follow_up', token.sequence)) deps.queueLifecycle.dispatchNext()
+    }).catch(err => {
+      if (st.pendingEnqueue !== token) return
+      st.pendingEnqueue = null
+      deps.pendingQueue.release(token)
+      deps.scrollback.commitSystem('sys-queue-image-error', `  Image loading failed: ${errorText(err)}`)
+      deps.queueLifecycle.dispatchNext()
+      deps.renderer.requestRender()
+    })
+  }
+
   function handleLoadingEnter() {
     deps.suggestions.cancel()
     const displayText = deps.getDisplayText()
@@ -58,10 +147,11 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       ? deps.getExpandedText(imageResult.resolvedIds)
       : deps.getExpandedText()
 
+    const modelText = promptInput(expandedText, st.skillEntries)
     const action = busySubmissionAction({
-      displayText, expandedText, hasImages: imageBlocks !== null,
+      displayText: modelText ?? displayText, expandedText: modelText ?? expandedText, hasImages: imageBlocks !== null,
       compacting: deps.manualCompaction.active, editingQueue: deps.queueEdit.editingEntry() !== null,
-      hasRun: st.streamRef !== null,
+      hasRun: st.isLoading,
     })
     if (deps.manualCompaction.active) {
       if (action === 'blocked_compaction_command') {
@@ -72,17 +162,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
         return
       }
       if (action === 'queue_compaction') {
-        const queuedDisplay = displayText || '(image prompt)'
-        st.queuedCompactionSubmissions.push({
-          displayText: queuedDisplay,
-          expandedText,
-          ...(imageBlocks ? { contentJson: JSON.stringify(imageBlocks) } : {}),
-        })
-        if (historyText) {
-          deps.saveInputHistory(historyText)
-        }
-        deps.clearAll()
-        deps.renderer.requestRender()
+        acceptDraft('follow_up')
       }
       return
     }
@@ -118,36 +198,23 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       return
     }
 
-    if (action === 'steer' && st.streamRef) {
-      if (imageBlocks) {
-        const contentJson = JSON.stringify(imageBlocks)
-        const queued = st.streamRef.steer('', contentJson)
-        st.queuedUserMessages.push({ ...queued, text: displayText || '(image prompt)', queue: 'steering' })
-      } else {
-        const queued = st.streamRef.steer(expandedText)
-        if (displayText) st.queuedUserMessages.push({ ...queued, text: displayText, queue: 'steering' })
-      }
+    if (action === 'steer') {
+      const accepted = acceptDraft('steering')
       // Steering is only inspected between tool calls, so anything holding the
       // turn holds this message with it — a shell watched in the foreground or a
       // blocking task_output call alike. During that wait typing appears to do
       // nothing. Freeing both lets the message land now; the work keeps running.
-      deps.backgroundTerminals.reclaimTurnForMessage()
-      // Save expanded text to input history before clearAll() drops the
-      // in-memory paste registry. Keep displayText only for compact rendering.
-      if (historyText) {
-        deps.saveInputHistory(historyText)
-      }
-      // Queue instead of committing now: history renders above the streaming
-      // block, so an immediate commit lands above the incoming reply.
-      // Plain and structured prompts are steering messages: consume them FIFO
-      // at the next safe turn/tool boundary instead of waiting for the current
-      // agent task to finish naturally.
-      deps.clearAll()
+      if (accepted && st.streamRef) deps.backgroundTerminals.reclaimTurnForMessage()
       deps.renderer.requestRender()
     }
   }
 
   function submitDraft() {
+    if (st.pendingQueue.blocked) {
+      deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before submitting.')
+      deps.renderer.requestRender()
+      return
+    }
     // Re-read: keys keep dispatching while a pending image load parks the
     // submit, so text captured before the wait can already be stale.
     const submitRaw = getEditorText(st.editor).trim()
@@ -166,11 +233,15 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
     if (historyText) deps.saveInputHistory(historyText)
     deps.clearAll()
     deps.renderer.requestRender()
-    if (isSlashCommand(expandedText || submitRaw)) {
+    const modelText = promptInput(expandedText || submitRaw, st.skillEntries)
+    if (imageBlocks && modelText !== null && modelText !== expandedText) {
+      for (const block of imageBlocks) if (block.type === 'text') block.text = promptInput(block.text, st.skillEntries) ?? block.text
+    }
+    if (modelText === null && isSlashCommand(expandedText || submitRaw)) {
       deps.slashCtl.handleSlashInput(expandedText || submitRaw)
     } else if (st.logMode) {
-      // In log mode, send to forked agent
-      deps.slashCtl.runLogQuery(st.logMode, expandedText)
+      // Preserve structured content on the initial fork query as on follow-ups.
+      deps.slashCtl.runLogQuery(st.logMode, imageBlocks ? '' : modelText ?? expandedText, imageBlocks ? JSON.stringify(imageBlocks) : undefined)
     } else {
       deps.scrollback.commitUserMessage(displayText)
       // If the model stopped the task edit with a plain-text question,
@@ -182,10 +253,10 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
         const contentJson = JSON.stringify(imageBlocks)
         deps.runCtl.runQuery('', contentJson, undefined, taskExtension)
       } else {
-        deps.runCtl.runQuery(expandedText, undefined, undefined, taskExtension)
+        deps.runCtl.runQuery(modelText ?? expandedText, undefined, undefined, taskExtension)
       }
     }
   }
 
-  return { handleLoadingEnter, submitDraft }
+  return { handleLoadingEnter, submitDraft, enqueueDraft }
 }

@@ -8,15 +8,18 @@ const KEY_GAP = 2
 type Entry = [key: string, description: string]
 
 const KEYS: Entry[] = [
-  ['Enter', 'Submit message'],
+  ['Enter', 'Send now / steer the active task'],
   ['Alt+Enter', 'Insert newline'],
   ['Ctrl+C', 'Clear / Exit (×2)'],
   ['Esc', 'Clear input / Dismiss / Interrupt (×2)'],
   [backgroundChordLabel(), 'Run in background, keeping the work alive'],
-  ['Ctrl+G', 'Focus queued prompts when non-empty'],
+  ['Ctrl+G', 'Manage pending prompts / explicitly resume paused work'],
   ['↓ / Ctrl+T', 'Background task panel when shells are running'],
   ['↑ / ↓', 'History navigation / multi-line'],
-  ['Tab', 'Complete command / path'],
+  ['Tab', 'Complete locally / queue draft while running'],
+  ['Shift+↑', 'Dequeue newest pending prompt into empty composer'],
+  ['Ctrl+N', 'Request / cycle AI input assistance'],
+  ['Ctrl+Z', 'Suspend to shell; fg resumes (Unix)'],
   ['Shift+Tab', 'Cycle thinking level'],
   ['Ctrl+O', 'Expand/collapse output'],
   ['Ctrl+Y', 'Copy last reply (Markdown source) to clipboard'],

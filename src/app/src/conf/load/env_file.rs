@@ -89,6 +89,7 @@ const OTHER_RELEVANT_PREFIXES: &[&str] = &[
     "EVOT_CHANNEL_",
     "EVOT_SANDBOX",
     "EVOT_SKILLS_DIRS",
+    "EVOT_SESSION_HOOK",
     "EVOT_ID",
     "EVOT_THINKING_LEVEL",
 ];

@@ -23,6 +23,7 @@ export type KeyEvent =
   | { type: 'shift-tab' }
   | { type: 'escape' }
   | { type: 'up' }
+  | { type: 'shift-up' }
   | { type: 'down' }
   | { type: 'left' }
   | { type: 'right' }
@@ -417,7 +418,7 @@ function modifiedArrowEvent(final: string, modifier: number): KeyEvent | undefin
   const normalized = modifier & ~(64 + 128)
   const wordMod = (normalized & MOD_ALT) !== 0 || (normalized & MOD_CTRL) !== 0
   switch (final) {
-    case 'A': return { type: 'up' }
+    case 'A': return { type: normalized === MOD_SHIFT ? 'shift-up' : 'up' }
     case 'B': return { type: 'down' }
     case 'C': return { type: wordMod ? 'word-right' : 'right' }
     case 'D': return { type: wordMod ? 'word-left' : 'left' }
@@ -452,7 +453,9 @@ function keyEventFromCodepoint(codepoint: number, modifier: number): KeyEvent | 
   }
   if (codepoint === 27) return normalizedModifier === 0 ? { type: 'escape' } : undefined
 
-  // Kitty CSI-u encodes arrows as special codepoints 57348–57351 (or use modified cursor).
+  // Kitty functional arrows must be decoded before printable codepoints.
+  const arrow = ({ 57350: 'D', 57351: 'C', 57352: 'A', 57353: 'B' } as Record<number, string>)[codepoint]
+  if (arrow) return modifiedArrowEvent(arrow, normalizedModifier)
   // Also handle letter keys with alt for word ops (alt+b/f/d).
   if ((normalizedModifier & MOD_ALT) !== 0 && !(normalizedModifier & MOD_CTRL)) {
     const ch = codepoint >= 65 && codepoint <= 90

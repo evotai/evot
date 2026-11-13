@@ -3,7 +3,7 @@ import { SuggestionCache } from '../../../src/term/app/suggestion/cache.js'
 import { SuggestionContext, IDLE_WORKFLOW } from '../../../src/term/app/suggestion/context.js'
 import { PromptSuggestion } from '../../../src/term/app/suggestion/controller.js'
 import { SuggestionCandidates } from '../../../src/term/app/suggestion/candidates.js'
-import { commandIdentity, validCommandInput } from '../../../src/term/app/suggestion/arguments.js'
+import { commandIdentity, validCommandInput } from '../../../src/term/app/composer/command-arguments.js'
 
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 

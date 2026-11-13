@@ -8,6 +8,7 @@ use agent_client_protocol_schema::v1 as acp;
 use agent_client_protocol_schema::ProtocolVersion;
 use futures::StreamExt;
 use parking_lot::Mutex;
+use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::io::AsyncRead;
@@ -18,6 +19,7 @@ use tokio_util::codec::LinesCodec;
 use tokio_util::codec::LinesCodecError;
 use tokio_util::sync::CancellationToken;
 
+use super::config_reload::ConfigFiles;
 use super::connection::to_value;
 use super::connection::write_frames;
 use super::connection::Connection;
@@ -74,9 +76,11 @@ where
 {
     let (connection, frames_out) = Connection::new();
     let writer = tokio::spawn(write_frames(writer, frames_out));
+    let files = ConfigFiles::for_config(&config)?.map(tokio::sync::Mutex::new);
     let server = Arc::new(Server {
         agent,
-        config,
+        config: RwLock::new(config),
+        files,
         options,
         connection: Arc::new(connection),
         sessions: Mutex::new(HashMap::new()),
@@ -125,12 +129,24 @@ struct SessionState {
     /// Tools the client chose to always allow in this session.
     always_allowed: Arc<Mutex<HashSet<String>>>,
     /// Cancel signal of the prompt running in this session, if any.
-    prompt: Option<CancellationToken>,
+    prompt: Option<Arc<CancellationToken>>,
+}
+
+/// Reserved synchronously in wire order, before spawning or waiting on reload.
+struct AdmittedPrompt {
+    input: Vec<evot_engine::Content>,
+    selection: Arc<ModelSelection>,
+    always_allowed: Arc<Mutex<HashSet<String>>>,
+    finished: PromptFinished,
 }
 
 struct Server {
     agent: Arc<Agent>,
-    config: Config,
+    /// Model catalog and providers. A long-lived ACP process reloads this
+    /// when the files it was loaded from change; see [`Server::refresh_config`].
+    config: RwLock<Config>,
+    /// Files behind `config`; `None` for an in-memory config.
+    files: Option<tokio::sync::Mutex<ConfigFiles>>,
     options: AcpOptions,
     connection: Arc<Connection>,
     /// Sessions created or resumed on this connection. Prompts are accepted
@@ -143,11 +159,16 @@ impl Server {
         match Inbound::parse(line) {
             // Prompts run concurrently so cancel and other requests get through.
             Ok(Inbound::Request { id, method, params }) if method == "session/prompt" => {
-                let server = self.clone();
-                prompts.spawn(async move {
-                    let result = server.prompt(params).await;
-                    server.connection.reply(id, result);
-                });
+                match self.admit_prompt(params) {
+                    Ok(prompt) => {
+                        let server = self.clone();
+                        prompts.spawn(async move {
+                            let result = server.prompt(prompt).await;
+                            server.connection.reply(id, result);
+                        });
+                    }
+                    Err(error) => self.connection.error(id, error),
+                }
             }
             Ok(Inbound::Request { id, method, params }) => {
                 let result = self.request(&method, params).await;
@@ -173,7 +194,7 @@ impl Server {
             "session/resume" => to_value(self.resume_session(parse(params)?).await?),
             "session/list" => to_value(self.list_sessions(parse(params)?).await?),
             "session/close" => to_value(self.close_session(parse(params)?)?),
-            "session/set_config_option" => to_value(self.set_config_option(parse(params)?)?),
+            "session/set_config_option" => to_value(self.set_config_option(parse(params)?).await?),
             _ => Err(acp::Error::method_not_found()),
         }
     }
@@ -210,13 +231,15 @@ impl Server {
                 "acp: MCP servers are not supported; ignoring"
             );
         }
+        self.refresh_config().await;
         let meta = self
             .agent
             .create_session_in("acp", Some(cwd))
             .await
             .map_err(internal)?;
+        let config = self.config.read();
         let selection = Arc::new(ModelSelection::new(self.agent.llm()));
-        let options = self.config_options(&selection);
+        let options = Self::config_options(&config, &selection);
         self.register(&meta.session_id, selection);
         Ok(acp::NewSessionResponse::new(meta.session_id).config_options(options))
     }
@@ -233,16 +256,18 @@ impl Server {
             .await
             .map_err(internal)?
             .ok_or_else(|| acp::Error::resource_not_found(None))?;
+        self.refresh_config().await;
+        let config = self.config.read();
         let selection = Arc::new(ModelSelection::new(self.agent.llm()));
         if !meta.provider.is_empty() && !meta.model.is_empty() {
             // A saved model that is no longer configured falls back to the
             // current selection rather than failing the resume.
             let spec = format!("{}:{}", meta.provider, meta.model);
-            if let Err(error) = selection.select_by_spec(&self.config, &spec) {
+            if let Err(error) = selection.select_by_spec(&config, &spec) {
                 tracing::info!("acp: resume keeps current model: {error}");
             }
         }
-        let options = self.config_options(&selection);
+        let options = Self::config_options(&config, &selection);
         self.register(&session_id, selection);
         Ok(acp::ResumeSessionResponse::new().config_options(options))
     }
@@ -286,7 +311,7 @@ impl Server {
         Ok(acp::CloseSessionResponse::new())
     }
 
-    fn set_config_option(
+    async fn set_config_option(
         &self,
         request: acp::SetSessionConfigOptionRequest,
     ) -> RpcResult<acp::SetSessionConfigOptionResponse> {
@@ -302,20 +327,24 @@ impl Server {
             .get(request.session_id.0.as_ref())
             .map(|state| state.selection.clone())
             .ok_or_else(|| acp::Error::resource_not_found(None))?;
+        // Clients validate the saved model against the catalog this process
+        // advertised. Re-read it first, as restarting the agent would.
+        self.refresh_config().await;
+        let config = self.config.read();
         selection
-            .select_by_spec(&self.config, &value.0)
+            .select_by_spec(&config, &value.0)
             .map_err(|error| acp::Error::invalid_params().data(Value::from(error.to_string())))?;
         Ok(acp::SetSessionConfigOptionResponse::new(
-            self.config_options(&selection),
+            Self::config_options(&config, &selection),
         ))
     }
 
-    async fn prompt(self: &Arc<Self>, params: Value) -> RpcResult<acp::PromptResponse> {
+    fn admit_prompt(self: &Arc<Self>, params: Value) -> RpcResult<AdmittedPrompt> {
         let request: acp::PromptRequest = parse(params)?;
         let session_id = request.session_id.0.to_string();
         let input = prompt_input(&request.prompt)?;
-        let cancel = CancellationToken::new();
-        let (llm, always_allowed) = {
+        let cancel = Arc::new(CancellationToken::new());
+        let (selection, always_allowed) = {
             let mut sessions = self.sessions.lock();
             let state = sessions
                 .get_mut(&session_id)
@@ -325,13 +354,35 @@ impl Server {
                     .data(Value::from("a prompt is already running in this session")));
             }
             state.prompt = Some(cancel.clone());
-            (state.selection.snapshot(), state.always_allowed.clone())
+            (state.selection.clone(), state.always_allowed.clone())
         };
-        let _finished = PromptFinished {
-            server: self.clone(),
-            session_id: session_id.clone(),
-        };
+        Ok(AdmittedPrompt {
+            input,
+            selection,
+            always_allowed,
+            finished: PromptFinished {
+                server: self.clone(),
+                session_id,
+                cancel,
+            },
+        })
+    }
 
+    async fn prompt(self: &Arc<Self>, prompt: AdmittedPrompt) -> RpcResult<acp::PromptResponse> {
+        let AdmittedPrompt {
+            input,
+            selection,
+            always_allowed,
+            finished,
+        } = prompt;
+        let session_id = finished.session_id.clone();
+        let cancel = finished.cancel.clone();
+        let _finished = finished;
+        self.refresh_config().await;
+        if cancel.is_cancelled() {
+            return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
+        }
+        let llm = selection.snapshot();
         let mut query = QueryRequest::with_input(input)
             .session_id(Some(session_id.clone()))
             .mode(self.options.mode)
@@ -407,15 +458,61 @@ impl Server {
         }
     }
 
+    /// Reload the config when a file it was loaded from changed since the
+    /// last load: the cloud catalog cache, cloud login, env file or TOML.
+    /// Other evot processes rewrite them (`evot login`, the REPL's catalog
+    /// sync, key recovery), and without this a long-lived ACP process keeps
+    /// rejecting models its startup snapshot lacked until the client
+    /// restarts it. A failed reload keeps the current config and retries on
+    /// the next request.
+    async fn refresh_config(&self) {
+        let Some(files) = &self.files else {
+            return;
+        };
+        // Serialize check/load/publication so a slower request cannot publish
+        // an older config after a newer refresh. Never hold a parking_lot
+        // guard across the worker await.
+        let mut files = files.lock().await;
+        let snapshot = files.clone();
+        let loaded = crate::base::blocking::blocking_io("acp config reload", move |cancel| {
+            snapshot.reload(cancel)
+        })
+        .await;
+        match loaded {
+            Ok(Some((fresh, observed))) => {
+                // Config -> selection is the same lock order as explicit model
+                // switches and session registration. No reader may rebuild a
+                // session from the old config after its selection was refreshed.
+                let mut config = self.config.write();
+                let landing = self.agent.reload_selection(&fresh);
+                for state in self.sessions.lock().values() {
+                    // Admitted runs own their LlmConfig copies. Refreshing the
+                    // session only affects its next prompt and keeps effort.
+                    state.selection.reload_selection(&fresh);
+                }
+                tracing::info!(?landing, "acp: reloaded config after its files changed");
+                *config = fresh;
+                files.accept(observed);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!("acp: config reload failed, keeping current config: {error}");
+            }
+        }
+    }
+
     /// The model selector: configured specs and legacy cloud group aliases,
     /// plus the session's current choice when it is not among them.
-    fn config_options(&self, selection: &ModelSelection) -> Vec<acp::SessionConfigOption> {
+    fn config_options(
+        config: &Config,
+        selection: &ModelSelection,
+    ) -> Vec<acp::SessionConfigOption> {
         let current = selection.snapshot();
         if current.provider.is_empty() || current.model.is_empty() {
             return Vec::new();
         }
         let current_value = format!("{}:{}", current.provider, current.model);
-        let mut options = model_options(&self.config);
+        let mut options = model_options(config);
         if !options
             .iter()
             .any(|option| option.value.0.as_ref() == current_value)
@@ -436,12 +533,21 @@ impl Server {
 struct PromptFinished {
     server: Arc<Server>,
     session_id: String,
+    cancel: Arc<CancellationToken>,
 }
 
 impl Drop for PromptFinished {
     fn drop(&mut self) {
         if let Some(state) = self.server.sessions.lock().get_mut(&self.session_id) {
-            state.prompt = None;
+            // Closing/resuming a session can admit a successor before this
+            // task finishes. A stale guard must not clear its cancellation.
+            if state
+                .prompt
+                .as_ref()
+                .is_some_and(|prompt| Arc::ptr_eq(prompt, &self.cancel))
+            {
+                state.prompt = None;
+            }
         }
     }
 }

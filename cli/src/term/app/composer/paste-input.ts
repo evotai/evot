@@ -44,6 +44,8 @@ export interface PasteInputDeps {
   getEditor: () => EditorState
   mutateEditor: (mutator: (state: EditorState) => EditorState) => void
   isDestroyed: () => boolean
+  ownership?: () => number
+  notify?: (message: string) => void
   requestRender: () => void
   getDisplayText: () => string
   getExpandedText: (resolvedImageIds?: Set<number>) => string
@@ -68,16 +70,19 @@ export function createPasteHandlers(deps: PasteInputDeps) {
     const ref = formatImageRef(id)
     deps.mutateEditor(state => insertText(state, ref))
     deps.requestRender()
+    const owner = deps.ownership?.()
+    const stillOwned = () => !deps.isDestroyed() && owner === deps.ownership?.() && getEditorText(deps.getEditor()).includes(ref)
 
     const load = (async () => {
       const img = await readClipboardImage()
-      if (!getEditorText(deps.getEditor()).includes(ref)) return
+      if (!stillOwned()) return
       if (!img) {
+        deps.notify?.('Image could not be loaded; draft was not submitted.')
         removeImageRef(id, ref)
         return
       }
       const filePath = await storeImage(img.base64, img.mediaType)
-      if (!getEditorText(deps.getEditor()).includes(ref)) return
+      if (!stillOwned()) return
       deps.store.images.set(id, {
         id,
         base64: img.base64,
@@ -107,20 +112,25 @@ export function createPasteHandlers(deps: PasteInputDeps) {
   }
 
   async function tryPasteImage() {
+    const owner = deps.ownership?.()
     const probe = await probeClipboardImage()
+    if (owner !== deps.ownership?.() || deps.isDestroyed()) return
     if (!probe) return
     if (probe.byteLength !== null && probe.byteLength > MAX_IMAGE_SIZE_BYTES) return
     beginImagePaste()
   }
 
   async function tryPasteClipboard() {
+    const owner = deps.ownership?.()
     const probe = await probeClipboardImage()
+    if (owner !== deps.ownership?.() || deps.isDestroyed()) return
     if (probe) {
       if (probe.byteLength !== null && probe.byteLength > MAX_IMAGE_SIZE_BYTES) return
       beginImagePaste()
       return
     }
     const text = await getTextFromClipboard()
+    if (owner !== deps.ownership?.() || deps.isDestroyed()) return
     if (text) {
       insertPaste(text)
       deps.requestRender()
@@ -128,10 +138,11 @@ export function createPasteHandlers(deps: PasteInputDeps) {
   }
 
   function withDraftImages(submit: () => void): void {
+    const owner = deps.ownership?.()
     deps.pendingImages.gate(
       getEditorText(deps.getEditor()),
       () => {
-        if (deps.isDestroyed()) return
+        if (deps.isDestroyed() || owner !== deps.ownership?.()) return
         submit()
       },
       () => deps.requestRender(),

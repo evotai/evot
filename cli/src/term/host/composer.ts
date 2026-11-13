@@ -4,10 +4,14 @@ import type { HistoryManager } from '../../session/history.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
 import type { FileCompletion } from '../app/composer/file-completion-controller.js'
 import type { PastedImage } from '../app/composer/paste-input.js'
+import type { ComposerSnapshot } from '../app/composer/snapshot.js'
+import type { PromptSuggestion } from '../app/suggestion/index.js'
 import { type ReplCommandContext, handleCopyCommand } from '../command-handlers.js'
 import type { CommandWindowController } from './command-window.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { ReplState } from './state.js'
+import type { PendingQueue } from '../app/queue/pending-queue.js'
+import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
 import type { SubmitController } from './submit.js'
 import { type EditorState, acceptCompletion, applyCompletion, backspace, clearEditor, clearLineAfter, clearLineBefore, deleteForward, deleteWordBefore, deleteWordForward, editorNeedsContinuation, getEditorText, historyNext, historyPrev, insertContinuationNewline, insertNewline, insertText, isEditorEmpty, moveCompletion, moveDown, moveEnd, moveHome, moveLeft, moveRight, moveUp, moveWordLeft, moveWordRight, pushHistory, refreshGhostHint } from '../input/editor.js'
 import type { InputImageHistory } from '../input/image-history.js'
@@ -33,6 +37,9 @@ export interface ComposerDeps {
   readonly renderer: TermRenderer
   readonly replCommands: ReplCommandContext
   readonly scrollback: ScrollbackController
+  readonly pendingQueue: PendingQueue
+  readonly queueLifecycle: QueueLifecycle
+  readonly suggestions: PromptSuggestion
   readonly submit: SubmitController
   readonly tryPasteClipboard: () => Promise<void>
   readonly tryPasteImage: () => Promise<void>
@@ -41,6 +48,9 @@ export interface ComposerDeps {
 
 export interface ComposerController {
   clearAll(): void
+  snapshot(): ComposerSnapshot
+  restore(snapshot: ComposerSnapshot, recovery?: boolean): void
+  invalidateDraft(): void
   getDisplayText(): string
   readonly getExpandedText: (resolvedImageIds?: Set<number> | undefined) => string
   getHistoryText(): string
@@ -52,12 +62,46 @@ export interface ComposerController {
 
 /** The composer: editing keys, buffer mutation with undo, word deletion, history, file completion. */
 export function createComposerController(st: ReplState, deps: ComposerDeps): ComposerController {
+  function invalidateDraft(): void {
+    st.draftEpoch++
+    const preparing = st.pendingEnqueue !== null
+    st.pendingEnqueue = null
+    if (preparing) {
+      deps.pendingQueue.cancelReservation()
+      queueMicrotask(() => { if (!st.destroyed) deps.queueLifecycle.dispatchNext() })
+    }
+  }
+
+  function snapshot(): ComposerSnapshot {
+    return {
+      text: getEditorText(st.editor), cursorLine: st.editor.cursorLine, cursorCol: st.editor.cursorCol,
+      preferredVisualCol: st.editor.preferredVisualCol,
+      chunks: structuredClone([...deps.pastedChunks]), images: structuredClone([...deps.pastedImages]),
+      undo: deps.editorUndo.snapshot(), history: { index: st.historyState.index, savedInput: st.historyState.savedInput, length: st.historyState.entries.length },
+    }
+  }
+
+  function restore(saved: ComposerSnapshot, recovery = false): void {
+    clearAll()
+    deps.suggestions.cancel()
+    for (const [id, text] of saved.chunks) deps.pastedChunks.set(id, text)
+    for (const [id, image] of saved.images) deps.pastedImages.set(id, image)
+    st.editor = { ...insertText(st.editor, saved.text), cursorLine: saved.cursorLine, cursorCol: saved.cursorCol,
+      preferredVisualCol: saved.preferredVisualCol, ghostHint: '', completion: null }
+    deps.editorUndo.restore(recovery ? [] : saved.undo)
+    st.historyState = { ...st.historyState,
+      index: recovery || saved.history.index === saved.history.length ? st.historyState.entries.length : Math.min(saved.history.index, st.historyState.entries.length),
+      savedInput: recovery ? '' : saved.history.savedInput }
+    deps.renderer.requestRender()
+  }
+
   function mutateEditor(mutator: (state: EditorState) => EditorState): void {
     const previous = st.editor
     const next = mutator(previous)
     if (next === previous) return
     // Only snapshot content-changing mutations for undo; pure cursor moves skip.
     if (getEditorText(next) !== getEditorText(previous)) {
+      invalidateDraft()
       deps.editorUndo.push(previous)
     }
     st.editor = next
@@ -66,6 +110,7 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
   function undoEditor(): boolean {
     const previous = deps.editorUndo.pop()
     if (!previous) return false
+    invalidateDraft()
     st.editor = previous
     return true
   }
@@ -130,6 +175,8 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
 
   /** Clear editor and paste state. */
   function clearAll() {
+    invalidateDraft()
+    st.draftImageEpoch++
     deps.commandWindow.cancelCommandWindowLoads()
     deps.commandWindow.cancelResumeSearchEnrichment()
     st.editor = clearEditor(st.editor)
@@ -138,12 +185,11 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
     deps.pastedImages.clear()
   }
 
-  /** Commit queued prompts that are no longer present in either native queue. */
   function refreshFileCompletions(acceptSingle: boolean): void {
     const beforeCursor = st.editor.lines[st.editor.cursorLine]?.slice(0, st.editor.cursorCol) ?? ''
     if (!extractAtPrefix(beforeCursor)) return
     void deps.fileCompletion.refresh(st.editor, st.appState.cwd, acceptSingle, () => st.editor, next => {
-      st.editor = next
+      mutateEditor(() => next)
       deps.renderer.requestRender()
     })
   }
@@ -198,7 +244,7 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
         return
       }
       if (event.type === 'enter' || event.type === 'tab') {
-        st.editor = acceptCompletion(st.editor)
+        mutateEditor(acceptCompletion)
         deps.renderer.requestRender()
         return
       }
@@ -286,20 +332,16 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
           refreshFileCompletions(true)
           break
         }
-        const previous = st.editor
-        const result = applyCompletion(st.editor)
+        const result = applyCompletion(st.editor, st.skillEntries)
         if (result.applied) {
-          if (getEditorText(result.state) !== getEditorText(previous)) {
-            deps.editorUndo.push(previous)
-          }
-          st.editor = result.state
+          mutateEditor(() => result.state)
           deps.renderer.requestRender()
         }
         break
       }
       case 'char':
       case 'shift-char':
-        mutateEditor(state => refreshGhostHint(insertText(state, event.char)))
+        mutateEditor(state => refreshGhostHint(insertText(state, event.char), st.skillEntries))
         deps.renderer.requestRender()
         if (extractAtPrefix(st.editor.lines[st.editor.cursorLine]!.slice(0, st.editor.cursorCol))) {
           refreshFileCompletions(false)
@@ -337,7 +379,7 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
         } else {
           mutateEditor(state => backspace(state))
         }
-        st.editor = refreshGhostHint(st.editor)
+        st.editor = refreshGhostHint(st.editor, st.skillEntries)
         deps.renderer.requestRender()
         if (extractAtPrefix(st.editor.lines[st.editor.cursorLine]!.slice(0, st.editor.cursorCol))) {
           refreshFileCompletions(false)
@@ -387,6 +429,8 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
         // At the top visual row: navigate history.
         const result = historyPrev(st.historyState, st.editor)
         if (result.changed) {
+          invalidateDraft()
+          st.draftImageEpoch++
           st.historyState = result.history
           deps.inputImageHistory.capture(getEditorText(st.editor), deps.pastedImages)
           st.editor = result.editor
@@ -405,6 +449,8 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
         // At the bottom visual row: navigate history.
         const result = historyNext(st.historyState, st.editor)
         if (result.changed) {
+          invalidateDraft()
+          st.draftImageEpoch++
           st.historyState = result.history
           deps.inputImageHistory.capture(getEditorText(st.editor), deps.pastedImages)
           st.editor = result.editor
@@ -426,5 +472,5 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
     }
   }
 
-  return { clearAll, getDisplayText, getExpandedText, getHistoryText, handleNormalKey, mutateEditor, saveInputHistory, toggleExpanded }
+  return { clearAll, snapshot, restore, invalidateDraft, getDisplayText, getExpandedText, getHistoryText, handleNormalKey, mutateEditor, saveInputHistory, toggleExpanded }
 }

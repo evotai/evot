@@ -27,7 +27,7 @@ export interface NativeSuggestion {
   nextCandidates?(): Promise<string[] | null>
   abort(): void
 }
-export interface NativeForkedAgent { query(prompt: string): Promise<NativeRun> }
+export interface NativeForkedAgent { query(prompt: string, contentJson?: string | null): Promise<NativeRun> }
 export interface NativeAgent {
   model: string
   readonly cwd: string

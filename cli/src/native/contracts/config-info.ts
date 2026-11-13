@@ -35,6 +35,8 @@ export interface ConfigInfo {
   /** The account's pinned landing model (cloud wire id), set with Space in the
    *  picker or by an admin. Absent when the account follows catalog rank. */
   defaultModel?: string
+  /** Resolved user-level lifecycle executable. Absent from older addons. */
+  sessionHook?: string
 }
 
 function invalid(path: string): never {
@@ -66,6 +68,7 @@ function validateConfigInfo(value: unknown): asserts value is ConfigInfo {
   if (value.baseUrl !== null) field(value.baseUrl, 'string', '$.baseUrl')
   optional(value, 'judge', 'string', '$')
   optional(value, 'defaultModel', 'string', '$')
+  optional(value, 'sessionHook', 'string', '$')
   if (!Array.isArray(value.availableModels)) invalid('$.availableModels')
   value.availableModels.forEach((entry: unknown, index: number) => {
     const path = `$.availableModels[${index}]`

@@ -1,3 +1,6 @@
+import { tabAction } from '../app/composer/input-action.js'
+import type { SuggestController } from './suggest.js'
+import type { PendingImages } from '../app/composer/pending-images.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import type { TaskSession } from '../../features/task/session.js'
 import { isBackgroundPanelShortcut } from '../app/background/background-panel.js'
@@ -21,7 +24,7 @@ import type { SessionController } from './session.js'
 import type { SlashController } from './slash.js'
 import type { ReplState } from './state.js'
 import type { SubmitController } from './submit.js'
-import { clearEditor, closeCompletion, insertText } from '../input/editor.js'
+import { closeCompletion, getEditorText, insertText, showCompletions } from '../input/editor.js'
 import type { TermRenderer } from '../screen/renderer.js'
 import type { KeyEvent } from '../../ui/keys.js'
 import { SELECTOR_OWNER, isBackgroundSelector, isCommandSelector } from '../../ui/selector-identity.js'
@@ -39,6 +42,8 @@ export interface KeysDeps {
   readonly insertPaste: (raw: string) => void
   readonly loopSession: LoopSession
   readonly manualCompaction: ManualCompaction
+  readonly pendingImages: PendingImages
+  readonly suggest: SuggestController
   readonly queueEdit: ReturnType<typeof createQueueEdit>
   readonly renderer: TermRenderer
   readonly runCtl: RunController
@@ -51,6 +56,7 @@ export interface KeysDeps {
   readonly suggestionInput: { handle(event: { type: string; }): boolean; }
   readonly suggestions: PromptSuggestion
   readonly taskSession: TaskSession
+  readonly terminal: import('./terminal.js').TerminalController
   readonly withDraftImages: (submit: () => void) => void
 }
 
@@ -61,7 +67,30 @@ export interface KeysController {
 /** Top-level key routing: overlays first, then a running turn, then the composer. */
 export function createKeysController(st: ReplState, deps: KeysDeps): KeysController {
   function handleKey(event: KeyEvent) {
-    if (deps.suggestionInput.handle(event)) return
+    if (event.type === 'ctrl' && event.key === 'z') { deps.terminal.suspend(); return }
+    const ordinary = st.overlay.kind === 'none' && !st.commandWindowPreview
+    const editing = deps.queueEdit.editingEntry() !== null
+    if (event.type === 'shift-up' && (!ordinary || st.editor.completion)) event = { type: 'up' }
+    if (ordinary && !st.editor.completion) {
+      if (event.type === 'shift-up') { deps.queueEdit.restoreLastQueuedUserMessageToEditor(); return }
+      if ((st.pendingEnqueue || deps.pendingImages.awaiting) && (event.type === 'tab' || event.type === 'enter')) return
+      if (editing && event.type === 'enter') { deps.queueEdit.saveQueueEdit(deps.composer.getExpandedText()); return }
+      if (event.type === 'tab' && (editing || (st.isLoading && getEditorText(st.editor).trim()))) {
+        const action = tabAction(st.editor, { busy: st.isLoading, editing, skills: st.skillEntries, inventory: deps.suggest.suggestionInventory() })
+        if (action.kind === 'local') deps.composer.handleNormalKey(event)
+        else if (action.kind === 'arguments') {
+          const menu = action.completion
+          deps.composer.mutateEditor(state => showCompletions(state, menu.items, menu.start, menu.end, menu.note))
+          deps.renderer.requestRender()
+        } else if (action.kind === 'queue') deps.submit.enqueueDraft()
+        return
+      }
+      if (event.type === 'ctrl' && event.key === 'n' && !editing) {
+        deps.suggestionInput.handle({ type: 'tab' })
+        return
+      }
+    }
+    if (!editing && !st.pendingEnqueue && deps.suggestionInput.handle(event)) return
     if (event.type !== 'escape' || st.overlay.kind !== 'none' || st.editor.completion || deps.queueEdit.editingEntry()) {
       deps.runInteraction.clear()
     }
@@ -107,11 +136,11 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
         return
       }
     }
-    if (isQueueManageShortcut(event)) {
+    if (isQueueManageShortcut(event) && (st.overlay.kind === 'none' || (st.overlay.kind === 'selector' && st.overlay.state.owner === SELECTOR_OWNER.queue))) {
       if (st.overlay.kind === 'selector' && st.overlay.state.owner === SELECTOR_OWNER.queue) {
         st.overlay = { kind: 'none' }
         deps.renderer.requestRender()
-      } else if (st.streamRef && st.queuedUserMessages.length > 0) {
+      } else if (deps.queueEdit.entries().length > 0) {
         deps.queueEdit.openQueueSelector()
       }
       return
@@ -136,7 +165,7 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
       editor: st.editor,
       exitHint: st.exitHint,
       logMode: st.logMode !== null,
-      hasQueuedPrompt: st.queuedUserMessages.length > 0,
+      hasQueuedPrompt: deps.queueEdit.entries().length > 0,
       isCompacting: deps.manualCompaction.active,
       interaction: deps.runInteraction.snapshot(deps.runCtl.runInteractionInput()),
     })
@@ -213,12 +242,13 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
         return true
       case 'show-exit-hint':
         st.exitHint = true
+        if (st.pendingQueue.entries.length) deps.scrollback.commitSystem('sys-queue-exit', `  Exiting discards ${st.pendingQueue.entries.length} pending prompts; queues are not saved across restarts.`)
         deps.renderer.requestRender()
         if (st.exitHintTimer) clearTimeout(st.exitHintTimer)
         st.exitHintTimer = setTimeout(() => { st.exitHint = false; deps.renderer.requestRender() }, 2000)
         return true
       case 'clear-editor':
-        st.editor = clearEditor(st.editor)
+        deps.composer.clearAll()
         deps.renderer.requestRender()
         return true
       case 'close-completion':
@@ -285,7 +315,7 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
         return true
       case 'loading-char':
         if (event.type === 'char' || event.type === 'shift-char') {
-          st.editor = insertText(st.editor, event.char)
+          deps.composer.mutateEditor(editor => insertText(editor, event.char))
           deps.renderer.requestRender()
         }
         return true

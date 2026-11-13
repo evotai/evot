@@ -5,6 +5,7 @@
 //! terminal UI. Only protocol adaptation lives here; the agent loop, session
 //! storage, tool execution, and cancellation stay in the application layer.
 
+mod config_reload;
 mod connection;
 mod models;
 mod options;

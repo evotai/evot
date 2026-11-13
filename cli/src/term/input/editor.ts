@@ -1,5 +1,6 @@
 import { complete, getGhostHint, type GhostHintContext } from '../../commands/completion.js'
-import { COMMANDS, HIDDEN_COMMANDS } from '../../commands/index.js'
+import { commandInventory } from '../../commands/index.js'
+import type { SkillEntry } from '../../commands/skill/scan.js'
 import { needsContinuation } from './continuation.js'
 import {
   boundaryAtDisplayWidth,
@@ -220,11 +221,11 @@ export function moveEnd(state: EditorState): EditorState {
   return withoutGhost({ ...state, cursorCol: state.lines[state.cursorLine]!.length })
 }
 
-export function applyCompletion(state: EditorState): CompletionApplyResult {
+export function applyCompletion(state: EditorState, skills: readonly SkillEntry[] = []): CompletionApplyResult {
   if (state.completion) return { state: acceptCompletion(state), applied: true }
 
   const currentLine = state.lines[state.cursorLine]!
-  const result = complete(currentLine, state.cursorCol)
+  const result = complete(currentLine, state.cursorCol, skills)
   if (!result) return { state, applied: false }
 
   const before = currentLine.slice(0, result.wordStart)
@@ -233,7 +234,7 @@ export function applyCompletion(state: EditorState): CompletionApplyResult {
   const newLines = [...state.lines]
   newLines[state.cursorLine] = before + result.replacement + after
   const cursorCol = before.length + result.replacement.length
-  const items = result.candidates.map(completionCandidate)
+  const items = result.candidates.map(value => completionCandidate(value, skills))
 
   return {
     state: {
@@ -296,8 +297,8 @@ export function closeCompletion(state: EditorState): EditorState {
   return state.completion ? { ...state, completion: null } : state
 }
 
-function completionCandidate(value: string): CompletionCandidate {
-  const command = [...COMMANDS, ...HIDDEN_COMMANDS].find(
+function completionCandidate(value: string, skills: readonly SkillEntry[]): CompletionCandidate {
+  const command = commandInventory(skills).find(
     item => item.name === value || item.aliases?.includes(value),
   )
   return {
@@ -319,11 +320,11 @@ export function setGhostHintContext(context: GhostHintContext): void {
   ghostHintContext = context
 }
 
-export function refreshGhostHint(state: EditorState): EditorState {
+export function refreshGhostHint(state: EditorState, skills: readonly SkillEntry[] = []): EditorState {
   const currentLine = state.lines[state.cursorLine]!
   return {
     ...state,
-    ghostHint: getGhostHint(currentLine, state.cursorCol, ghostHintContext) ?? '',
+    ghostHint: getGhostHint(currentLine, state.cursorCol, ghostHintContext, skills) ?? '',
   }
 }
 

@@ -188,6 +188,8 @@ export class TermRenderer {
   private renderTimer: ReturnType<typeof setTimeout> | undefined
   private lastRenderAt = 0
   private destroyed = false
+  private suspended = false
+  private resumeRepaint = false
 
   // --- Constructor ---
 
@@ -235,6 +237,23 @@ export class TermRenderer {
     this.stdout.off('resize', this.onResize)
   }
 
+  /** Release terminal ownership without destroying the frame callback. */
+  suspend(): void {
+    if (this.destroyed || this.suspended) return
+    this.renderRequested = false
+    if (this.renderTimer) { clearTimeout(this.renderTimer); this.renderTimer = undefined }
+    this.write(WRAP + SHOW_CURSOR + '\r\n')
+    this.suspended = true
+  }
+
+  resume(): void {
+    if (this.destroyed || !this.suspended) return
+    this.suspended = false
+    this.write(NOWRAP + HIDE_CURSOR)
+    this.resumeRepaint = true
+    this.requestRender()
+  }
+
   // --- Public API ---
 
   setRenderCallback(cb: () => RenderFrame | string[]): void {
@@ -279,7 +298,7 @@ export class TermRenderer {
   }
 
   requestRender(force = false): void {
-    if (this.destroyed) return
+    if (this.destroyed || this.suspended) return
     if (force) {
       this.previousLines = []
       this.previousSourceLines = []
@@ -339,7 +358,7 @@ export class TermRenderer {
   // --- Private: scheduling ---
 
   private scheduleRender(): void {
-    if (this.destroyed || this.renderTimer || !this.renderRequested) return
+    if (this.destroyed || this.suspended || this.renderTimer || !this.renderRequested) return
     const elapsed = performance.now() - this.lastRenderAt
     const delay = Math.max(0, MIN_RENDER_INTERVAL_MS - elapsed)
     this.renderTimer = setTimeout(() => {
@@ -394,7 +413,7 @@ export class TermRenderer {
   // --- Private: core render ---
 
   private doRender(): void {
-    if (this.destroyed || !this.renderCallback) return
+    if (this.destroyed || this.suspended || !this.renderCallback) return
 
     const width = this.termCols
     const height = this.termRows
@@ -622,6 +641,14 @@ export class TermRenderer {
       buffer += this.hardwareCursorSequence(cursorPos, newLines.length) + SYNC_END
       this.write(buffer)
       traceFrame(branch, firstChanged)
+    }
+
+    // Shell output may have moved the cursor or changed the viewport while
+    // suspended. Repaint addressable rows without deleting shell scrollback.
+    if (this.resumeRepaint) {
+      this.resumeRepaint = false
+      viewportRender('resume')
+      return
     }
 
     // First render
@@ -1031,7 +1058,7 @@ export class TermRenderer {
   }
 
   private write(data: string): void {
-    if (this.destroyed) return
+    if (this.destroyed || this.suspended) return
     if (this.trace) {
       if (this.traceWrites) this.traceWrites.push(data)
       else this.pendingTraceWrites.push(data)

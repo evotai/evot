@@ -255,7 +255,8 @@ integration('live NAPI ConfigInfo contract', () => {
   test('current Rust writer reaches the validated TypeScript reader', async () => {
     const home = mkdtempSync(join(tmpdir(), 'evot-config-contract-'))
     try {
-      seedSmokeHome(home)
+      const root = seedSmokeHome(home)
+      await Bun.write(join(root, 'evot.toml'), 'session_hook = "/fixture/from-toml"\n')
       const script = `
         const { Agent } = await import('./src/native/index.ts');
         const agent = await Agent.create();
@@ -287,6 +288,7 @@ integration('live NAPI ConfigInfo contract', () => {
       expect(info.availableModels.map(model => model.spec)).toEqual(['smoke:smoke-model', 'smoke:smoke-other-model'])
       expect(info.hasApiKey).toBe(true)
       expect(info.thinkingLevel).toBe('')
+      expect(info.sessionHook).toBe('/fixture/from-toml')
       expect(stdout).not.toContain('smoke-test-key')
     } finally {
       rmSync(home, { recursive: true, force: true })

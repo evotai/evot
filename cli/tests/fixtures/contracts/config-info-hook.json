@@ -1,0 +1,10 @@
+{
+  "provider": "byok",
+  "protocol": "openai",
+  "envPath": "/fixture/evot.env",
+  "hasApiKey": true,
+  "baseUrl": "https://example.invalid/v1",
+  "availableModels": [{ "provider": "byok", "model": "custom", "spec": "byok:custom" }],
+  "thinkingLevel": "",
+  "sessionHook": "/fixture/session-hook"
+}

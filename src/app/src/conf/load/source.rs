@@ -21,6 +21,7 @@ pub(super) struct ConfigSource {
     storage: StorageSource,
     channel: ChannelSource,
     sandbox: SandboxSource,
+    session_hook: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -104,6 +105,8 @@ impl ConfigSource {
         if let Some(level) = self.llm.thinking_level {
             config.llm.thinking_level = Some(thinking_level_from_str(&level)?);
         }
+
+        config.session_hook = self.session_hook.filter(|value| !value.trim().is_empty());
 
         // Apply [providers.*] from TOML — preserves declaration order
         for (name, src) in self.providers {

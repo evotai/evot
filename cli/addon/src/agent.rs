@@ -212,6 +212,7 @@ impl NapiAgent {
             thinking_level,
             judge: None,
             default_model: config.cloud_default_model.clone(),
+            session_hook: config.session_hook.clone(),
         };
         serde_json::to_string(&info).map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }

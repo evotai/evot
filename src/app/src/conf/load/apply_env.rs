@@ -126,6 +126,13 @@ pub(super) fn apply_env(config: &mut Config, vars: &[(String, String)]) -> Resul
         }
     }
 
+    // Session hook: an explicitly empty higher-priority value disables it.
+    for (key, value) in vars {
+        if key == "EVOT_SESSION_HOOK" {
+            config.session_hook = (!value.trim().is_empty()).then(|| value.trim().to_string());
+        }
+    }
+
     // Instance ID
     for (key, value) in vars {
         if key == "EVOT_ID" {

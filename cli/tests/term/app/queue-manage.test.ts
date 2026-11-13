@@ -38,6 +38,14 @@ describe('queue manager', () => {
     expect(decideQueueSelectorAction(items[1]!, 'delete')).toEqual({ kind: 'remove', entry: entries[1] })
   })
 
+  test('explicit Resume row is actionable only through Enter, never entry Edit/Remove', () => {
+    const state = createQueueSelectorState(entries, true)
+    expect(state.items[0]?.label).toBe('Resume paused queue')
+    expect(decideQueueSelectorAction(state.items[0]!, 'enter')).toEqual({ kind: 'resume' })
+    expect(decideQueueSelectorAction(state.items[0]!, 'delete')).toEqual({ kind: 'none' })
+    expect(decideQueueSelectorAction(state.items[1]!, 'enter')).toEqual({ kind: 'edit', entry: entries[0] })
+  })
+
   test('recognizes only ctrl+g as the queue shortcut', () => {
     expect(isQueueManageShortcut({ type: 'ctrl', key: 'g' })).toBe(true)
     // Ctrl+B is the background chord now, so it must not open the queue pane.

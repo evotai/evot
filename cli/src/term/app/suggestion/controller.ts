@@ -3,7 +3,7 @@ import type { SuggestionTrigger } from '../composer/composer-guidance.js'
 import type { SuggestionFeedback, SuggestionHints, SuggestionMessage, SuggestionPosition } from './types.js'
 import { SuggestionCandidates } from './candidates.js'
 import type { SuggestionSnapshot } from './context.js'
-import { suggestionCommand } from './command.js'
+import { suggestionCommand } from '../composer/command-usage.js'
 import { readSuggestion } from './request.js'
 import { SuggestionCache } from './cache.js'
 

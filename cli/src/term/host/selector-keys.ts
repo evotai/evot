@@ -32,6 +32,7 @@ export interface SelectorKeysDeps {
   readonly composer: ComposerController
   readonly computeSession: ComputeSession
   readonly queueEdit: ReturnType<typeof createQueueEdit>
+  readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
   readonly refreshConfigInfo: () => void
   readonly renderer: TermRenderer
   readonly resumeCache: ResumeSessionCache
@@ -237,6 +238,10 @@ export function createSelectorKeysController(st: ReplState, deps: SelectorKeysDe
         st.overlay = { kind: 'selector', state: action.state }
         void st.shareSelector?.delete(action.shareId)
         deps.renderer.requestRender()
+        return
+      case 'queue-resume':
+        st.overlay = { kind: 'none' }
+        deps.queueLifecycle.resumePaused()
         return
       case 'queue-edit':
         deps.queueEdit.editQueuedPrompt(action.entry)

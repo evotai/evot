@@ -2,6 +2,9 @@
  * Slash commands for the REPL.
  */
 
+import type { SkillEntry } from './skill/scan.js'
+import { isValidSkillName } from './skill/scan.js'
+
 export interface SlashCommand {
   name: string
   aliases?: string[]
@@ -60,8 +63,51 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
 /** All commands (visible + hidden) for resolution */
 export const ALL_COMMANDS: SlashCommand[] = [...COMMANDS, ...HIDDEN_COMMANDS]
 
+export type SkillCommand = Omit<SlashCommand, 'handler'> & { handler: 'skill'; dir: string }
+export type CommandDefinition = SlashCommand | SkillCommand
+
+/** Installed skills as commands. Builtin spellings are reserved, including
+ * aliases; installing a skill never shadows them. */
+export function skillCommands(skills: readonly SkillEntry[] = []): SkillCommand[] {
+  const reserved = new Set(ALL_COMMANDS.flatMap(command => [command.name, ...command.aliases ?? []]))
+  return skills.filter(skill => isValidSkillName(skill.name) && !reserved.has(`/${skill.name.toLowerCase()}`)).map(skill => ({
+    name: `/${skill.name}`, description: `Use the ${skill.name} skill`, handler: 'skill' as const, dir: skill.dir,
+  }))
+}
+
+/** Builtins followed by installed skills, for listing and descriptions. */
+export function commandInventory(skills: readonly SkillEntry[] = []): CommandDefinition[] {
+  return [...ALL_COMMANDS, ...skillCommands(skills)]
+}
+
+export interface CommandSpelling { label: string; command: CommandDefinition }
+
+/** Every typeable spelling paired with its command; aliases are first class. */
+export function commandSpellings(commands: readonly CommandDefinition[]): CommandSpelling[] {
+  return commands.flatMap(command => [command.name, ...command.aliases ?? []].map(label => ({ label, command })))
+}
+
+function spellingsWithPrefix(commands: readonly CommandDefinition[], prefix: string): CommandSpelling[] {
+  // Low-frequency commands may require a longer explicit prefix so they do
+  // not steal common prefixes from high-frequency commands.
+  return commandSpellings(commands).filter(({ label, command }) =>
+    prefix.length >= (command.minPrefixLength ?? 1) && label.toLowerCase().startsWith(prefix))
+}
+
+/**
+ * The one matching rule shared by resolution, completion and hints: builtins
+ * own their spellings and prefixes, and skills are consulted only when no
+ * builtin matches. Installing a skill therefore never changes what a builtin
+ * prefix such as `/m` means, and builtin-only callers may omit `skills`.
+ */
+export function matchCommandPrefix(prefix: string, skills: readonly SkillEntry[] = []): CommandSpelling[] {
+  const builtin = spellingsWithPrefix(ALL_COMMANDS, prefix)
+  return builtin.length > 0 || skills.length === 0 ? builtin : spellingsWithPrefix(skillCommands(skills), prefix)
+}
+
 export type ResolvedCommand =
   | { kind: 'resolved'; name: string; args: string }
+  | { kind: 'skill'; name: string; args: string; dir: string }
   | { kind: 'ambiguous'; candidates: string[] }
   | { kind: 'unknown' }
 
@@ -88,34 +134,22 @@ export function buildHardenPrompt(args: string): string {
 
 /**
  * Resolve a slash command input to a known command.
- * Supports prefix matching (e.g. "/h" → "/help").
+ * Supports prefix matching (e.g. "/h" → "/help"), under `matchCommandPrefix`.
  */
-export function resolveCommand(input: string): ResolvedCommand {
+export function resolveCommand(input: string, skills: readonly SkillEntry[] = []): ResolvedCommand {
   const parts = input.trim().split(/\s+/)
   const cmd = parts[0]!.toLowerCase()
   const args = parts.slice(1).join(' ')
-
-  // Exact match first (visible + hidden)
-  for (const c of ALL_COMMANDS) {
-    if (c.name === cmd) return { kind: 'resolved', name: c.name, args }
-    if (c.aliases?.includes(cmd)) return { kind: 'resolved', name: c.name, args }
-  }
-
-  // Prefix match. Low-frequency commands may require a longer explicit prefix
-  // so they do not steal common prefixes from high-frequency commands.
-  const matches = ALL_COMMANDS.filter(
-    (c) => cmd.length >= (c.minPrefixLength ?? 1)
-      && (c.name.startsWith(cmd) || (c.aliases?.some((a) => a.startsWith(cmd)) ?? false))
-  )
-
-  if (matches.length === 1) {
-    return { kind: 'resolved', name: matches[0]!.name, args }
-  }
-  if (matches.length > 1) {
-    return { kind: 'ambiguous', candidates: matches.map((c) => c.name) }
-  }
-
-  return { kind: 'unknown' }
+  const matches = matchCommandPrefix(cmd, skills)
+  // An exact spelling wins over longer names that merely start with it.
+  const exact = matches.find(match => match.label.toLowerCase() === cmd)
+  const commands = exact ? [exact.command] : [...new Set(matches.map(match => match.command))]
+  if (commands.length > 1) return { kind: 'ambiguous', candidates: commands.map(command => command.name) }
+  const command = commands[0]
+  if (!command) return { kind: 'unknown' }
+  return command.handler === 'skill'
+    ? { kind: 'skill', name: command.name, args, dir: command.dir }
+    : { kind: 'resolved', name: command.name, args }
 }
 
 /** True for a bare `runSafe` command. Arguments change what a command does, so only the audited form passes. */
@@ -131,12 +165,13 @@ export function isRunSafeCommand(input: string): boolean {
  * typed with caps lock still resolves. Pasted paths like `/some/path.rs`
  * are rejected because their first segment carries `/` or `.`.
  */
-function isSlashPrefix(text: string): boolean {
+export function isSlashPrefix(text: string): boolean {
   if (!text.startsWith('/')) return false
   const rest = text.slice(1)
   const cmdPart = rest.split(/\s/)[0] ?? ''
-  // Allow letters plus `_` so hidden commands like `/_dump` work.
-  return /^[a-zA-Z_]*$/.test(cmdPart)
+  // Preserve the published path boundary (e.g. `/v2` is prose/path), while
+  // accepting hyphenated names. Installed skills resolve from the inventory.
+  return /^[a-zA-Z_-]*$/.test(cmdPart)
 }
 
 /**

@@ -1,3 +1,6 @@
+import { tabAction, tabActionHint } from '../app/composer/input-action.js'
+import { currentQueueTarget, pendingEntryLabel, visiblePendingEntries } from '../app/queue/pending-queue.js'
+import type { SuggestController } from './suggest.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import { formatLoopWaitLine } from '../../features/loop/wait-line.js'
 import type { Agent } from '../../native/index.js'
@@ -45,6 +48,7 @@ export interface FrameDeps {
   readonly renderer: TermRenderer
   readonly runInteraction: RunInteraction
   readonly runInteractionInput: () => RunInteractionInput
+  readonly suggest: SuggestController
   readonly suggestions: PromptSuggestion
   readonly suggestionTicker: SuggestionTicker
 }
@@ -75,7 +79,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       : interaction.interruptTarget === 'background'
         ? interaction.interruptPending ? `esc again to stop all ${interaction.backgroundTasks} task${interaction.backgroundTasks === 1 ? '' : 's'}` : 'esc twice to stop all'
         : undefined
-    return promptFromSnapshot({
+    const prompt = promptFromSnapshot({
       editor: st.editor,
       session: st.appState,
       config: st.configInfo,
@@ -99,8 +103,14 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       suggestionExplicit: deps.suggestions.isExplicit(),
       suggestionFrame: deps.suggestionTicker.frame,
       loopParked,
-      queuedCount: st.queuedUserMessages.length + st.queuedCompactionSubmissions.length,
+      queuedCount: visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length,
     })
+    const action = tabAction(st.editor, { busy: st.isLoading, editing: !!st.queueEditState, skills: st.skillEntries, inventory: deps.suggest.suggestionInventory() })
+    const inputHint = st.overlay.kind !== 'none' ? undefined
+      : st.queueEditState ? (st.queueEditState.consumed ? 'Original sent · copy changes or Esc discard' : 'Enter save · Esc discard')
+      : st.pendingEnqueue ? 'Preparing images · editing cancels enqueue'
+      : tabActionHint(action) ?? (visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length ? 'Ctrl+G manage/resume · Shift+↑ dequeue' : undefined)
+    return { ...prompt, inputHint }
   }
   function refreshBannerData(): void {
     if (deps.bannerCache.refresh(deps.agent.cwd, deps.agent.skillsDirs())) deps.renderer.requestRender()
@@ -328,8 +338,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
     const queueLines = queueManagerOpen
       ? []
       : formatQueuedMessageLines([
-          ...st.queuedUserMessages.map(message => message.text),
-          ...st.queuedCompactionSubmissions.map(message => message.displayText),
+          ...visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).map(pendingEntryLabel),
         ])
     if (queueLines.length > 0) {
       preEditorBlocks.push({

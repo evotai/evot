@@ -57,6 +57,7 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
     for fixture in [
         include_str!("../../../../cli/tests/fixtures/contracts/config-info-legacy.json"),
         include_str!("../../../../cli/tests/fixtures/contracts/config-info-current.json"),
+        include_str!("../../../../cli/tests/fixtures/contracts/config-info-hook.json"),
     ] {
         let original: serde_json::Value = serde_json::from_str(fixture)?;
         let current: ConfigInfo = serde_json::from_str(fixture)?;
@@ -72,6 +73,7 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
         if let Some(object) = for_legacy.as_object_mut() {
             object.remove("judge");
             object.remove("defaultModel");
+            object.remove("sessionHook");
         }
         let legacy: LegacyConfigInfo = serde_json::from_value(for_legacy)?;
         assert_eq!(legacy.provider, current.provider);
@@ -88,6 +90,7 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
         "../../../../cli/tests/fixtures/contracts/config-info-legacy.json"
     ))?;
     assert_eq!(legacy_fixture.default_model, None);
+    assert_eq!(legacy_fixture.session_hook, None);
     let current_fixture: ConfigInfo = serde_json::from_str(include_str!(
         "../../../../cli/tests/fixtures/contracts/config-info-current.json"
     ))?;

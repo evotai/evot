@@ -35,6 +35,7 @@ export type SelectorControlAction =
   | { kind: 'delete-session'; sessionId: string; label: string; state: SelectorState }
   /** `u u` on a cloud row: the server copy goes, the local transcript stays. */
   | { kind: 'unshare-session'; sessionId: string; label: string; state: SelectorState }
+  | { kind: 'queue-resume' }
   | { kind: 'queue-edit'; entry: ManagedQueuedPrompt }
   | { kind: 'queue-remove'; entry: ManagedQueuedPrompt; state: SelectorState }
   | { kind: 'rename-session'; sessionId: string; title: string; state: SelectorState }
@@ -161,6 +162,7 @@ function selectAction(state: SelectorState): SelectorControlAction {
 
   if (state.owner === SELECTOR_OWNER.queue) {
     const action = decideQueueSelectorAction(selected, 'enter')
+    if (action.kind === 'resume') return { kind: 'queue-resume' }
     if (action.kind === 'edit') return { kind: 'queue-edit', entry: action.entry }
     return { kind: 'none' }
   }

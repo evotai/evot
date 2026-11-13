@@ -1,5 +1,6 @@
 import chalk from 'chalk'
 import { buildHardenPrompt, resolveCommand } from '../../commands/index.js'
+import { getSkillEntries } from '../../commands/skill/scan.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import type { TaskSession } from '../../features/task/session.js'
@@ -55,6 +56,8 @@ export interface SlashDeps {
   readonly loopSession: LoopSession
   readonly privacyFeed: PrivacyFeed
   readonly queueEdit: ReturnType<typeof createQueueEdit>
+  readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
+  readonly pendingQueue: import('../app/queue/pending-queue.js').PendingQueue
   readonly refreshConfigInfo: () => void
   readonly renderDiagnostics: RenderDiagnostics
   readonly renderer: TermRenderer
@@ -77,7 +80,7 @@ export interface SlashDeps {
 export interface SlashController {
   readonly handleSlashInput: (text: string) => Promise<void>
   leaveLogMode(): void
-  readonly runLogQuery: (forked: ForkedAgent, prompt: string) => Promise<void>
+  readonly runLogQuery: (forked: ForkedAgent, prompt: string, contentJson?: string) => Promise<void>
 }
 
 /** Slash-command dispatch and the /log side conversation. */
@@ -87,6 +90,18 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       deps.scrollback.commitSystem('sys-mode', '  already in normal conversation mode')
       return
     }
+    const pending = deps.queueEdit.entries()
+    if (pending.length) {
+      if (st.logDiscardTarget !== st.logMode) {
+        st.logDiscardTarget = st.logMode
+        deps.scrollback.commitSystem('sys-log-queue-discard', `  Leaving log mode discards ${pending.length} pending prompts. Run /done again to confirm; keep chatting to stay.`)
+        deps.renderer.requestRender()
+        return
+      }
+      for (const entry of pending) deps.pendingQueue.remove(entry, entry.version)
+    }
+    st.pendingEnqueue = null
+    st.logDiscardTarget = null
     st.composerRevision++
     deps.suggestions.cancel()
     st.logMode = null
@@ -96,6 +111,16 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
 
   async function handleSlashInput(text: string) {
     const pendingCommand = resolveCommand(text)
+    if (pendingCommand.kind === 'resolved' && ['/new', '/clear', '/resume', '/fork', '/back', '/log'].includes(pendingCommand.name) && st.logMode) {
+      deps.scrollback.commitSystem('sys-log-switch', '  Leave the log fork with /done before switching targets; pending log prompts require confirmation.')
+      deps.renderer.requestRender()
+      return
+    }
+    if (pendingCommand.kind === 'resolved' && ['/new', '/clear'].includes(pendingCommand.name) && !st.sessionId && deps.pendingQueue.visible(st.queueStartupTarget).length) {
+      deps.scrollback.commitSystem('sys-queue-startup', '  Recover or remove the unsaved session’s pending prompts with Shift+↑ or Ctrl+G before starting a new session.')
+      deps.renderer.requestRender()
+      return
+    }
     if (pendingCommand.kind === 'resolved' && deps.backgroundTerminals.guardSessionSwitch(pendingCommand.name)) {
       return
     }
@@ -138,7 +163,9 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       deps.loopSession.reset()
       // Abort any in-flight run and clear local context view without switching sessions.
       deps.runCtl.abandonRun()
+      deps.queueLifecycle.pause()
       deps.sessionHook.endSession('context_cleared')
+      st.queueStartupTarget = { startup: st.queueStartupTarget.startup + 1 }
       st.sessionId = null
       st.appState = { ...createInitialState(st.appState.model, deps.agent.cwd) }
       deps.gitInfo.setCwd(deps.agent.cwd)
@@ -159,10 +186,12 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       deps.computeSession.cancelFlow()
       deps.loopSession.reset()
       deps.runCtl.abandonRun()
+      deps.queueLifecycle.pause()
       // Leave the session unbound until the first real prompt. The query path
       // creates and returns the session id, so abandoning /new no longer leaves
       // an empty, untitled session in persistent storage or /resume.
       deps.sessionHook.endSession('new_session')
+      st.queueStartupTarget = { startup: st.queueStartupTarget.startup + 1 }
       st.sessionId = null
       st.lastLineage = []
       setGhostHintContext({ forked: false })
@@ -247,6 +276,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     } else if (name === '/skill') {
       try {
         await handleSkillCommand(deps.replCommands, args)
+        st.skillEntries = getSkillEntries(deps.agent.skillsDirs())
       } finally {
         deps.frames.refreshBannerData()
       }
@@ -461,8 +491,14 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     deps.renderer.requestRender()
   }
 
-  async function runLogQuery(forked: import('../../native/index.js').ForkedAgent, prompt: string) {
+  async function runLogQuery(forked: import('../../native/index.js').ForkedAgent, prompt: string, contentJson?: string) {
     if (deps.cloudCtl.queryBlockedByCloudLogin()) return
+    if (st.pendingQueue.blocked) {
+      deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before starting work.')
+      return
+    }
+    st.logDiscardTarget = null
+    const queueChain = deps.queueLifecycle.begin(forked)
     const generation = deps.runCtl.beginRun()
     st.runStartedAt = Date.now()
     st.runTurnCount = 0
@@ -473,15 +509,19 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     st.streamMachine = createStreamMachineState(st.appState, st.spinnerState)
     deps.runCtl.startSpinner()
     deps.renderer.requestRender()
-    deps.scrollback.commitUserMessage(prompt)
+    if (!st.queueDispatchId) deps.scrollback.commitUserMessage(prompt)
+    let completed = false
+    let terminalError = false
+    let finished = false
 
     try {
-      const stream = await forked.query(prompt)
+      const stream = await forked.query(prompt, contentJson)
       if (!deps.runCtl.ownsRun(generation)) {
         stream.abort()
         return
       }
       st.streamRef = stream
+      deps.queueLifecycle.started(stream)
 
       // Reuse the main streaming path so log-mode inherits pi-aligned behavior:
       // the whole message stays in the dynamic zone and only commits at
@@ -493,6 +533,8 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         if (!st.streamMachine) break
         if (isHostToolEvent(event)) throw new Error('Readonly log run requested a host tool')
 
+        if (event.kind === 'error') terminalError = true
+        if (event.kind === 'run_finished') finished = true
         deps.runThinking.observe(event)
         const update = reduceRunEvent(st.streamMachine, event, {
           termRows: deps.renderer.termRows,
@@ -508,7 +550,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         if (update.commitLines.length > 0) deps.scrollback.commitLines(update.commitLines)
         if (event.kind === 'turn_started') {
           st.runTurnCount++
-          deps.queueEdit.reconcileQueuedUserMessages()
+          deps.queueLifecycle.reconcile()
         }
         if (update.rerenderStatus) deps.renderer.requestRender()
       }
@@ -520,8 +562,8 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         st.appState = final.state.appState
         deps.scrollback.commitFlushResult(final)
       }
-      deps.queueEdit.reconcileQueuedUserMessages()
-      deps.queueEdit.restoreQueuedUserMessagesToEditor()
+      deps.queueLifecycle.reconcile()
+      completed = finished && !terminalError
     } catch (err) {
       if (!deps.runCtl.ownsRun(generation)) return
       if (st.streamMachine) {
@@ -530,16 +572,17 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         deps.scrollback.commitFlushResult(final)
       }
       deps.scrollback.commitSystem('sys-log-err', renderErrorNotice(`Log query failed: ${errorText(err)}`))
-      deps.queueEdit.reconcileQueuedUserMessages()
-      deps.queueEdit.restoreQueuedUserMessagesToEditor()
+      deps.queueLifecycle.reconcile()
     } finally {
       if (deps.runCtl.ownsRun(generation)) {
+        deps.queueLifecycle.settled(st.streamRef, queueChain, completed)
         st.streamRef = null
         st.isLoading = false
         st.streamMachine = null
         deps.runCtl.stopSpinner()
         deps.scrollback.commitRunFooter()
         deps.renderer.requestRender()
+        deps.queueLifecycle.dispatchNext()
       }
     }
   }

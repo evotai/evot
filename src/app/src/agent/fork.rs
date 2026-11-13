@@ -19,7 +19,14 @@ pub struct ForkedAgent {
 
 impl ForkedAgent {
     pub async fn query(&mut self, prompt: &str) -> Result<Run> {
-        let request = QueryRequest::text(prompt)
+        self.query_input(QueryRequest::text(prompt)).await
+    }
+
+    /// Submit structured input without allowing a fork to escape readonly mode
+    /// or switch away from its own side-session identity. Only content is
+    /// retained; execution options and extra tools remain fork-owned.
+    pub async fn query_input(&mut self, request: QueryRequest) -> Result<Run> {
+        let request = QueryRequest::with_input(request.input)
             .session_id(self.session_id.clone())
             .mode(ToolMode::Readonly);
         let outcome = self.agent.submit(request).await?;

@@ -4,8 +4,8 @@ import { QUEUE_MANAGE_SHORTCUT_HINT } from '../app/queue/queue-manage.js'
  * Visible copy for mid-stream queued user messages.
  *
  * Placed above the spinner/prompt (pi-style) so a message that vanished from
- * the input box still has a clear home, plus a one-line hint that esc pulls
- * it back for editing.
+ * the input box still has a clear home, plus a one-line hint that Shift+Up
+ * dequeues the newest pending prompt into an empty composer.
  */
 export function formatQueuedMessageLines(
   messages: string[],
@@ -32,6 +32,6 @@ export function formatQueuedMessageLines(
   })
   const hidden = previews.length - shown.length
   if (hidden > 0) lines.push(`↓ ${hidden} more queued`)
-  lines.push(`↳ ${QUEUE_MANAGE_SHORTCUT_HINT} manage · esc pull last`)
+  lines.push(`↳ ${QUEUE_MANAGE_SHORTCUT_HINT} manage · shift+↑ dequeue`)
   return lines
 }

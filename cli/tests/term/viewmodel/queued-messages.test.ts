@@ -11,7 +11,7 @@ describe('formatQueuedMessageLines', () => {
     expect(formatQueuedMessageLines(['fix the layout', 'then ship'])).toEqual([
       '#1 fix the layout',
       '#2 then ship',
-      '↳ ctrl+g manage · esc pull last',
+      '↳ ctrl+g manage · shift+↑ dequeue',
     ])
   })
 
@@ -22,7 +22,7 @@ describe('formatQueuedMessageLines', () => {
     expect(lines[1]!.startsWith('#2 ')).toBe(true)
     expect(lines[1]!.endsWith('…')).toBe(true)
     expect(lines[1]!.length).toBeLessThanOrEqual(40)
-    expect(lines[2]).toBe('↳ ctrl+g manage · esc pull last')
+    expect(lines[2]).toBe('↳ ctrl+g manage · shift+↑ dequeue')
   })
 
   test('shows only the first three prompts and reports hidden rows', () => {
@@ -31,7 +31,7 @@ describe('formatQueuedMessageLines', () => {
       '#2 two',
       '#3 three',
       '↓ 1 more queued',
-      '↳ ctrl+g manage · esc pull last',
+      '↳ ctrl+g manage · shift+↑ dequeue',
     ])
   })
 })

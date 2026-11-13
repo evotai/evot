@@ -107,7 +107,7 @@ describe('module dependency boundaries', () => {
   })
 
   test('busy submission and queue projections are independent of terminal side effects', async () => {
-    for (const file of ['queue/busy-submission', 'queue/prompt-queue', 'run/manual-compaction', 'composer/file-completion-controller', 'queue/queue-edit']) {
+    for (const file of ['queue/busy-submission', 'run/manual-compaction', 'composer/file-completion-controller', 'queue/queue-edit', 'queue/pending-queue', 'queue/queue-lifecycle', 'composer/input-action']) {
       const text = await source(`../src/term/app/${file}.ts`)
       for (const forbidden of ['binding.js', 'renderer', 'process.', 'setTimeout', 'setInterval', ' as any']) {
         expect(text).not.toContain(forbidden)
@@ -115,9 +115,30 @@ describe('module dependency boundaries', () => {
     }
     const host = hostSource()
     expect(host).toContain('busySubmissionAction(')
-    expect(host).toContain('reconcileQueuedUserMessages(')
+    expect(host).toContain('queueLifecycle.reconcile(')
     const queueEdit = await source('../src/term/app/queue/queue-edit.ts')
-    expect(queueEdit).toContain('reconcilePromptQueue(')
+    expect(queueEdit).not.toContain('runQueued(')
+    expect(queueEdit).not.toContain('queue.settle(')
+    const lifecycle = await source('../src/term/app/queue/queue-lifecycle.ts')
+    expect(lifecycle).toContain('queue.reconcile(')
+    expect(host).not.toContain('queuedUserMessages')
+    // Queue state changes only through PendingQueue, and "which queue is
+    // current" has one definition.
+    for (const text of [host, lifecycle, queueEdit]) expect(text).not.toMatch(/(?:pendingQueue|queue\.state)\.\w+ = /)
+    expect(host).not.toContain('st.logMode ?? st.sessionId')
+    // composer owns command grammar; suggestion may use it, never the reverse.
+    const composerDir = resolve(import.meta.dir, '../src/term/app/composer')
+    for (const name of readdirSync(composerDir)) expect(readFileSync(join(composerDir, name), 'utf8'), name).not.toContain("'../suggestion/")
+    // One hook resolution: Rust config. The CLI never re-reads the variable.
+    const cli = resolve(import.meta.dir, '../src')
+    for (const file of ['session/hook.ts', 'headless/prompt.ts', 'term/repl.ts']) {
+      const text = readFileSync(join(cli, file), 'utf8')
+      expect(text, file).not.toContain('env.EVOT_SESSION_HOOK')
+      if (file !== 'session/hook.ts') expect(text, file).toContain('configInfo().sessionHook')
+    }
+    const pendingQueue = await source('../src/term/app/queue/pending-queue.ts')
+    expect(pendingQueue).toContain("stream.queuedPrompts('steering')")
+    expect(pendingQueue).toContain("stream.queuedPrompts('follow_up')")
     expect(host).not.toContain('function queueEntryText(')
     expect(host).toContain('manualCompaction.run(')
     expect(host).not.toContain('compactionTask = agent.compact(')

@@ -25,6 +25,8 @@ import type { RendererTrace } from '../diagnostics/renderer-trace.js'
 import type { CommandWindowController } from './command-window.js'
 import type { FrameController } from './frame.js'
 import type { ScrollbackController } from './scrollback.js'
+import type { RunController } from './run.js'
+import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
 import type { ReplState } from './state.js'
 import { setGhostHintContext } from '../input/editor.js'
 import { openWebLink } from '../open-link.js'
@@ -51,6 +53,8 @@ export interface SessionDeps {
   readonly rendererTrace: RendererTrace
   readonly requestProductSuggestion: (trigger: SuggestionTrigger) => void
   readonly resumeCache: ResumeSessionCache
+  readonly runCtl: RunController
+  readonly queueLifecycle: QueueLifecycle
   readonly runQuery: (text: string, contentJson?: string | undefined, prebuiltStream?: QueryStream | undefined, hostToolExtension?: HostToolExtension | undefined) => Promise<void>
   readonly scrollback: ScrollbackController
   readonly sessionCloudLabel: (session: SessionMeta) => string
@@ -132,6 +136,13 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
   }
 
   async function resumeSession(session: SessionMeta, notice?: OutputLine[]) {
+    if (st.logMode) {
+      deps.scrollback.commitSystem('sys-log-switch', '  Leave the log fork with /done before switching sessions; pending log prompts require confirmation.')
+      return
+    }
+    deps.runCtl.abandonRun()
+    deps.queueLifecycle.pause()
+    st.draftImageEpoch++
     const revision = ++st.composerRevision
     st.suggestionContextId++
     deps.suggestions.cancel()
