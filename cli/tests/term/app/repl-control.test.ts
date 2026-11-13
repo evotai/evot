@@ -85,14 +85,20 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'escape' }, editor: completionEditor })).toEqual(['close-completion'])
   })
 
-  test('Shift+Up restores newest queued prompt without interrupting', () => {
-    expect(kinds({
-      ...base,
-      event: { type: 'shift-up' },
-      isLoading: true,
-      hasStream: true,
-      hasQueuedPrompt: true,
-    })).toEqual(['restore-queued'])
+  test('escape pulls back the newest pending prompt before it may interrupt', () => {
+    const running = { ...base, event: { type: 'escape' as const }, isLoading: true, hasStream: true }
+    expect(kinds({ ...running, hasQueuedPrompt: true })).toEqual(['restore-queued'])
+    expect(kinds(running)).toEqual(['interrupt'])
+    // A draft during a run never turns Esc into an interrupt while prompts
+    // are pending: the pull-back action explains itself instead.
+    const draft = insertText(createEditorState(), 'draft')
+    expect(kinds({ ...running, hasQueuedPrompt: true, editor: draft })).toEqual(['restore-queued'])
+    expect(kinds({ ...running, editor: draft })).toEqual(['interrupt'])
+    // Idle (paused backlog): the same rule; a draft is cleared first.
+    const idle = { ...base, event: { type: 'escape' as const }, hasQueuedPrompt: true }
+    expect(kinds(idle)).toEqual(['restore-queued'])
+    expect(kinds({ ...idle, editor: draft })).toEqual(['clear-editor'])
+    expect(kinds({ ...base, event: { type: 'escape' } })).toEqual([])
   })
 
   test('escape interrupts loading stream without queued prompts', () => {
@@ -138,15 +144,10 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'ctrl', key: 'b' } })).toEqual(['normal-key'])
   })
 
-  test('escape interrupts even with a queued prompt; dequeue has its own chord', () => {
-    expect(kinds({
-      ...base,
-      event: { type: 'escape' },
-      isLoading: true,
-      hasStream: true,
-      hasQueuedPrompt: true,
-      canReclaimTurn: true,
-    })).toEqual(['interrupt'])
+  test('a pending prompt is pulled back before Esc interrupts, backgroundable work or not', () => {
+    const running = { ...base, event: { type: 'escape' as const }, isLoading: true, hasStream: true, canReclaimTurn: true }
+    expect(kinds({ ...running, hasQueuedPrompt: true })).toEqual(['restore-queued'])
+    expect(kinds(running)).toEqual(['interrupt'])
   })
 
   test('ctrl-c does not become a stop gesture while work is backgroundable', () => {

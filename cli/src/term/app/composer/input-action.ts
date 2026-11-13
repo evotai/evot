@@ -40,7 +40,7 @@ export function tabAction(editor: EditorState, options: {
 export function tabActionHint(action: TabAction): string | undefined {
   switch (action.kind) {
     case 'local': case 'arguments': return 'Tab complete · Enter accept'
-    case 'queue': return 'Enter steer · Tab queue · Shift+↑ dequeue · Ctrl+N assist'
+    case 'queue': return 'Enter send now · Tab send after · Ctrl+N assist'
     case 'none': return 'Enter run command · commands do not queue'
     case 'assist': return undefined
   }

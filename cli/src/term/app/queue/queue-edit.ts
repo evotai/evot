@@ -58,7 +58,7 @@ export function createQueueEdit(deps: QueueEditDeps) {
     const entry = find(item)
     if (!entry) { notify('Queued prompt is no longer pending.'); return }
     if (deps.preparing() || deps.getEditing()) { notify('Finish or discard the pending input first.'); return }
-    if (entry.contentJson) { notify('Structured prompts cannot be edited here. Use Shift+↑ to recover pending prompts newest first.'); return }
+    if (entry.contentJson) { notify('Structured prompts cannot be edited here. Press Esc to pull pending prompts back, newest first.'); return }
     deps.setEditing({ entry: item, stash: deps.snapshot(), consumed: false })
     deps.restore(entry.snapshot)
     deps.setOverlay({ kind: 'none' })
@@ -90,12 +90,17 @@ export function createQueueEdit(deps: QueueEditDeps) {
     deps.requestRender()
   }
   function restoreLastQueuedUserMessageToEditor() {
-    if (getEditorText(deps.getEditor()).length || deps.getEditing() || deps.preparing()) { notify('Finish or clear the draft before dequeueing.'); return }
+    if (getEditorText(deps.getEditor()).length || deps.getEditing() || deps.preparing()) { notify('Draft in progress · Ctrl+C clears it, then Esc pulls back a pending prompt.'); return }
     const entry = entries().at(-1)
-    if (!entry) { notify('No queued prompts.'); return }
-    try { queue.remove(entry, entry.version); deps.restore(entry.snapshot, true) }
-    catch (err) { deps.lifecycle.reconcile(); notify(`Dequeue failed: ${errorText(err)}`) }
-    deps.requestRender()
+    if (!entry) { notify('Nothing pending.'); return }
+    try {
+      queue.remove(entry, entry.version)
+      deps.restore(entry.snapshot, true)
+      notify('Pulled back · not sent.')
+    } catch (err) {
+      deps.lifecycle.reconcile()
+      notify(entries().includes(entry) ? `Pull back failed: ${errorText(err)}` : 'Already sent · cannot pull back.')
+    }
   }
   return { editingEntry, openQueueSelector, editQueuedPrompt, cancelQueueEdit, saveQueueEdit, removeQueuedPrompt,
     restoreLastQueuedUserMessageToEditor, entries }

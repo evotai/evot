@@ -1,4 +1,5 @@
 import { tabAction, tabActionHint } from '../app/composer/input-action.js'
+import { pendingQueueHint } from '../app/queue/queue-manage.js'
 import { currentQueueTarget, pendingEntryLabel, visiblePendingEntries } from '../app/queue/pending-queue.js'
 import type { SuggestController } from './suggest.js'
 import type { LoopSession } from '../../features/loop/session.js'
@@ -105,11 +106,12 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       loopParked,
       queuedCount: visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length,
     })
+    const pending = visiblePendingEntries(st.pendingQueue, currentQueueTarget(st))
     const action = tabAction(st.editor, { busy: st.isLoading, editing: !!st.queueEditState, skills: st.skillEntries, inventory: deps.suggest.suggestionInventory() })
     const inputHint = st.overlay.kind !== 'none' ? undefined
       : st.queueEditState ? (st.queueEditState.consumed ? 'Original sent · copy changes or Esc discard' : 'Enter save · Esc discard')
       : st.pendingEnqueue ? 'Preparing images · editing cancels enqueue'
-      : tabActionHint(action) ?? (visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).length ? 'Ctrl+G manage/resume · Shift+↑ dequeue' : undefined)
+      : tabActionHint(action) ?? (pending.length ? pendingQueueHint(pending.filter(entry => entry.paused).length) : undefined)
     return { ...prompt, inputHint }
   }
   function refreshBannerData(): void {
@@ -335,11 +337,10 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       && !commandWindowIsMounted && deps.renderer.termCols >= 30))
     const preEditorBlocks: ViewBlock[] = []
     const queueManagerOpen = st.overlay.kind === 'selector' && st.overlay.state.owner === SELECTOR_OWNER.queue
+    const pendingNow = visiblePendingEntries(st.pendingQueue, currentQueueTarget(st))
     const queueLines = queueManagerOpen
       ? []
-      : formatQueuedMessageLines([
-          ...visiblePendingEntries(st.pendingQueue, currentQueueTarget(st)).map(pendingEntryLabel),
-        ])
+      : formatQueuedMessageLines(pendingNow.map(pendingEntryLabel), { paused: pendingNow.filter(entry => entry.paused).length })
     if (queueLines.length > 0) {
       preEditorBlocks.push({
         lines: queueLines.map(text => ({ spans: [{ text, dim: true }] })),

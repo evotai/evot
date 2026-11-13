@@ -117,7 +117,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       return
     }
     if (pendingCommand.kind === 'resolved' && ['/new', '/clear'].includes(pendingCommand.name) && !st.sessionId && deps.pendingQueue.visible(st.queueStartupTarget).length) {
-      deps.scrollback.commitSystem('sys-queue-startup', '  Recover or remove the unsaved session’s pending prompts with Shift+↑ or Ctrl+G before starting a new session.')
+      deps.scrollback.commitSystem('sys-queue-startup', '  Recover or remove the unsaved session’s pending prompts with Esc or Ctrl+G before starting a new session.')
       deps.renderer.requestRender()
       return
     }

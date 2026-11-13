@@ -13,7 +13,7 @@ test.each([
 ] as const)('Tab has one predictable meaning for %j', (text, kind) => {
   const action = tabAction(insertText(createEditorState(), text), options)
   expect(action.kind).toBe(kind)
-  if (kind === 'queue') expect(tabActionHint(action)).toContain('Tab queue')
+  if (kind === 'queue') expect(tabActionHint(action)).toBe('Enter send now · Tab send after · Ctrl+N assist')
   if (kind === 'local' || kind === 'arguments') expect(tabActionHint(action)).toContain('Tab complete')
 })
 

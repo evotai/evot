@@ -19,7 +19,7 @@ test('visible pending entries are a pure session-scoped projection', () => {
   const before = structuredClone(h.queue.state)
   expect(visiblePendingEntries(h.queue.state, 'session-a')).toEqual([b])
   expect(visiblePendingEntries(h.queue.state, 'session-other')).toEqual([])
-  expect(pendingEntryLabel(b)).toBe('[next] B')
+  expect(pendingEntryLabel(b)).toBe('[after] B')
   expect(h.queue.state).toEqual(before)
   h.queue.settle(h.chain, false)
   expect(pendingEntryLabel(b)).toBe('[paused] B')

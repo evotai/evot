@@ -1,15 +1,15 @@
-import { QUEUE_MANAGE_SHORTCUT_HINT } from '../app/queue/queue-manage.js'
+import { pendingQueueHint } from '../app/queue/queue-manage.js'
 
 /**
  * Visible copy for mid-stream queued user messages.
  *
  * Placed above the spinner/prompt (pi-style) so a message that vanished from
- * the input box still has a clear home, plus a one-line hint that Shift+Up
- * dequeues the newest pending prompt into an empty composer.
+ * the input box still has a clear home, plus the one-line hint for getting it
+ * back (Esc) or, when the backlog is paused, continuing it.
  */
 export function formatQueuedMessageLines(
   messages: string[],
-  options: { maxChars?: number; maxVisible?: number } = {},
+  options: { maxChars?: number; maxVisible?: number; paused?: number } = {},
 ): string[] {
   const maxChars = Number.isFinite(options.maxChars)
     ? Math.max(16, Math.floor(options.maxChars!))
@@ -32,6 +32,6 @@ export function formatQueuedMessageLines(
   })
   const hidden = previews.length - shown.length
   if (hidden > 0) lines.push(`↓ ${hidden} more queued`)
-  lines.push(`↳ ${QUEUE_MANAGE_SHORTCUT_HINT} manage · shift+↑ dequeue`)
+  lines.push(`↳ ${pendingQueueHint(options.paused ?? 0)}`)
   return lines
 }

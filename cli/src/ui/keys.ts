@@ -23,7 +23,6 @@ export type KeyEvent =
   | { type: 'shift-tab' }
   | { type: 'escape' }
   | { type: 'up' }
-  | { type: 'shift-up' }
   | { type: 'down' }
   | { type: 'left' }
   | { type: 'right' }
@@ -418,7 +417,7 @@ function modifiedArrowEvent(final: string, modifier: number): KeyEvent | undefin
   const normalized = modifier & ~(64 + 128)
   const wordMod = (normalized & MOD_ALT) !== 0 || (normalized & MOD_CTRL) !== 0
   switch (final) {
-    case 'A': return { type: normalized === MOD_SHIFT ? 'shift-up' : 'up' }
+    case 'A': return { type: 'up' }
     case 'B': return { type: 'down' }
     case 'C': return { type: wordMod ? 'word-right' : 'right' }
     case 'D': return { type: wordMod ? 'word-left' : 'left' }

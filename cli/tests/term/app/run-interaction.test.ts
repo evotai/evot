@@ -106,15 +106,15 @@ test('idle background stop preserves drafts and respects modal and completion pr
   expect(decideReplControl({ ...input, interaction: resolveRunInteraction({ active: false, owner: null, backgroundTasks: 2, backgroundStopping: true }) })).toEqual([])
 })
 
-test('overlays dismiss before interruption, while pending messages do not capture Esc', () => {
+test('overlays dismiss first, then Esc pulls back a pending message, then it interrupts', () => {
   const input = {
     interaction: resolveRunInteraction({ active: true, owner, blockingWaits: 1 }),
     event: { type: 'escape' as const }, overlay: { kind: 'none' as const },
     editor: createEditorState(), isLoading: true, hasStream: true,
     exitHint: false, logMode: false, hasQueuedPrompt: true,
   }
-  expect(decideReplControl(input)).toEqual([{ kind: 'interrupt' }])
-  expect(decideReplControl({ ...input, event: { type: 'shift-up' } })).toEqual([{ kind: 'restore-queued' }])
+  expect(decideReplControl(input)).toEqual([{ kind: 'restore-queued' }])
+  expect(decideReplControl({ ...input, hasQueuedPrompt: false })).toEqual([{ kind: 'interrupt' }])
   expect(decideReplControl({ ...input, overlay: { kind: 'help' } })).toEqual([{ kind: 'close-overlay' }])
 })
 

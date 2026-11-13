@@ -1025,7 +1025,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('/x-r\t')
       await session.waitForScreen('/x-review')
       session.write('inspect changes\t')
-      await session.waitForScreen(/\[next\].*\/x-review inspect changes/)
+      await session.waitForScreen(/\[after\].*\/x-review inspect changes/)
       expect(requests).toHaveLength(1)
       release.resolve()
       await session.waitForScreen('Skill response 2')
@@ -1044,7 +1044,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 30_000)
 
-  test('busy Tab queues FIFO; raw Shift+Up dequeues and restores the newest draft', async () => {
+  test('busy Tab queues FIFO; Esc pulls the newest pending prompt back without interrupting', async () => {
     const requests: { role: string; content: unknown }[][] = []
     const arrived = Array.from({ length: 3 }, () => Promise.withResolvers<void>())
     const finish: (() => void)[] = []
@@ -1068,13 +1068,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('Queue prompt A\x0d')
       await arrived[0]!.promise
       session.write('Queue prompt B\tQueue prompt C\t')
-      await session.waitForScreen(/\[next\].*Queue prompt C/)
+      await session.waitForScreen(/\[after\].*Queue prompt C/)
       expect(requests).toHaveLength(1)
-      session.write('\x1b[1;2A')
-      await session.waitForScreen(/^(?![\s\S]*\[next\][^\n]*Queue prompt C)[\s\S]*Queue prompt C/)
+      session.write('\x1b')
+      await session.waitForScreen(/^(?![\s\S]*\[after\][^\n]*Queue prompt C)[\s\S]*Queue prompt C/)
       expect(requests).toHaveLength(1)
       session.write('\t')
-      await session.waitForScreen(/\[next\].*Queue prompt C/)
+      await session.waitForScreen(/\[after\].*Queue prompt C/)
       finish[0]!(); await arrived[1]!.promise
       expect(JSON.stringify(requests[1])).toContain('Queue prompt B')
       expect(JSON.stringify(requests[1])).not.toContain('Queue prompt C')

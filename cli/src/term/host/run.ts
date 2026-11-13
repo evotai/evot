@@ -423,7 +423,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     flushStreamContent()
     st.streamMachine = null
     stopSpinner()
-    // Unconsumed work stays paused and individually recoverable with Shift+Up.
+    // Unconsumed work stays paused and individually recoverable with Esc.
     // The transcript has no record of a user-side interrupt, so this line is
     // captured as a client notice and survives into a shared session.
     deps.committer.commitNotice([{ id, kind: 'cancelled', text }])

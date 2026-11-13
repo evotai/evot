@@ -44,8 +44,10 @@ export function currentQueueTarget(host: { logMode: ForkedAgent | null; sessionI
 export function visiblePendingEntries(state: PendingQueueState, target: QueueTarget): PendingEntry[] {
   return state.entries.filter(entry => entry.target === target)
 }
+/** `[now]` joins the running turn, `[after]` waits for it to end, `[paused]`
+ * waits for an explicit resume. */
 export function pendingEntryLabel(entry: PendingEntry): string {
-  return `${entry.paused ? '[paused] ' : entry.queue === 'follow_up' ? '[next] ' : '[steer] '}${entry.text}`
+  return `${entry.paused ? '[paused] ' : entry.queue === 'follow_up' ? '[after] ' : '[now] '}${entry.text}`
 }
 
 /** Logical ownership survives stream cleanup. Only acknowledged native removals

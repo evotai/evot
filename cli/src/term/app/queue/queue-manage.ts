@@ -6,6 +6,14 @@ import { createAppSelectorState } from '../../../ui/selector-identity.js'
 export const QUEUE_SELECTOR_TITLE = 'Prompt queue'
 export const QUEUE_MANAGE_SHORTCUT_HINT = 'ctrl+g'
 
+/** The one hint for pending prompts, wherever it is shown. Paused work names
+ * the key that continues it. */
+export function pendingQueueHint(paused: number): string {
+  return paused > 0
+    ? `${paused} paused · ${QUEUE_MANAGE_SHORTCUT_HINT} resume · esc pull back`
+    : `esc pull back · ${QUEUE_MANAGE_SHORTCUT_HINT} manage`
+}
+
 /**
  * Queue-pane toggle key.
  *

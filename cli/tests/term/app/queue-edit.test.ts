@@ -54,6 +54,7 @@ test('dequeue is newest-first, preserves the other native entry, and never abort
   expect(h.native.calls).toEqual(['follow_up', 'follow_up'])
   expect(h.native.queues.follow_up.map(entry => entry.id)).toEqual([b.native?.id])
   expect(h.committed).toEqual([])
+  expect(h.messages.at(-1)).toContain('Pulled back · not sent.')
   expect(c.native?.id).toBeDefined()
 })
 
@@ -63,6 +64,7 @@ test.each(['existing draft', ' ', '\n'])('dequeue protects a nonempty composer: 
   h.ctl.restoreLastQueuedUserMessageToEditor()
   expect(h.text()).toBe(text)
   expect(h.queue.state.entries).toEqual([b])
+  expect(h.messages.at(-1)).toContain('Ctrl+C clears it')
 })
 
 test('dequeue with empty queue or pending image action is harmless', () => {
@@ -82,6 +84,7 @@ test('dequeue failure preserves draft and reconciles a consumption winner withou
   expect(h.text()).toBe('')
   expect(h.committed).toEqual(['B'])
   expect(h.queue.state.entries).toEqual([])
+  expect(h.messages.at(-1)).toContain('Already sent · cannot pull back.')
 })
 
 test('structured editing is blocked without taking over an unrelated draft', () => {

@@ -70,9 +70,7 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
     if (event.type === 'ctrl' && event.key === 'z') { deps.terminal.suspend(); return }
     const ordinary = st.overlay.kind === 'none' && !st.commandWindowPreview
     const editing = deps.queueEdit.editingEntry() !== null
-    if (event.type === 'shift-up' && (!ordinary || st.editor.completion)) event = { type: 'up' }
     if (ordinary && !st.editor.completion) {
-      if (event.type === 'shift-up') { deps.queueEdit.restoreLastQueuedUserMessageToEditor(); return }
       if ((st.pendingEnqueue || deps.pendingImages.awaiting) && (event.type === 'tab' || event.type === 'enter')) return
       if (editing && event.type === 'enter') { deps.queueEdit.saveQueueEdit(deps.composer.getExpandedText()); return }
       if (event.type === 'tab' && (editing || (st.isLoading && getEditorText(st.editor).trim()))) {

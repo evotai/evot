@@ -78,6 +78,12 @@ export function decideReplControl(input: ReplControlInput): ReplControlAction[] 
       return actions.concat({ kind: 'close-overlay' })
     }
     if (editor.completion) return actions.concat({ kind: 'close-completion' })
+    // A sent-but-pending prompt is cancelled before the run is: Esc pulls the
+    // newest one back into the empty composer, running or idle, and reaches
+    // interrupt only once nothing is pending. With a draft in a running turn
+    // the same action explains itself instead of interrupting; an idle draft
+    // falls through to the ordinary clear, and the next Esc pulls back.
+    if (hasQueuedPrompt && (isLoading || isEditorEmpty(editor))) return actions.concat({ kind: 'restore-queued' })
     // Esc is the interrupt key; the REPL asks for a second press within a
     // short window. Backgrounding lives on ctrl+b, so neither key's meaning
     // depends on state the user cannot see.
@@ -91,8 +97,6 @@ export function decideReplControl(input: ReplControlInput): ReplControlAction[] 
     if (logMode) return actions.concat({ kind: 'exit-log-mode' })
     return actions
   }
-
-  if (event.type === 'shift-up' && overlay.kind === 'none' && !editor.completion) return actions.concat({ kind: 'restore-queued' })
 
   if (overlay.kind === 'help') return actions.concat({ kind: 'close-overlay' })
   if (overlay.kind === 'selector') return actions.concat({ kind: 'selector-key' })

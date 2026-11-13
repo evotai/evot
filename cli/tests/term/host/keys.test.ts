@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { createKeysController, type KeysDeps } from '../../../src/term/host/keys.js'
 import type { ReplState } from '../../../src/term/host/state.js'
-import { createEditorState, insertText, showCompletions } from '../../../src/term/input/editor.js'
+import { createEditorState, insertText } from '../../../src/term/input/editor.js'
 import { resolveRunInteraction } from '../../../src/term/app/run/run-interaction.js'
 import { createPendingQueueState } from '../../../src/term/app/queue/pending-queue.js'
 import { parseInput } from '../../../src/ui/keys.js'
@@ -90,16 +90,8 @@ test('pending image action suppresses repeated submission intent', () => {
   expect(h.calls).toEqual([])
 })
 
-test('raw Shift+Up dequeues ordinarily but becomes local Up in overlays and popups', () => {
+test('Shift+Up is an ordinary Up: only Esc pulls a pending prompt back', () => {
   const ordinary = harness('')
   for (const event of parseInput(Buffer.from('\x1b[1;2A'))) ordinary.keys.handleKey(event)
-  expect(ordinary.calls).toEqual(['dequeue'])
-  const popup = harness('')
-  popup.st.editor = showCompletions(popup.st.editor, [{ label: 'file', value: 'file' }], 0)
-  popup.keys.handleKey({ type: 'shift-up' })
-  expect(popup.calls).toEqual(['local:up'])
-  const overlay = harness('')
-  overlay.st.overlay = { kind: 'ask-user', state: {} } as ReplState['overlay']
-  overlay.keys.handleKey({ type: 'shift-up' })
-  expect(overlay.calls).toEqual(['ask:up'])
+  expect(ordinary.calls).not.toContain('dequeue')
 })
