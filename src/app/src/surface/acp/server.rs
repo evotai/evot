@@ -27,6 +27,7 @@ use super::connection::Inbound;
 use super::models::model_options;
 use super::permission::AcpApprover;
 use super::projection::TurnProjection;
+use super::prompt::prepare_input;
 use super::prompt::prompt_input;
 use super::AcpOptions;
 use crate::agent::models::ModelSelection;
@@ -37,7 +38,7 @@ use crate::base::error::EvotError;
 use crate::base::error::Result;
 use crate::conf::Config;
 
-/// Largest accepted inbound frame. Prompts are text only, so this is generous.
+/// Largest accepted inbound frame, including base64-encoded image prompts.
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MODEL_CONFIG_ID: &str = "model";
 
@@ -378,6 +379,16 @@ impl Server {
         let session_id = finished.session_id.clone();
         let cancel = finished.cancel.clone();
         let _finished = finished;
+        // Admission reserved this prompt before dispatch read another frame.
+        // Keep expensive image work off that path so cancel/close/disconnect
+        // can drop preparation without waiting for a decoder to finish.
+        let input = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));
+            }
+            result = prepare_input(input) => result?,
+        };
         self.refresh_config().await;
         if cancel.is_cancelled() {
             return Ok(acp::PromptResponse::new(acp::StopReason::Cancelled));

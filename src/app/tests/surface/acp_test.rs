@@ -119,6 +119,17 @@ impl Client {
         Ok(())
     }
 
+    pub(super) async fn send_batch(&mut self, frames: &[Value]) -> TestResult {
+        let batch = frames
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        self.input.write_all(batch.as_bytes()).await?;
+        Ok(())
+    }
+
     pub(super) async fn frame(&mut self) -> Result<Value, Box<dyn std::error::Error>> {
         let line = tokio::time::timeout(Duration::from_secs(10), self.output.next_line())
             .await??
@@ -200,13 +211,7 @@ async fn prompt_admission_precedes_immediate_cancel_in_the_same_wire_batch() -> 
         json!({"jsonrpc":"2.0", "id":100, "method":"session/prompt", "params":text_prompt(&session, "hello")}),
         json!({"jsonrpc":"2.0", "method":"session/cancel", "params":{"sessionId":session}}),
     ];
-    let batch = frames
-        .iter()
-        .map(Value::to_string)
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    client.input.write_all(batch.as_bytes()).await?;
+    client.send_batch(&frames).await?;
     let response = client.frame().await?;
     assert_eq!(response["id"], 100, "{response}");
     assert_eq!(response["result"]["stopReason"], "cancelled", "{response}");
