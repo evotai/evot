@@ -350,17 +350,33 @@ async fn cloud_http_does_not_extend_retry_after_for_a_stalled_body() -> TestResu
     storage
         .save_session(SessionMeta::new("s1".into(), "/w".into(), "m".into()))
         .await?;
-    let started = std::time::Instant::now();
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(3),
-        sync::share_session(&state, &storage, "s1", None, "test", &|_| {}),
-    )
-    .await??;
+    let (limited, mut rate_limits) = tokio::sync::mpsc::unbounded_channel();
+    let on_event = |progress: sync::PushProgress| {
+        if let sync::PushPhase::RateLimited { retry_in } = progress.phase {
+            let _ = limited.send((std::time::Instant::now(), retry_in));
+        }
+    };
+    let upload = sync::share_session(&state, &storage, "s1", None, "test", &on_event);
+    tokio::pin!(upload);
+    // Scrubbing, client initialization and the first request are not part of
+    // Retry-After. On slow CI runners they can exhaust the old three-second
+    // total budget before the stalled body has even been observed.
+    let (limited_at, retry_in) = tokio::time::timeout(REQUEST_TIMEOUT, async {
+        tokio::select! {
+            event = rate_limits.recv() => event.ok_or("missing rate-limit event"),
+            _ = &mut upload => Err("upload completed before receiving the expected 429"),
+        }
+    })
+    .await
+    .map_err(|_| "upload did not reach the expected 429 within the startup timeout")??;
+    assert_eq!(retry_in, Duration::from_secs(1));
+    // Keep the strict upper bound: draining the body for the normal five
+    // seconds instead of the retry deadline must still fail this test.
+    let outcome = tokio::time::timeout(Duration::from_secs(3), &mut upload)
+        .await
+        .map_err(|_| "stalled response body extended the retry deadline")??;
     assert!(matches!(outcome, sync::PushOutcome::Synced { .. }));
-    assert!(
-        started.elapsed() >= Duration::from_secs(1),
-        "honour Retry-After"
-    );
+    assert!(limited_at.elapsed() >= retry_in, "honour Retry-After");
     let requests = server.state.requests.lock().await;
     assert_eq!(requests.len(), 2);
     assert_ne!(
