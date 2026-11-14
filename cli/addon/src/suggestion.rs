@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use evot::suggestion::SuggestionOutcome;
-use evot::suggestion::SuggestionStatus;
+use evot::api::suggestion::SuggestionOutcome;
+use evot::api::suggestion::SuggestionStatus;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use tokio::sync::watch;
@@ -27,8 +27,8 @@ pub struct NapiSuggestion {
 
 impl NapiSuggestion {
     pub fn start(
-        request: evot::suggestion::SuggestionRequest,
-        current: evot::conf::LlmConfig,
+        request: evot::api::suggestion::SuggestionRequest,
+        current: evot::api::LlmConfig,
     ) -> Self {
         let cancel = CancellationToken::new();
         let task_cancel = cancel.clone();
@@ -37,7 +37,7 @@ impl NapiSuggestion {
         let listener = Arc::new(move |candidates| {
             updates.send_replace(candidates);
         });
-        let handle = tokio::spawn(evot::suggestion::generate(
+        let handle = tokio::spawn(evot::api::suggestion::generate(
             current,
             messages,
             hints,

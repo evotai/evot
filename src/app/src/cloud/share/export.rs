@@ -54,7 +54,7 @@ pub fn export_session(
                     if system_prompt.is_none() || tools.is_none() {
                         // Compute machine details stay on this computer.
                         let mut call = data.clone();
-                        crate::cloud::compute::prompt::redact_llm_call(&mut call);
+                        crate::privacy::local_prompt::redact_llm_call(&mut call);
                         if system_prompt.is_none() {
                             system_prompt = call
                                 .get("system_prompt")

@@ -301,7 +301,8 @@ impl NapiAgent {
         &self,
         context_json: String,
     ) -> Result<crate::suggestion::NapiSuggestion> {
-        let request = evot::suggestion::parse_request(&context_json).map_err(Error::from_reason)?;
+        let request =
+            evot::api::suggestion::parse_request(&context_json).map_err(Error::from_reason)?;
         Ok(crate::suggestion::NapiSuggestion::start(
             request,
             self.agent.llm(),

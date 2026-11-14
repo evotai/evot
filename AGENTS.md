@@ -17,12 +17,13 @@
 Each list is lowest layer first. A module uses only modules listed before it; guard tests fail on an upward dependency.
 
 - **`src/engine/src`**: `time`, `media`, `spill` → `types` → `provider` → `context`, `retry` → `event`, `tools`, `host` → `runner` → `agent` (guard: `src/engine/tests/architecture.rs`)
-- **`src/app/src`**: `base` → `types` → `auth` → `conf` → `observability`, `privacy` → `session` → `cloud` → `agent` → `suggestion` → `surface` → `api` (guard: `src/app/tests/base/architecture_test.rs`)
+- **`src/app/src`**: `base` → `types` → `auth` → `conf` → `observability`, `privacy` → `session` → `cloud` → `agent` → `suggestion` → `surface` → `api` (guard: `src/app/tests/base/architecture_test.rs`, which also enforces the `session`, `cloud` and `surface` sub-layers below and fails on any child module missing from its table)
   - `base`: `error`, `blocking`, `atomic_file`, `http`, `paths`
-  - `session`: `conversation` → `storage` → `search` → session state (`Session`, `SessionService`, …) → `compact`
-  - `cloud`: `compute`, `share` → `sync`
+  - `session`: `conversation` → `storage` → `search` → session state (`Session`, `SessionService`, …; one unit) → `compact`
+  - `cloud`: `compute`, `share` → `sync`. Machine-local prompt sections that uploads drop live in `privacy::local_prompt`, below both producers and uploaders
   - `agent`: agent runtime plus `bootstrap`, `models`, `command`
   - `surface`: `delivery` → `gateway` → `automation`, `acp`, `contracts` → `service`
+  - `api`: the NAPI addon's only door into `evot`; `cli/addon` never names another `evot::` path (same guard)
 - **`cli/src`**: `native` → `ui` → `markdown` → `render` → `session` → `features` → `commands` → `update` → `term` → `headless`; `index.ts` and `cli.ts` are the entry points (guard: `cli/tests/architecture-boundaries.test.ts`)
   - `ui`: terminal primitives with no application knowledge (selector, keys, theme, wrap, progress)
   - `features`: `task`, `compute`, `loop`, `channels`, `models`

@@ -2,6 +2,7 @@
 
 use evot::cloud::compute::prompt;
 use evot::cloud::compute::ComputeMachine;
+use evot::privacy::local_prompt;
 
 type Result<T = ()> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -24,8 +25,8 @@ fn prompt_section_lists_enabled_machines_with_their_ssh_targets() -> Result {
     let mut paused = machine("old");
     paused.enabled = false;
     let section = prompt::prompt_section(&[machine("big-1"), paused]).ok_or("no section")?;
-    assert!(section.starts_with(prompt::PROMPT_OPEN));
-    assert!(section.ends_with(prompt::PROMPT_CLOSE));
+    assert!(section.starts_with(local_prompt::COMPUTE_OPEN));
+    assert!(section.ends_with(local_prompt::COMPUTE_CLOSE));
     assert!(section.contains("- big-1 (ssh ubuntu@10.0.0.9): Rust builds and tests"));
     let mut aliased = machine("box");
     aliased.ssh_target = "box".into();
@@ -58,16 +59,16 @@ fn redaction_drops_the_section() -> Result {
     let section = prompt::prompt_section(&[machine("big-1")]).ok_or("none")?;
     let system = format!("You are evot.\n\n{section}\n\nAvailable variables: X");
     assert_eq!(
-        prompt::redact_prompt(&system),
+        local_prompt::redact_prompt(&system),
         "You are evot.\n\nAvailable variables: X"
     );
-    assert_eq!(prompt::redact_prompt(&format!("A\n\n{section}")), "A");
-    assert_eq!(prompt::redact_prompt("no section"), "no section");
+    assert_eq!(local_prompt::redact_prompt(&format!("A\n\n{section}")), "A");
+    assert_eq!(local_prompt::redact_prompt("no section"), "no section");
 
     let mut data = serde_json::json!({ "system_prompt": system });
-    assert!(prompt::redact_llm_call(&mut data));
+    assert!(local_prompt::redact_llm_call(&mut data));
     assert!(!data.to_string().contains("big-1"));
-    assert!(!prompt::redact_llm_call(&mut data));
+    assert!(!local_prompt::redact_llm_call(&mut data));
     Ok(())
 }
 

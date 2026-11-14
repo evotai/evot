@@ -1,3 +1,8 @@
+//! The NAPI addon's only door into this crate (guard:
+//! `tests/base/architecture_test.rs`). Items are re-exported by name; a
+//! cohesive service namespace whose functions only read well qualified
+//! (`privacy::settings`, `acp::serve_stdio`) is re-exported as a module.
+
 pub use crate::agent::bootstrap::build_agent;
 pub use crate::agent::models::cycle_thinking_level;
 pub use crate::agent::models::model_catalog;
@@ -19,6 +24,7 @@ pub use crate::agent::ToolMode;
 pub use crate::auth;
 pub use crate::base::error::EvotError;
 pub use crate::base::error::Result;
+pub use crate::cloud::compute;
 pub use crate::cloud::share;
 pub use crate::cloud::share::parse_session_share_link;
 pub use crate::cloud::share::parse_task_share_id;
@@ -27,10 +33,15 @@ pub use crate::cloud::sync::import_shared_session;
 pub use crate::conf::persist_default_thinking_level;
 pub use crate::conf::thinking_level_from_str;
 pub use crate::conf::Config;
+pub use crate::conf::LlmConfig;
+pub use crate::privacy;
 pub use crate::session::compact::orchestrator::ManualCompactionObserver;
 pub use crate::session::compact::orchestrator::ManualCompactionPhase;
+pub use crate::session::conversation::input::transcript_views;
 pub use crate::session::conversation::RunEvent;
 pub use crate::session::Session;
+pub use crate::suggestion;
+pub use crate::surface::acp;
 pub use crate::surface::automation::create_task;
 pub use crate::surface::automation::delete_task;
 pub use crate::surface::automation::executor_id;

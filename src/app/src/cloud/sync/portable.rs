@@ -90,7 +90,7 @@ fn redact_compute(item: &mut Value) -> bool {
         return false;
     }
     item.get_mut("data")
-        .is_some_and(crate::cloud::compute::prompt::redact_llm_call)
+        .is_some_and(crate::privacy::local_prompt::redact_llm_call)
 }
 
 fn embed_item_images(item: &mut Value) -> Result<bool> {

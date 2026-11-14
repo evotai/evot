@@ -9,9 +9,9 @@ fn failure(error: impl std::fmt::Display) -> napi::Error {
 /// records, for `/privacy`.
 #[napi]
 pub async fn privacy_status(days: u32) -> NapiResult<String> {
-    let settings = evot::privacy::settings().await.map_err(failure)?;
-    let summary = evot::privacy::summary(days).await.map_err(failure)?;
-    let (kinds, packs) = evot::privacy::rules_status().await.map_err(failure)?;
+    let settings = evot::api::privacy::settings().await.map_err(failure)?;
+    let summary = evot::api::privacy::summary(days).await.map_err(failure)?;
+    let (kinds, packs) = evot::api::privacy::rules_status().await.map_err(failure)?;
     serde_json::to_string(&serde_json::json!({
         "settings": settings,
         "summary": summary,
@@ -24,8 +24,8 @@ pub async fn privacy_status(days: u32) -> NapiResult<String> {
 /// Validate and save settings; returns them as saved.
 #[napi]
 pub async fn privacy_save(settings_json: String) -> NapiResult<String> {
-    let settings = evot::privacy::PrivacySettings::parse(&settings_json).map_err(failure)?;
-    let saved = evot::privacy::save_settings(settings)
+    let settings = evot::api::privacy::PrivacySettings::parse(&settings_json).map_err(failure)?;
+    let saved = evot::api::privacy::save_settings(settings)
         .await
         .map_err(failure)?;
     serde_json::to_string(&saved).map_err(failure)
@@ -36,7 +36,7 @@ pub async fn privacy_save(settings_json: String) -> NapiResult<String> {
 /// only: the TUI asks after each step to show masking as it happens.
 #[napi]
 pub fn privacy_live(after: u32) -> NapiResult<String> {
-    let (cursor, notices) = evot::privacy::live_notices(u64::from(after));
+    let (cursor, notices) = evot::api::privacy::live_notices(u64::from(after));
     serde_json::to_string(&serde_json::json!({ "cursor": cursor, "notices": notices }))
         .map_err(failure)
 }
@@ -45,7 +45,7 @@ pub fn privacy_live(after: u32) -> NapiResult<String> {
 /// resumed session's first request does not report its history as new.
 #[napi]
 pub async fn privacy_session_tags(session: String, days: u32) -> NapiResult<String> {
-    let tags = evot::privacy::session_tags(session, days)
+    let tags = evot::api::privacy::session_tags(session, days)
         .await
         .map_err(failure)?;
     serde_json::to_string(&tags).map_err(failure)

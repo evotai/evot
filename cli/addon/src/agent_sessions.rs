@@ -110,10 +110,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load transcript: {e}")))?;
 
-        serde_json::to_string(&evot::session::conversation::input::transcript_views(
-            &items,
-        ))
-        .map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::api::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Load the effective context transcript for a session, after control markers.
@@ -126,10 +124,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load context transcript: {e}")))?;
 
-        serde_json::to_string(&evot::session::conversation::input::transcript_views(
-            &items,
-        ))
-        .map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::api::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Load a bounded resume view without superseded history or Engine-only
@@ -143,10 +139,8 @@ impl NapiAgent {
             .await
             .map_err(|e| Error::from_reason(format!("load resume transcript: {e}")))?;
 
-        serde_json::to_string(&evot::session::conversation::input::transcript_views(
-            &items,
-        ))
-        .map_err(|e| Error::from_reason(format!("serialize: {e}")))
+        serde_json::to_string(&evot::api::transcript_views(&items))
+            .map_err(|e| Error::from_reason(format!("serialize: {e}")))
     }
 
     /// Find a single session by ID.

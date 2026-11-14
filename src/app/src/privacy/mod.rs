@@ -10,6 +10,10 @@
 //! Every rule, word list, exclusion, source and structural field is data:
 //! the packs in `rules/data/*.json` and the user's `~/.evotai/privacy/rules`.
 //! The Rust here is the engine that runs them.
+//!
+//! [`local_prompt`] is structural rather than rule-driven: the prompt sections
+//! that describe this computer and are dropped from every upload.
+pub mod local_prompt;
 mod masker;
 mod notice;
 mod policy;

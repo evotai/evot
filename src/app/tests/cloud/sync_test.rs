@@ -332,8 +332,8 @@ async fn shares_never_upload_compute_machine_details() -> TestResult {
         .await?;
     let section = format!(
         "{}\n- big-1: Rust builds on ubuntu@10.0.0.9\n{}",
-        evot::cloud::compute::prompt::PROMPT_OPEN,
-        evot::cloud::compute::prompt::PROMPT_CLOSE
+        evot::privacy::local_prompt::COMPUTE_OPEN,
+        evot::privacy::local_prompt::COMPUTE_CLOSE
     );
     storage.append_entry(user("s1", 1, "hi")).await?;
     storage
