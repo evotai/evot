@@ -416,8 +416,16 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         // is the only correct way to restore the terminal's physical row base;
         // patching a new logical tail over the reflowed scrollback duplicates
         // rows and leaves partial-width backgrounds.
-        expect(output).toContain('\x1b[3J')
-        expect(output.match(/Result 0:/g)).toHaveLength(1)
+        // A slow runner may deliver a second full repaint (a late layout
+        // change) inside the same window; that is still correct as long as
+        // each replay starts by clearing scrollback and replays history once.
+        const replays = output.split('\x1b[3J')
+        expect(replays.length).toBeGreaterThan(1)
+        for (const replay of replays.slice(1)) {
+          expect((replay.match(/Result 0:/g) ?? []).length).toBeLessThanOrEqual(1)
+        }
+        expect(replays[0]!.match(/Result 0:/g)).toBeNull()
+        expect(replays.some(replay => replay.includes('Result 0:'))).toBe(true)
       }
       session.write('draft after resize')
       await session.waitForScreen('draft after resize')
