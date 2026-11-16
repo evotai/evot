@@ -1,0 +1,159 @@
+{
+ "schema_version": 1,
+ "id": "formats",
+ "source": {
+  "name": "Curated credential formats from magpie",
+  "url": "https://github.com/yetone/magpie",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 yetone"
+ },
+ "rules": [
+  {
+   "id": "formats.private-key",
+   "kind": "PRIVATE_KEY",
+   "confidence": "high",
+   "regex": "-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\\s\\S]+?-----END (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----",
+   "keywords": ["private key"],
+   "examples": {"matches": ["-----BEGIN PRIVATE KEY-----\nMIIB<cut>abcdefghijklmnopqrstuvwxyz0123456789\n-----END PRIVATE KEY-----"], "ignores": ["-----BEGIN PUBLIC KEY-----YWJj-----END PUBLIC KEY-----"]}
+  },
+  {
+   "id": "formats.openai-compatible-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "sk-(?:(?:proj-|svcacct-|ant-api[0-9]+-|or-v1-)[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{48}|[A-Za-z0-9]{32})",
+   "keywords": ["sk-"],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {
+    "matches": ["sk-proj-abcd<cut>1234EFGH5678ijkl9012MNOP3456", "sk-1234<cut>567890abcdef1234567890abcdef"],
+    "ignores": ["disk-usage-report-for-the-quarter", "sk-custom-ordinary-identifier-without-a-vendor"]
+   }
+  },
+  {
+   "id": "formats.github-classic",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "gh[pousr]_[A-Za-z0-9]{36}",
+   "keywords": ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
+   "bound": "${TOKEN_BOUND}",
+   "checksum": {"algorithm": "crc32_base62", "keep_on_fail": true, "confirmed": "high"},
+   "examples": {"matches": ["ghp_abcd<cut>1234EFGH5678ijkl9012MNOP3456qrst"], "ignores": ["ghp_short"]}
+  },
+  {
+   "id": "formats.github-fine-grained",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "github_pat_[A-Za-z0-9_]{22,}",
+   "keywords": ["github_pat_"],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {"matches": ["github_pat_abcd<cut>1234EFGH5678ijkl9012MNOP3456"], "ignores": ["github_pat_short"]}
+  },
+  {
+   "id": "formats.gitlab-token",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "glpat-[A-Za-z0-9_-]{20,}",
+   "keywords": ["glpat-"],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {"matches": ["glpat-abcd<cut>1234EFGH5678ijkl9012"], "ignores": ["glpat-short"]}
+  },
+  {
+   "id": "formats.npm-token",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "npm_[A-Za-z0-9]{36}",
+   "keywords": ["npm_"],
+   "bound": "${TOKEN_BOUND}",
+   "checksum": {"algorithm": "crc32_base62", "keep_on_fail": true, "confirmed": "high"},
+   "examples": {"matches": ["npm_abcd<cut>1234EFGH5678ijkl9012MNOP3456qrst"], "ignores": ["npm_package_name"]}
+  },
+  {
+   "id": "formats.vendor-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "(?:AIza[A-Za-z0-9_-]{35}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{20,}|hf_[A-Za-z0-9]{20,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9_-]{20,}|pypi-[A-Za-z0-9_-]{20,}|dop_v1_[a-f0-9]{64}|SG\\.[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43})",
+   "keywords": ["aiza", "_live_", "_test_", "hf_", "gsk_", "xai-", "pypi-", "dop_v1_", "sg."],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {"matches": ["hf_abcd<cut>1234EFGH5678ijkl9012MNOP3456", "gsk_abcd<cut>1234EFGH5678ijkl9012MNOP3456"], "ignores": ["hf_model_cache_path"]}
+  },
+  {
+   "id": "formats.aws-access-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "(?:AKIA|ASIA)[A-Z0-9]{16}",
+   "keywords": ["akia", "asia"],
+   "bound": "[A-Za-z0-9]",
+   "examples": {"matches": ["AKIA<cut>IOSFODNN7EXAMPLE"], "ignores": ["AKIAshort"]}
+  },
+  {
+   "id": "formats.jwt",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "eyJ[A-Za-z0-9_-]{5,}\\.eyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]{8,}",
+   "keywords": ["eyj"],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {"matches": ["eyJhbGci<cut>OiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop"], "ignores": ["eyJhbGciOiJIUzI1NiJ9.not-json.signature"]}
+  },
+  {
+   "id": "formats.slack-token",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "xox[baprs]-[A-Za-z0-9-]{20,}",
+   "keywords": ["xox"],
+   "bound": "${TOKEN_BOUND}",
+   "examples": {"matches": ["xoxb-1234<cut>56789012-123456789012-abcdefghijklmnopqrstuvwx"], "ignores": ["xoxb-short"]}
+  },
+  {
+   "id": "formats.tencent-access-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "AKID[A-Za-z0-9]{32}",
+   "keywords": ["akid"],
+   "bound": "[A-Za-z0-9]",
+   "examples": {"matches": ["AKIDabcd<cut>1234EFGH5678ijkl9012MNOP3456"], "ignores": ["AKIDshort"]}
+  },
+  {
+   "id": "formats.volcengine-access-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "AKLT[A-Za-z0-9_-]{32,}",
+   "keywords": ["aklt"],
+   "bound": "[A-Za-z0-9]",
+   "examples": {"matches": ["AKLTabcd<cut>1234EFGH5678ijkl9012MNOP3456"], "ignores": ["AKLTshort"]}
+  },
+  {
+   "id": "formats.aliyun-access-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "LTAI[A-Za-z0-9]{12,20}",
+   "keywords": ["ltai"],
+   "bound": "[A-Za-z0-9]",
+   "examples": {"matches": ["LTAIabcd<cut>1234EFGH5678ijkl"], "ignores": ["LTAIshort"]}
+  },
+  {
+   "id": "formats.qianfan-key",
+   "kind": "API_KEY",
+   "confidence": "high",
+   "regex": "bce-v3/ALTAK-[A-Za-z0-9]{20,}/[a-f0-9]{40}",
+   "keywords": ["bce-v3/"],
+   "examples": {"matches": ["bce-v3/ALTAK-abcd<cut>1234EFGH5678ijkl9012/1234567890abcdef1234567890abcdef12345678"], "ignores": ["bce-v3/ALTAK-not-a-key"]}
+  },
+  {
+   "id": "formats.lark-token",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "[tu]-g[0-9a-z]{4}[A-Za-z0-9_-]{30,}",
+   "keywords": ["t-g", "u-g"],
+   "bound": "${TOKEN_BOUND}",
+   "unless": ["no_digit_and_letter"],
+   "examples": {"matches": ["t-g1234abcd<cut>1234EFGH5678ijkl9012MNOP3456qr"], "ignores": ["t-graphql-subscription-handler-for-orders"]}
+  },
+  {
+   "id": "formats.robot-webhook",
+   "kind": "SECRET",
+   "confidence": "high",
+   "regex": "(?:oapi\\.dingtalk\\.com/robot/send\\?access_token=|qyapi\\.weixin\\.qq\\.com/cgi-bin/webhook/send\\?key=|open\\.(?:feishu\\.cn|larksuite\\.com)/open-apis/bot/v2/hook/)([A-Za-z0-9-]{16,})",
+   "keywords": ["dingtalk.com", "qyapi.weixin", "/open-apis/bot/"],
+   "examples": {"matches": ["https://open.feishu.cn/open-apis/bot/v2/hook/1234<cut>5678-1234-1234-1234-123456789012"], "ignores": ["https://open.feishu.cn/open-apis/bot/v2/hook/status"]}
+  }
+ ]
+}

@@ -5,22 +5,19 @@
 //! (prompt caches and thinking signatures stay valid) and a placeholder
 //! says nothing about its value without the key. Values live in memory
 //! only; every request brings its history again, so a restart loses
-//! nothing. A value once masked is "known" and masked wherever it shows up
-//! later, whatever words surround it: a model writes about a placeholder
-//! in words no rule recognises, and the agent replays that text with the
-//! value restored.
+//! nothing. Confirmed-value matching lives in `known`: allocating a tag
+//! must not promote a short password or ordinary word to a global substring.
+//! Replies can still restore every binding, including these short values.
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use aho_corasick::AhoCorasick;
-use aho_corasick::MatchKind;
 use parking_lot::RwLock;
 use regex::Regex;
 use sha2::Digest;
 use sha2::Sha256;
 
-use super::scan::Finder;
+use super::known::KnownValues;
 use super::scan::Span;
 use crate::base::error::EvotError;
 use crate::base::error::Result;
@@ -28,14 +25,13 @@ use crate::base::error::Result;
 /// Past this many values the oldest half is let go; a request that still
 /// carries them brings them back.
 const MAX_VALUES: usize = 100_000;
-/// Shorter known values would mask ordinary words.
-const MIN_KNOWN: usize = 4;
 const MAX_KIND: usize = 32;
 const B32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 pub(super) struct Vault {
     key: [u8; 32],
     state: RwLock<State>,
+    known: KnownValues,
 }
 
 #[derive(Default)]
@@ -43,9 +39,6 @@ struct State {
     /// Placeholder → value.
     values: HashMap<String, String>,
     kinds: BTreeSet<String>,
-    /// Value → kind, matched anywhere.
-    known: HashMap<String, String>,
-    matcher: Option<(AhoCorasick, Vec<String>)>,
 }
 
 impl Vault {
@@ -53,6 +46,7 @@ impl Vault {
         Self {
             key,
             state: RwLock::new(State::default()),
+            known: KnownValues::default(),
         }
     }
 
@@ -73,7 +67,8 @@ impl Vault {
         format!("{{{{{kind}_{hash}}}}}")
     }
 
-    /// The placeholder for `value`, remembered for restore and as known.
+    /// Bind a placeholder for restore. Discovery decides separately whether
+    /// the value is safe to promote to context-free known-value matching.
     pub fn put(&self, kind: &str, value: &str) -> Result<String> {
         let placeholder = self.tag(kind, value);
         let mut state = self.state.write();
@@ -95,44 +90,24 @@ impl Vault {
             state.values.insert(placeholder.clone(), value.to_string());
             state.kinds.insert(kind.to_string());
         }
-        remember_locked(&mut state, kind, value);
         Ok(placeholder)
     }
 
     /// Mask `value` wherever it appears from now on.
     pub fn remember(&self, kind: &str, value: &str) {
-        if value.len() < MIN_KNOWN || self.state.read().known.contains_key(value) {
-            return;
-        }
-        remember_locked(&mut self.state.write(), kind, value);
+        self.known.remember(kind, value);
+    }
+
+    /// Short values still mask in explicit credential contexts, but do not
+    /// turn ordinary words (e.g. `query`) into session-wide substrings. An
+    /// explicitly registered credential uses `remember` instead.
+    pub fn remember_discovered(&self, kind: &str, value: &str, min_len: usize) {
+        self.known.discover(kind, value, min_len);
     }
 
     /// Where the known values are in `text`.
     pub fn known_spans(&self, text: &str) -> Vec<Span> {
-        {
-            let state = self.state.read();
-            if state.known.is_empty() {
-                return Vec::new();
-            }
-            if state.matcher.is_some() {
-                return indexed_spans(&state, text);
-            }
-        }
-        let mut state = self.state.write();
-        if state.matcher.is_none() {
-            let values: Vec<String> = state.known.keys().cloned().collect();
-            match AhoCorasick::builder()
-                .match_kind(MatchKind::LeftmostLongest)
-                .build(&values)
-            {
-                Ok(ac) => state.matcher = Some((ac, values)),
-                Err(error) => {
-                    tracing::warn!(%error, "privacy: known-value index failed; scanning plainly");
-                    return plain_spans(&state.known, text);
-                }
-            }
-        }
-        indexed_spans(&state, text)
+        self.known.spans(text)
     }
 
     /// `s` with each placeholder this vault made put back, or `None` when
@@ -213,39 +188,6 @@ impl Vault {
             0
         }
     }
-}
-
-fn remember_locked(state: &mut State, kind: &str, value: &str) {
-    if value.len() < MIN_KNOWN || state.known.contains_key(value) {
-        return;
-    }
-    if state.known.len() >= MAX_VALUES {
-        state.known.clear();
-    }
-    state.known.insert(value.to_string(), kind.to_string());
-    state.matcher = None;
-}
-
-fn indexed_spans(state: &State, text: &str) -> Vec<Span> {
-    let Some((ac, values)) = &state.matcher else {
-        return plain_spans(&state.known, text);
-    };
-    ac.find_iter(text)
-        .filter_map(|m| {
-            let kind = state.known.get(values.get(m.pattern().as_usize())?)?;
-            Some(Span::new(m.start(), m.end(), kind, Finder::Known))
-        })
-        .collect()
-}
-
-fn plain_spans(known: &HashMap<String, String>, text: &str) -> Vec<Span> {
-    known
-        .iter()
-        .flat_map(|(value, kind)| {
-            text.match_indices(value.as_str())
-                .map(move |(at, v)| Span::new(at, at + v.len(), kind, Finder::Known))
-        })
-        .collect()
 }
 
 fn hmac_sha256(key: &[u8; 32], msg: &[u8]) -> [u8; 32] {

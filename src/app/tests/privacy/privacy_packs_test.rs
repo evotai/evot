@@ -180,7 +180,7 @@ fn user_packs_add_rules_and_must_be_valid() -> TestResult {
     }))?;
     assert!(unknown_kind.contains("NOPE"), "{unknown_kind}");
     let duplicate = reject(serde_json::json!({
-        "id": "dup", "rules": [{"id": "secrets.jwt", "kind": "TOKEN", "regex": "x"}]
+        "id": "dup", "rules": [{"id": "formats.jwt", "kind": "TOKEN", "regex": "x"}]
     }))?;
     assert!(duplicate.contains("twice"), "{duplicate}");
     let future = reject(serde_json::json!({"schema_version": 99, "id": "future"}))?;
@@ -205,9 +205,9 @@ fn imported_packs_carry_their_attribution() -> TestResult {
     let masker = masker()?;
     let packs = masker.packs();
     let imported: Vec<_> = packs.iter().filter(|p| p.source.is_some()).collect();
-    assert!(imported
-        .iter()
-        .any(|p| p.id == "betterleaks" && p.rules > 400));
+    assert_eq!(imported.len(), 1);
+    assert_eq!(imported[0].id, "formats");
+    assert_eq!(imported[0].rules, 16);
     assert!(imported.iter().all(|p| p.license.as_deref() == Some("MIT")));
     // Every imported source is named, with its license text, in NOTICE.
     let notice = std::fs::read_to_string(

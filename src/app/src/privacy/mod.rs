@@ -13,6 +13,7 @@
 //!
 //! [`local_prompt`] is structural rather than rule-driven: the prompt sections
 //! that describe this computer and are dropped from every upload.
+mod known;
 pub mod local_prompt;
 mod masker;
 mod notice;

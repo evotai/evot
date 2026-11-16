@@ -722,11 +722,17 @@ impl Engine {
     /// `sources.uses`) a file given as an option's value is not read into
     /// the output; `ssh host 'cat ~/.env'` still is. Quotes are not parsed,
     /// except in the values of leading assignments (`S="-i ~/.ssh/key"`):
-    /// other words inside them are words of the enclosing command.
+    /// other words inside them are words of the enclosing command. A segment
+    /// starting with `#` is a comment (`#!/usr/bin/env python3` names no
+    /// command); a `#` later in a segment may be quoted (`grep '#' .env`), so
+    /// it ends nothing. Heredoc bodies are not parsed.
     pub fn sensitive_command(&self, command: &str) -> bool {
         command
             .split(|c: char| ";|&\n`()".contains(c))
             .any(|segment| {
+                if segment.trim_start().starts_with('#') {
+                    return false;
+                }
                 let mut words = skip_assignments(segment)
                     .split(|c: char| c.is_whitespace() || "<>'\"".contains(c))
                     .filter(|w| !w.is_empty())

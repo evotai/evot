@@ -15,9 +15,8 @@ use crate::base::error::Result;
 /// others build on.
 const BUILTIN: &[(&str, &str)] = &[
     ("core.json", include_str!("data/core.json")),
-    ("secrets.json", include_str!("data/secrets.json")),
-    ("cn-cloud.json", include_str!("data/cn-cloud.json")),
-    ("betterleaks.json", include_str!("data/betterleaks.json")),
+    ("formats.json", include_str!("data/formats.json")),
+    ("contexts.json", include_str!("data/contexts.json")),
 ];
 
 /// Dropped from a pack's text before parsing. Example values are shaped

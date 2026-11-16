@@ -218,9 +218,9 @@ fn a_value_found_once_is_masked_everywhere() -> TestResult {
 }
 
 #[test]
-fn assignments_in_secret_files_are_masked() -> TestResult {
+fn credential_assignments_are_masked_regardless_of_the_file() -> TestResult {
     let masker = masker()?;
-    let file = "PORT=3000\nSTRIPE=abcd1234efgh\nDEBUG=true\n";
+    let file = "PORT=3000\nSTRIPE_SECRET=abcd1234efgh\nDEBUG=true\n";
     let call = |id: &str, path: &str| Content::ToolCall {
         id: id.into(),
         name: "read".into(),
@@ -239,8 +239,8 @@ fn assignments_in_secret_files_are_masked() -> TestResult {
         env.contains("PORT=3000") && env.contains("DEBUG=true"),
         "{env}"
     );
-    // Context alone is no reason: the same text elsewhere names no secret,
-    // but the value is known now, so it goes there too.
+    // A credential's explicit field, not the file name, is the evidence.
+    // The same credential in an ordinary file must be masked too.
     assert!(!first_text(&request.messages[2]).contains("abcd1234efgh"));
     Ok(())
 }
@@ -254,7 +254,7 @@ fn rust_paths_in_secret_files_are_not_assignments() -> TestResult {
                 \x20   TableSnapshot::try_new(meta)?\n\
                 \x20   Thread::spawn(move || {\n\
                 12:    std::env::var(\"HOME_DIR\")\n";
-    let file = format!("STRIPE: abcd1234efgh\n{code}");
+    let file = format!("STRIPE_SECRET=abcd1234efgh\n{code}");
     let call = |id: &str, path: &str| Content::ToolCall {
         id: id.into(),
         name: "read".into(),
@@ -276,9 +276,9 @@ fn rust_paths_in_secret_files_are_not_assignments() -> TestResult {
 }
 
 #[test]
-fn only_commands_that_print_a_secrets_file_make_their_output_sensitive() -> TestResult {
-    // Output shaped like a build log: assignments and `Key: value` lines
-    // that are secrets only if they came out of an env file.
+fn commands_do_not_turn_arbitrary_output_into_credentials() -> TestResult {
+    // A file or command name is not credential evidence. Ordinary build
+    // metadata stays ordinary even when a command also prints the environment.
     let output = "Output: /Users/me/.evotai/sessions/01a1/tool-results/a64a69bb-bash-output.txt\n\
                   Error: StorageOther. Code: 4000, Text = Unexpected fault on `1/11/_sg/x.mpk`\n\
                   COLOR=abcd1234efgh\n";
@@ -310,7 +310,10 @@ fn only_commands_that_print_a_secrets_file_make_their_output_sensitive() -> Test
         "DEBUG=1 cat .env",
         "S='-q' env",
     ] {
-        assert!(run(command)?, "{command}: output should be sensitive");
+        assert!(
+            !run(command)?,
+            "{command}: arbitrary assignments are not credentials"
+        );
     }
     for command in [
         // ssh options kept in a shell variable: the assignment prints
@@ -616,7 +619,7 @@ fn uploads_are_scrubbed_for_good_and_keep_their_structure() -> TestResult {
             {"id": "e1", "type": "message", "timestamp": "2026-01-01T00:00:00Z",
              "message": {"role": "user", "content": [{"type": "text", "text": format!("gh {GH_TOKEN} key {API_KEY}")}]}},
             {"type": "toolCall", "id": "c1", "name": "read", "arguments": {"path": ".env"}},
-            {"role": "toolResult", "toolCallId": "c1", "content": [{"type": "text", "text": "SERVICE=abcd1234efgh"}]},
+            {"role": "toolResult", "toolCallId": "c1", "content": [{"type": "text", "text": "SERVICE_TOKEN=abcd1234efgh"}]},
             {"type": "image", "mimeType": "image/png", "data": "c2stYW50LWFwaTAz"},
             {"headers": {"Authorization": "Basic dXNlcjpwYXNz"}}
         ]
@@ -971,18 +974,16 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
         ("system prompt", None, 1),
         ("user", None, 1),
     ]);
-    // Rules: distinct values per rule, most first. The `NAME=value` lines
-    // of the result are values of their own (kind SECRET), so the
-    // assignment rule has two and the bare key and token one each.
+    // The same credential has the same kind/tag in every place. An env
+    // result no longer reclassifies vendor credentials as generic SECRET.
     let counted = record.rules();
     let rules: Vec<(&str, usize)> = counted
         .iter()
         .map(|r| (r.rule.as_str(), r.values))
         .collect();
     assert_eq!(rules, vec![
-        ("core.file-assignment", 2),
-        ("secrets.github-classic", 1),
-        ("secrets.sk-key", 1)
+        ("formats.github-classic", 1),
+        ("formats.openai-compatible-key", 1)
     ]);
     let written = serde_json::to_string(&record)?;
     assert!(!written.contains(API_KEY) && !written.contains(GH_TOKEN));
@@ -992,7 +993,7 @@ fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> T
     let event = serde_json::to_value(evot::privacy::Event::of(&record))?;
     assert_eq!(event["model"], json!("m"));
     assert_eq!(event["origins"][0]["at"], json!("Bash result"));
-    assert_eq!(event["rules"].as_array().map(Vec::len), Some(3));
+    assert_eq!(event["rules"].as_array().map(Vec::len), Some(2));
     let legacy: evot::privacy::Event = serde_json::from_str(
         r#"{"time":"t","target":"llm","blocked":false,"kinds":["EMAIL"],"reason":"masked EMAIL ×1"}"#,
     )?;

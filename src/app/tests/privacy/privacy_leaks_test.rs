@@ -143,7 +143,7 @@ fn p2_secrets_file_result_in_a_later_batch_is_scrubbed() -> TestResult {
         2,
         json!({
             "type": "tool_result", "tool_call_id": "c1", "tool_name": "read",
-            "content": format!("STRIPE={value}\n"), "is_error": false
+            "content": format!("STRIPE_SECRET={value}\n"), "is_error": false
         }),
     )?;
     let masker = masker()?;
@@ -601,12 +601,12 @@ async fn share_and_sync_payloads_hold_no_value() -> TestResult {
         entry(
             3,
             json!({"type": "tool_result", "tool_call_id": "c1", "tool_name": "read",
-            "content": format!("SERVICE={env}\n"), "is_error": false, "details": {"stdout": format!("SERVICE={env}")}}),
+            "content": format!("SERVICE_TOKEN={env}\n"), "is_error": false, "details": {"stdout": format!("SERVICE_TOKEN={env}")}}),
         )?,
         entry(
             4,
             json!({"type": "assistant", "stop_reason": "stop",
-            "content": [{"type": "text", "text": format!("done, SERVICE is {env}")}], "error_message": format!("echo {key}")}),
+            "content": [{"type": "text", "text": format!("done, SERVICE_TOKEN is {env}")}], "error_message": format!("echo {key}")}),
         )?,
     ];
     let upload = evot::cloud::share::export_session(&meta, &entries, "0");

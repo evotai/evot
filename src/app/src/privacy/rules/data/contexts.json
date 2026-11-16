@@ -1,0 +1,84 @@
+{
+ "schema_version": 1,
+ "id": "contexts",
+ "vars": {
+  "PASSWORD_NAME": "(?i:(?:[a-z0-9]+[_.-]?)*?(?:password|passwd|passphrase))",
+  "CREDENTIAL_NAME": "(?i:(?:[a-z0-9]+[_.-]?)*?(?:api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret|(?:access|refresh|auth|id|bearer)[_-]?token)|(?:[a-z0-9]+[_.-]?)+?(?:secret|token))",
+  "ASSIGNED": "[\"']?[ \\t]*[=:][ \\t]*(?:\"([^\"\\r\\n]+)\"|'([^'\\r\\n]+)'|([^\\s\"'\\x60,(;})\\]#=][^\\s\"'\\x60,(;})\\]#]*))",
+  "NAME_START": "(?m)(?:^|[\\s{,(;])[\"']?-{0,2}"
+ },
+ "rules": [
+  {
+   "id": "contexts.authorization",
+   "kind": "TOKEN",
+   "confidence": "high",
+   "regex": "(?mi)(?:^|[\\s{,])[\"']?(?:proxy-)?authorization[\"']?[ \\t]*[:=][ \\t]*[\"']?(?:Bearer|Basic|Token)[ \\t]+([A-Za-z0-9._~+/=-]{4,})",
+   "keywords": ["authorization"],
+   "unless": ["a_variable", "a_placeholder"],
+   "examples": {"matches": ["Authorization: Bearer abcd<cut>1234EFGH5678", "\"Authorization\": \"Basic dXNlcjpwYXNz\""], "ignores": ["Bearer authentication is described here", "Basic usage", "Authorization: Bearer $TOKEN"]}
+  },
+  {
+   "id": "contexts.url-password",
+   "kind": "PASSWORD",
+   "confidence": "high",
+   "regex": "[A-Za-z][A-Za-z0-9+.-]*://[^\\s:@/?#\"'<>]*:([^\\s/?#\"'<>]+)@[^\\s@/?#\"'<>]",
+   "keywords": ["://"],
+   "unless": ["a_variable", "a_placeholder"],
+   "examples": {"matches": ["postgres://user:Zx8<cut>Ab9@db.internal/app", "postgres://user:tiny@db.internal/app", "mysql://root:p@ss9word@db.internal/app"], "ignores": ["https://db.internal/app", "postgres://user:${PASSWORD}@db.internal/app", "https://github.com:443/org/repo@main"]}
+  },
+  {
+   "id": "contexts.password-assignment",
+   "kind": "PASSWORD",
+   "confidence": "high",
+   "regex": "${NAME_START}${PASSWORD_NAME}${ASSIGNED}",
+   "keywords": ["pass"],
+   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", {"value": "^(?i:true|false|null|none|undefined)$"}],
+   "examples": {"matches": ["DB_PASSWORD=Hunter2pass9", "password=1234", "DB_PASSWORD='query'", "--password=Zx8vAb9q", "db-password: Zx8vAb9q", "dbPassword = \"Zx8vAb9q\"", "spring.datasource.password=Zx8vAb9q"], "ignores": ["password: string;", "password_hash: abc123def456", "password = getPassword()", "if password == expected", "Password reset link sent"]}
+  },
+  {
+   "id": "contexts.credential-assignment",
+   "kind": "SECRET",
+   "confidence": "high",
+   "regex": "${NAME_START}${CREDENTIAL_NAME}${ASSIGNED}",
+   "keywords": ["key", "secret", "token"],
+   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", {"value": "^(?i:true|false|null|none|undefined)$"}],
+   "examples": {"matches": ["\"apiKey\": \"abcd<cut>1234EFGH5678\"", "X-Api-Key: Zx8vAb9qLm3n", "client-secret: Zx8vAb9qLm3n", "authToken: Zx8vAb9qLm3n", "--access-token=Zx8vAb9qLm3n"], "ignores": ["secret = get_secret('db')", "max_tokens: 4096", "token_url: https://auth.example.org/token", "api_key_id=key_id_for_display_only", "key=abcd1234EFGH5678", "COLOR=abcd1234EFGH5678", "Output: /Users/me/.evotai/sessions/s/tool-results/task-bash-output.txt"]}
+  },
+  {
+   "id": "contexts.curl-user",
+   "kind": "PASSWORD",
+   "confidence": "high",
+   "regex": "\\bcurl\\b[^\\r\\n]*?[ \\t](?:-u|--user)(?:=|[ \\t]+)[\"']?[^\\s:\"']*:([^\\s\"']+)",
+   "keywords": ["curl"],
+   "unless": ["a_variable", "a_placeholder"],
+   "examples": {"matches": ["curl -s -u root:tiny https://example.org", "curl --user='root:Abc<cut>123XYZ' https://example.org"], "ignores": ["curl -u root:$PASSWORD https://example.org", "curl -s https://example.org"]}
+  },
+  {
+   "id": "contexts.cjk-password",
+   "kind": "PASSWORD",
+   "confidence": "high",
+   "regex": "(?:密码|密碼|口令|パスワード|비밀번호)[ \\t]*(?:[:：=][ \\t]*|[为為是][ \\t]*[:：]?[ \\t]*|は[ \\t]*)(?:[\"'“「])?([A-Za-z0-9_!@#$%^&*+=./~-]{4,})",
+   "keywords": ["密码", "密碼", "口令", "パスワード", "비밀번호"],
+   "unless": ["a_variable", "a_placeholder"],
+   "examples": {"matches": ["密码：Zx8<cut>Ab9!", "パスワードは Zx8<cut>Ab9!"], "ignores": ["密码长度为 16", "密码：${DB_PASSWORD}"]}
+  }
+ ],
+ "fields": [
+  {
+   "id": "contexts.password-field",
+   "kind": "PASSWORD",
+   "confidence": "high",
+   "key": "${PASSWORD_NAME}",
+   "unless": ["a_variable", "a_placeholder", "an_env_read", {"value": "^.{0,2}$"}, {"value": "^\\[REDACTED"}],
+   "examples": {"matches": ["password: tiny", "dbPassword: Zx8vAb9q"], "ignores": ["password_hash: abc123def456", "password_length: 16"]}
+  },
+  {
+   "id": "contexts.credential-field",
+   "kind": "SECRET",
+   "confidence": "high",
+   "key": "${CREDENTIAL_NAME}|(?:proxy-)?authorization",
+   "unless": ["a_variable", "a_placeholder", "an_env_read", {"value": "^.{0,2}$"}, {"value": "^\\[REDACTED"}],
+   "examples": {"matches": ["api_key: abcd1234EFGH5678", "x-api-key: Zx8vAb9qLm3n"], "ignores": ["max_tokens: 4096", "key: user_profile", "token_count: 12345", "api_key_id: display_only", "secret_name: production-database-credentials"]}
+  }
+ ]
+}

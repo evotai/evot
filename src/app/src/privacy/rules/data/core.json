@@ -2,284 +2,57 @@
  "schema_version": 1,
  "id": "core",
  "kinds": [
-  {
-   "name": "PRIVATE_KEY",
-   "category": "secret"
-  },
-  {
-   "name": "API_KEY",
-   "category": "secret"
-  },
-  {
-   "name": "TOKEN",
-   "category": "secret"
-  },
-  {
-   "name": "PASSWORD",
-   "category": "secret"
-  },
-  {
-   "name": "SECRET",
-   "category": "secret"
-  },
-  {
-   "name": "TERM",
-   "category": "custom"
-  }
+  {"name": "PRIVATE_KEY", "category": "secret"},
+  {"name": "API_KEY", "category": "secret"},
+  {"name": "TOKEN", "category": "secret"},
+  {"name": "PASSWORD", "category": "secret"},
+  {"name": "SECRET", "category": "secret"},
+  {"name": "TERM", "category": "custom"}
  ],
  "vars": {
-  "QUOTE": "(?:\\\\?[\"'])?",
-  "SECRET_CH": "[A-Za-z0-9_\\-./+=~!@#%^&*]",
-  "SECRET_END": "[A-Za-z0-9_\\-/+=~!@#%^&*]",
   "TOKEN_BOUND": "[A-Za-z0-9_-]",
-  "FIELD_TEXT": "(?mi)(?:^|[\\s\"'{,(，；、。])[\"']?(?:${KEY})[\"']?[ \\t]*[:=：][ \\t]*[\"']?([^\"'\\n,;}，；。、]{2,120})",
-  "CMD": "(?:^|[;&|(`\\n{]|\\$\\()\\s*(?:(?:sudo(?:\\s+-\\S+)*|env(?:\\s+-\\S+)*|exec|nohup|time|nice(?:\\s+-n\\s*\\S+)?|command|builtin|xargs(?:\\s+-\\S+)*|timeout\\s+\\S+|watch(?:\\s+-\\S+)*|[A-Za-z_][A-Za-z0-9_]*=\\S*)\\s+)*",
-  "WORD_END": "(?:\\s|$|[;&|)`}])",
-  "PATH_CH": "[^\\s;&|<>()'\\\"`]"
+  "FIELD_TEXT": "(?mi)(?:^|[\\s\"'{,(，；、。])[\"']?(?:${KEY})[\"']?[ \\t]*[:=：][ \\t]*[\"']?([^\"'\\n,;}，；。、]{2,120})"
  },
- "lists": {
-  "placeholder_words": [
-   "your_",
-   "your-",
-   "_here",
-   "-here",
-   "changeme",
-   "change_me",
-   "placeholder",
-   "redacted",
-   "example",
-   "dummy",
-   "sample",
-   "xxxxxx",
-   "******",
-   "<",
-   ">"
-  ]
+ "sources": {
+  "tools": [
+   {"name": "read", "path_args": ["path", "file_path", "filePath", "file"]},
+   {"name": "bash", "command_arg": "command"}
+  ],
+  "names": [".env", ".netrc", ".pgpass", ".npmrc", ".pypirc", ".git-credentials", ".htpasswd", "credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".dockercfg", "kubeconfig"],
+  "prefixes": [".env."],
+  "suffixes": [".env", ".pem", ".key", ".p12", ".pfx", ".tfvars", ".jks", ".keystore", ".kdbx"],
+  "commands": ["env", "printenv"],
+  "uses": ["ssh", "scp", "sftp", "rsync", "mosh", "ssh-add", "ssh-keygen", "ssh-copy-id", "git", "curl", "wget", "ansible", "ansible-playbook"]
  },
  "checks": {
-  "a_variable": {
-   "value": "^(?:[$%{<\\[*]|.*\\$\\{|.*\\{\\{)|^[*xX.]+$"
-  },
-  "a_placeholder": {
-   "contains": [
-    "@{placeholder_words}"
-   ]
-  },
-  "an_env_read": {
-   "value": "^(?:process\\.env|os\\.|env\\.|ENV\\[|getenv|System\\.getenv)"
-  },
-  "no_digit_and_letter": {
-   "value": "^(?:[^0-9]*|[^A-Za-z]*)$"
-  },
+  "a_variable": {"value": "^(?:[$%{<\\[*]|.*\\$\\{|.*\\{\\{)|^[*xX.]+$"},
+  "a_placeholder": {"value": "^(?i:your[-_].*|.*[-_]here|change[-_]me|placeholder|redacted|example|dummy|sample|xxxxxx|\\*+)$"},
+  "an_env_read": {"value": "^(?:process\\.env|os\\.|env\\.|ENV\\[|getenv|System\\.getenv)"},
+  "no_digit_and_letter": {"value": "^(?:[^0-9]*|[^A-Za-z]*)$"},
   "code_name": {
-   "value": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*$",
+   "value": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*$",
    "after": "^[ \\t]*\\("
   },
   "code_type": {
-   "value": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z0-9_]+)*$",
+   "value": "^(?:string|String|str|bool|boolean|Boolean|number|Number|int|float|object|Object|array|Array|any|unknown|never|void|Token|SecretString|Uint8Array|ArrayBuffer|Buffer|Bytes|CryptoKey|KeyObject|SecretKey|Vec<u8>|Option<String>|[ui](?:8|16|32|64|128|size)|f(?:32|64))$",
    "before": "[^\"'][ \\t]*:[ \\t]*$",
    "after": "^[ \\t]*(?:$|[;,)}\\]|?&<>])"
-  },
-  "low_entropy": {
-   "entropy_below": 2.5
   }
- },
- "rules": [
-  {
-   "id": "core.file-assignment",
-   "kind": "SECRET",
-   "scope": "sensitive",
-   "regex": "(?m)^[ \\t]*(?:[0-9]+[\\t→:| ]+)?(?:export[ \\t]+)?[\"']?[A-Za-z_][A-Za-z0-9_.-]*[\"']?[ \\t]*[=:][ \\t]*[\"']?([^\"'\\s#,:][^\"'\\r\\n]*?)[\"']?[ \\t]*,?[ \\t]*\\r?$",
-   "unless": [
-    {
-     "value": "^.{0,7}$"
-    },
-    {
-     "value": "^(?i:true|false|null|none|yes|no|on|off|default|file|json|text|table|csv|auto|local|remote|stdin|stdout|stderr|release|debug)$"
-    },
-    {
-     "value": "^[0-9.]+$"
-    },
-    {
-     "value": "^[$#{\\[<]"
-    },
-    {
-     "value": "^[A-Za-z][A-Za-z0-9+.-]*://[^@\\s]*$"
-    },
-    "low_entropy"
-   ],
-   "examples": {
-    "matches": [
-     "PORT=3000\nSTRIPE_KEY=abcd1234efgh\n",
-     "  12→export DB_URL=\"postgres://u:p@h/db\"",
-     "\"token\": \"hello-world-value\","
-    ],
-    "ignores": [
-     "DEBUG=true\nPORT=3000\nHOME=$HOME",
-     "\"base_url\": \"https://api.databend.com\",\n\"warehouse\": \"default\",\n\"credential_source\": \"file\"",
-     "MODE=release\nFORMAT=json\nSTATUS=aaaaaaaaaa",
-     "    Default::default()\n    TableSnapshot::try_new(meta)?\n12:    std::env::var(\"HOME_DIR\")"
-    ]
-   }
-  }
- ],
- "fields": [
-  {
-   "id": "core.secret-field",
-   "kind": "SECRET",
-   "key": ".*(?:password|passwd|secret|token|apikey|api_key|api-key|access_key|private_key|credential|authorization|cookie).*|key",
-   "key_unless": "(?:tokens|token_count|_id|_url|_uri|_type|_name|_path|_file|_expires?(?:_at|_in)?|_ttl|_length|_len|_size|_limit|_usage)$|^(?:max|num|input|output|total|cached|reasoning)_|^public_key$",
-   "unless": [
-    "a_variable",
-    {
-     "value": "^\\[REDACTED"
-    },
-    {
-     "value": "^.{0,3}$"
-    }
-   ],
-   "examples": {
-    "matches": [
-     "Authorization: Basic dXNlcjpTQ3gwUmhZeDZo",
-     "api_key: V5QnCbpg1JQsbtrfqdDi1mdd1JQO"
-    ],
-    "ignores": [
-     "max_tokens: 4096",
-     "token_url: https://auth.example.org/token",
-     "public_key: ssh-ed25519 AAAAC3"
-    ]
-   }
-  }
- ],
- "sources": {
-  "tools": [
-   {
-    "name": "read",
-    "path_args": [
-     "path",
-     "file_path",
-     "filePath",
-     "file"
-    ]
-   },
-   {
-    "name": "bash",
-    "command_arg": "command"
-   }
-  ],
-  "names": [
-   ".env",
-   ".netrc",
-   ".pgpass",
-   ".npmrc",
-   ".pypirc",
-   ".git-credentials",
-   ".htpasswd",
-   "credentials",
-   "credentials.json",
-   "secrets.json",
-   "secrets.yaml",
-   "secrets.yml",
-   "id_rsa",
-   "id_dsa",
-   "id_ecdsa",
-   "id_ed25519",
-   ".dockercfg",
-   "kubeconfig"
-  ],
-  "prefixes": [
-   ".env."
-  ],
-  "suffixes": [
-   ".env",
-   ".pem",
-   ".key",
-   ".p12",
-   ".pfx",
-   ".tfvars",
-   ".jks",
-   ".keystore",
-   ".kdbx"
-  ],
-  "commands": [
-   "env",
-   "printenv"
-  ],
-  "uses": [
-   "ssh",
-   "scp",
-   "sftp",
-   "rsync",
-   "mosh",
-   "ssh-add",
-   "ssh-keygen",
-   "ssh-copy-id",
-   "git",
-   "curl",
-   "wget",
-   "ansible",
-   "ansible-playbook"
-  ]
  },
  "structure": {
   "skip_keys": [
-   "id",
-   "type",
-   "role",
-   "kind",
-   "model",
-   "provider",
-   "seq",
-   "timestamp",
-   "created_at",
-   "updated_at",
-   "mime_type",
-   "mimeType",
-   "media_type",
-   "signature",
-   "encrypted_content",
-   "stop_reason",
-   "stopReason",
-   "schema_version",
-   "evot_version",
-   "delivery_target",
-   "delivery_channel",
-   "cron",
-   "timezone",
-   "thinking_level"
+   "id", "type", "role", "kind", "model", "provider", "seq", "timestamp",
+   "created_at", "updated_at", "mime_type", "mimeType", "media_type", "signature",
+   "encrypted_content", "stop_reason", "stopReason", "schema_version", "evot_version",
+   "delivery_target", "delivery_channel", "cron", "timezone", "thinking_level"
   ],
-  "skip_suffixes": [
-   "_id",
-   "Id"
-  ],
-  "binary_keys": [
-   "data"
-  ],
-  "binary_markers": [
-   "mime_type",
-   "mimeType",
-   "media_type"
-  ],
-  "binary_types": [
-   "base64"
-  ],
-  "result_id_keys": [
-   "tool_call_id",
-   "toolCallId"
-  ],
-  "call_args_keys": [
-   "input",
-   "arguments"
-  ]
+  "skip_suffixes": ["_id", "Id"],
+  "binary_keys": ["data"],
+  "binary_markers": ["mime_type", "mimeType", "media_type"],
+  "binary_types": ["base64"],
+  "result_id_keys": ["tool_call_id", "toolCallId"],
+  "call_args_keys": ["input", "arguments"]
  },
- "decode": {
-  "base64": true,
-  "percent": true,
-  "min_len": 16,
-  "max_len": 4096,
-  "depth": 2
- },
- "known": {
-  "min_secret_len": 8
- }
+ "decode": {"base64": true, "percent": true, "min_len": 16, "max_len": 4096, "depth": 2},
+ "known": {"min_secret_len": 8}
 }

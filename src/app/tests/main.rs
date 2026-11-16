@@ -103,6 +103,8 @@ mod model_spec_test;
 mod orchestrator_compact_test;
 #[path = "agent/orphaned_tasks_test.rs"]
 mod orphaned_tasks_test;
+#[path = "privacy/privacy_detection_test.rs"]
+mod privacy_detection_test;
 #[path = "privacy/privacy_leaks_test.rs"]
 mod privacy_leaks_test;
 #[path = "privacy/privacy_packs_test.rs"]

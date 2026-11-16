@@ -14,8 +14,9 @@ const kinds = [
   { kind: 'TERM', category: 'custom' as const },
 ]
 const packs = [
-  { id: 'core', rules: 2 },
-  { id: 'betterleaks', rules: 421, source: 'https://github.com/betterleaks/betterleaks', license: 'MIT' },
+  { id: 'core', rules: 0 },
+  { id: 'formats', rules: 16, source: 'https://github.com/yetone/magpie', license: 'MIT' },
+  { id: 'contexts', rules: 6 },
 ]
 
 function status(settings: PrivacySettings = defaults): PrivacyStatus {

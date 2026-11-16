@@ -83,7 +83,7 @@ pub struct RuleCount {
 pub struct ValueRecord {
     pub kind: String,
     pub by: Finder,
-    /// The pack rule that found it (`secrets.jwt`, `betterleaks.github-pat`).
+    /// The pack rule that found it (`formats.jwt`, `contexts.authorization`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
     #[serde(default)]

@@ -59,7 +59,7 @@ fn remember(policy: &Policy, vault: &Vault, text: &str, spans: &[scan::Span]) {
     for span in spans {
         let value = &text[span.start..span.end];
         if policy.upload_action(&span.kind) != Action::Warn && !policy.allows(value) {
-            vault.remember(&span.kind, value);
+            vault.remember_discovered(&span.kind, value, policy.engine.known.min_secret_len);
         }
     }
 }

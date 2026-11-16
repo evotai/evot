@@ -1,82 +1,106 @@
 # Privacy
 
-What leaves this machine for a model or a server is masked or scrubbed
-first. Only secrets: keys, tokens, passwords, private keys, and the
-assignments in a secrets file. Tool calls are not judged: the agent's work
-is running commands with the credentials it was given, and a check on every
-`bash` line produced far more noise than signal.
+Privacy has one detector shared by model requests and uploads. The default
+policy favors clear evidence over broad coverage: distinctive credential
+formats, explicit credential contexts, and confirmed values. There is no
+entropy heuristic, bulk third-party catalog, or rule treating every line of
+an `.env` file as a secret.
 
-There are no rules for data about people or machines (emails, phone
-numbers, ID and card numbers, chat handles, addresses, IPs): they fired on
-cache sizes, tool-call ids and base64 far more often than on what they
-named, and a model seeing a phone number is not the harm a leaked key is.
-Pack kinds are `secret` or `custom`; settings files that still carry the
-old `personal` / `network` switches parse, and the switches are ignored.
+## Module boundaries
 
-## Sensitive sources
+| Responsibility | Module | What belongs here |
+| --- | --- | --- |
+| Fixed formats | `rules/data/formats.json` | Private keys, vendor prefixes/lengths, JWT structure, vendor webhook URLs |
+| Explicit contexts | `rules/data/contexts.json` | Authorization headers, credential-bearing URLs, exact credential field/assignment names, curl credentials, explicit password declarations |
+| Shared vocabulary | `rules/data/core.json` | Kinds, small reusable exclusions, encoded-text scanning and wire structure; no detection rules |
+| Rule execution | `rules/engine.rs`, `scan.rs` | Compile packs, locate spans, resolve overlaps and apply policy; no vendor-specific decisions |
+| Confirmed values | `known.rs` | Registration, conservative automatic discovery, indexed re-matching |
+| Placeholders | `vault.rs`, `stream.rs` | Stable keyed tags, collision protection and reply restoration |
+| Boundaries | `request.rs`, `scrub.rs` | Traverse request/upload data without changing protocol structure |
+| Policy and records | `policy.rs`, `record.rs`, `notice.rs` | Mask/block/warn, value-free audit records and UI notices |
 
-`core.file-assignment` (every `KEY=value` line is a secret) runs only on the
-output of a sensitive source: a `read` of a secrets file, or a `bash`
-command that prints one (`cat .env`, `env`, `ssh host 'cat ~/.env'`). A
-command from `sources.uses` (`ssh`, `scp`, `git`, `curl`, …) given a key
-file as an option's value (`ssh -i ~/.ssh/id_ed25519 host`) prints what the
-host says, not the key, so its output is ordinary (`engine::sensitive_command`).
-The same holds when the options sit in a shell variable
-(`S="-i ~/.ssh/id_ed25519"; ssh $S host`): a leading assignment prints
-nothing, and its quoted value is one word.
-Before this distinction a session that ran 488 `ssh -i` commands had every
-line of remote build output masked as a secret.
+The built-ins have 16 format rules and 8 context rules (including two JSON
+field rules). No generated imports. Every built-in rule has keywords, so the
+prefilter skips it on text that cannot match. A new default rule must name
+its concrete credential evidence and include positive and negative examples
+and keywords. Avoid generic
+`key`, identifier-shaped values, arbitrary URL parameters and "random-looking"
+strings. User rule packs remain an explicit extension under
+`~/.evotai/privacy/rules/*.json`; their schema and source-scoped rules still
+work, but do not broaden the built-in policy.
+
+## Detection contract
+
+- A vendor format is recognized wherever it appears, independent of the tool,
+  file name or command that produced it. An unknown opaque value needs an
+  explicit credential context such as `DB_PASSWORD=...` or `api_key`.
+  Credential names match in snake, kebab, dotted and camel case and as CLI
+  flags (`--password=`, `X-Api-Key:`, `dbPassword`). Password contexts
+  report `PASSWORD`, other credential names `SECRET`, so a per-kind action
+  covers a value whichever context revealed it.
+- Bare `key=...`, build IDs, output paths and ordinary assignments are not
+  credential evidence, even inside an env file. A command segment starting
+  with `#` is a comment, so a `#!/usr/bin/env python3` shebang cannot mark a
+  result as an env dump for `scope: "sensitive"` user rules.
+- Context rules do not require entropy or mixed case. Short, numeric and
+  lowercase passwords still mask in explicit credential contexts.
+- Automatic discovery promotes only values meeting `known.min_secret_len`
+  (8 characters by default) that are not alphabetic words. A password of
+  `query` masks at its assignment but does not rewrite `execute_query`,
+  `query.rs` or later prose. Allocating a placeholder never implicitly
+  registers a value for global matching.
+- `Masker::remember_secret` is authoritative from 4 bytes. Values the
+  runtime registers wholesale (`remember_secrets`: shell variables, provider
+  keys) need `known.min_secret_len`, since such lists also hold short
+  non-secret settings. Long confirmed values continue to mask when embedded in
+  URLs or longer strings; token boundaries are not a leak bypass.
+- Base64 and percent-encoded runs still go through the same rules. Tool schema
+  structure, signed protocol data and binary payloads are not ordinary text.
 
 ## Boundaries
 
-- **Model requests** (`provider.rs`): every request is masked before the
-  inner provider sees it; placeholders are restored in the reply and in each
-  streamed delta (`stream.rs`). Tool-call arguments come back with real
-  values: the tool needs them. A kind set to `block` stops the request.
-- **Uploads** (`scrub.rs`, `service::scrub_upload*`): share, sync, task
-  definitions, task reports and chat deliveries are scrubbed for good
-  (`[REDACTED:KIND]`); nothing is kept to undo it. Always on, whatever
-  `enabled` says.
-- **Known values** (`vault.rs`): a value found once is masked wherever it
-  appears again; values evot injects into the shell and the provider key
-  are registered up front (`remember_secrets`).
+- **Model requests** (`provider.rs`): mask before the inner provider sees the
+  request; restore replies and streamed deltas. Tool-call arguments get real
+  values back because tools need them. A kind set to `block` stops the request.
+- **Uploads** (`scrub.rs`, `service::scrub_upload*`): share, sync, task definitions,
+  reports and chat deliveries are scrubbed irreversibly (`[REDACTED:KIND]`).
+  This stays on even when model masking is disabled.
+- **Execution**: tool calls run with real values. Privacy does not decide which
+  commands may run or watch where a tool sends credentials.
 
-## Records and the live feed
+## Records and configuration
 
-Each request or upload with a finding appends one line to
-`~/.evotai/privacy/records/<day>.jsonl` (`record.rs`): kind, rule,
-placeholder, length, count, and for model requests where each value sat
-(`origins`: `user`, `system prompt`, `Bash call`, `Bash result` with the
-call's label). Labels are read from the request *after* masking, so a
-command that carried a value names it by placeholder. Never a value.
-`/privacy` summarizes them.
+Each request/upload with a finding appends a value-free JSONL record under
+`~/.evotai/privacy/records/<day>.jsonl`: kind, rule, keyed placeholder, length,
+count and masked origin labels. No raw value, prefix or suffix is recorded.
+`/privacy` summarizes the records. The TUI shows newly seen tags rather than
+re-announcing the same history each turn; resume seeds tags from past records.
+Historical settings, packs and records remain readable; no schema change is
+needed to narrow the default detection policy.
 
-The same records enter a bounded in-memory feed (`service::live_notices`,
-per process). The TUI reads it after each step and shows a card only when a
-request masks a placeholder tag the session has not seen before, so
-re-masking the same history each turn stays silent. On resume the CLI
-seeds "seen" from the session's records (`session_tags`) so the first
-request does not report the whole history as new. A blocked request's
-error card takes model, origins and rules from the latest blocked notice.
-
-## Rules
-
-Packs under `rules/data/*.json` plus the user's `~/.evotai/privacy/rules`
-are compiled once per configuration (`rules/engine.rs`). Cache identities
-include file length, mtime and, on Unix, inode/ctime; another process's
-edits are seen on the next request. Configuration loading and settings
-writes run off the async runtime; settings writes are atomic. Settings can
-be repaired without valid user packs.
+Packs are compiled once per configuration. User-pack cache identities include
+file length, mtime and Unix inode/ctime. Configuration I/O runs off the async
+runtime, writes are atomic, and broken user packs do not prevent repairing
+settings.
 
 ## Validation
 
 ```sh
 cargo test -p evot --test integration privacy
-cd cli && bun test tests/privacy-*.test.ts && bunx tsc --noEmit
+cd cli && bun test tests/commands/privacy-command.test.ts
 ```
 
-## Limitations
+`privacy_detection_test.rs` pins the small built-in surface and pairs real
+credential cases with code, paths, short-word and background-task regressions.
+The other privacy tests cover encoding, extension packs, schema compatibility,
+request/stream restoration, upload boundaries and value-free audit records.
 
-Masking is regex and context driven: a secret the rules do not recognize,
-or one spread across fields, can reach the model. Tool calls run with real
-values and nothing watches where they send them.
+## Deliberate limits
+
+Unknown credentials with no distinctive format, explicit context or prior
+registration are not guessed from their randomness or file of origin. Short
+or alphabetic passwords repeated without context are not automatically
+rediscovered. Heredoc bodies are not parsed as commands. Pagination-style
+names such as `page_token` count as credential names. Register known values or
+add an explicit user rule when that coverage is required. This is a
+conservative default, not a claim to find all secrets.
