@@ -1,160 +1,90 @@
 ---
 name: harden
-description: "Stress-test a proposed strategy, plan, or current git changes by hunting loopholes before implementation or commit. Trigger phrases: harden, stress test, poke holes, find loopholes."
+description: "Stress-test a plan, strategy, conclusion, current git changes, or a module/directory layout by hunting loopholes before implementation or commit. Trigger phrases: harden, stress test, poke holes, find loopholes."
 ---
 
 # Harden
 
-Stress-test a proposed strategy, design, or plan by actively hunting loopholes
-and iterating fixes until the remaining risks are either closed or explicitly
-accepted.
+Find what would break, fix it in the plan or the change, simplify, and repeat
+until everything left is either closed or knowingly accepted. Judge whether the
+approach holds up; this is not a line-by-line code review.
 
-## When to Use
+## What to harden
 
-- User asks you to validate, pressure-test, or "poke holes in" a plan,
-  strategy, or conclusion before coding starts. For a bare `/harden`, treat the
-  immediately preceding plan/conclusion as the primary subject.
-- User explicitly asks you to harden current git changes before commit or merge. In this
-  case, inspect the diff to infer the implementation strategy, then harden that
-  strategy.
-- You have a proposed approach but suspect gaps and want a disciplined pass
-  before committing.
-- Do NOT use this as a line-by-line code review of diffs or PRs — use the
-  `review` skill for that. Harden evaluates whether the strategy behind the
-  change is robust.
-- Do NOT use this as a default reflex after every small change. Invoke it when
-  the blast radius of being wrong is high.
+- Bare `/harden`: the plan, strategy, or conclusion just discussed. Local git
+  changes are supporting evidence, not the subject.
+- `/harden changes`: the staged and unstaged diff. Infer the strategy behind it
+  and harden that.
+- `/harden <target>`: whatever is named: a strategy in words, a design doc, a
+  file, a directory, or a module layout. The named target is the subject; the
+  conversation and the diff are context.
+- Nothing to harden: ask for the subject in one paragraph.
 
-## Inputs
+## How
 
-The subject of hardening is one of:
+1. Read before judging: the code, the project's rules (`AGENTS.md`, guard
+   tests), real callers and imports. Mark anything you assumed without checking.
+2. List concrete loopholes: what breaks, under which condition. Look where it
+   usually hurts: edge cases and existing state, concurrency and partial
+   failure, conventions the change bypasses or duplicates, tests that would not
+   catch a regression, things that are hard to undo, and structure.
+3. Fix each one with a specific change, or accept it with a reason.
+4. Ablate: cut abstractions, layers, and fallbacks the requirement does not
+   need. Check whether the fixes or cuts opened new holes, and repeat. Two or
+   three passes are typical; if fundamental problems keep appearing after four,
+   say the design is probably wrong. Do not add fallbacks for impossible
+   cases, layers just in case, or new feature scope, and name what remains
+   instead of claiming confidence.
 
-- the currently-proposed plan, strategy, or conclusion from the previous turn
-  or the user's message. This is the default subject for a bare
-  `/harden` request;
-- the current git changes, when the user explicitly asks to harden local work
-  (for example, `harden changes` or `/harden changes`). Inspect staged and
-  unstaged diffs, summarize the inferred strategy, then harden that strategy
-  rather than reviewing every changed line;
-- the architecture, when the user asks to harden architecture (for example,
-  `harden arch` or `/harden arch`). Evaluate the structural design of the
-  changes or plan — focus on simplicity, decoupling, clarity of responsibility,
-  and cohesion. The output must include an annotated file tree (see Output);
-- when a plan/strategy/conclusion is available and local git changes also exist,
-  use the diff only as supporting context. Combine relevant findings from the
-  diff with the hardening pass, but do not switch the primary subject from the
-  previous conclusion to the diff.
-
-If no plan, strategy, or git change is available, ask the user to state the
-subject in one paragraph before starting.
-
-## The Loop
-
-Repeat until convergence:
-
-1. **Enumerate loopholes.** List concrete, named weaknesses. Each item must say
-   *what* breaks and *under what condition*. Reject vague worries. Cover at
-   least:
-   - Edge cases: empty input, max size, concurrency, partial failure, retries,
-     migration from existing state.
-   - Assumptions: behaviors you inferred without reading the code. Mark them.
-   - Integration: conventions in the codebase the plan bypasses or duplicates.
-   - Verification: tests or checks that would not actually catch a regression.
-   - Reversibility: what's hard to undo if this ships and is wrong.
-   - Structure (when subject is architecture): module boundary violations,
-     responsibility overlap between modules, naming/directory confusion,
-     unnecessary coupling.
-2. **Fix or accept.** For each loophole, either:
-   - update the plan or strategy with a specific change;
-   - if hardening current git changes, identify the specific implementation
-     adjustment needed; or
-   - explicitly mark it as accepted risk with the reason (scope, cost, low
-     probability).
-   Do not close a loophole by waving at it.
-3. **Ablate and re-check.** Before converging, run an ablation experiment on
-   the revised plan or change: actively look for unnecessary abstractions and
-   design, and simplify them while preserving required behavior and constraints.
-   Use judgment and codebase context rather than mechanically targeting specific
-   patterns or forcing a removal. Then ask whether the fixes or simplifications
-   introduced new loopholes. If yes, go to step 1. If no, stop.
-
-Typical runs converge in 2-3 iterations. If you're past 4 iterations and still
-finding substantive new loopholes, the underlying design is probably wrong —
-surface that to the user instead of patching further.
-
-## Anti-patterns
-
-Hardening fails when it degrades into these:
-
-- **Fallback sprawl.** Adding normalizers, retries, and defensive wrappers for
-  scenarios that cannot happen. A plan is not safer because it handles more
-  imaginary cases.
-- **Abstraction creep.** Introducing new layers or indirection "just in case".
-- **Vague confidence claims.** "I'm now confident" is not a stopping condition.
-  The stopping condition is: remaining loopholes are fixed or named as risks.
-- **Scope drift.** Hardening the plan should not grow the feature. If a
-  loophole reveals the feature is too small, say so; don't silently expand it.
+When files, modules, or directories are involved, check the structure too: one
+job per module, named by domain rather than kind; dependencies point one way;
+callers go through a narrow entry, not a sibling's internals; what changes
+together lives together; wiring stays thin. Tie every move to a concrete
+problem; no reshuffles for taste.
 
 ## Output
 
-Use the conversation language established before the harden invocation. Treat
-the invocation command and target selector as language-neutral. If no prior
-conversation language is available, use the invocation's natural-language
-prose. An explicit output-language request takes precedence. Never infer the
-output language from the subject being hardened. Localize prose and section
-headings; preserve code, diffs, identifiers, paths, logs, and quoted material.
+Write in the language the user has been using. Words the user typed after
+`/harden` count; selectors such as `changes`, host-written instructions, and
+the material being hardened (code, diffs, docs) do not. Keep code, paths, and
+identifiers as they are. Roughly this shape, about one page.
+Drop empty sections, and say in each heading where its items stand.
 
-When you converge, present the sections below. Follow each heading with a
-short parenthetical saying where its items stand, so a reader knows at a glance
-whether anything is already done and what is left to them. Base it on what you
-actually checked, for example "(the PR already handles these; I checked the
-code)", "(fixed in the plan below; not implemented yet)", "(the author already
-noted these; acceptable, but keep them in the PR description)" or "(suggested
-changes)".
+Tag every loophole and risk with a priority, and list each section highest
+first:
 
-- **Subject** — the plan, strategy, or current git changes being hardened.
-- **Closed loopholes** — each one as: `condition → fix`, one line. The
-  parenthetical says whether the fix already exists in the code you checked or
-  is only part of the plan below.
-- **Accepted risks** — each one as: `condition → why it's acceptable`, one line.
-  The parenthetical says who accepted them and whether the reader should
-  record or confirm them.
-- **Ablation** — unnecessary design found in step 3, each one as
-  `what → simpler alternative`. Omit the section when nothing was found.
-- **Final plan** — the revised plan, rewritten as a self-contained, ready-to-execute
-  specification that already incorporates every closed loophole. Do not describe
-  it as a diff against the original or a list of adjustments — write it as if the
-  original plan never existed. It must be concrete enough that the next step is
-  implementation, not another round of planning. When the subject is current
-  git changes rather than a forward-looking plan, replace this with
-  **Implementation adjustments** — the specific file-level edits still needed
-  to close the loopholes. When the subject is architecture, replace this with
-  **Architecture** — include the following:
-  - A brief assessment of simplicity, decoupling, and clarity of responsibility.
-  - An annotated file tree showing the proposed directory structure with change
-    markers. Each entry uses `[Add]`, `[Modify]`, or `[Delete]` to indicate the
-    structural change, followed by a short comment explaining the role or reason.
-    Example format:
-    ```
-    src/
-      engine/
-        src/
-          provider/    # [Add] LLM provider trait, decoupled from agent loop
-          tools/       # [Modify] extract tool registry into standalone module
-          old_exec/    # [Delete] merged into provider/
-      app/
-        src/
-          agent/       # [Modify] prompt assembly now delegates to skill dispatch
-          storage/     # [Add] persistence layer (SQLite, file-based)
-    ```
-    Unchanged directories may be listed without markers for context, but keep
-    them minimal. The tree must reflect the state after all loophole fixes are
-    applied.
-- **Iterations** — a short count (e.g. "converged after 2 passes").
+- `P0`: wrong results, data loss, security, or a broken published contract on a
+  normal path; must be fixed before shipping. A P0 never goes under Accepted
+  risks; if it cannot be fixed here, list it in the final plan as blocking and
+  say why.
+- `P1`: fails under a specific but plausible condition, or breaks a project
+  rule; fix in this change unless accepted with a reason.
+- `P2`: unlikely, cosmetic, or cheap to fix later.
 
-Put **Final plan** (or **Implementation adjustments** or **Architecture**) last
-so the reader ends on the actionable output and does not need to ask "now give
-me the revised plan".
+~~~markdown
+## Subject
+<what was hardened> · <N passes>
 
-Keep it compact. One page is usually enough, but do not shrink the final plan
-to the point it loses the detail needed to execute.
+## Closed loopholes (<already in the code | still to do below>)
+- L1 [P0] <condition> → <fix>
+
+## Accepted risks (<who accepted them; confirm?>)
+- R1 [P2] <condition> → <why it is acceptable>
+
+## Ablation
+- A1 <what> → <simpler alternative>
+
+## Final plan
+<Self-contained and ready to execute, written as if the original never existed,
+not as a diff of it. For `changes`, title it "Implementation adjustments": only
+what still needs editing, or "None". Include the tree only when files or
+structure change, and start it with the layering `a → b → c`.>
+
+```text
+path/
+├── file.rs   [Add | Modify | Delete | Move from <path>] reason (L1)
+└── …
+```
+
+1. <step> — verify: <command or check>
+~~~

@@ -48,7 +48,7 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
   { name: '/version', description: 'Show current version', handler: 'builtin', runSafe: true },
   { name: '/exit', aliases: ['/quit', '/q'], description: 'Exit the REPL', handler: 'builtin' },
   { name: '/done', description: 'Exit log mode', handler: 'builtin' },
-  { name: '/harden', description: 'Stress-test the previous plan or current changes', usage: '/harden [plan | changes | arch | subject]', handler: 'builtin' },
+  { name: '/harden', description: 'Stress-test the previous plan, current changes, or a target', usage: '/harden [changes | target]', handler: 'builtin' },
   { name: '/skill', description: 'Manage skills', usage: '/skill [list | install [name | source] | update [name] | remove <name>]', handler: 'builtin' },
   { name: '/clip', description: 'Clip last reply to the memory vault; all = distill session; copy = clipboard', usage: '/clip [all | copy]', handler: 'builtin' },
   { name: '/compact', description: 'Compact session context', usage: '/compact [instructions]', handler: 'builtin' },
@@ -113,23 +113,16 @@ export type ResolvedCommand =
 
 export function buildHardenPrompt(args: string): string {
   const subject = args.trim()
-  if (!subject || subject === 'plan') {
+  if (!subject) {
     return [
       'harden the plan, strategy, or conclusion from the immediately preceding conversation context.',
       'If local git changes exist, inspect them only as supporting context and combine any relevant findings with the hardening pass; do not default to hardening the diff as the primary subject.',
     ].join(' ')
   }
-  if (subject === 'changes') {
+  if (subject.toLowerCase() === 'changes') {
     return 'harden current git changes'
   }
-  if (subject === 'arch') {
-    return [
-      'harden the architecture of the current git changes or the immediately preceding plan.',
-      'Evaluate: simplicity, decoupling, clarity of responsibility, and cohesion.',
-      'In the final output, include an annotated file tree showing the proposed directory structure with short comments explaining each module\'s role.',
-    ].join(' ')
-  }
-  return `harden this strategy: ${subject}`
+  return `harden: ${subject}`
 }
 
 /**

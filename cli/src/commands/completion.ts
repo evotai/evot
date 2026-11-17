@@ -140,7 +140,7 @@ const SUB_COMMANDS: Record<string, string[]> = {
   '/fork': ['<title>'],
   '/back': ['<levels>'],
   '/model': ['<name>'],
-  '/harden': ['plan', 'changes', 'arch', '<subject>'],
+  '/harden': ['changes', '<target>'],
 }
 
 // ---------------------------------------------------------------------------
@@ -150,8 +150,8 @@ const SUB_COMMANDS: Record<string, string[]> = {
 /**
  * A sub-command entry that is a literal token, not a prompt.
  *
- * `SUB_COMMANDS` mixes both: `/harden` offers real words (`plan`, `changes`)
- * alongside `<subject>`, which describes what to type rather than something to
+ * `SUB_COMMANDS` mixes both: `/harden` offers a real word (`changes`)
+ * alongside `<target>`, which describes what to type rather than something to
  * type. Completing a placeholder would insert the angle brackets verbatim.
  */
 function isLiteralSubCommand(entry: string): boolean {

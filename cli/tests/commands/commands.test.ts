@@ -57,8 +57,8 @@ describe('resolveCommand', () => {
   })
 
   test('resolves /harden command', () => {
-    const result = resolveCommand('/harden plan')
-    expect(result).toEqual({ kind: 'resolved', name: '/harden', args: 'plan' })
+    const result = resolveCommand('/harden changes')
+    expect(result).toEqual({ kind: 'resolved', name: '/harden', args: 'changes' })
     expect(isSlashCommand('/harden')).toBe(true)
   })
 
@@ -201,21 +201,12 @@ describe('buildHardenPrompt', () => {
 
   test('keeps explicit changes subject focused on git changes', () => {
     expect(buildHardenPrompt('changes')).toBe('harden current git changes')
+    expect(buildHardenPrompt('CHANGES')).toBe('harden current git changes')
   })
 
-  test('keeps explicit plan subject focused on previous context', () => {
-    expect(buildHardenPrompt('plan')).toContain('immediately preceding conversation context')
-  })
-
-  test('keeps explicit arch subject focused on architecture', () => {
-    const prompt = buildHardenPrompt('arch')
-    expect(prompt).toContain('architecture')
-    expect(prompt).toContain('simplicity')
-    expect(prompt).toContain('annotated file tree')
-  })
-
-  test('passes custom subject through as strategy', () => {
-    expect(buildHardenPrompt('retry rollout')).toBe('harden this strategy: retry rollout')
+  test('passes custom target or subject through directly', () => {
+    expect(buildHardenPrompt('retry rollout')).toBe('harden: retry rollout')
+    expect(buildHardenPrompt('src/app/src/session')).toBe('harden: src/app/src/session')
   })
 })
 describe('skillListFromDirs', () => {

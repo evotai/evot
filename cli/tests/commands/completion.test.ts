@@ -231,6 +231,8 @@ describe('sub-command completion', () => {
     expect(result!.candidates).toEqual(['changes'])
     // Splices the argument, leaving `/harden ` intact.
     expect(result!.wordStart).toBe(8)
+    expect(getGhostHint('/harden ', 8)).toBe('  [changes  <target>]')
+    expect(complete('/harden ./', 10)).not.toBeNull()
   })
 
   test('applies to every command with literal sub-commands', () => {
@@ -273,7 +275,7 @@ describe('sub-command completion', () => {
     // The invariant that broke: the hint advertised a completion Tab could not
     // deliver. Anything the hint offers as literal text must be appliable.
     for (const input of [
-      '/harden chan', '/harden pl', '/harden a', '/skill re',
+      '/harden chan', '/skill re',
       '/log sh', '/env lo', '/clip a', '/help mo',
     ]) {
       const hint = getGhostHint(input, input.length)
