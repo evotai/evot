@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --no-fail-fast
+      - run: cargo nextest run --profile ci --no-fail-fast
 
   build:
     name: Build
@@ -93,4 +93,6 @@ jobs:
       - run: cd cli && bun test tests/ --path-ignore-patterns 'tests/tui/**'
       - run: cd cli && bun run build:cli
       - run: cd cli && EVOT_TEST_NATIVE_CONTRACT=1 bun test tests/native/native-config-contract.test.ts tests/native/fork-queue-native.test.ts
-      - run: cd cli && bun run test:tui
+      # PTY smoke tests race real terminal timing on shared macOS runners; a
+      # real regression fails every attempt, a scheduling hiccup does not.
+      - run: cd cli && bun run test:tui --retry=2

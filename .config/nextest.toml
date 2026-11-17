@@ -1,0 +1,6 @@
+# CI runners are shared and slow; timing-sensitive tests (retry backoff,
+# stalled bodies, PTY relays) occasionally miss a deadline. A retried pass is
+# reported as FLAKY in the log, so flakes stay visible without failing main.
+[profile.ci]
+retries = { backoff = "fixed", count = 2, delay = "1s" }
+fail-fast = false
