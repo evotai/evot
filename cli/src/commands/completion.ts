@@ -4,7 +4,7 @@
  */
 
 import { completePath, resolvePathTarget } from './path-completion.js'
-import { ALL_COMMANDS, COMMANDS, commandSpellings, isSlashPrefix, matchCommandPrefix } from './index.js'
+import { COMMANDS, commandInventory, isSlashPrefix, matchCommandPrefix, resolveCommand, type CommandDefinition } from './index.js'
 import type { SkillEntry } from './skill/scan.js'
 
 export interface CompletionResult {
@@ -57,6 +57,7 @@ const ROOT_SESSION: GhostHintContext = { forked: false }
  * - Bare `/` → compact list of visible commands that apply right now
  * - `/he` → `lp — Show help` (single match: completion + description)
  * - `/skill ` → `[install  list  remove]` (sub-command hints)
+ * - Registered skill names and empty arguments keep their command description
  */
 export function getGhostHint(line: string, cursorCol: number, context: GhostHintContext = ROOT_SESSION, skills: readonly SkillEntry[] = []): string {
   const beforeCursor = line.slice(0, cursorCol)
@@ -72,12 +73,13 @@ export function getGhostHint(line: string, cursorCol: number, context: GhostHint
   // Sub-command hints (after space)
   if (parts.length >= 2) {
     const partial = parts.slice(1).join(' ').toLowerCase()
-    return getSubCommandHint(cmd, partial)
+    return getSubCommandHint(cmd, partial, skills)
   }
 
   // Bare `/` → the visible commands that can act in this session
   if (cmd === '/') {
-    const names = COMMANDS.filter(c => !c.hintWhenForked || context.forked).map(c => c.name.slice(1))
+    const visible = [...COMMANDS, ...commandInventory(skills).filter(command => command.handler === 'skill')]
+    const names = visible.filter(c => !c.hintWhenForked || context.forked).map(c => c.name.slice(1))
     return `  [${names.join('  ')}]`
   }
 
@@ -85,15 +87,10 @@ export function getGhostHint(line: string, cursorCol: number, context: GhostHint
 
   if (matches.length === 0) return ''
 
-  // Single match — show completion suffix + sub-commands or description
+  // Single match — keep skill descriptions alongside their argument hints.
   if (matches.length === 1) {
     const m = matches[0]!
-    const suffix = m.label.slice(cmd.length)
-    const subcmds = SUB_COMMANDS[m.command.name]
-    if (subcmds && subcmds.length > 0 && (suffix === '' || m.label === cmd + suffix)) {
-      return `${suffix}  [${subcmds.join('  ')}]`
-    }
-    return `${suffix}  ${m.command.description}`
+    return m.label.slice(cmd.length) + commandHint(m.command)
   }
 
   // Multiple matches — show common suffix + candidate names
@@ -103,21 +100,40 @@ export function getGhostHint(line: string, cursorCol: number, context: GhostHint
   return suffix ? `${suffix}  [${names}]` : `  [${names}]`
 }
 
-function getSubCommandHint(cmd: string, partial: string): string {
-  // Resolve through aliases so `/sessions <tab>` hints like `/resume`.
-  const candidates = commandSpellings(ALL_COMMANDS)
-  const resolved = (candidates.find(c => c.label === cmd)
-    ?? candidates.find(c => c.label.startsWith(cmd)))?.command
-  if (!resolved) return ''
+function subCommandEntries(command: CommandDefinition): readonly string[] {
+  return command.handler === 'skill' ? command.arguments ?? [] : SUB_COMMANDS[command.name] ?? []
+}
 
-  const subcmds = SUB_COMMANDS[resolved.name] ?? []
+function commandHint(command: CommandDefinition): string {
+  const entries = subCommandEntries(command)
+  const argumentsHint = entries.length > 0 ? `  [${entries.join('  ')}]` : ''
+  return command.handler === 'skill' || !argumentsHint
+    ? `${argumentsHint}  ${command.description}` : argumentsHint
+}
+
+function registeredCommand(cmd: string, skills: readonly SkillEntry[]): CommandDefinition | undefined {
+  const resolved = resolveCommand(cmd, skills)
+  if (resolved.kind !== 'resolved' && resolved.kind !== 'skill') return undefined
+  return commandInventory(skills).find(command => command.name === resolved.name)
+}
+
+function registeredArguments(cmd: string, skills: readonly SkillEntry[]): readonly string[] {
+  const command = registeredCommand(cmd, skills)
+  return command ? subCommandEntries(command) : []
+}
+
+function getSubCommandHint(cmd: string, partial: string, skills: readonly SkillEntry[]): string {
+  const command = registeredCommand(cmd, skills)
+  if (!command) return ''
+  if (!partial && command.handler === 'skill') return commandHint(command)
+  const subcmds = subCommandEntries(command)
   if (subcmds.length === 0) return ''
 
   if (!partial) {
     return `  [${subcmds.join('  ')}]`
   }
 
-  const matches = subcmds.filter(s => s.startsWith(partial))
+  const matches = subcmds.filter(s => s.toLowerCase().startsWith(partial.toLowerCase()))
   if (matches.length === 0) return ''
   if (matches.length === 1) {
     return matches[0]!.slice(partial.length)
@@ -140,7 +156,6 @@ const SUB_COMMANDS: Record<string, string[]> = {
   '/fork': ['<title>'],
   '/back': ['<levels>'],
   '/model': ['<name>'],
-  '/harden': ['changes', '<target>'],
 }
 
 // ---------------------------------------------------------------------------
@@ -150,8 +165,8 @@ const SUB_COMMANDS: Record<string, string[]> = {
 /**
  * A sub-command entry that is a literal token, not a prompt.
  *
- * `SUB_COMMANDS` mixes both: `/harden` offers a real word (`changes`)
- * alongside `<target>`, which describes what to type rather than something to
+ * `SUB_COMMANDS` mixes both: `/privacy` offers real words (`off`, `on`)
+ * alongside `<days>`, which describes what to type rather than something to
  * type. Completing a placeholder would insert the angle brackets verbatim.
  */
 function isLiteralSubCommand(entry: string): boolean {
@@ -159,22 +174,17 @@ function isLiteralSubCommand(entry: string): boolean {
 }
 
 /**
- * Complete the sub-command under the cursor, e.g. `/harden chan` → `changes`.
+ * Complete the sub-command under the cursor, e.g. `/skill inst` → `install`.
  *
- * Driven by the same `SUB_COMMANDS` table `getSubCommandHint` reads, so the
+ * Driven by the same argument registry `getSubCommandHint` reads, so the
  * ghost hint and Tab can never disagree: anything the hint advertises as a
  * literal completion is something Tab can actually apply.
  */
-function completeSubCommand(cmd: string, partial: string, wordStart: number): CompletionResult | null {
-  const candidates = commandSpellings(ALL_COMMANDS)
-  const resolved = (candidates.find(c => c.label === cmd)
-    ?? candidates.find(c => c.label.startsWith(cmd)))?.command
-  if (!resolved) return null
-
-  const subcmds = (SUB_COMMANDS[resolved.name] ?? []).filter(isLiteralSubCommand)
+function completeSubCommand(cmd: string, partial: string, wordStart: number, skills: readonly SkillEntry[]): CompletionResult | null {
+  const subcmds = registeredArguments(cmd, skills).filter(isLiteralSubCommand)
   if (subcmds.length === 0) return null
 
-  const matches = subcmds.filter(sub => sub.startsWith(partial))
+  const matches = subcmds.filter(sub => sub.toLowerCase().startsWith(partial.toLowerCase()))
   if (matches.length === 0) return null
   if (matches.length === 1) {
     return { replacement: matches[0]! + ' ', candidates: matches, wordStart }
@@ -197,7 +207,7 @@ export function completeSlashCommand(input: string, skills: readonly SkillEntry[
   // argument: deeper words are free-form prompt text with nothing to match.
   if (parts.length === 2) {
     const partial = parts[1]!
-    return completeSubCommand(cmd, partial, input.length - partial.length)
+    return completeSubCommand(cmd, partial, input.length - partial.length, skills)
   }
   if (parts.length > 2) return null
 

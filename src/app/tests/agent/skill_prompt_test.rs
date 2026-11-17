@@ -73,7 +73,13 @@ async fn first_request_prompt(
 #[tokio::test]
 async fn selected_skills_filter_the_system_prompt() -> Result<(), Box<dyn std::error::Error>> {
     let tmp = TempDir::new()?;
-    let agent = test_agent(&tmp)?;
+    let skills = tmp.path().join("skills");
+    std::fs::create_dir_all(skills.join("harden"))?;
+    std::fs::write(
+        skills.join("harden/SKILL.md"),
+        "---\nname: harden\ndescription: Stress-test changes\n---\n# Harden\n",
+    )?;
+    let agent = test_agent(&tmp)?.add_skills_dirs(vec![skills]);
     agent.set_skill_names(vec!["harden".into()])?;
 
     let (prompt, tools) = first_request_prompt(
@@ -100,11 +106,7 @@ async fn active_modes_do_not_inject_retired_planning_instructions(
     ] {
         let tmp = TempDir::new()?;
         let agent = test_agent(&tmp)?;
-        agent.set_skill_names(vec![
-            "harden".into(),
-            "memory".into(),
-            "session-search".into(),
-        ])?;
+        agent.set_skill_names(vec!["memory".into(), "session-search".into()])?;
         let (prompt, tools) =
             first_request_prompt(&agent, QueryRequest::text("hello").mode(mode)).await?;
         let prompt = prompt.to_lowercase();
@@ -135,7 +137,6 @@ async fn active_modes_do_not_inject_retired_planning_instructions(
 #[test]
 fn builtin_skill_bodies_do_not_reference_retired_planning_mode() {
     for body in [
-        include_str!("../../src/agent/prompt/prompts/harden.md"),
         include_str!("../../src/agent/prompt/prompts/memory.md"),
         include_str!("../../src/agent/prompt/prompts/session-search.md"),
     ] {

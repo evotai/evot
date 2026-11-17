@@ -1,5 +1,5 @@
 import chalk from 'chalk'
-import type { OfficialSyncResult } from '../../commands/skill/index.js'
+import { getSkillEntries, type OfficialSyncResult } from '../../commands/skill/index.js'
 import { currentModelSpec, formatModelLabel, formatModelOptionLabel, hasPremiumModel, isCloudModel, selectModelOption } from '../../features/models/options.js'
 import type { ModelOption } from '../../native/contracts/config-info.js'
 import { type Agent, authNotices } from '../../native/index.js'
@@ -14,6 +14,7 @@ import type { FrameController } from './frame.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { ReplState } from './state.js'
 import type { TermRenderer } from '../screen/renderer.js'
+import { closeCompletion, refreshGhostHint } from '../input/editor.js'
 import { type AdContent, campaignFingerprint, queueAdSlotTransition, triggerAdSlot } from '../viewmodel/ad-slot.js'
 import { renderErrorNotice } from '../../ui/command-notice.js'
 import { errorText } from '../../ui/format.js'
@@ -40,7 +41,7 @@ export interface CloudController {
   adoptExternalAuthChange(): void
   flushDeferredCloudUpdates(): void
   handleCloudSessionRevoked(): void
-  noteOfficialSkillSync(result: OfficialSyncResult): void
+  noteOfficialSkillSync(result?: OfficialSyncResult): void
   readonly pinDefaultModel: (spec: string) => Promise<void>
   queryBlockedByCloudLogin(): boolean
   reloadAfterAuthChange(): boolean
@@ -69,20 +70,31 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
     if (campaignId) showCloudCampaign(campaignId)
   }
 
-  /** The official catalog moved and this device followed it. Said once, in one
-   *  dim line, and never over an open command window. */
-  function noteOfficialSkillSync(result: OfficialSyncResult): void {
-    const parts = [
+  /** Reconcile the command snapshot even after a no-op or failed maintenance
+   * pass: another process, or a partially completed sync, may have changed disk.
+   * Announce successful catalog changes without interrupting a command window. */
+  function noteOfficialSkillSync(result?: OfficialSyncResult): void {
+    const entries = getSkillEntries(deps.agent.skillsDirs())
+    const changed = JSON.stringify(entries) !== JSON.stringify(st.skillEntries)
+    if (changed) {
+      st.skillEntries = entries
+      deps.suggestions.cancel()
+      st.editor = refreshGhostHint(closeCompletion(st.editor), entries)
+    }
+    const parts = result ? [
       result.installed.length ? `new: ${result.installed.join(', ')}` : '',
       result.updated.length ? `updated: ${result.updated.join(', ')}` : '',
       result.removed.length ? `removed: ${result.removed.join(', ')}` : '',
-    ].filter(Boolean)
-    if (!parts.length) return
-    const notice = `  ↻ Official skills ${parts.join(' · ')}`
-    deps.frames.refreshBannerData()
-    if (deps.commandWindow.commandWindowMounted()) st.deferredSkillNotice = notice
-    else deps.scrollback.commitSystem('sys-skills-sync', chalk.dim(notice))
-    deps.renderer.requestRender()
+    ].filter(Boolean) : []
+    if (parts.length) {
+      const notice = `  ↻ Official skills ${parts.join(' · ')}`
+      if (deps.commandWindow.commandWindowMounted()) st.deferredSkillNotice = notice
+      else deps.scrollback.commitSystem('sys-skills-sync', chalk.dim(notice))
+    }
+    if (changed || parts.length) {
+      deps.frames.refreshBannerData()
+      deps.renderer.requestRender()
+    }
   }
 
   /** Save the highlighted picker row as the account default (Space in the

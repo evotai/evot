@@ -48,9 +48,9 @@ describe('skill browser', () => {
     expect(state.items[2]?.badge).toBeUndefined()
     const hidden = createSkillSelectorState([...entries,
       { name: 'memory', dir: join(builtinSkillsRoot(), 'memory') },
-      { name: 'harden', dir: join(builtinSkillsRoot(), 'harden') },
+      { name: 'session-search', dir: join(builtinSkillsRoot(), 'session-search') },
     ])
-    expect(hidden.items.some(item => item.id === 'memory' || item.id === 'harden')).toBe(false)
+    expect(hidden.items.some(item => item.id === 'memory' || item.id === 'session-search')).toBe(false)
     expect(selectorType(hidden, 'memory').items).toEqual([])
     const next = selectorDown(selectorFocusOn(state, item => item.id === 'opencli'))
     expect(next.items[next.focusIndex]?.id).toBe('group:lark')
@@ -70,6 +70,18 @@ describe('skill browser', () => {
     expect(searched.items.map(item => item.label)).toEqual(['lark/', 'im'])
     expect(selectorClearQuery(searched).items).toHaveLength(3)
     expect(handleSelectorControl(next, { type: 'delete' })).toEqual({ kind: 'none' })
+  })
+
+  test('migrated harden is visible as a managed catalog skill', () => {
+    const { root } = fixture()
+    const dir = join(root, 'harden')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: harden\ndescription: Stress-test plans and changes\n---\n')
+    writeFileSync(join(dir, '.evot-source.json'), JSON.stringify({ version: 1, repo: 'evotai/evot-skills', path: 'skills/harden' }))
+    const state = createSkillSelectorState([{ name: 'harden', dir }])
+    expect(state.items.map(item => item.id)).toEqual(['harden'])
+    expect(state.items[0]?.badge).toBe('official')
+    expect(selectorType(state, 'Stress-test').items.map(item => item.id)).toEqual(['harden'])
   })
 
   test('uses official sidecar copy and searches descriptions and examples across groups', () => {

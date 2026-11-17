@@ -282,7 +282,7 @@ fn nested_frontmatter_error_keeps_valid_siblings() -> Result<(), Box<dyn std::er
 
     let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
     assert!(specs.iter().any(|s| s.name == "lark-im"));
-    assert!(specs.iter().any(|s| s.name == "harden"));
+    assert!(specs.iter().any(|s| s.name == "memory"));
     assert!(specs.iter().all(|s| s.name != "lark-bad"));
     Ok(())
 }
@@ -297,7 +297,7 @@ fn builtin_directory_lives_under_the_state_root() -> Result<(), Box<dyn std::err
     let state = TempDir::new()?;
     let root = ensure_builtin_skills_dir(state.path())?;
     assert_eq!(root, state.path().join("builtin-skills"));
-    for name in ["harden", "memory", "session-search"] {
+    for name in ["memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
     }
     Ok(())
@@ -310,45 +310,53 @@ fn all_builtin_skills_load() -> Result<(), Box<dyn std::error::Error>> {
     let specs = load_skills(&[builtin])?;
     let names: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
 
-    assert_eq!(names, vec!["harden", "memory", "session-search"]);
+    assert_eq!(names, vec!["memory", "session-search"]);
     assert!(specs.iter().all(|skill| !skill.description.is_empty()));
     Ok(())
 }
 
 #[test]
 fn stale_builtin_dirs_are_removed() -> Result<(), Box<dyn std::error::Error>> {
-    // `opencli` and `humanize` moved to the evot-skills catalog. An upgraded
-    // binary must clear the copies it wrote in an earlier version, or they keep
-    // loading and collide with the installed ones.
+    // Migrated skills must not linger under the evot-owned builtin root.
     let state = TempDir::new()?;
     let root = ensure_builtin_skills_dir(state.path())?;
-    let stale = root.join("opencli");
-    fs::create_dir_all(&stale)?;
-    fs::write(
-        stale.join("SKILL.md"),
-        "---\nname: opencli\ndescription: stale\n---\n",
-    )?;
+    for name in ["harden", "opencli", "humanize"] {
+        create_skill(&root, name, "Stale builtin");
+    }
 
     let root = ensure_builtin_skills_dir(state.path())?;
-    assert!(!stale.exists(), "stale builtin dir should be removed");
-    for name in ["harden", "memory", "session-search"] {
+    for name in ["harden", "opencli", "humanize"] {
+        assert!(!root.join(name).exists(), "stale {name} should be removed");
+    }
+    for name in ["memory", "session-search"] {
         assert!(root.join(name).join("SKILL.md").is_file());
     }
     Ok(())
 }
 
 #[test]
-fn builtin_harden_skill_loaded() -> Result<(), Box<dyn std::error::Error>> {
+fn migrated_harden_loads_from_filesystem() -> Result<(), Box<dyn std::error::Error>> {
     let state = TempDir::new()?;
+    create_skill(
+        &state.path().join("builtin-skills"),
+        "harden",
+        "Stale builtin",
+    );
+    let installed = state.path().join("skills");
+    create_skill(&installed, "harden", "Installed harden");
+
     let builtin = ensure_builtin_skills_dir(state.path())?;
-    let specs = load_skills(&[builtin])?;
-    let harden = match specs.iter().find(|s| s.name == "harden") {
-        Some(skill) => skill,
-        None => return Err("builtin harden skill should be present".into()),
-    };
-    assert!(!harden.description.is_empty());
-    assert!(std::fs::read_to_string(&harden.file_path)?.contains("# Harden"));
-    assert!(harden.file_path.ends_with("harden/SKILL.md"));
+    assert!(!builtin.join("harden").exists());
+    let specs = load_skills(&[builtin, installed.clone()])?;
+    let harden = specs
+        .iter()
+        .find(|skill| skill.name == "harden")
+        .ok_or("installed harden should be present")?;
+    assert_eq!(harden.description, "Installed harden");
+    assert_eq!(
+        harden.file_path,
+        installed.join("harden/SKILL.md").canonicalize()?
+    );
     Ok(())
 }
 
@@ -375,16 +383,16 @@ fn fs_skill_overrides_builtin() -> Result<(), Box<dyn std::error::Error>> {
     let state = TempDir::new()?;
     let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
-    create_skill(tmp.path(), "harden", "Custom harden");
+    create_skill(tmp.path(), "memory", "Custom memory");
 
     let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
-    let harden = specs
+    let memory = specs
         .iter()
-        .find(|s| s.name == "harden")
-        .ok_or("harden should be present")?;
-    assert_eq!(harden.description, "Custom harden");
+        .find(|s| s.name == "memory")
+        .ok_or("memory should be present")?;
+    assert_eq!(memory.description, "Custom memory");
     assert!(
-        harden.file_path.ends_with("harden/SKILL.md"),
+        memory.file_path.ends_with("memory/SKILL.md"),
         "fs skill should point at SKILL.md"
     );
     Ok(())
@@ -402,7 +410,7 @@ fn filesystem_skill_error_does_not_drop_builtins_or_valid_siblings(
     create_skill(tmp.path(), "valid", "Valid sibling");
 
     let specs = load_skills(&[builtin, tmp.path().to_path_buf()])?;
-    assert!(specs.iter().any(|s| s.name == "harden"));
+    assert!(specs.iter().any(|s| s.name == "session-search"));
     assert!(specs.iter().any(|s| s.name == "memory"));
     assert!(specs.iter().any(|s| s.name == "valid"));
     assert!(specs.iter().all(|s| s.name != "bad"));
@@ -415,11 +423,11 @@ fn selected_skills_can_mix_builtin_and_filesystem() -> Result<(), Box<dyn std::e
     let builtin = ensure_builtin_skills_dir(state.path())?;
     let tmp = TempDir::new()?;
     create_skill(tmp.path(), "custom", "Custom skill");
-    let names = vec!["harden".to_string(), "custom".to_string()];
+    let names = vec!["memory".to_string(), "custom".to_string()];
 
     let specs = load_skills_by_name(&[builtin, tmp.path().to_path_buf()], &names)?;
     let loaded: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
-    assert_eq!(loaded, vec!["custom", "harden"]);
+    assert_eq!(loaded, vec!["custom", "memory"]);
     Ok(())
 }
 
@@ -454,7 +462,7 @@ fn unknown_selected_skill_returns_error() -> Result<(), Box<dyn std::error::Erro
         Err(error) => error,
     };
     assert!(error.to_string().contains("unknown skill 'missing'"));
-    assert!(error.to_string().contains("harden"));
+    assert!(error.to_string().contains("memory"));
     Ok(())
 }
 

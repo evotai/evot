@@ -1,6 +1,5 @@
 import chalk from 'chalk'
-import { buildHardenPrompt, resolveCommand } from '../../commands/index.js'
-import { getSkillEntries } from '../../commands/skill/scan.js'
+import { resolveCommand } from '../../commands/index.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import type { TaskSession } from '../../features/task/session.js'
@@ -9,7 +8,6 @@ import { type Agent, type ForkedAgent, taskShareId } from '../../native/index.js
 import type { OutputLine } from '../../render/output.js'
 import type { RunThinking } from '../../render/run-thinking.js'
 import { type CloudSessionSync, mergeRemoteSessions } from '../../session/cloud-sessions.js'
-import { buildCommandPrompt } from '../../session/command-envelope.js'
 import type { SessionHook } from '../../session/hook.js'
 import { isSessionIdPrefix, normalizeResumeQuery, resolveSessionByPrefix } from '../../session/resume.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
@@ -254,9 +252,6 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       await handleEnvCommand(deps.replCommands, args)
     } else if (name === '/privacy') {
       await handlePrivacyCommand(deps.replCommands, args)
-    } else if (name === '/harden') {
-      deps.scrollback.commitUserMessage(text.trim())
-      deps.runCtl.runQuery(buildCommandPrompt({ name: 'harden', input: text.trim(), instructions: buildHardenPrompt(args) }))
     } else if (name === '/clip') {
       const sub = args.trim().toLowerCase()
       if (sub === 'all') {
@@ -276,8 +271,8 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     } else if (name === '/skill') {
       try {
         await handleSkillCommand(deps.replCommands, args)
-        st.skillEntries = getSkillEntries(deps.agent.skillsDirs())
       } finally {
+        deps.cloudCtl.noteOfficialSkillSync()
         deps.frames.refreshBannerData()
       }
     } else if (name === '/update') {

@@ -56,6 +56,8 @@ export function createSkillSelectorState(entries: SkillEntry[]): SelectorState {
       ...(official ? { badge: 'official' } : {}),
       searchText: `${entry.name} ${entry.group ?? ''} ${summary} ${display?.example ?? ''}`,
       preview: [entry.name, '', summary || 'No description available.',
+        ...(entry.command ? ['', 'Command', entry.command.usage ?? `/${entry.name} [request]`] : []),
+        ...(entry.commandError ? ['', `Command not registered: ${entry.commandError}`] : []),
         ...(display ? ['', 'Example', display.example] : [])],
     })
   }

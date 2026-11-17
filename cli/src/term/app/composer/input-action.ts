@@ -27,7 +27,7 @@ export function tabAction(editor: EditorState, options: {
   const argumentsMenu = options.inventory && argumentCompletion(text, cursor, options.inventory)
   if (argumentsMenu) return { kind: 'arguments', completion: argumentsMenu }
   if (fileCompletionTarget(line, editor.cursorCol, options.skills)) return { kind: 'local' }
-  if (!options.busy && !options.editing && suggestionCommand(text, cursor)) return { kind: 'assist' }
+  if (!options.busy && !options.editing && suggestionCommand(text, cursor, options.skills)) return { kind: 'assist' }
   if (completeSlashCommand(before.trimStart(), options.skills) && before.trimStart().startsWith('/')) return { kind: 'local' }
   if (options.editing) return { kind: 'none' }
   if (options.busy && text.trim()) {

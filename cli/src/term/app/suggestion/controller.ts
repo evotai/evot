@@ -1,4 +1,5 @@
 import type { NativeSuggestion } from '../../../native/contracts/ports.js'
+import type { SkillEntry } from '../../../commands/skill/scan.js'
 import type { SuggestionTrigger } from '../composer/composer-guidance.js'
 import type { SuggestionFeedback, SuggestionHints, SuggestionMessage, SuggestionPosition } from './types.js'
 import { SuggestionCandidates } from './candidates.js'
@@ -44,6 +45,7 @@ export class PromptSuggestion {
     unauthorized?(): void
     draft?(): string
     cursor?(): number
+    skills?(): readonly SkillEntry[]
   }) {}
 
   cancel(): void {
@@ -112,7 +114,7 @@ export class PromptSuggestion {
    * No context/result still settles to visible feedback, never a silent no-op. */
   complete(draft: string, cursor = draft.length): void {
     if (!this.host.eligible() || cursor < 0 || cursor > draft.length) return
-    if (draft.trimStart().startsWith('/') && !suggestionCommand(draft, cursor)) return
+    if (draft.trimStart().startsWith('/') && !suggestionCommand(draft, cursor, this.host.skills?.())) return
     if (this.valid() && this.request) return
     this.cancel()
     this.intent = { key: this.host.key(), context: this.host.context(), draft, cursor }
@@ -136,7 +138,7 @@ export class PromptSuggestion {
     const { context, draft, cursor } = this.intent
     const prefix = draft.slice(0, cursor)
     const suffix = draft.slice(cursor)
-    const command = suggestionCommand(draft, cursor)
+    const command = suggestionCommand(draft, cursor, this.host.skills?.())
     // All explicit input assistance uses the same literal suffix contract:
     // appending at the end is simply replacing an empty suffix.
     const generation = ++this.generation

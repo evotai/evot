@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'fs'
 import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import stripAnsi from 'strip-ansi'
-import { resolveCommand, isSlashCommand, buildHardenPrompt } from '../../src/commands/index.js'
+import { resolveCommand, isSlashCommand } from '../../src/commands/index.js'
 import { getSkillEntries, skillListFromDirs, resolveSkillsDirs, skillList } from '../../src/commands/skill/index.js'
 
 describe('isSlashCommand', () => {
@@ -56,9 +56,11 @@ describe('resolveCommand', () => {
     })
   })
 
-  test('resolves /harden command', () => {
-    const result = resolveCommand('/harden changes')
-    expect(result).toEqual({ kind: 'resolved', name: '/harden', args: 'changes' })
+  test('/harden is an installed skill rather than a reserved builtin', () => {
+    expect(resolveCommand('/harden changes')).toEqual({ kind: 'unknown' })
+    expect(resolveCommand('/harden changes', [{ name: 'harden', dir: '/fixture/harden', command: {} }])).toEqual({
+      kind: 'skill', name: '/harden', args: 'changes', dir: '/fixture/harden',
+    })
     expect(isSlashCommand('/harden')).toBe(true)
   })
 
@@ -188,27 +190,6 @@ describe('resolveCommand', () => {
   })
 })
 
-describe('buildHardenPrompt', () => {
-  test('defaults to previous plan or conclusion with git diff as supporting context', () => {
-    const prompt = buildHardenPrompt('')
-
-    expect(prompt).toContain('immediately preceding conversation context')
-    expect(prompt).toContain('If local git changes exist')
-    expect(prompt).toContain('supporting context')
-    expect(prompt).toContain('do not default to hardening the diff')
-    expect(prompt).not.toBe('harden current git changes')
-  })
-
-  test('keeps explicit changes subject focused on git changes', () => {
-    expect(buildHardenPrompt('changes')).toBe('harden current git changes')
-    expect(buildHardenPrompt('CHANGES')).toBe('harden current git changes')
-  })
-
-  test('passes custom target or subject through directly', () => {
-    expect(buildHardenPrompt('retry rollout')).toBe('harden: retry rollout')
-    expect(buildHardenPrompt('src/app/src/session')).toBe('harden: src/app/src/session')
-  })
-})
 describe('skillListFromDirs', () => {
   test('lists skills from evotai and claude directories', () => {
     const home = join(tmpdir(), `evot-skill-list-${Date.now()}`)

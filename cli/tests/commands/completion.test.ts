@@ -29,8 +29,9 @@ describe('slash command completion', () => {
     expect(result).toBeNull()
   })
 
-  test('completes /ha to /harden', () => {
-    const result = complete('/ha', 3)
+  test('completes /ha only when harden is installed', () => {
+    expect(complete('/ha', 3)).toBeNull()
+    const result = complete('/ha', 3, [{ name: 'harden', dir: '/fixture/harden', command: {} }])
     expect(result).not.toBeNull()
     expect(result!.replacement).toBe('/harden ')
     expect(result!.candidates).toEqual(['/harden'])
@@ -223,16 +224,14 @@ describe('alias completion', () => {
 
 describe('sub-command completion', () => {
   test('completes the sub-command under the cursor', () => {
-    // The reported bug: `/harden chan` showed a `ges` ghost hint, but Tab
-    // refused to apply it because completion stopped at the command name.
-    const result = complete('/harden chan', 12)
+    // Literal hints and Tab must agree past the command name too.
+    const result = complete('/skill inst', 11)
     expect(result).not.toBeNull()
-    expect(result!.replacement).toBe('changes ')
-    expect(result!.candidates).toEqual(['changes'])
-    // Splices the argument, leaving `/harden ` intact.
-    expect(result!.wordStart).toBe(8)
-    expect(getGhostHint('/harden ', 8)).toBe('  [changes  <target>]')
-    expect(complete('/harden ./', 10)).not.toBeNull()
+    expect(result!.replacement).toBe('install ')
+    expect(result!.candidates).toEqual(['install'])
+    expect(result!.wordStart).toBe(7)
+    expect(getGhostHint('/skill ', 7)).toBe('  [install  list  update  remove]')
+    expect(complete('/skill ./', 9)).not.toBeNull()
   })
 
   test('applies to every command with literal sub-commands', () => {
@@ -275,7 +274,7 @@ describe('sub-command completion', () => {
     // The invariant that broke: the hint advertised a completion Tab could not
     // deliver. Anything the hint offers as literal text must be appliable.
     for (const input of [
-      '/harden chan', '/skill re',
+      '/share pub', '/skill re',
       '/log sh', '/env lo', '/clip a', '/help mo',
     ]) {
       const hint = getGhostHint(input, input.length)

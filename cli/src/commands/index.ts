@@ -48,7 +48,6 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
   { name: '/version', description: 'Show current version', handler: 'builtin', runSafe: true },
   { name: '/exit', aliases: ['/quit', '/q'], description: 'Exit the REPL', handler: 'builtin' },
   { name: '/done', description: 'Exit log mode', handler: 'builtin' },
-  { name: '/harden', description: 'Stress-test the previous plan, current changes, or a target', usage: '/harden [changes | target]', handler: 'builtin' },
   { name: '/skill', description: 'Manage skills', usage: '/skill [list | install [name | source] | update [name] | remove <name>]', handler: 'builtin' },
   { name: '/clip', description: 'Clip last reply to the memory vault; all = distill session; copy = clipboard', usage: '/clip [all | copy]', handler: 'builtin' },
   { name: '/compact', description: 'Compact session context', usage: '/compact [instructions]', handler: 'builtin' },
@@ -63,15 +62,17 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
 /** All commands (visible + hidden) for resolution */
 export const ALL_COMMANDS: SlashCommand[] = [...COMMANDS, ...HIDDEN_COMMANDS]
 
-export type SkillCommand = Omit<SlashCommand, 'handler'> & { handler: 'skill'; dir: string }
+export type SkillCommand = Omit<SlashCommand, 'handler'> & { handler: 'skill'; dir: string; arguments?: readonly string[] }
 export type CommandDefinition = SlashCommand | SkillCommand
 
-/** Installed skills as commands. Builtin spellings are reserved, including
- * aliases; installing a skill never shadows them. */
+/** Only explicitly registered skills become commands. Builtin spellings and
+ * aliases remain reserved; command metadata never executes local handlers. */
 export function skillCommands(skills: readonly SkillEntry[] = []): SkillCommand[] {
   const reserved = new Set(ALL_COMMANDS.flatMap(command => [command.name, ...command.aliases ?? []]))
-  return skills.filter(skill => isValidSkillName(skill.name) && !reserved.has(`/${skill.name.toLowerCase()}`)).map(skill => ({
-    name: `/${skill.name}`, description: `Use the ${skill.name} skill`, handler: 'skill' as const, dir: skill.dir,
+  return skills.filter(skill => skill.command && isValidSkillName(skill.name) && !reserved.has(`/${skill.name.toLowerCase()}`)).map(skill => ({
+    name: `/${skill.name}`, description: skill.command?.description ?? `Use the ${skill.name} skill`,
+    usage: skill.command?.usage ?? `/${skill.name} [request]`, arguments: skill.command?.arguments,
+    handler: 'skill' as const, dir: skill.dir,
   }))
 }
 
@@ -110,20 +111,6 @@ export type ResolvedCommand =
   | { kind: 'skill'; name: string; args: string; dir: string }
   | { kind: 'ambiguous'; candidates: string[] }
   | { kind: 'unknown' }
-
-export function buildHardenPrompt(args: string): string {
-  const subject = args.trim()
-  if (!subject) {
-    return [
-      'harden the plan, strategy, or conclusion from the immediately preceding conversation context.',
-      'If local git changes exist, inspect them only as supporting context and combine any relevant findings with the hardening pass; do not default to hardening the diff as the primary subject.',
-    ].join(' ')
-  }
-  if (subject.toLowerCase() === 'changes') {
-    return 'harden current git changes'
-  }
-  return `harden: ${subject}`
-}
 
 /**
  * Resolve a slash command input to a known command.

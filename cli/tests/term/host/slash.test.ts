@@ -67,3 +67,20 @@ test('leaving a fork with pending prompts requires an explicit second confirmati
   expect(h.st.logMode).toBeNull()
   expect(removed).toEqual(['pending-log'])
 })
+
+test.each([false, true])('skill commands reconcile metadata even when output fails: %s', async fails => {
+  const h = harness(), refreshed: string[] = []
+  Object.assign(h.deps, {
+    backgroundTerminals: { guardSessionSwitch: () => false },
+    frames: { refreshBannerData: () => { refreshed.push('banner') } },
+    replCommands: {
+      agent: { skillsDirs: () => [] }, columns: () => 80, requestRender: () => {},
+      commitLines: () => { if (fails) throw new Error('fixture output failure') },
+    },
+  })
+  Object.assign(h.deps.cloudCtl, { noteOfficialSkillSync: () => { refreshed.push('skills') } })
+  const run = h.ctl.handleSlashInput('/skill list')
+  if (fails) await expect(run).rejects.toThrow('fixture output failure')
+  else await run
+  expect(refreshed).toEqual(['skills', 'banner'])
+})

@@ -1,3 +1,10 @@
+export interface SkillCommandMetadata {
+  description?: string
+  usage?: string
+  /** First-argument literals and <placeholders>; placeholders are hints only. */
+  arguments?: string[]
+}
+
 export interface Requires {
   env: string[]
   bins: string[]
@@ -149,6 +156,41 @@ export function parseSkillDescription(content: string): string | undefined {
     return body.join(' ').trim() || undefined
   }
   return unquote(value) || undefined
+}
+
+/** Optional, versioned command registration. Missing versions are legacy v0;
+ * future versions and malformed declarations must not register a command. */
+export function parseSkillCommand(content: string): SkillCommandMetadata | undefined {
+  const lines = splitFrontmatter(content)
+  if (!lines) return undefined
+  const record = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  const root = record(Bun.YAML.parse(lines.join('\n')))
+  const evot = record(record(root?.metadata)?.evot)
+  if (!evot || evot.command === undefined) return undefined
+  const command = record(evot.command)
+  if (!command) throw new Error('metadata.evot.command must be an object')
+  const version = command.schema_version === undefined ? 0 : command.schema_version
+  if (version !== 0 && version !== 1) throw new Error(`Unsupported skill command schema_version: ${String(version)}`)
+  const result: SkillCommandMetadata = {}
+  for (const field of ['description', 'usage'] as const) {
+    const value = command[field]
+    if (value === undefined) continue
+    if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) {
+      throw new Error(`metadata.evot.command.${field} must be printable, nonempty, single-line text (max 512 characters)`)
+    }
+    result[field] = value.trim()
+  }
+  if (command.arguments !== undefined) {
+    const values = command.arguments
+    if (!Array.isArray(values) || values.length > 32 || values.some(value =>
+      typeof value !== 'string' || !value || value.length > 64 || /[\s\p{Cc}\p{Cf}]/u.test(value)
+      || !/^(?:[^<>]+|<[^<>]+>)$/u.test(value))) {
+      throw new Error('metadata.evot.command.arguments must contain up to 32 literal tokens or <placeholders> (max 64 characters each)')
+    }
+    result.arguments = [...new Set(values as string[])]
+  }
+  return result
 }
 
 export function parseRequires(content: string): Requires {

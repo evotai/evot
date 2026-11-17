@@ -1005,6 +1005,29 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
+  test('registered harden shows inline /har description and completes its declared arguments without submitting', async () => {
+    const session = await startEvot(false, false, false, undefined, home => {
+      const skill = join(home, 'skills', 'harden')
+      mkdirSync(skill, { recursive: true })
+      const fixture = readFileSync(new URL('../fixtures/contracts/skill-command-v1.md', import.meta.url), 'utf8')
+      writeFileSync(join(skill, 'SKILL.md'), fixture.replace('Stress-test the previous plan, current changes, or a target', 'Find loopholes and recommend fixes'))
+    })
+    try {
+      session.write('/har')
+      await session.waitForScreen(/\/harden\s+\[changes\s+<target>\]\s+Find loopholes and recommend fixes/)
+      session.write('\t')
+      await session.waitForScreen(/\/harden\s+\[changes\s+<target>\]\s+Find loopholes and recommend fixes/)
+      session.write('ch')
+      await session.waitForScreen('/harden changes')
+      session.write('\tretry')
+      await session.waitForScreen('/harden changes retry')
+      expect(session.historyEntries()).toEqual([])
+      expect(session.persistedSessionCount()).toBe(0)
+    } finally {
+      await session.kill()
+    }
+  }, 30_000)
+
   test('installed skill completion invokes model input immediately and from the busy FIFO', async () => {
     const requests: string[] = []
     const arrived = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
@@ -1026,7 +1049,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         seedSuggestionService(home, base)
         const skill = join(home, 'skills', 'x-review')
         mkdirSync(skill, { recursive: true })
-        writeFileSync(join(skill, 'SKILL.md'), '---\nname: x-review\ndescription: Readonly fixture\n---\nReview the supplied changes.\n')
+        writeFileSync(join(skill, 'SKILL.md'), '---\nname: x-review\ndescription: Readonly fixture\nmetadata:\n  evot:\n    command:\n      schema_version: 1\n---\nReview the supplied changes.\n')
       })
       session.write('Hold the active response\x0d')
       await arrived.promise

@@ -43,7 +43,7 @@ function harness(text = 'B') {
 
 test.each(['immediate', 'steering', 'follow_up'])('skill invocation is model input for %s submission', kind => {
   const h = harness('/x-review inspect changes')
-  h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review' }]
+  h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review', command: {} }]
   if (kind === 'immediate') {
     h.st.isLoading = false
     h.ctl.submitDraft()
@@ -57,9 +57,26 @@ test.each(['immediate', 'steering', 'follow_up'])('skill invocation is model inp
   }
 })
 
+test.each(['immediate', 'steering', 'follow_up'])('migrated harden follows the %s skill submission path', kind => {
+  const h = harness('/harden changes')
+  h.st.skillEntries = [{ name: 'harden', dir: '/fixture/skills/harden', command: {} }]
+  if (kind === 'immediate') {
+    h.st.isLoading = false
+    h.ctl.submitDraft()
+    expect(h.queries[0]?.text).toContain('/fixture/skills/harden/SKILL.md')
+  } else {
+    if (kind === 'steering') h.ctl.handleLoadingEnter()
+    else h.ctl.enqueueDraft()
+    expect(h.pending.state.entries[0]?.expandedText).toContain('/fixture/skills/harden/SKILL.md')
+    expect(h.pending.state.entries[0]?.text).toBe('/harden changes')
+    expect(h.native.calls).toEqual([kind])
+  }
+  expect(h.history).toEqual(['/harden changes'])
+})
+
 test.each(['immediate', 'steering', 'follow_up'])('skill %s image submission preserves source annotations and image payload', kind => {
   const h = harness('/x-review inspect [Image #1]')
-  h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review' }]
+  h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review', command: {} }]
   h.blocks.unshift({ type: 'text', text: '/x-review inspect\nImage source: /fixture/source.png' })
   h.ready()
   let content: string | undefined

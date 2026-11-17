@@ -47,7 +47,7 @@ export function createSuggestionInput(host: {
     }
     if (event.type !== 'tab' || !host.eligible()) return false
     const text = getEditorText(editor)
-    if (text.trimStart().startsWith('/') && !suggestionCommand(text, editorCursorOffset(editor))) return false
+    if (text.trimStart().startsWith('/') && !suggestionCommand(text, editorCursorOffset(editor), host.skills?.())) return false
     host.controller.complete(text, editorCursorOffset(editor))
     host.changed()
     return true

@@ -554,6 +554,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     },
     draft: () => getEditorText(st.editor),
     cursor: () => editorCursorOffset(st.editor),
+    skills: () => st.skillEntries,
     changed: () => { suggestionTicker.sync(); renderer.requestRender() },
     // Automatic sampling is otherwise invisible; a rejected key would stay
     // silent for days. Say it once, then pause until credentials change.
@@ -904,14 +905,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // Official skills follow their catalog on their own: a stamp-gated check on
   // the same cadence as the check itself, so a fresh launch and a session left
   // open for days both stay current without anyone running /skill update.
-  // Skills are re-read from disk on every turn, so a sync needs no reload.
+  // The agent re-reads skill bodies each turn; sync also refreshes the CLI's
+  // command metadata snapshot so new registrations work without a restart.
   resources.add(backgroundJobs.register({
     name: 'official-skills',
     intervalMs: OFFICIAL_SYNC_INTERVAL_MS,
     initialDelayMs: 1_500,
     run: async () => {
-      const outcome = await startOfficialSkillMaintenance()
-      if (outcome.kind === 'synced' && !st.destroyed) cloudCtl.noteOfficialSkillSync(outcome.result)
+      const outcome = await startOfficialSkillMaintenance().catch(error => {
+        if (!st.destroyed) cloudCtl.noteOfficialSkillSync()
+        throw error
+      })
+      if (!st.destroyed) cloudCtl.noteOfficialSkillSync(outcome.kind === 'synced' ? outcome.result : undefined)
     },
   }))
   resources.add(registerDashboard(backgroundJobs, {

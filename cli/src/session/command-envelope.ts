@@ -1,5 +1,5 @@
 /**
- * Host-expanded slash commands (`/loop`, `/task`, `/harden`, …) reach the
+ * Host-expanded slash commands (`/loop`, `/task`, installed skills, …) reach the
  * model as one user message: the instructions the command adds, then the
  * user's own words. Stored verbatim, that message would show a wall of
  * runtime rules wherever the transcript is replayed (resume, the recognition

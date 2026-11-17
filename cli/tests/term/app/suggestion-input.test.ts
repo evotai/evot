@@ -6,16 +6,17 @@ import type { UIMessage } from '../../../src/render/message-types.js'
 import { context } from '../../helpers/suggestion-context.js'
 import { parsePasteRefs } from '../../../src/term/input/paste_refs.js'
 import { PendingImages } from '../../../src/term/app/composer/pending-images.js'
+import type { SkillEntry } from '../../../src/commands/skill/scan.js'
 
 const tick = () => new Promise<void>(resolve => queueMicrotask(resolve))
 
-function harness(text: string, history: UIMessage[] = []) {
+function harness(text: string, history: UIMessage[] = [], skills: SkillEntry[] = []) {
   let editor = insertText(createEditorState(), text)
   let eligible = true
   let dismissed = 0
   const requests: { hints?: SuggestionHints; resolve(outcome: SuggestionOutcome): void; aborted: boolean }[] = []
   const controller = new PromptSuggestion({
-    key: () => 'session', eligible: () => eligible, context: () => context(history), draft: () => getEditorText(editor), cursor: () => editorCursorOffset(editor), changed: () => {},
+    key: () => 'session', eligible: () => eligible, context: () => context(history), draft: () => getEditorText(editor), cursor: () => editorCursorOffset(editor), changed: () => {}, skills: () => skills,
     start: (_messages, hints) => {
       let resolve!: (outcome: SuggestionOutcome) => void
       const promise = new Promise<SuggestionOutcome>(yes => { resolve = yes })
@@ -25,7 +26,7 @@ function harness(text: string, history: UIMessage[] = []) {
     },
   })
   const input = createSuggestionInput({
-    controller, eligible: () => eligible, editor: () => editor,
+    controller, eligible: () => eligible, editor: () => editor, skills: () => skills,
     replace: text => { editor = replaceAfterCursor(editor, text) }, changed: () => {}, dismissed: () => { dismissed++ },
   })
   return { input, controller, requests, text: () => getEditorText(editor), dismissed: () => dismissed,
@@ -232,6 +233,27 @@ test('known slash commands use registered usage and cycle argument suggestions w
     expect(h.text()).toBe(command + ' second argument')
     expect(h.requests).toHaveLength(1)
   }
+})
+
+test('skill command metadata grounds AI argument hints while literals and paths stay local', async () => {
+  const command = { description: 'Stress-test plans and changes', usage: '/harden [changes | <target>]', arguments: ['changes', '<target>'] }
+  const skills = [{ name: 'harden', dir: '/fixture/harden', command }]
+  for (const text of ['/ha', '/harden ch', '/harden ./missing']) {
+    const h = harness(text, [], skills)
+    expect(h.input.handle({ type: 'tab' })).toBe(false)
+    expect(h.requests).toHaveLength(0)
+  }
+  const h = harness('/harden inspect ', [], skills)
+  expect(h.input.handle({ type: 'tab' })).toBe(true)
+  expect(h.requests[0]?.hints?.command).toEqual({ name: '/harden', description: command.description, usage: command.usage })
+  h.requests[0]!.resolve({ candidates: ['retry behavior', 'session persistence'], status: 'ready' })
+  await tick()
+  expect(h.input.handle({ type: 'right' })).toBe(true)
+  expect(h.text()).toBe('/harden inspect retry behavior')
+  expect(h.requests).toHaveLength(1)
+  const unregistered = harness('/harden inspect ', [], [{ name: 'harden', dir: '/fixture/harden' }])
+  expect(unregistered.input.handle({ type: 'tab' })).toBe(false)
+  expect(unregistered.requests).toHaveLength(0)
 })
 
 test('command names and fixed subcommands keep their local completion path', () => {

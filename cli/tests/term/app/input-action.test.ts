@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { tabAction, tabActionHint } from '../../../src/term/app/composer/input-action.js'
 import { createEditorState, insertText, showCompletions } from '../../../src/term/input/editor.js'
 
-const skills = [{ name: 'x-review', dir: '/fixture/x-review' }]
+const skills = [{ name: 'x-review', dir: '/fixture/x-review', command: {} }]
 const options = { busy: true, editing: false, skills, inventory: { models: [], sessions: [] } }
 
 test.each([
