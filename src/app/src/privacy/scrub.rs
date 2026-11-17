@@ -8,10 +8,12 @@
 //! value under a field a field rule names (`authorization`, `收件人`) is
 //! found by that rule like any other.
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use serde_json::Map;
 use serde_json::Value;
 
+use super::known::KnownValues;
 use super::policy::Action;
 use super::policy::Mode;
 use super::policy::Policy;
@@ -24,18 +26,21 @@ use super::vault::Vault;
 /// local history. Its values are remembered and its sensitive tool calls
 /// listed, so an upload that carries only part of a session (one sync
 /// batch, the entries since the last push, a fresh process) scrubs a value
-/// or a `.env` result whose context went up earlier.
+/// or a `.env` result whose context went up earlier. What it remembers stays
+/// in it: an upload scan never teaches requests or other uploads anything.
 #[derive(Debug, Default, Clone)]
 pub struct UploadContext {
     sensitive: HashSet<String>,
+    known: Arc<KnownValues>,
 }
 
 /// Scan `history` without changing it: remember what it finds and the tool
 /// calls whose results are sensitive.
-pub(super) fn context(policy: &Policy, vault: &Vault, history: &Value) -> UploadContext {
+pub(super) fn context(policy: &Policy, history: &Value) -> UploadContext {
     let engine = policy.engine.as_ref();
     let mut sensitive = HashSet::new();
     sensitive_ids(engine, history, &mut sensitive);
+    let known = KnownValues::default();
     let mut history = history.clone();
     visit(
         engine,
@@ -46,20 +51,23 @@ pub(super) fn context(policy: &Policy, vault: &Vault, history: &Value) -> Upload
         &mut |text, sensitive, field| {
             remember(
                 policy,
-                vault,
+                &known,
                 text,
                 &scan::find(policy, text, sensitive, field),
             );
         },
     );
-    UploadContext { sensitive }
+    UploadContext {
+        sensitive,
+        known: Arc::new(known),
+    }
 }
 
-fn remember(policy: &Policy, vault: &Vault, text: &str, spans: &[scan::Span]) {
+fn remember(policy: &Policy, known: &KnownValues, text: &str, spans: &[scan::Span]) {
     for span in spans {
         let value = &text[span.start..span.end];
         if policy.upload_action(&span.kind) != Action::Warn && !policy.allows(value) {
-            vault.remember_discovered(&span.kind, value, policy.engine.known.min_secret_len);
+            known.discover(&span.kind, value, policy.engine.known.min_secret_len);
         }
     }
 }
@@ -74,7 +82,8 @@ pub(super) fn scrub_value(
     let mut sensitive = context.map(|c| c.sensitive.clone()).unwrap_or_default();
     sensitive_ids(engine, value, &mut sensitive);
     // Pass one finds and remembers every value, so pass two takes each one
-    // wherever it is in the payload (and later requests mask it too).
+    // wherever it is in the payload. What it finds goes nowhere else.
+    let known = KnownValues::default();
     let mut found = Vec::new();
     visit(
         engine,
@@ -84,7 +93,7 @@ pub(super) fn scrub_value(
         None,
         &mut |text, sensitive, field| {
             let spans = scan::find(policy, text, sensitive, field);
-            remember(policy, vault, text, &spans);
+            remember(policy, &known, text, &spans);
             found.push(spans);
         },
     );
@@ -93,7 +102,11 @@ pub(super) fn scrub_value(
     let put = |kind: &str, _: &str| format!("[REDACTED:{kind}]");
     visit(engine, value, &sensitive, false, None, &mut |text, _, _| {
         let mut spans = found.next().unwrap_or_default();
-        spans.extend(vault.known_spans(text));
+        spans.extend(vault.scrub_spans(text));
+        spans.extend(known.spans(text));
+        if let Some(context) = context {
+            spans.extend(context.known.spans(text));
+        }
         if let Some(scrubbed) =
             scan::apply(Mode::Upload, text, spans, policy, vault, &put, &mut hits)
         {

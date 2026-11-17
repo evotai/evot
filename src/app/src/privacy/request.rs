@@ -50,6 +50,14 @@ pub(super) fn mask_config(
     config: &mut StreamConfig,
 ) -> Result<Vec<Hit>> {
     let sensitive = sensitive_results(policy.engine.as_ref(), &config.messages);
+    // What this session found before: its history may have been compacted
+    // away since. Other sessions' findings are not looked for.
+    let session = vault.session(config.prompt_cache_key.as_deref());
+    let known = |text: &str| {
+        let mut spans = vault.registered_spans(text);
+        spans.extend(session.spans(text));
+        spans
+    };
     // Pass one finds and remembers every value, so pass two masks each one
     // wherever it is, even in a text that names it without context.
     let mut found = Vec::new();
@@ -64,11 +72,16 @@ pub(super) fn mask_config(
         for span in &spans {
             let value = &text[span.start..span.end];
             if policy.action(&span.kind, span.confidence) != Action::Warn && !policy.allows(value) {
-                vault.remember_discovered(&span.kind, value, policy.engine.known.min_secret_len);
+                vault.discover(
+                    &session,
+                    &span.kind,
+                    value,
+                    policy.engine.known.min_secret_len,
+                );
             }
         }
         if matches!(slot, Slot::Inbound { .. }) {
-            let known = vault.known_spans(text);
+            let known = known(text);
             inbound.extend(
                 spans
                     .iter()
@@ -87,7 +100,7 @@ pub(super) fn mask_config(
             return false;
         }
         let mut spans = found.next().unwrap_or_default();
-        spans.extend(vault.known_spans(text));
+        spans.extend(known(text));
         if slot == Slot::Signed {
             // A secret never goes back for a signature's sake, wherever it
             // came from; a user's term only when the user's side sent it.

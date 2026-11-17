@@ -4,18 +4,21 @@
  "vars": {
   "PASSWORD_NAME": "(?i:(?:[a-z0-9]+[_.-]?)*?(?:password|passwd|passphrase))",
   "CREDENTIAL_NAME": "(?i:(?:[a-z0-9]+[_.-]?)*?(?:api[_-]?key|access[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret|(?:access|refresh|auth|id|bearer)[_-]?token)|(?:[a-z0-9]+[_.-]?)+?(?:secret|token))",
-  "ASSIGNED": "[\"']?[ \\t]*[=:][ \\t]*(?:\"([^\"\\r\\n]+)\"|'([^'\\r\\n]+)'|([^\\s\"'\\x60,(;})\\]#=][^\\s\"'\\x60,(;})\\]#]*))",
-  "NAME_START": "(?m)(?:^|[\\s{,(;])[\"']?-{0,2}"
+  "ASSIGNED": "(?:[\"']?(?:${TYPED}|[ \\t]*:?=|[ \\t]*:)[ \\t]*(?:\"([^\"\\r\\n]+)\"|'([^'\\r\\n]+)')|[\"']?[ \\t]*(?::?=|:)[ \\t]*(${VALUE_HEAD}${VALUE_TAIL}*(?:,${VALUE_TAIL}+)*)[ \\t]*(?:[ \\t](?:#|//)[^\\r\\n]*)?\\r?$|=(${VALUE_HEAD}${VALUE_TAIL}*)|[ \\t]*:[ \\t]*(${VALUE_HEAD}${VALUE_TAIL}*)[\"'])",
+  "NAME_START": "(?m)(?:^|[\\s{,(;])[\"']?-{0,2}",
+  "VALUE_HEAD": "[^\\s\"'\\x60#(){}\\[\\];,=<>]",
+  "VALUE_TAIL": "[^\\s\"'\\x60#(){};,]",
+  "TYPED": "[ \\t]*:[ \\t]*[&A-Za-z_][A-Za-z0-9_&'<>\\[\\]:. ]{0,48}?[ \\t]*="
  },
  "rules": [
   {
    "id": "contexts.authorization",
    "kind": "TOKEN",
    "confidence": "high",
-   "regex": "(?mi)(?:^|[\\s{,])[\"']?(?:proxy-)?authorization[\"']?[ \\t]*[:=][ \\t]*[\"']?(?:Bearer|Basic|Token)[ \\t]+([A-Za-z0-9._~+/=-]{4,})",
+   "regex": "(?mi)(?:^|[\\s{,])[\"']?(?:proxy-)?authorization[\"']?[ \\t]*[:=][ \\t]*[\"']?(?:Bearer|Basic|Token)[ \\t]+([A-Za-z0-9._~+/=-]{4,})(?:[ \\t]*\\r?$|[\"'\\x60\\\\])",
    "keywords": ["authorization"],
    "unless": ["a_variable", "a_placeholder"],
-   "examples": {"matches": ["Authorization: Bearer abcd<cut>1234EFGH5678", "\"Authorization\": \"Basic dXNlcjpwYXNz\""], "ignores": ["Bearer authentication is described here", "Basic usage", "Authorization: Bearer $TOKEN"]}
+   "examples": {"matches": ["Authorization: Bearer abcd<cut>1234EFGH5678", "\"Authorization\": \"Basic dXNlcjpwYXNz\"", "curl -H 'Authorization: Bearer abcd1234EFGH5678' https://api.example.org"], "ignores": ["Bearer authentication is described here", "Basic usage", "Authorization: Bearer $TOKEN", "Pass it as ?token=..., an Authorization: Bearer header, or X-Webhook-Secret.", "clients send \"Authorization: Bearer <token>\"."]}
   },
   {
    "id": "contexts.url-password",
@@ -32,8 +35,8 @@
    "confidence": "high",
    "regex": "${NAME_START}${PASSWORD_NAME}${ASSIGNED}",
    "keywords": ["pass"],
-   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", {"value": "^(?i:true|false|null|none|undefined)$"}],
-   "examples": {"matches": ["DB_PASSWORD=Hunter2pass9", "password=1234", "DB_PASSWORD='query'", "--password=Zx8vAb9q", "db-password: Zx8vAb9q", "dbPassword = \"Zx8vAb9q\"", "spring.datasource.password=Zx8vAb9q"], "ignores": ["password: string;", "password_hash: abc123def456", "password = getPassword()", "if password == expected", "Password reset link sent"]}
+   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", "code_reference", "credential_reference", "code_argument", {"value": "^(?i:true|false|null|nil|none|undefined)$"}, {"value": "^.{0,2}$"}],
+   "examples": {"matches": ["DB_PASSWORD=Hunter2pass9", "password=1234", "DB_PASSWORD='query'", "--password=Zx8vAb9q", "db-password: Zx8vAb9q", "dbPassword = \"Zx8vAb9q\"", "spring.datasource.password=Zx8vAb9q", "const DB_PASSWORD: &str = \"Zx8vAb9q\";", "password := \"Zx8vAb9q\"", "DB_PASSWORD=Zx8vAb9q ./migrate", "mysql --password=Zx8vAb9q -h db.internal", "here is the password: Zx8vAb9q", "DB_PASSWORD=Hunter2pass9, then restart"], "ignores": ["password: string;", "password_hash: abc123def456", "password = getPassword()", "if password == expected", "Password reset link sent", "    password: hashed,", "fn new(password: &str) -> Self {", "password = settings.password", "user.password = form.password", "connect(password=pw, timeout=30)", "// DB_PASSWORD: required when the database has authentication enabled", "connect(host, password=pw)"]}
   },
   {
    "id": "contexts.credential-assignment",
@@ -41,8 +44,8 @@
    "confidence": "high",
    "regex": "${NAME_START}${CREDENTIAL_NAME}${ASSIGNED}",
    "keywords": ["key", "secret", "token"],
-   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", {"value": "^(?i:true|false|null|none|undefined)$"}],
-   "examples": {"matches": ["\"apiKey\": \"abcd<cut>1234EFGH5678\"", "X-Api-Key: Zx8vAb9qLm3n", "client-secret: Zx8vAb9qLm3n", "authToken: Zx8vAb9qLm3n", "--access-token=Zx8vAb9qLm3n"], "ignores": ["secret = get_secret('db')", "max_tokens: 4096", "token_url: https://auth.example.org/token", "api_key_id=key_id_for_display_only", "key=abcd1234EFGH5678", "COLOR=abcd1234EFGH5678", "Output: /Users/me/.evotai/sessions/s/tool-results/task-bash-output.txt"]}
+   "unless": ["a_variable", "a_placeholder", "an_env_read", "code_name", "code_type", "code_reference", "credential_reference", "code_argument", {"value": "^(?i:true|false|null|nil|none|undefined)$"}, {"value": "^.{0,2}$"}],
+   "examples": {"matches": ["\"apiKey\": \"abcd<cut>1234EFGH5678\"", "X-Api-Key: Zx8vAb9qLm3n", "client-secret: Zx8vAb9qLm3n", "authToken: Zx8vAb9qLm3n", "--access-token=Zx8vAb9qLm3n", "client = Client(api_key=\"Zx8vAb9qLm3n\")", "curl -H \"X-Api-Key: Zx8vAb9qLm3n\" https://api.example.org", "API_TOKEN=Zx8vAb9qLm3n  # production", "API_KEY=Zx8vAb9qLm3n,Qw7eRt5yUi3o"], "ignores": ["secret = get_secret('db')", "max_tokens: 4096", "token_url: https://auth.example.org/token", "api_key_id=key_id_for_display_only", "key=abcd1234EFGH5678", "COLOR=abcd1234EFGH5678", "Output: /Users/me/.evotai/sessions/s/tool-results/task-bash-output.txt", "const headers = { 'x-api-key': this.apiKey, 'content-type': 'json' };", "if (apiKey === storedKey) {", "let next_token = self.next_query_token();", "  authToken: AuthToken", "c.WebhookToken = c.APIToken", "access_token = refresh_token", "    api_key=key_from_env,", "// APP_SECRET_KEY: encrypts stored credentials at rest"]}
   },
   {
    "id": "contexts.curl-user",

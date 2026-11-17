@@ -111,6 +111,8 @@ mod privacy_leaks_test;
 mod privacy_packs_test;
 #[path = "privacy/privacy_runtime_test.rs"]
 mod privacy_runtime_test;
+#[path = "privacy/privacy_scope_test.rs"]
+mod privacy_scope_test;
 #[path = "privacy/privacy_test.rs"]
 mod privacy_test;
 #[path = "agent/process_registry_test.rs"]

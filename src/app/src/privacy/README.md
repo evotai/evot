@@ -14,8 +14,8 @@ an `.env` file as a secret.
 | Explicit contexts | `rules/data/contexts.json` | Authorization headers, credential-bearing URLs, exact credential field/assignment names, curl credentials, explicit password declarations |
 | Shared vocabulary | `rules/data/core.json` | Kinds, small reusable exclusions, encoded-text scanning and wire structure; no detection rules |
 | Rule execution | `rules/engine.rs`, `scan.rs` | Compile packs, locate spans, resolve overlaps and apply policy; no vendor-specific decisions |
-| Confirmed values | `known.rs` | Registration, conservative automatic discovery, indexed re-matching |
-| Placeholders | `vault.rs`, `stream.rs` | Stable keyed tags, collision protection and reply restoration |
+| Confirmed values | `known.rs` | Registration, opaque-only automatic discovery, indexed re-matching |
+| Placeholders | `vault.rs`, `stream.rs` | Stable keyed tags, collision protection, reply restoration and the scope of confirmed values |
 | Boundaries | `request.rs`, `scrub.rs` | Traverse request/upload data without changing protocol structure |
 | Policy and records | `policy.rs`, `record.rs`, `notice.rs` | Mask/block/warn, value-free audit records and UI notices |
 
@@ -42,13 +42,31 @@ work, but do not broaden the built-in policy.
   credential evidence, even inside an env file. A command segment starting
   with `#` is a comment, so a `#!/usr/bin/env python3` shebang cannot mark a
   result as an env dump for `scope: "sensitive"` user rules.
+- After a credential name only a literal is a value, by grammar rather than
+  word lists: a quoted string (after `=`, `:`, `:=` or a type annotation), an
+  unquoted value that ends its line (`.env`, YAML, INI, prose; a trailing
+  comment allowed), a tight `--flag=value` / `NAME=value cmd`, or a quoted
+  `"Name: value"` header. A reference (`this.apiKey`, `c.APIToken`,
+  `config::secret()`), a type (`&str`, `Option<T>`, `Promise<string>`), an
+  identifier naming a credential (`refresh_token`), a call argument
+  (`f(password=pw)`) or a sentence going on after the value is not one.
+  `Authorization` likewise needs its credential to end the header.
 - Context rules do not require entropy or mixed case. Short, numeric and
   lowercase passwords still mask in explicit credential contexts.
-- Automatic discovery promotes only values meeting `known.min_secret_len`
-  (8 characters by default) that are not alphabetic words. A password of
-  `query` masks at its assignment but does not rewrite `execute_query`,
-  `query.rs` or later prose. Allocating a placeholder never implicitly
-  registers a value for global matching.
+- Automatic discovery promotes only opaque values of at least
+  `known.min_secret_len` (8 characters by default): ones holding a character
+  no name has (`@`, `!`, `+`, `=`, …) or whose letter/digit runs alternate at
+  least three times. Words, identifiers, paths, versions, dates and numbers
+  mask at their context but are not looked for elsewhere, so a password of
+  `query` does not rewrite `execute_query` or later prose. Allocating a
+  placeholder never implicitly registers a value for global matching.
+- Confirmed values are scoped (`vault.rs`). Registered values apply to every
+  request and upload. A value a request found applies to the rest of its
+  session (`prompt_cache_key`) only; a request outside a session keeps its
+  findings to itself, and `/new` starts clean. One-way scrubbing (uploads,
+  deliveries) also takes every opaque value a request masked. An upload's
+  history scan (`UploadContext`) is used by that upload only and never
+  teaches requests.
 - `Masker::remember_secret` is authoritative from 4 bytes. Values the
   runtime registers wholesale (`remember_secrets`: shell variables, provider
   keys) need `known.min_secret_len`, since such lists also hold short
@@ -92,15 +110,19 @@ cd cli && bun test tests/commands/privacy-command.test.ts
 
 `privacy_detection_test.rs` pins the small built-in surface and pairs real
 credential cases with code, paths, short-word and background-task regressions.
+`privacy_scope_test.rs` pins which session, request and upload may learn a
+confirmed value from which.
 The other privacy tests cover encoding, extension packs, schema compatibility,
 request/stream restoration, upload boundaries and value-free audit records.
 
 ## Deliberate limits
 
 Unknown credentials with no distinctive format, explicit context or prior
-registration are not guessed from their randomness or file of origin. Short
-or alphabetic passwords repeated without context are not automatically
-rediscovered. Heredoc bodies are not parsed as commands. Pagination-style
+registration are not guessed from their randomness or file of origin. Values
+shaped like words, names, dates or numbers repeated without context are not
+automatically rediscovered, nor is a value found in one session looked for in
+another. An unquoted credential followed by more code on the same line
+(`connect(password=hunter2)`) needs quotes, a format or registration. Heredoc bodies are not parsed as commands. Pagination-style
 names such as `page_token` count as credential names. Register known values or
 add an explicit user rule when that coverage is required. This is a
 conservative default, not a claim to find all secrets.

@@ -36,7 +36,20 @@
   "code_type": {
    "value": "^(?:string|String|str|bool|boolean|Boolean|number|Number|int|float|object|Object|array|Array|any|unknown|never|void|Token|SecretString|Uint8Array|ArrayBuffer|Buffer|Bytes|CryptoKey|KeyObject|SecretKey|Vec<u8>|Option<String>|[ui](?:8|16|32|64|128|size)|f(?:32|64))$",
    "before": "[^\"'][ \\t]*:[ \\t]*$",
-   "after": "^[ \\t]*(?:$|[;,)}\\]|?&<>])"
+   "after": "^[ \\t]*(?:\\r?\\n|$|[;,)}\\]|?&<>])"
+  },
+  "code_argument": {
+   "value": "^[A-Za-z_][A-Za-z0-9_.]*$",
+   "before": "\\([^()\\r\\n]*$",
+   "after": "^[ \\t]*[,)]"
+  },
+  "code_reference": {
+   "value": "^(?:[A-Za-z_$][A-Za-z_$]*(?:[0-9]+[A-Za-z_$]*)?(?:(?:\\.|::|->|\\?\\.)[A-Za-z_$][A-Za-z_$]*(?:[0-9]+[A-Za-z_$]*)?)+|&.*|[A-Za-z_][A-Za-z0-9_:]*<.*>|[A-Za-z_][A-Za-z0-9_]*\\[\\])$",
+   "before": "[^\"'\\x60]$"
+  },
+  "credential_reference": {
+   "value": "^(?:(?:[A-Za-z_]*_)?(?i:password|passwd|passphrase|secret|token|key|credentials?|auth)|[A-Za-z_]*[a-z](?:Password|Passwd|Passphrase|Secret|Token|Key|Credentials?|Auth))s?(?:_[A-Za-z_]*|[A-Z][A-Za-z_]*)?$",
+   "before": "[^\"'\\x60]$"
   }
  },
  "structure": {

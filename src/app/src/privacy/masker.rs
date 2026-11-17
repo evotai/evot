@@ -194,10 +194,11 @@ impl Masker {
 
     /// Read a session's local history as context for uploading part of it.
     pub fn upload_context(&self, history: &Value) -> UploadContext {
-        scrub::context(&self.policy, &self.vault, history)
+        scrub::context(&self.policy, history)
     }
 
-    /// Mask `value` as a secret wherever it appears from now on.
+    /// Mask `value` as a secret wherever it appears from now on, in every
+    /// session and upload.
     pub fn remember_secret(&self, value: &str) {
         self.vault.remember("SECRET", value);
     }

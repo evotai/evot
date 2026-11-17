@@ -8,10 +8,21 @@
 //! nothing. Confirmed-value matching lives in `known`: allocating a tag
 //! must not promote a short password or ordinary word to a global substring.
 //! Replies can still restore every binding, including these short values.
+//!
+//! Placeholders are process-wide; what is looked for without context is
+//! scoped by who may learn from whom:
+//! - registered values (shell variables, provider keys) go everywhere;
+//! - a value a request's rules found goes to the rest of that session only,
+//!   so one session's findings never rewrite another's text or `/new`;
+//! - one-way scrubbing (uploads, deliveries) also takes every opaque value any
+//!   request masked, since scrubbing too much there costs nothing to undo.
+//!   Nothing an upload scan finds flows back into requests.
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use regex::Regex;
 use sha2::Digest;
@@ -26,12 +37,27 @@ use crate::base::error::Result;
 /// carries them brings them back.
 const MAX_VALUES: usize = 100_000;
 const MAX_KIND: usize = 32;
+/// Sessions whose findings are kept; the least recently used goes first.
+/// Each request carries its history again, so a dropped session loses only
+/// what compaction already took out of it.
+const MAX_SESSIONS: usize = 64;
 const B32: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 
 pub(super) struct Vault {
     key: [u8; 32],
     state: RwLock<State>,
-    known: KnownValues,
+    /// Explicitly registered: every request and upload.
+    registered: KnownValues,
+    /// Opaque values any request found: one-way scrubbing only.
+    masked: KnownValues,
+    sessions: Mutex<Sessions>,
+}
+
+/// Findings per session (a request's `prompt_cache_key`), bounded.
+#[derive(Default)]
+struct Sessions {
+    tick: u64,
+    by_id: HashMap<String, (u64, Arc<KnownValues>)>,
 }
 
 #[derive(Default)]
@@ -46,8 +72,38 @@ impl Vault {
         Self {
             key,
             state: RwLock::new(State::default()),
-            known: KnownValues::default(),
+            registered: KnownValues::default(),
+            masked: KnownValues::default(),
+            sessions: Mutex::new(Sessions::default()),
         }
+    }
+
+    /// What a session has found so far; `None` (a request outside any
+    /// session) gets a set of its own that lives as long as the request.
+    pub fn session(&self, id: Option<&str>) -> Arc<KnownValues> {
+        let Some(id) = id.filter(|id| !id.is_empty()) else {
+            return Arc::new(KnownValues::default());
+        };
+        let mut sessions = self.sessions.lock();
+        sessions.tick += 1;
+        let tick = sessions.tick;
+        if let Some((used, known)) = sessions.by_id.get_mut(id) {
+            *used = tick;
+            return known.clone();
+        }
+        if sessions.by_id.len() >= MAX_SESSIONS {
+            let oldest = sessions
+                .by_id
+                .iter()
+                .min_by_key(|(_, (used, _))| *used)
+                .map(|(id, _)| id.clone());
+            if let Some(oldest) = oldest {
+                sessions.by_id.remove(&oldest);
+            }
+        }
+        let known = Arc::new(KnownValues::default());
+        sessions.by_id.insert(id.to_string(), (tick, known.clone()));
+        known
     }
 
     /// The placeholder `value` of `kind` goes as, not remembered.
@@ -93,21 +149,29 @@ impl Vault {
         Ok(placeholder)
     }
 
-    /// Mask `value` wherever it appears from now on.
+    /// Mask `value` wherever it appears from now on, in every session.
     pub fn remember(&self, kind: &str, value: &str) {
-        self.known.remember(kind, value);
+        self.registered.remember(kind, value);
     }
 
-    /// Short values still mask in explicit credential contexts, but do not
-    /// turn ordinary words (e.g. `query`) into session-wide substrings. An
-    /// explicitly registered credential uses `remember` instead.
-    pub fn remember_discovered(&self, kind: &str, value: &str, min_len: usize) {
-        self.known.discover(kind, value, min_len);
+    /// A value a request's rules found: the rest of `session` looks for it
+    /// when it is opaque, and so does one-way scrubbing.
+    pub fn discover(&self, session: &KnownValues, kind: &str, value: &str, min_len: usize) {
+        session.discover(kind, value, min_len);
+        self.masked.discover(kind, value, min_len);
     }
 
-    /// Where the known values are in `text`.
-    pub fn known_spans(&self, text: &str) -> Vec<Span> {
-        self.known.spans(text)
+    /// Where the registered values are in `text`.
+    pub fn registered_spans(&self, text: &str) -> Vec<Span> {
+        self.registered.spans(text)
+    }
+
+    /// What one-way scrubbing looks for in `text` beyond its own findings:
+    /// registered values and every opaque value a request masked.
+    pub fn scrub_spans(&self, text: &str) -> Vec<Span> {
+        let mut spans = self.registered.spans(text);
+        spans.extend(self.masked.spans(text));
+        spans
     }
 
     /// `s` with each placeholder this vault made put back, or `None` when
