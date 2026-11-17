@@ -85,6 +85,13 @@ export class PromptSuggestion {
     this.cancel()
   }
 
+  /** Catalog changes invalidate command arguments, not prose batches or
+   * requests. Inspect the owning intent: a temporary slash draft may only be
+   * hiding a cached empty-composer suggestion. */
+  cancelCommand(): void {
+    if (this.intent?.draft.trimStart().startsWith('/')) this.cancel()
+  }
+
   /** Keys changed (login, model reload): automatic sampling may resume. */
   credentialsChanged(): void {
     this.credentialsRejected = false

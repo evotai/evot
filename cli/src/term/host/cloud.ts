@@ -78,7 +78,7 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
     const changed = JSON.stringify(entries) !== JSON.stringify(st.skillEntries)
     if (changed) {
       st.skillEntries = entries
-      deps.suggestions.cancel()
+      deps.suggestions.cancelCommand()
       st.editor = refreshGhostHint(closeCompletion(st.editor), entries)
     }
     const parts = result ? [
