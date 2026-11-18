@@ -142,7 +142,8 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
   const EMPTY_ASSISTANT_CONTENT: UIAssistantBlock[] = []
 
   function buildPartialAssistantBlocks(prevKind: string | undefined): ViewBlock[] {
-    const content = st.streamMachine?.appState.currentAssistantContent ?? EMPTY_ASSISTANT_CONTENT
+    const content = st.streamMachine?.pendingSwitch?.content
+      ?? st.streamMachine?.appState.currentAssistantContent ?? EMPTY_ASSISTANT_CONTENT
     // Only provider deltas are provisional. The entire partial message stays in
     // the dynamic zone and is reparsed on every content delta, matching pi: a
     // growing table can update its rows and column geometry through line diffs.

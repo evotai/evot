@@ -30,20 +30,28 @@ describe('transcript conversion', () => {
       expect(texts.filter(text => text.startsWith('⊘ privacy'))).toHaveLength(1)
     }
   })
-  test('replays a single model handoff card in both views', () => {
-    const messages = transcriptToMessages([
+  test('replays switch outcomes in both views without claiming success for incomplete history', () => {
+    const exchange = [
       { type: 'assistant', content: [{ type: 'tool_call', id: 'switch', name: 'handoff_model', input: { model: 'target:shared' } }] },
       { type: 'tool_result', tool_call_id: 'switch', tool_name: 'handoff_model', is_error: false,
         content: "Model handoff: origin:shared → target:shared\nContinue the user's request: Implement it" },
-      { type: 'assistant', content: [{ type: 'text', text: 'continued' }] },
-    ])
-    for (const expanded of [false, true]) {
-      const lines = messagesToOutputLines(messages, expanded)
-      const cards = lines.filter(line => line.toolCard?.first)
-      expect(cards.map(card => card.text)).toEqual(['⇄ model handoff  origin:shared → target:shared'])
-      expect(lines.indexOf(cards[0]!)).toBeLessThan(lines.findIndex(line => line.text === 'continued'))
-      expect(blocksToLines(buildOutputBlocks(lines, { columns: 80 })).map(stripAnsi).join('\n'))
-        .toContain('⇄ model handoff  origin:shared → target:shared')
+    ]
+    const start = { type: 'stats', kind: 'llm_call_started', data: { model: 'shared', turn: 3 } }
+    const finished = { type: 'stats', kind: 'run_finished' }
+    const cases = [
+      { after: [{ type: 'assistant', model: 'shared', provider: 'target', content: [{ type: 'text', text: 'continued' }] }], status: '✓ Default model unchanged' },
+      { after: [start, { type: 'stats', kind: 'llm_call_completed', data: { turn: 3, error: 'HTTP 400: invalid_request_error', stop_reason: 'error' } }, finished], status: '✗ shared rejected the request' },
+      { after: [finished], status: '✗ Switch not confirmed' },
+    ]
+    for (const { after, status } of cases) {
+      for (const expanded of [false, true]) {
+        const lines = messagesToOutputLines(transcriptToMessages([...exchange, ...after]), expanded)
+        expect(lines.filter(line => line.toolCard?.first).map(card => card.text))
+          .toEqual(['⇄ Switch model  origin:shared → target:shared'])
+        const rendered = blocksToLines(buildOutputBlocks(lines, { columns: 80 })).map(stripAnsi).join('\n')
+        expect(rendered).toContain(status)
+        if (rendered.includes('continued')) expect(rendered.indexOf(status)).toBeLessThan(rendered.indexOf('continued'))
+      }
     }
   })
 

@@ -14,7 +14,7 @@ import type { ManualCompaction } from '../app/run/manual-compaction.js'
 import type { RunInteraction, RunInteractionInput } from '../app/run/run-interaction.js'
 import type { RunOwnership } from '../app/run/run-ownership.js'
 import { settleRunCallModel } from '../app/run/state.js'
-import { createStreamMachineState, flushStreaming, reduceRunEvent } from '../app/run/stream.js'
+import { createStreamMachineState, finishStreaming, reduceRunEvent } from '../app/run/stream.js'
 import type { SuggestionContext } from '../app/suggestion/context.js'
 import type { PromptSuggestion, TaskWaitSuggestion } from '../app/suggestion/index.js'
 import type { RendererTrace } from '../diagnostics/renderer-trace.js'
@@ -307,7 +307,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
 
       if (!ownsRun(generation)) return
       if (st.streamMachine) {
-        const final = flushStreaming(st.streamMachine)
+        const final = finishStreaming(st.streamMachine)
         st.streamMachine = final.state
         st.appState = final.state.appState
         deps.scrollback.commitFlushResult(final)
@@ -322,7 +322,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       // touching shared state here could flush or clear a newer run.
       if (!ownsRun(generation)) return
       if (st.streamMachine) {
-        const final = flushStreaming(st.streamMachine)
+        const final = finishStreaming(st.streamMachine)
         st.streamMachine = final.state
         deps.scrollback.commitFlushResult(final)
       }
@@ -400,7 +400,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
   function flushStreamContent() {
     // Flush anything the stream machine accumulated
     if (!st.streamMachine) return
-    const flushed = flushStreaming(st.streamMachine)
+    const flushed = finishStreaming(st.streamMachine, true)
     st.streamMachine = flushed.state
     deps.scrollback.commitFlushResult(flushed)
   }

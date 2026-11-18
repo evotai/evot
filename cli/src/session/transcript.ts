@@ -7,7 +7,8 @@ import { replayUserInput } from './user-input.js'
 import { toolArgsRecord } from './tool-args.js'
 import type { TranscriptItem } from '../native/index.js'
 import { readSavedPrivacyCard } from '../native/contracts/privacy.js'
-import type { UIAssistantBlock, UIMessage } from '../render/message-types.js'
+import type { ModelSwitchOutcome, UIAssistantBlock, UIMessage } from '../render/message-types.js'
+import { MODEL_SWITCH_TOOL, modelSwitchTarget, modelSwitchFailure, successfulModelResponse } from '../render/model-switch.js'
 
 // ---------------------------------------------------------------------------
 // Raw transcript item shapes (from Rust TranscriptItem serialization)
@@ -28,6 +29,9 @@ interface RawItem {
   // Transcripts written before the canonical content migration.
   content_blocks?: RawAssistantBlock[]
   stop_reason?: string
+  model?: string
+  provider?: string
+  error_message?: string
   // ToolResult
   tool_call_id?: string
   tool_name?: string
@@ -53,6 +57,7 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
   const rawItems = items as unknown as RawItem[]
   const messages: UIMessage[] = []
   const toolResults = collectToolResults(rawItems)
+  const modelSwitches = collectModelSwitchOutcomes(rawItems, toolResults)
   let idx = 0
 
   for (const item of rawItems) {
@@ -71,7 +76,7 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
       }
     } else if (t === 'assistant') {
       const canonical = Array.isArray(item.content) ? item.content : undefined
-      const content = buildAssistantContent(canonical ?? item.content_blocks ?? [], toolResults)
+      const content = buildAssistantContent(canonical ?? item.content_blocks ?? [], toolResults, modelSwitches)
       const text = content
         .filter((block): block is Extract<UIAssistantBlock, { type: 'text' }> => block.type === 'text')
         .map(block => block.text)
@@ -117,7 +122,8 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
 
 function buildAssistantContent(
   persisted: RawAssistantBlock[],
-  toolResults: Map<string, { content: string; isError: boolean; details?: unknown }>,
+  toolResults: ReturnType<typeof collectToolResults>,
+  modelSwitches: Map<string, ModelSwitchOutcome>,
 ): UIAssistantBlock[] {
   return persisted.map((block, contentIndex): UIAssistantBlock => {
     switch (block.type) {
@@ -136,6 +142,7 @@ function buildAssistantContent(
             status: result ? (result.isError ? 'error' : 'done') : 'queued',
             result: result?.content,
             details: result?.details,
+            modelSwitchOutcome: modelSwitches.get(block.id),
             previewCommand: inferPreviewCommand(block.name, args),
           },
         }
@@ -162,6 +169,50 @@ function collectToolResults(items: RawItem[]): Map<string, { content: string; is
     }
   }
   return map
+}
+
+function collectModelSwitchOutcomes(items: RawItem[], toolResults: ReturnType<typeof collectToolResults>): Map<string, ModelSwitchOutcome> {
+  const outcomes = new Map<string, ModelSwitchOutcome>()
+  let requested: { id: string; model: string; provider?: string } | undefined
+  let pending: (NonNullable<typeof requested> & { turn?: unknown; failure?: ModelSwitchOutcome }) | undefined
+  const settle = (outcome: ModelSwitchOutcome) => {
+    if (pending) outcomes.set(pending.id, outcome)
+    pending = undefined
+  }
+  for (const item of items) {
+    if (item.type === 'assistant') {
+      if (pending && item.model === pending.model && (!item.provider || item.provider === pending.provider)) {
+        const result = { error: item.error_message, stop_reason: item.stop_reason }
+        if (successfulModelResponse(result)) settle('started')
+        else pending.failure = modelSwitchFailure(result)
+      }
+      const content = Array.isArray(item.content) ? item.content : item.content_blocks ?? []
+      for (const block of content) {
+        if (block.type !== 'tool_call' || block.name !== MODEL_SWITCH_TOOL) continue
+        const result = toolResults.get(block.id)
+        if (!result || result.isError) continue
+        requested = { id: block.id, ...modelSwitchTarget(toolArgsRecord(block.input) ?? {}) }
+        outcomes.set(block.id, 'unconfirmed')
+      }
+    } else if (requested && item.type === 'tool_result' && item.tool_call_id === requested.id) {
+      settle(pending?.failure ?? 'unconfirmed')
+      pending = requested
+      requested = undefined
+    } else if (pending && item.type === 'stats') {
+      const data = item.data ?? {}
+      if (item.kind === 'llm_call_started') {
+        if (data.model !== pending.model) settle(pending.failure ?? 'unconfirmed')
+        else pending = { ...pending, turn: data.turn, failure: undefined }
+      } else if (item.kind === 'llm_call_completed' && pending.turn !== undefined && data.turn === pending.turn) {
+        if (successfulModelResponse(data)) settle('started')
+        else pending.failure = modelSwitchFailure(data)
+      } else if (item.kind === 'run_finished') {
+        settle(pending.failure ?? 'unconfirmed')
+      }
+    }
+  }
+  settle(pending?.failure ?? 'unconfirmed')
+  return outcomes
 }
 
 /** Re-derive previewCommand from tool name + args (mirrors engine preview_command logic). */

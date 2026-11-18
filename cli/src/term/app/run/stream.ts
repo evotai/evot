@@ -6,16 +6,20 @@ import { buildError, buildPrivacyCard, buildSavedPrivacyCard, buildSystem, build
 import { formatDuration } from '../../../ui/format.js'
 import { compactionToolName, recordStreamDelta, resetStreamStats, setLongWait, setRetryWait, setSpinnerPhase, type SpinnerState } from '../../widgets/spinner.js'
 import { assistantToolCalls } from './assistant-content.js'
+import { MODEL_SWITCH_TOOL } from '../../../render/model-switch.js'
+import { observeModelSwitch, type PendingModelSwitch } from './model-switch.js'
 import { assistantMessageToOutputLines } from '../../../render/assistant.js'
 import { applyEvent } from './reducer.js'
 import type { AppState } from './state.js'
 import { isKnownRunEvent, type KnownRunEvent, type RunEvent } from '../../../native/contracts/query-event.js'
-import type { UIAssistantBlock } from '../../../render/message-types.js'
+import type { ModelSwitchOutcome, UIAssistantBlock } from '../../../render/message-types.js'
 
 export interface StreamMachineState {
   appState: AppState
   spinnerState: SpinnerState
   activeLlmCall: boolean
+  /** Hold the previous assistant message in the live region until the switch settles. */
+  pendingSwitch?: PendingModelSwitch & { content: UIAssistantBlock[] }
   /** Whether this logical LLM call already committed a quota-wait card.
    *  Re-probes update the countdown without appending another warning. */
   quotaWaitShown: boolean
@@ -147,6 +151,20 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     if (flushed.expandedLines) {
       if (!expandedCommitLines) expandedCommitLines = []
       expandedCommitLines.push(...flushed.expandedLines)
+    }
+  }
+
+  let switchPrefix: ReturnType<typeof settleModelSwitch> | undefined
+  let rejectedSwitch = false
+  if (known && prev.pendingSwitch) {
+    const next = observeModelSwitch(prev.pendingSwitch, known)
+    if (typeof next === 'string') {
+      switchPrefix = settleModelSwitch(state, next)
+      state = switchPrefix.state
+      rerenderStatus = true
+      rejectedSwitch = next === 'rejected'
+    } else if (next !== prev.pendingSwitch) {
+      state = { ...state, pendingSwitch: { ...next, content: prev.pendingSwitch.content } }
     }
   }
 
@@ -403,7 +421,8 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     const failedInsideStorm = state.retryCardShown && (known.payload.error?.length ?? 0) > 0
     const newEvents = state.appState.verboseEvents.slice(prev.appState.verboseEvents.length)
     for (const evt of newEvents) {
-      if (revokedEvent || failedInsideStorm) writeLines.push(...buildVerboseEvent(evt.text))
+      const switchRejection = state.pendingSwitch?.failure === 'rejected'
+      if (revokedEvent || failedInsideStorm || switchRejection) writeLines.push(...buildVerboseEvent(evt.text))
       else routeVerbose(evt.text, { commit: commitLines, write: writeLines })
     }
   }
@@ -458,10 +477,18 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     // Tool-bearing assistant messages stay live through execution. Commit the
     // complete ordered message when the last tool settles, exactly once.
     if (toolCalls.length > 0 && toolCalls.every(call => call.status === 'done' || call.status === 'error')) {
-      const flushed = flushStreaming(state)
-      state = flushed.state
-      commitLines.push(...flushed.lines)
-      mergeFlushExpanded(flushed)
+      const call = toolCalls.find(call => call.name === MODEL_SWITCH_TOOL && call.status === 'done')
+      if (call) {
+        state = { ...state,
+          pendingSwitch: { call, content: state.appState.currentAssistantContent },
+          appState: { ...state.appState, currentAssistantContent: [] },
+        }
+      } else {
+        const flushed = flushStreaming(state)
+        state = flushed.state
+        commitLines.push(...flushed.lines)
+        mergeFlushExpanded(flushed)
+      }
     }
     rerenderStatus = true
   }
@@ -482,7 +509,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       // this same message (the provider error surfaces via both events).
       const alreadyShown = capturedLlmError != null &&
         (message.trim() === capturedLlmError || message.includes(capturedLlmError) || capturedLlmError.includes(message.trim()))
-      if (alreadyShown) writeLines.push(...buildError(message))
+      if (alreadyShown || rejectedSwitch) writeLines.push(...buildError(message))
       else {
         const failure = providerFailurePresentation({ error: message })
         const privacy = parsePrivacyStop(message)
@@ -505,8 +532,10 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
 
   return {
     state: { ...state, lastLlmErrorMessage: capturedLlmError },
-    commitLines,
-    expandedCommitLines,
+    commitLines: switchPrefix ? [...switchPrefix.lines, ...commitLines] : commitLines,
+    expandedCommitLines: switchPrefix
+      ? [...(switchPrefix.expandedLines ?? switchPrefix.lines), ...(expandedCommitLines ?? commitLines)]
+      : expandedCommitLines,
     writeLines,
     noticeLines,
     rerenderStatus,
@@ -538,6 +567,31 @@ export function discardedPartialNotice(content: UIAssistantBlock[], cause: strin
     toolCalls > 0 ? `${toolCalls} tool call(s)` : null,
   ].filter((part): part is string => part !== null).join(', ')
   return buildSystem(`  ↻ Discarded an incomplete reply (${what}) — ${reason}`)
+}
+
+function settleModelSwitch(state: StreamMachineState, outcome: ModelSwitchOutcome) {
+  const pending = state.pendingSwitch
+  if (!pending) return { state, lines: [] }
+  const content = pending.content.map(block => block.type === 'tool_call' && block.toolCall.id === pending.call.id
+    ? { ...block, toolCall: { ...block.toolCall, modelSwitchOutcome: outcome } }
+    : block)
+  return {
+    state: { ...state, pendingSwitch: undefined },
+    lines: assistantMessageToOutputLines(content),
+    expandedLines: assistantMessageToOutputLines(content, true),
+  }
+}
+
+/** Final stream flush, including a switch that never reached a response. */
+export function finishStreaming(state: StreamMachineState, interrupted = false): ReturnType<typeof flushStreaming> {
+  const settled = settleModelSwitch(state, interrupted ? 'interrupted' : state.pendingSwitch?.failure ?? 'unconfirmed')
+  const final = flushStreaming(settled.state)
+  if (settled.lines.length === 0) return final
+  return {
+    state: final.state,
+    lines: [...settled.lines, ...final.lines],
+    expandedLines: [...(settled.expandedLines ?? settled.lines), ...(final.expandedLines ?? final.lines)],
+  }
 }
 
 export function flushStreaming(state: StreamMachineState): { state: StreamMachineState; lines: OutputLine[]; expandedLines?: OutputLine[] } {

@@ -134,23 +134,31 @@ describe('model handoff card', () => {
 
   test('renders one settled card with the confirmed route, without the instruction body', () => {
     const lines = buildToolCard({
-      ...call, status: 'done',
+      ...call, status: 'done', modelSwitchOutcome: 'started',
       result: `Model handoff: current:original → next:target\nContinue the user's request: ${call.args.handoff}`,
     })
     expect(lines.map(line => line.text)).toEqual([
-      '⇄ model handoff  current:original → next:target', '  ✓ · accepted · same run',
+      '⇄ Switch model  original → target', '  ✓ Default model unchanged',
     ])
     expect(lines.map(line => line.toolCard)).toEqual([
       { state: 'success', first: true, last: false }, { state: 'success', first: false, last: true },
     ])
   })
 
+  test('uses provider prefixes only to distinguish identical model IDs', () => {
+    const headline = (from: string, to: string) => buildToolCard({
+      ...call, args: { model: to }, status: 'done', result: `Model handoff: ${from} → ${to}`,
+    })[0]?.text
+    expect(headline('current:shared', 'next:shared')).toBe('⇄ Switch model  current:shared → next:shared')
+    expect(headline('current:model:v1', 'next:model:v2')).toBe('⇄ Switch model  model:v1 → model:v2')
+  })
+
   test('shows a pending target and reports rejection without claiming a switch', () => {
     const pending = buildToolCard({ ...call, status: 'running' })
-    expect(pending.map(line => line.text)).toEqual(['⇄ model handoff  → next:target', '  ● · pending'])
+    expect(pending.map(line => line.text)).toEqual(['⇄ Switch model  target', '  ● Waiting for target…'])
     const failed = buildToolCard({ ...call, status: 'error', result: 'invalid target\n\x1b[31mnot configured\x1b[0m' })
     expect(failed.map(line => line.text)).toEqual([
-      '⇄ model handoff  → next:target', '  ✗ · not switched', '  invalid target not configured',
+      '⇄ Switch model  target', '  ✗ Could not switch models', '  invalid target not configured',
     ])
     expect(failed.every(line => line.toolCard?.state === 'error')).toBe(true)
   })

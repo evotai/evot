@@ -42,6 +42,8 @@ export type UIAssistantBlock =
   | { type: 'thinking'; contentIndex: number; text: string }
   | { type: 'tool_call'; contentIndex: number; toolCall: UIToolCall }
 
+export type ModelSwitchOutcome = 'started' | 'rejected' | 'failed' | 'interrupted' | 'unconfirmed'
+
 export interface UIToolCall {
   id: string
   name: string
@@ -60,6 +62,8 @@ export interface UIToolCall {
   result?: string
   previewCommand?: string
   durationMs?: number
+  /** The switch tool settles before the receiving model responds. */
+  modelSwitchOutcome?: ModelSwitchOutcome
 }
 
 // ---------------------------------------------------------------------------

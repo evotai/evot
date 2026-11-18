@@ -8,7 +8,7 @@
  * This module is pure logic — no React, no stdout. Easy to test.
  */
 
-import stripAnsi from 'strip-ansi'
+import { MODEL_SWITCH_TOOL, modelSwitchRoute, modelSwitchTarget, modelSwitchText } from './model-switch.js'
 import type { PrivacyLiveFinding, SavedPrivacyCard } from '../native/contracts/privacy.js'
 import { providerFailurePresentation } from './provider-error.js'
 import { parsePrivacyStop, privacyActionLabel, privacyCard, privacyFindingRows, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
@@ -535,7 +535,7 @@ export function buildToolCard(call: UIToolCall, expanded?: boolean, _now = Date.
   if (isAskUserTool(call.name)) return []
   if (isScheduleWakeupTool(call.name)) return buildLoopCard(call, _now)
   if (isLoopPlanTool(call.name)) return buildLoopPlanCard(call, expanded)
-  if (call.name === 'handoff_model') return buildModelHandoffCard(call)
+  if (call.name === MODEL_SWITCH_TOOL) return buildModelSwitchCard(call)
 
   const details = asDetails(call.details)
   const diff = typeof details.diff === 'string' ? details.diff : undefined
@@ -1270,34 +1270,27 @@ function buildLoopCard(call: UIToolCall, now: number): OutputLine[] {
   return stampToolCard(lines, 'success')
 }
 
-function buildModelHandoffCard(call: UIToolCall): OutputLine[] {
-  const inline = (text: string) => stripAnsi(text).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]+/g, ' ').trim()
-  const target = toolDraftText(call.args, ['model'])
-  // The successful tool result starts with the resolved route. The remaining
-  // lines are instructions for the receiving model, not card content.
-  const confirmed = call.status === 'done' ? call.result?.match(/^Model handoff: ([^\r\n]+)/)?.[1] : undefined
-  const route = confirmed && target && confirmed.endsWith(` → ${target}`)
-    ? inline(confirmed) : target ? `→ ${inline(target)}` : ''
+function buildModelSwitchCard(call: UIToolCall): OutputLine[] {
+  const route = modelSwitchRoute(call)
+  const target = modelSwitchText(modelSwitchTarget(call.args).model) || 'the new model'
   const lines: OutputLine[] = [{
-    id: genId('model-handoff'),
-    kind: 'tool',
-    text: `⇄ model handoff${route ? `  ${route}` : ''}`,
+    id: genId('model-switch'), kind: 'tool', text: `⇄ Switch model${route ? `  ${route}` : ''}`,
   }]
-  switch (call.status) {
-    case 'queued':
-    case 'running':
-      lines.push(toolStatusLine(call.status === 'running' ? '●' : '○', ['pending']))
-      return stampToolCard(lines, 'pending')
-    case 'error': {
-      lines.push(toolStatusLine('✗', ['not switched']))
-      const reason = inline(call.result ?? '')
-      if (reason) lines.push({ id: genId('model-handoff-error'), kind: 'error', text: `  ${reason}` })
-      return stampToolCard(lines, 'error')
-    }
-    case 'done':
-      // The receiving request can still be cancelled or fail before it starts.
-      lines.push(toolStatusLine('✓', ['accepted · same run']))
-      return stampToolCard(lines, 'success')
+  const status = (mark: '●' | '✓' | '✗', text: string, state: ToolCardState, reason?: string) => {
+    lines.push({ id: genId('model-switch-status'), kind: 'tool', text: `  ${mark} ${text}` })
+    if (reason) lines.push({ id: genId('model-switch-error'), kind: 'error', text: `  ${reason}` })
+    return stampToolCard(lines, state)
+  }
+  if (call.status === 'error') {
+    return status('✗', 'Could not switch models', 'error', modelSwitchText(call.result ?? ''))
+  }
+  switch (call.modelSwitchOutcome) {
+    case 'started': return status('✓', 'Default model unchanged', 'success')
+    case 'rejected': return status('✗', `${target} rejected the request`, 'error')
+    case 'failed': return status('✗', `${target} could not respond`, 'error')
+    case 'interrupted': return status('✗', 'Switch interrupted', 'error')
+    case 'unconfirmed': return status('✗', 'Switch not confirmed', 'error')
+    default: return status('●', `Waiting for ${target}…`, 'pending')
   }
 }
 

@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import stripAnsi from 'strip-ansi'
 import { createSpinnerState } from '../../../src/term/widgets/spinner.js'
 import { createInitialState } from '../../../src/term/app/run/state.js'
-import { createStreamMachineState, reduceRunEvent, flushStreaming } from '../../../src/term/app/run/stream.js'
+import { createStreamMachineState, reduceRunEvent, finishStreaming, flushStreaming } from '../../../src/term/app/run/stream.js'
 import { buildToolCard } from '../../../src/render/output.js'
+import { assistantMessageToOutputLines } from '../../../src/render/assistant.js'
 import { assistantToolCalls, findAssistantToolCall } from '../../../src/term/app/run/assistant-content.js'
 import type { OutputLine } from '../../../src/render/output.js'
 
@@ -1898,7 +1899,7 @@ describe('term stream machine', () => {
     expect(finalized?.argsComplete).toBe(true)
   })
 
-  test('commits the model handoff card once before the receiving model starts', () => {
+  function acceptedSwitch() {
     const tool = { tool_call_id: 'switch', tool_name: 'handoff_model' }
     const ctx = { termRows: 24 }
     const initial = createStreamMachineState(createInitialState('original', '/tmp'), createSpinnerState())
@@ -1912,9 +1913,62 @@ describe('term stream machine', () => {
       kind: 'tool_finished',
       payload: { ...tool, content: "Model handoff: current:original → next:target\nContinue the user's request: Implement it", is_error: false },
     }, ctx)
-    expect(accepted.commitLines.filter(line => line.toolCard?.first).map(line => line.text))
-      .toEqual(['⇄ model handoff  current:original → next:target'])
-    expect(reduceRunEvent(accepted.state, { kind: 'turn_started', payload: {} }, ctx).commitLines).toEqual([])
+    expect(accepted.commitLines).toEqual([])
+    return accepted.state
+  }
+
+  const switchContext = { termRows: 24 }
+  function receiveSwitch(state: ReturnType<typeof acceptedSwitch>, attempt = 0, provider = 'next') {
+    const started = reduceRunEvent(state, {
+      kind: 'llm_call_started', turn: 2,
+      payload: { turn: 2, attempt, model: 'target', provider, injected_count: 0, message_count: 3, message_bytes: 100, system_prompt_tokens: 5, tool_count: 1 },
+    }, switchContext)
+    return started
+  }
+
+  test('waits for the receiving model to respond, then commits the card once', () => {
+    const state = acceptedSwitch()
+    expect(assistantMessageToOutputLines(state.pendingSwitch?.content ?? []).map(line => line.text))
+      .toEqual(['⇄ Switch model  original → target', '  ● Waiting for target…'])
+    const turn = reduceRunEvent(state, { kind: 'turn_started', turn: 2, payload: {} }, switchContext)
+    expect(turn.commitLines).toEqual([])
+    const started = receiveSwitch(turn.state)
+    expect(started.commitLines).toEqual([])
+    const reply = reduceRunEvent(started.state, {
+      kind: 'assistant_delta', turn: 2, payload: { content_type: 'text', content_index: 0, delta: 'Hello' },
+    }, switchContext)
+    expect(reply.commitLines.map(line => line.text)).toEqual(['⇄ Switch model  original → target', '  ✓ Default model unchanged'])
+    expect(reply.expandedCommitLines?.map(line => line.text)).toEqual(reply.commitLines.map(line => line.text))
+    expect(reply.state.pendingSwitch).toBeUndefined()
+    expect(finishStreaming(reply.state).lines.map(line => line.text)).toEqual(['Hello'])
+  })
+
+  test('reports a terminal rejection on the switch card without a false success or duplicate', () => {
+    const started = receiveSwitch(acceptedSwitch())
+    const error = 'Invalid request: HTTP 400: invalid_request_error'
+    const failed = reduceRunEvent(started.state, {
+      kind: 'llm_call_completed', turn: 2, payload: { turn: 2, attempt: 0, usage: { input: 0, output: 0 }, error, stop_reason: 'error' },
+    }, switchContext)
+    expect(failed.commitLines).toEqual([])
+    expect(failed.writeLines.some(line => line.text.includes(error))).toBe(true)
+    const terminal = reduceRunEvent(failed.state, { kind: 'error', turn: 2, payload: { message: error } }, switchContext)
+    expect(terminal.commitLines.map(line => line.text)).toEqual(['⇄ Switch model  original → target', '  ✗ target rejected the request'])
+  })
+
+  test('keeps waiting across retries and never confirms a different provider or an interruption', () => {
+    const started = receiveSwitch(acceptedSwitch())
+    const failed = reduceRunEvent(started.state, {
+      kind: 'llm_call_completed', turn: 2,
+      payload: { turn: 2, attempt: 0, usage: { input: 0, output: 0 }, error: 'HTTP 529: overloaded', stop_reason: 'error' },
+    }, switchContext)
+    const retried = receiveSwitch(failed.state, 1)
+    expect(retried.state.pendingSwitch).toBeDefined()
+    const answered = reduceRunEvent(retried.state, {
+      kind: 'llm_call_completed', turn: 2, payload: { turn: 2, attempt: 1, usage: { input: 5, output: 5 }, stop_reason: 'stop' },
+    }, switchContext)
+    expect(answered.commitLines.map(line => line.text)).toContain('  ✓ Default model unchanged')
+    expect(receiveSwitch(acceptedSwitch(), 0, 'other').commitLines.map(line => line.text)).toContain('  ✗ Switch not confirmed')
+    expect(finishStreaming(acceptedSwitch(), true).lines.map(line => line.text)).toContain('  ✗ Switch interrupted')
   })
 
   test('last tool completion flushes the ordered assistant message once', () => {
