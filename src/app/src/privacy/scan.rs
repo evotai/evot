@@ -79,7 +79,7 @@ pub(super) struct Hit {
     /// Byte range in the original text, never written to the record.
     pub start: usize,
     pub end: usize,
-    /// Source line where a read result's match begins, when known.
+    /// Source line where the file-content match begins, when known.
     pub line: Option<usize>,
     /// A safe label for `/privacy`: a variable's name, a file's name. Never
     /// a piece of the value.
@@ -103,7 +103,13 @@ pub(super) struct Origin {
     pub call: Option<String>,
     pub label: Option<String>,
     pub path: Option<String>,
-    pub read_offset: Option<usize>,
+    pub lines: Option<FileLines>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum FileLines {
+    Read { offset: usize },
+    Write,
 }
 
 /// What the packs and the user's terms find in `text`. `field` is the JSON

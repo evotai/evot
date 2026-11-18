@@ -1175,6 +1175,54 @@ async fn live_findings_pair_actual_syntax_and_location_without_copying_input() -
     Ok(())
 }
 
+#[tokio::test]
+async fn write_findings_use_file_lines_only_for_the_top_level_content_string() -> TestResult {
+    let provider = MaskingProvider::with_masker(
+        Arc::new(evot_engine::provider::MockProvider::text("ok")),
+        Arc::new(masker()?),
+    );
+    let key = ["fixture", "-write-line-42"].concat();
+    let other = ["fixture", "-write-argument-82"].concat();
+    let path = "/workspace/fixture.py";
+    let mut request = config(vec![assistant(vec![Content::ToolCall {
+        id: "write-test".into(),
+        name: "Write".into(),
+        arguments: json!({
+            "filePath": path,
+            "content": format!("# 文件\r\n\n... [500 bytes truncated] ...\n\napi_key='{key}'\n"),
+            "metadata": { "content": format!("header\nDB_PASSWORD='{other}'") },
+        }),
+        metadata: None,
+    }])]);
+    let session = "privacy-write-line-test";
+    request.prompt_cache_key = Some(session.into());
+    let (before, _) = evot::privacy::live_notices(0);
+    let (tx, _rx) = mpsc::channel(16);
+    provider
+        .stream_bounded(request, tx, CancellationToken::new())
+        .await?;
+    let (_, notices) = evot::privacy::live_notices(before);
+    let notice = notices
+        .iter()
+        .find(|n| n.event.session.as_deref() == Some(session))
+        .ok_or("missing write notice")?;
+    let find = |preview| {
+        notice
+            .findings
+            .iter()
+            .find(|f| f.preview.as_deref() == Some(preview))
+    };
+    let file = find("api_key='[mask]'").ok_or("missing write content finding")?;
+    assert_eq!(file.rule, "contexts.credential-assignment");
+    assert_eq!(file.path.as_deref(), Some(path));
+    assert_eq!(file.line, Some(5));
+    let argument = find("DB_PASSWORD='[mask]'").ok_or("missing nested argument finding")?;
+    assert_eq!(argument.line, None);
+    let saved = serde_json::to_string(notice)?;
+    assert!(!saved.contains(&key) && !saved.contains(&other));
+    Ok(())
+}
+
 #[test]
 fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> TestResult {
     let masker = masker()?;

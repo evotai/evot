@@ -22,6 +22,7 @@ use super::policy::Mode;
 use super::policy::Policy;
 use super::rules::Engine;
 use super::scan;
+use super::scan::FileLines;
 use super::scan::Hit;
 use super::scan::Origin;
 use super::vault::Vault;
@@ -163,15 +164,17 @@ pub(super) fn mask_config(
     Ok(hits)
 }
 
-/// Report the line where a match begins, in the original read text. Hits
-/// arrive in byte order, so each part of the result is counted at most once.
+/// Report where a match begins in the original file content. Hits arrive in
+/// byte order, so each part of the text is counted at most once.
 fn annotate_hits(hits: &mut [Hit], text: &str, origin: &Origin) {
     if hits.is_empty() {
         return;
     }
-    let mut file = origin
-        .read_offset
-        .and_then(|offset| read_body_len(text).map(|end| (offset, end)));
+    let mut file = match origin.lines {
+        Some(FileLines::Read { offset }) => read_body_len(text).map(|end| (offset, end)),
+        Some(FileLines::Write) => Some((1, text.len())),
+        None => None,
+    };
     let mut previous = 0;
     for hit in hits {
         if let Some((line, end)) = file {
@@ -209,6 +212,9 @@ fn read_body_len(text: &str) -> Option<usize> {
 /// How many characters of a command or path the record keeps as a label.
 const LABEL_CHARS: usize = 60;
 
+// Canonical field first, followed by the aliases accepted by file tools.
+const FILE_PATH_FIELDS: [&str; 4] = ["path", "file_path", "filePath", "file"];
+
 struct CallLabel {
     short: String,
     path: Option<String>,
@@ -241,6 +247,8 @@ fn call_labels(
                 "command",
                 "path",
                 "file_path",
+                "filePath",
+                "file",
                 "pattern",
                 "url",
             ]
@@ -266,9 +274,9 @@ fn call_labels(
                     .iter()
                     .any(|tool| name.eq_ignore_ascii_case(tool))
                 {
-                    arguments
-                        .get("path")
-                        .or_else(|| arguments.get("file_path"))
+                    FILE_PATH_FIELDS
+                        .iter()
+                        .find_map(|field| arguments.get(*field))
                         .and_then(Value::as_str)
                         .filter(|path| {
                             !path.is_empty()
@@ -376,7 +384,7 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
         call: None,
         label: None,
         path: None,
-        read_offset: None,
+        lines: None,
     };
     f(
         &mut config.system_prompt,
@@ -414,7 +422,7 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
                     call: Some(tool_call_id.clone()),
                     label: None,
                     path: None,
-                    read_offset,
+                    lines: read_offset.map(|offset| FileLines::Read { offset }),
                 };
                 (content, Slot::Inbound { sensitive }, origin)
             }
@@ -446,9 +454,9 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
                         call: Some(id.clone()),
                         label: None,
                         path: None,
-                        read_offset: None,
+                        lines: None,
                     };
-                    walk_value(arguments, Slot::Model, None, &origin, f)
+                    walk_tool_arguments(name, arguments, &origin, f);
                 }
                 Content::Image { .. } => {}
             }
@@ -521,6 +529,33 @@ fn walk_schema(schema: &mut Value, slot: Slot, origin: &Origin, f: &mut Visit<'_
         }
         _ => {}
     }
+}
+
+fn walk_tool_arguments(name: &str, arguments: &mut Value, origin: &Origin, f: &mut Visit<'_>) {
+    if name.eq_ignore_ascii_case("write") {
+        if let Some(fields) = arguments.as_object_mut() {
+            let has_path = FILE_PATH_FIELDS
+                .iter()
+                .find_map(|field| fields.get(*field))
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.is_empty());
+            for (key, value) in fields {
+                // Only the top-level string is written verbatim from line 1.
+                // Keep scanning all other arguments without a file line.
+                if has_path && key == "content" {
+                    if let Value::String(text) = value {
+                        let mut file = origin.clone();
+                        file.lines = Some(FileLines::Write);
+                        f(text, Slot::Model, Some(key), &file);
+                        continue;
+                    }
+                }
+                walk_value(value, Slot::Model, Some(key), origin, f);
+            }
+            return;
+        }
+    }
+    walk_value(arguments, Slot::Model, None, origin, f);
 }
 
 fn walk_value(

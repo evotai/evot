@@ -97,12 +97,13 @@ notices carry one representative match per tag. Routine cards show only the
 session's new tags, with the action, rule, masked syntax and location tied to
 the same match. Previews show the matched field or syntax and public format
 markers, never the credential body or arbitrary surrounding text. File locations
-retain the full tool path for the card. The run saves new model-request cards
-in order as display-only stats before emitting them. Resume replays these
-entries in the visible transcript without scanning old text or adding it to the
-model context. Opening a session also consults prior audit tags for findings
-outside the active transcript. Cloud sync keeps only an empty entry at that sequence;
-paths, previews and tags stay local.
+retain the full tool path for the card and the source line when known. Line
+counting starts at the `read` offset or at line 1 of `write` content.
+The run saves new model-request cards in order as display-only stats before
+emitting them. Resume replays them without scanning old text or adding them to
+the model context. Opening a session also consults prior audit tags for findings
+outside the active transcript. Cloud sync keeps only an empty entry at that
+sequence; paths, previews and tags stay local.
 Blocked requests link each blocking rule and kind to its source and available
 line numbers, separate from findings that were only masked or warned. No
 credential value or snippet is shown.
