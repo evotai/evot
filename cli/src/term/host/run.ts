@@ -69,7 +69,7 @@ export interface RunDeps {
 
 export interface RunController {
   abandonRun(): void
-  readonly beginRun: () => number
+  readonly beginRun: (newPrompt: boolean) => number
   interruptStream(id: string, text: string): void
   readonly ownsRun: (generation: number) => boolean
   runInteractionInput(): RunInteractionInput
@@ -98,9 +98,10 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       loopOwner: deps.loopSession.snapshot?.startedAt ?? null,
     }
   }
-  const beginRun = (): number => {
+  const beginRun = (newPrompt: boolean): number => {
     deps.suggestionContext.begin()
-    deps.suggestions.cancelAutomatic()
+    if (newPrompt) deps.suggestions.cancel()
+    else deps.suggestions.cancelAutomatic()
     return deps.runOwnership.begin()
   }
   const ownsRun = (generation: number): boolean => deps.runOwnership.owns(generation)
@@ -168,9 +169,10 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     if (deps.loopSession.active) hostToolExtension = composeExtensions(hostToolExtension, deps.loopSession.extension)
     // Notification-only wakeups continue the same user task; don't hide its
     // newly completed background work when the engine reads the result.
-    if (text || contentJson || prebuiltStream) deps.backgroundTerminals.beginRun()
+    const newPrompt = Boolean(text || contentJson || prebuiltStream)
+    if (newPrompt) deps.backgroundTerminals.beginRun()
     st.composerRevision++
-    const generation = beginRun()
+    const generation = beginRun(newPrompt)
     st.runStartedAt = Date.now()
     st.runTurnCount = 0
     deps.runThinking.reset()

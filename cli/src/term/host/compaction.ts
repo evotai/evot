@@ -5,6 +5,7 @@ import { transcriptToMessages } from '../../session/transcript.js'
 import { isLegacyContextSummary } from '../../session/user-input.js'
 import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
 import type { ManualCompaction } from '../app/run/manual-compaction.js'
+import type { RunOwnership } from '../app/run/run-ownership.js'
 import type { SuggestionContext } from '../app/suggestion/context.js'
 import type { FrameController } from './frame.js'
 import type { RunController } from './run.js'
@@ -28,6 +29,7 @@ export interface CompactionDeps {
   readonly queueLifecycle: QueueLifecycle
   readonly renderer: TermRenderer
   readonly runCtl: RunController
+  readonly runOwnership: RunOwnership
   readonly scrollback: ScrollbackController
   readonly suggestionContext: SuggestionContext
 }
@@ -79,14 +81,15 @@ export function createCompactionController(st: ReplState, deps: CompactionDeps):
       deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before compacting.')
       return
     }
-    const generation = deps.runCtl.beginRun()
+    // Compaction owns the foreground, but doesn't begin a conversation turn.
+    const generation = deps.runOwnership.begin()
     const chain = deps.queueLifecycle.begin(currentQueueTarget(st))
     let successful = false
     st.isLoading = true
     st.spinnerState = setSpinnerPhase(createSpinnerState(), 'executing', 'compact')
     deps.runCtl.startSpinner()
     const targetSession = st.sessionId
-    const ownsCompaction = () => !st.destroyed && deps.runCtl.ownsRun(generation) && st.sessionId === targetSession
+    const ownsCompaction = () => !st.destroyed && deps.runOwnership.owns(generation) && st.sessionId === targetSession
     try {
       await deps.manualCompaction.run(
         () => deps.agent.compact(targetSession, customInstructions || undefined),

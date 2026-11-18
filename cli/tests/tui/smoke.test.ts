@@ -866,10 +866,11 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('published suggestion returns three cached candidates and Tab wraps without more requests', async () => {
+  test('published suggestion survives local commands and Tab cycles its cached candidates', async () => {
     const input = '\x1b[C'
     let chatRequests = 0
     let suggestionRequests = 0
+    const arrived = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
     const suggestionBodies: string[] = []
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as { model: string; max_tokens: number; messages: { content: string }[] }
@@ -879,7 +880,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         suggestionRequests++
         suggestionBodies.push(body.messages.at(-1)?.content ?? '')
         expect(body.max_tokens).toBe(192)
-        await Bun.sleep(1600)
+        arrived.resolve()
+        await release.promise
         content = 'Run the targeted tests\nReview the diff\nCommit the change'
       } else {
         chatRequests++
@@ -898,10 +900,24 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session = await startEvot(false, false, false, baseUrl, stateHome => seedSuggestionService(stateHome, baseUrl))
       session.write('Implement the requested change\x0d')
       await session.waitFor('The implementation is ready.')
-      // The very first final answer may already contain a pending decision.
+      // Open a local selector before the first candidate arrives.
+      await arrived.promise
+      session.write('/model\x0d')
+      await session.waitForScreen('Only showing models from configured providers')
+      release.resolve()
+      session.write('\x1b')
       await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
       expect(suggestionRequests).toBe(1)
       expect(suggestionBodies[0]).not.toContain('ALREADY REJECTED')
+      // Both a successful local command and an unknown command must leave the
+      // automatic suggestion available without sampling a second time.
+      for (const [command, output] of [['/skill list', '[Skills]'], ['/not-a-command', 'Unknown command']] as const) {
+        session.checkpoint()
+        session.write(`${command}\x0d`)
+        await session.waitFor(output)
+        await session.waitForScreen(/Run the targeted tests\s+1\/3 ⇥/)
+        expect(suggestionRequests).toBe(1)
+      }
       // Exercise the automatic result before Tab promotes it to explicit input
       // assistance; cycling first would miss automatic-only invalidation.
       for (const [draft, clear] of [
@@ -949,8 +965,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('\x1b[D\x1b[C!')
       await session.waitForScreen(/Commit the change!/)
       expect(chatRequests).toBe(beforeAccept)
-      expect(session.historyEntries()).toEqual(['Implement the requested change'])
+      expect(session.historyEntries()).toEqual(['Implement the requested change', '/model', '/skill list', '/not-a-command'])
+      session.write('\x15/new\x0d')
+      const fresh = await session.waitForScreen(/new session[\s\S]*Enter a coding task/)
+      expect(fresh).not.toContain('⇥')
+      expect(suggestionRequests).toBe(1)
     } finally {
+      release.resolve()
       if (session) await session.kill()
       await server.stop(true)
     }
@@ -1028,17 +1049,20 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 30_000)
 
-  test('installed skill completion invokes model input immediately and from the busy FIFO', async () => {
+  test('installed skills invoke model input directly and from the busy FIFO, with automatic follow-ups', async () => {
     const requests: string[] = []
+    const suggestionRequests: string[] = []
     const arrived = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as { model: string; messages: unknown }
       const suggestion = body.model === 'suggestion-fixture'
-      if (!suggestion) {
+      if (suggestion) {
+        suggestionRequests.push(JSON.stringify(body.messages))
+      } else {
         requests.push(JSON.stringify(body.messages))
         if (requests.length === 1) { arrived.resolve(); await release.promise }
       }
-      const content = suggestion ? '[]' : `Skill response ${requests.length}`
+      const content = suggestion ? `Inspect the review findings ${requests.length}` : `Skill response ${requests.length}`
       const chunk = { id: 'fixture', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
@@ -1062,11 +1086,16 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await session.waitForScreen('Skill response 2')
       expect(requests[1]).toContain('/x-review/SKILL.md')
       expect(requests[1]).toContain('inspect changes')
-      await session.waitForScreen('Enter a coding task')
+      await session.waitForScreen(/Inspect the review findings 2\s+⇥/)
+      expect(suggestionRequests).toHaveLength(1)
+      expect(suggestionRequests[0]).toContain('/x-review inspect changes')
       session.write('/x-review inspect again\x0d')
       await session.waitForScreen('Skill response 3')
       expect(requests[2]).toContain('/x-review/SKILL.md')
       expect(requests[2]).toContain('inspect again')
+      await session.waitForScreen(/Inspect the review findings 3\s+⇥/)
+      expect(suggestionRequests).toHaveLength(2)
+      expect(suggestionRequests[1]).toContain('/x-review inspect again')
       expect(session.historyEntries()).toEqual(['Hold the active response', '/x-review inspect changes', '/x-review inspect again'])
     } finally {
       release.resolve()
@@ -1123,7 +1152,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
 
   test('Ctrl+N assists input during foreground work and keeps the cached batch after completion', async () => {
     let foreground = 0
-    let suggestions = 0
+    let draftRequests = 0
+    let followUps = 0
     let finishForeground: (() => void) | undefined
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
       const body = await request.json() as { model: string; messages: { content: string }[] }
@@ -1141,12 +1171,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
           },
         }), { headers: { 'content-type': 'text/event-stream' } })
       }
-      suggestions++
       const prompt = suggestionInstructions(body)
-      expect(prompt).toContain('CURSOR REWRITE MODE')
-      await Bun.sleep(500)
+      const rewriting = prompt.includes('CURSOR REWRITE MODE')
+      if (rewriting) { draftRequests++; await Bun.sleep(500) }
+      else { followUps++; expect(prompt).toContain('CURRENT STAGE: answered') }
+      const content = rewriting ? JSON.stringify([' target', ' approach', ' schedule']) : 'Review the completed work'
       const chunk = { id: 'suggestion', model: body.model, choices: [{ index: 0,
-        delta: { role: 'assistant', content: JSON.stringify([' target', ' approach', ' schedule']) }, finish_reason: 'stop' }] }
+        delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
     let session: Session | undefined
@@ -1163,16 +1194,21 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session.write('\x0e')
       await session.waitForScreen(/schedule\s+3\/3 ⇥/)
       expect(foreground).toBe(1)
-      expect(suggestions).toBe(1)
+      expect(draftRequests).toBe(1)
       if (!finishForeground) throw new Error('foreground stream did not start')
       finishForeground()
       await session.waitForScreen(/Foreground work completed/)
       await session.waitForScreen(/schedule\s+3\/3 ⇥/)
       session.write('\t')
       await session.waitForScreen(/target\s+1\/3 ⇥/)
-      expect(suggestions).toBe(1)
+      expect(draftRequests).toBe(1)
+      expect(followUps).toBe(0)
       session.write('\x1b[C')
       await session.waitForScreen(/^(?![\s\S]*⇥)[\s\S]*Change the target/)
+      session.write('\x15')
+      await session.waitForScreen(/Review the completed work\s+⇥/)
+      expect(draftRequests).toBe(1)
+      expect(followUps).toBe(1)
       expect(foreground).toBe(1)
       expect(session.historyEntries()).toEqual(['Run the long task'])
     } finally {
@@ -1242,10 +1278,14 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
           }
         } }), { headers: { 'content-type': 'text/event-stream' } })
       }
-      predictions++
       const instructions = suggestionInstructions(body)
-      expect(instructions).toContain('CURRENT STAGE: foreground_running')
-      const chunk = { id: 'prediction', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content: JSON.stringify(['new', 'another', 'later']) }, finish_reason: 'stop' }] }
+      const rewriting = instructions.includes('CURSOR REWRITE MODE')
+      if (rewriting) {
+        predictions++
+        expect(instructions).toContain('CURRENT STAGE: foreground_running')
+      }
+      const content = rewriting ? JSON.stringify(['new', 'another', 'later']) : '[]'
+      const chunk = { id: 'prediction', model: body.model, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: 'stop' }] }
       return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
     } })
     let session: Session | undefined

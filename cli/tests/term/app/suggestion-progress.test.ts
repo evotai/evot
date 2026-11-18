@@ -94,20 +94,21 @@ test('invalid progress and input changes never expose unsafe or stale suggestion
   expect(h.aborted()).toBe(true)
 })
 
-test('typing preserves a streamed placeholder while cancelling remaining generation', async () => {
+test('typing hides a streamed placeholder while the rest of its batch arrives', async () => {
   const h = harness('')
   h.emit(['Run the tests'])
   await tick()
   h.setDraft('temporary input')
   h.controller.reconcile()
-  expect(h.aborted()).toBe(true)
+  expect(h.aborted()).toBe(false)
   expect(h.controller.text()).toBe('')
-  h.emit(['Run the tests', 'Late candidate'])
+  h.emit(['Run the tests', 'Review the diff'])
+  h.resolve({ candidates: ['Run the tests', 'Review the diff'], status: 'ready' })
   await tick()
   h.setDraft('')
   h.controller.reconcile()
   expect(h.controller.text()).toBe('Run the tests')
-  expect(h.controller.position()).toEqual({ current: 1, total: 1 })
+  expect(h.controller.position()).toEqual({ current: 1, total: 2 })
   expect(h.calls()).toBe(1)
 })
 

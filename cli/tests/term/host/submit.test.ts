@@ -121,10 +121,26 @@ for (const busy of [false, true]) {
   })
 }
 
-test.each(['/log analyze this', '/new', 'next question'])('context-changing input still clears suggestions: %s', text => {
+test.each(['/model', '/resume', '/skill list', '/typo', '/new', '/log analyze this'])('local command %s owns its own suggestion lifecycle', text => {
   const h = harness(text)
   h.st.isLoading = false
   h.ctl.submitDraft()
+  expect(h.calls).toEqual([text])
+  expect(h.queries).toEqual([])
+})
+
+test('a blocked command does not cancel the running turn’s suggestions', () => {
+  const h = harness('/model')
+  h.ctl.handleLoadingEnter()
+  expect(h.notices[0]).toContain("Commands don't queue")
+  expect(getEditorText(h.st.editor)).toBe('/model')
+  expect(h.calls).not.toContain('cancel suggestion')
+})
+
+test('suggestions are invalidated after steering is accepted, not just attempted', () => {
+  const h = harness('next question')
+  h.ctl.handleLoadingEnter()
+  expect(h.native.calls).toEqual(['steering'])
   expect(h.calls).toContain('cancel suggestion')
 })
 

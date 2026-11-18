@@ -522,7 +522,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     draft: () => getEditorText(st.editor),
     cursor: () => editorCursorOffset(st.editor),
     skills: () => st.skillEntries,
-    changed: () => { suggestionTicker.sync(); renderer.requestRender() },
+    changed: () => renderer.requestRender(),
     // Automatic sampling is otherwise invisible; a rejected key would stay
     // silent for days. Say it once, then pause until credentials change.
     unauthorized: () => scrollback.commitSystem('sys-suggestion-auth',

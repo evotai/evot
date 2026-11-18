@@ -71,6 +71,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
 
   function getPromptVM(): PromptVMInput {
     deps.suggestions.reconcile()
+    deps.suggestionTicker.sync()
     const interaction = deps.runInteraction.snapshot(deps.runInteractionInput())
     // While a loop is parked, Esc stops the loop (the placeholder says so),
     // so the chip must not advertise a second meaning for the same key.

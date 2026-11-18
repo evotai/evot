@@ -1,4 +1,3 @@
-import { isRunSafeCommand, isSlashCommand } from '../../commands/index.js'
 import { promptInput } from '../../commands/skill/invocation.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { TaskSession } from '../../features/task/session.js'
@@ -112,7 +111,6 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
     if (!waits.length) { acceptDraft('follow_up'); return }
     const token = { epoch: st.draftEpoch, ...deps.pendingQueue.reserve(currentQueueTarget(st)) }
     st.pendingEnqueue = token
-    deps.suggestions.cancel()
     deps.scrollback.commitSystem('sys-queue-image', '  Preparing queued images · editing or clearing cancels submission')
     deps.renderer.requestRender()
     void Promise.all(waits).then(() => {
@@ -152,7 +150,6 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       compacting: deps.manualCompaction.active, editingQueue: deps.queueEdit.editingEntry() !== null,
       hasRun: st.isLoading,
     })
-    if (action !== 'show_log' && action !== 'run_readonly_command') deps.suggestions.cancel()
     if (deps.manualCompaction.active) {
       if (action === 'blocked_compaction_command') {
         // Not silently swallowed: commands cannot run mid-compaction and are
@@ -231,20 +228,17 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
     if (!expandedText && !imageBlocks) return
     const input = expandedText || submitRaw
     const modelText = promptInput(input, st.skillEntries)
-    // Read-only commands temporarily hide the empty-composer batch; clearing
-    // the command draft reveals the same selection without another request.
-    if (modelText !== null || (input.trim() !== '/log' && !isRunSafeCommand(input))) deps.suggestions.cancel()
     if (historyText) deps.saveInputHistory(historyText)
     deps.clearAll()
     deps.renderer.requestRender()
     if (imageBlocks && modelText !== null && modelText !== expandedText) {
       for (const block of imageBlocks) if (block.type === 'text') block.text = promptInput(block.text, st.skillEntries) ?? block.text
     }
-    if (modelText === null && isSlashCommand(expandedText || submitRaw)) {
-      deps.slashCtl.handleSlashInput(expandedText || submitRaw)
+    if (modelText === null) {
+      deps.slashCtl.handleSlashInput(input)
     } else if (st.logMode) {
       // Preserve structured content on the initial fork query as on follow-ups.
-      deps.slashCtl.runLogQuery(st.logMode, imageBlocks ? '' : modelText ?? expandedText, imageBlocks ? JSON.stringify(imageBlocks) : undefined)
+      deps.slashCtl.runLogQuery(st.logMode, imageBlocks ? '' : modelText, imageBlocks ? JSON.stringify(imageBlocks) : undefined)
     } else {
       deps.scrollback.commitUserMessage(displayText)
       // If the model stopped the task edit with a plain-text question,
@@ -256,7 +250,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
         const contentJson = JSON.stringify(imageBlocks)
         deps.runCtl.runQuery('', contentJson, undefined, taskExtension)
       } else {
-        deps.runCtl.runQuery(modelText ?? expandedText, undefined, undefined, taskExtension)
+        deps.runCtl.runQuery(modelText, undefined, undefined, taskExtension)
       }
     }
   }

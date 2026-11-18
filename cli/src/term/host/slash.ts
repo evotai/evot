@@ -476,7 +476,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     }
     st.logDiscardTarget = null
     const queueChain = deps.queueLifecycle.begin(forked)
-    const generation = deps.runCtl.beginRun()
+    const generation = deps.runCtl.beginRun(true)
     st.runStartedAt = Date.now()
     st.runTurnCount = 0
     deps.runThinking.reset()
