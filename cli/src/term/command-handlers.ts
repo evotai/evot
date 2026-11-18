@@ -341,21 +341,13 @@ export async function handleUpdateCommand(
 export async function handlePrivacyCommand(ctx: ReplCommandContext, args: string): Promise<void> {
   const { runPrivacyCommand, USAGE } = await import('../commands/privacy.js')
   const { privacyStatus, privacySave } = await import('../native/index.js')
-  const { buildPrivacyActionCard } = await import('../render/output.js')
-  const action = /^\s*term\b/.test(args)
+  const { buildPrivacyCommandCard } = await import('../render/output.js')
   try {
     const text = await runPrivacyCommand({ status: privacyStatus, save: privacySave }, args)
-    // A status read is a plain notice; an action is a card, titled with the
-    // command so what changed is on record.
-    if (action) {
-      const refused = text === USAGE || /already listed|no such/.test(text)
-      ctx.commitLines(buildPrivacyActionCard(args, text, refused ? 'error' : 'success'))
-    } else {
-      ctx.commitSystem('sys-privacy', text)
-    }
+    const refused = text === USAGE || /^\s*(that term is already listed|no such term)\s*$/.test(text)
+    ctx.commitLines(buildPrivacyCommandCard(args, text, refused ? 'error' : 'success'))
   } catch (err) {
-    if (action) ctx.commitLines(buildPrivacyActionCard(args, failureText('privacy failed', err), 'error'))
-    else ctx.commitSystem('sys-privacy-err', failureText('privacy failed', err))
+    ctx.commitLines(buildPrivacyCommandCard(args, failureText('privacy failed', err), 'error'))
   }
   ctx.requestRender()
 }

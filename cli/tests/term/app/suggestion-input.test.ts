@@ -52,6 +52,19 @@ test('interrupted turn ending in a user message still accepts Tab and cycles thr
   expect(h.input.handle({ type: 'right' })).toBe(false)
 })
 
+test('Right inserts the selected placeholder and clearing the draft restores it', async () => {
+  const h = harness('')
+  h.input.handle({ type: 'tab' })
+  h.requests[0]!.resolve({ candidates: ['Run tests', 'Review diff'], status: 'ready' })
+  await tick()
+  h.input.handle({ type: 'tab' }); h.input.handle({ type: 'right' })
+  expect(h.text()).toBe('Review diff')
+  expect(h.controller.text()).toBe('')
+  h.setEditor(createEditorState()); h.controller.reconcile()
+  expect(h.controller.text()).toBe('Review diff')
+  expect(h.requests).toHaveLength(1)
+})
+
 test('empty composer and draft-only new sessions start explicit requests and never silently ignore Tab', async () => {
   for (const draft of ['', 'who']) {
     const h = harness(draft)

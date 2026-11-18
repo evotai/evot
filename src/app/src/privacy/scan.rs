@@ -74,6 +74,11 @@ pub(super) struct Hit {
     pub action: Action,
     pub tag: String,
     pub len: usize,
+    /// Byte range in the original text, never written to the record.
+    pub start: usize,
+    pub end: usize,
+    /// Source line where a read result's match begins, when known.
+    pub line: Option<usize>,
     /// A safe label for `/privacy`: a variable's name, a file's name. Never
     /// a piece of the value.
     pub note: Option<String>,
@@ -84,17 +89,16 @@ pub(super) struct Hit {
 /// Where a found value sat in a request. `label` is taken from the masked
 /// request after the pass, so it can never hold a value: a bash command's
 /// description or head, a path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Origin {
+#[derive(Debug, Clone)]
+pub(super) struct Origin {
     /// `system prompt`, `tool description`, `user`, `assistant`,
     /// `thinking`, `Bash call`, `Bash result`.
     pub at: String,
     /// The tool call this belongs to (a call's arguments or its result), so
     /// the label can be filled in once the request is masked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    pub read_offset: Option<usize>,
 }
 
 /// What the packs and the user's terms find in `text`. `field` is the JSON
@@ -181,6 +185,9 @@ pub(super) fn try_apply<E>(
             confidence: span.confidence,
             action,
             len: value.chars().count(),
+            start: span.start,
+            end: span.end,
+            line: None,
             note: None,
             origin: None,
         });

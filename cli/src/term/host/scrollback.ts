@@ -1,4 +1,4 @@
-import { type OutputLine, buildPrivacyHappeningCard, buildUserMessage } from '../../render/output.js'
+import { type OutputLine, buildPrivacyNoticeCard, buildUserMessage } from '../../render/output.js'
 import { buildRunFooterLine } from '../../render/run-footer.js'
 import type { RunThinking } from '../../render/run-thinking.js'
 import type { PrivacyFeed } from '../app/privacy-feed.js'
@@ -38,7 +38,8 @@ export interface ScrollbackController {
 /** Commits finished lines to scrollback: user turns, system notices, run footers, status lines. */
 export function createScrollbackController(st: ReplState, deps: ScrollbackDeps): ScrollbackController {
   function commitPrivacyHappenings(): void {
-    for (const { notice, fresh } of deps.privacyFeed.poll(st.sessionId)) commitLines(buildPrivacyHappeningCard(notice, fresh))
+    const notices = deps.privacyFeed.poll(st.sessionId)
+    if (notices.length) commitLines(notices.flatMap(buildPrivacyNoticeCard))
   }
 
   function restoreLines(outputLines: OutputLine[], expandedOutputLines: OutputLine[] = outputLines) {

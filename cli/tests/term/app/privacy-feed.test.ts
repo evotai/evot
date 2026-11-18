@@ -3,7 +3,7 @@ import { beforeEach, expect, test } from 'bun:test'
 import type { PrivacyLive, PrivacyLiveNotice } from '../../../src/native/contracts/privacy.js'
 import { privacyLive as schema } from '../../../src/native/contracts/privacy.js'
 import { decodeResult } from '../../../src/native/contracts/results.js'
-import { buildPrivacyActionCard, buildPrivacyHappeningCard, resetIdCounter } from '../../../src/render/output.js'
+import { buildPrivacyCommandCard, buildPrivacyNoticeCard, resetIdCounter } from '../../../src/render/output.js'
 import { PrivacyFeed } from '../../../src/term/app/privacy-feed.js'
 
 beforeEach(() => resetIdCounter())
@@ -37,15 +37,15 @@ test('a value is announced the first time it is masked, not on every request', (
   n.push(notice({ tags: ['SECRET_a', 'PHONE_b'], kinds: ['PHONE', 'SECRET'], reason: 'masked SECRET ×27 · PHONE ×1' }))
   const first = feed.poll('s1')
   expect(first).toHaveLength(1)
-  expect(first[0]!.fresh).toBe(2)
+  expect(first[0]!.tags).toEqual(['SECRET_a', 'PHONE_b'])
   // The next turn masks the same history again: silence.
   n.push(notice({ tags: ['SECRET_a', 'PHONE_b'] }))
   expect(feed.poll('s1')).toEqual([])
-  // The user types a new password: one card, one new value.
+  // The user types a new password: one notice for that record.
   n.push(notice({ tags: ['SECRET_a', 'PHONE_b', 'SECRET_c'], reason: 'masked SECRET ×28 · PHONE ×1' }))
   const again = feed.poll('s1')
   expect(again).toHaveLength(1)
-  expect(again[0]!.fresh).toBe(1)
+  expect(again[0]!.tags).toContain('SECRET_c')
   // Polling twice does not replay.
   expect(feed.poll('s1')).toEqual([])
 })
@@ -58,11 +58,11 @@ test('blocked records, other sessions and session-less records are left to their
   n.push(notice({ session: null, tags: ['KEY_w'] }))
   n.push(notice({ tags: ['KEY_x'] }))
   const out = feed.poll('s1')
-  expect(out.map(h => h.notice.tags)).toEqual([['KEY_x']])
+  expect(out.map(h => h.tags)).toEqual([['KEY_x']])
   // A forgotten session sees its values as new again.
   feed.forget('s1')
   n.push(notice({ tags: ['KEY_x'] }))
-  expect(feed.poll('s1')[0]!.fresh).toBe(1)
+  expect(feed.poll('s1').map(h => h.tags)).toEqual([['KEY_x']])
 })
 
 test('an addon without the live feed is silence, not a crash in the event loop', () => {
@@ -70,27 +70,24 @@ test('an addon without the live feed is silence, not a crash in the event loop',
   expect(feed.poll('s1')).toEqual([])
 })
 
-test('the card says what happened, how many values are new, and where to look', () => {
-  const masked = buildPrivacyHappeningCard({ target: 'llm', reason: 'masked SECRET ×1' }, 1)
-  expect(masked.map(l => l.text)).toEqual([
-    '⊘ privacy  masked request',
-    '  ✓ · masked SECRET ×1 · 1 value first seen now',
-    '  The model saw placeholders; the reply was restored · /privacy shows the record',
-  ])
+test('non-blocking notices are compact cards without implying delivery', () => {
+  const masked = buildPrivacyNoticeCard(notice({ origins: [{ at: 'read result', label: 'mask.rs', n: 1, lines: [307] }] }))
+  expect(masked.map(line => line.text)).toEqual(['⊘ privacy  model request', '  masked SECRET ×1 · /privacy for details'])
   expect(masked[0]!.toolCard).toEqual({ state: 'success', first: true, last: false, tone: 'notice' })
-  expect(masked[2]!.toolCard).toEqual({ state: 'success', first: false, last: true, tone: 'notice' })
-  expect(buildPrivacyHappeningCard({ target: 'share', reason: 'masked EMAIL ×2' }, 2)[1]!.text).toBe('  ✓ · masked EMAIL ×2 · 2 values first seen now')
+  expect(masked[1]!.toolCard).toEqual({ state: 'success', first: false, last: true, tone: 'notice' })
+  expect(buildPrivacyNoticeCard({ target: 'share', reason: 'masked EMAIL ×2' })[0]!.text).toBe('⊘ privacy  share')
+  expect(buildPrivacyNoticeCard({ target: 'llm', reason: 'warned (not masked) SECRET ×1' })[1]!.text).toBe('  warned (not masked) SECRET ×1 · /privacy for details')
 })
 
 test('a /privacy action renders as a card titled with the command', () => {
-  const lines = buildPrivacyActionCard(' term  Project Nightjar', '  term added: Project Nightjar\n  model requests masked · 1 term of yours · uploads scrubbed')
+  const lines = buildPrivacyCommandCard(' term  Project Nightjar', '  term added: Project Nightjar\n  model requests masked · 1 term of yours · uploads scrubbed')
   expect(lines.map(line => line.text)).toEqual([
     '⊘ privacy  term Project Nightjar',
     '  term added: Project Nightjar',
     '  model requests masked · 1 term of yours · uploads scrubbed',
   ])
   expect(lines[0]!.toolCard).toEqual({ state: 'success', first: true, last: false, tone: 'notice' })
-  const refused = buildPrivacyActionCard('term rm x', '  no such term', 'error')
+  const refused = buildPrivacyCommandCard('term rm x', '  no such term', 'error')
   expect(refused[1]!.kind).toBe('error')
 })
 
@@ -109,6 +106,7 @@ test('a block is kept for its error card, per session, and does not earn a happe
   const feed = new PrivacyFeed(n.live)
   n.push(notice({ blocked: true, kinds: ['PRIVATE_KEY'], reason: 'contains PRIVATE_KEY ×1', origins: [{ at: 'Bash result', label: 'cat key', n: 1 }] }))
   n.push(notice({ session: 's2', blocked: true, reason: 'contains API_KEY ×1' }))
+  n.push(notice({ session: 's1', target: 'sync', blocked: true, reason: 'contains PASSWORD ×1' }))
   expect(feed.poll('s1')).toEqual([])
   // Asked without a poll in between: the block raised a moment ago still counts.
   expect(feed.lastBlocked('s1')?.reason).toBe('contains PRIVATE_KEY ×1')
@@ -126,5 +124,5 @@ test('seeded tags from earlier records are not reported as first seen after resu
   n.push(notice({ tags: ['SECRET_a', 'SECRET_b'] }))
   expect(feed.poll('s1')).toEqual([])
   n.push(notice({ tags: ['SECRET_a', 'SECRET_c'] }))
-  expect(feed.poll('s1').map(h => h.fresh)).toEqual([1])
+  expect(feed.poll('s1').map(h => h.tags)).toEqual([['SECRET_a', 'SECRET_c']])
 })

@@ -1,14 +1,9 @@
 import type { PrivacyLive, PrivacyLiveNotice } from '../../native/contracts/privacy.js'
 
-/** A record worth a card now, and how many of its values this session had
- * not seen masked before. */
-export interface PrivacyHappening { notice: PrivacyLiveNotice; fresh: number }
-
 /** What privacy did during this process, as it happens, for the transcript.
  *
- * Every model request masks the whole history again, so a card per record
- * would repeat itself each turn. A record earns a card only when it masks a
- * value this session has not had masked before (a new placeholder tag).
+ * Every model request scans the whole history again. Only publish a notice
+ * when it contains a tag this session has not seen before.
  * Blocked records surface as error cards where they stopped; the feed keeps
  * the latest one so that card can say where the values sat. */
 export class PrivacyFeed {
@@ -19,7 +14,7 @@ export class PrivacyFeed {
   constructor(private readonly live: (after: number) => PrivacyLive) {}
 
   /** New happenings for `session` since the last poll, oldest first. */
-  poll(session: string | null): PrivacyHappening[] {
+  poll(session: string | null): PrivacyLiveNotice[] {
     let batch: PrivacyLive
     try {
       batch = this.live(this.cursor)
@@ -27,23 +22,21 @@ export class PrivacyFeed {
       return []
     }
     this.cursor = Math.max(this.cursor, batch.cursor)
-    const out: PrivacyHappening[] = []
+    const out: PrivacyLiveNotice[] = []
     for (const notice of batch.notices) {
       // A record without a session (a legacy caller's request) belongs to no
       // open session: another TUI on the same addon must not show it as its own.
       if (session && notice.session !== session) continue
       const key = notice.session ?? session ?? ''
-      if (notice.blocked) { this.blocked.set(key, notice); continue }
+      if (notice.blocked) {
+        if (notice.target === 'llm') this.blocked.set(key, notice)
+        continue
+      }
       let tags = this.seen.get(key)
       if (!tags) { tags = new Set(); this.seen.set(key, tags) }
-      let fresh = 0
-      for (const tag of notice.tags) {
-        if (tags.has(tag)) continue
-        tags.add(tag)
-        fresh++
-      }
-      if (fresh === 0) continue
-      out.push({ notice, fresh })
+      const before = tags.size
+      for (const tag of notice.tags) tags.add(tag)
+      if (tags.size > before) out.push(notice)
     }
     return out
   }

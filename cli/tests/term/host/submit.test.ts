@@ -31,12 +31,13 @@ function harness(text = 'B') {
     manualCompaction: { active: false },
     queueEdit: { editingEntry: () => null },
     queueLifecycle: { reconcile: () => {}, dispatchNext: () => { calls.push('dispatch') } },
-    renderer: { requestRender: () => {} }, suggestions: { cancel: () => {} },
+    renderer: { requestRender: () => {} }, suggestions: { cancel: () => { calls.push('cancel suggestion') } },
+    screenLog: { filePath: null },
     scrollback: { commitSystem: (_id: string, message: string) => { notices.push(message) }, commitUserMessage: () => {} },
     runCtl: { runQuery: (text: string, contentJson?: string) => { queries.push({ text, contentJson }) } },
     taskSession: { followUpExtension: () => undefined }, computeSession: { followUpExtension: () => undefined },
     backgroundTerminals: { reclaimTurnForMessage: () => { calls.push('reclaim') } },
-    slashCtl: { runLogQuery: (_fork: ReplState['logMode'], text: string, contentJson?: string) => { logQueries.push({ text, contentJson }) } },
+    slashCtl: { handleSlashInput: (text: string) => { calls.push(text) }, runLogQuery: (_fork: ReplState['logMode'], text: string, contentJson?: string) => { logQueries.push({ text, contentJson }) } },
   } as unknown as SubmitDeps
   return { st, native, pending, images, history, notices, calls, blocks, logQueries, queries, ctl: createSubmitController(st, deps), ready: () => { imageReady = true } }
 }
@@ -108,6 +109,24 @@ for (const kind of ['text', 'mixed-image', 'image-only']) {
     expect(h.pending.state.entries).toHaveLength(1)
   })
 }
+
+for (const busy of [false, true]) {
+  test.each(['/log', '/version', '/_mem', '/help'])('inspection command %s preserves suggestions (busy=' + busy + ')', text => {
+    const h = harness(text)
+    h.st.isLoading = busy
+    if (busy) h.ctl.handleLoadingEnter()
+    else h.ctl.submitDraft()
+    expect(getEditorText(h.st.editor)).toBe('')
+    expect(h.calls).not.toContain('cancel suggestion')
+  })
+}
+
+test.each(['/log analyze this', '/new', 'next question'])('context-changing input still clears suggestions: %s', text => {
+  const h = harness(text)
+  h.st.isLoading = false
+  h.ctl.submitDraft()
+  expect(h.calls).toContain('cancel suggestion')
+})
 
 test('idle Enter in log mode preserves structured attachments like queued follow-ups', () => {
   const h = harness('inspect [Image #1]')

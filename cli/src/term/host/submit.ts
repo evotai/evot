@@ -1,4 +1,4 @@
-import { isSlashCommand } from '../../commands/index.js'
+import { isRunSafeCommand, isSlashCommand } from '../../commands/index.js'
 import { promptInput } from '../../commands/skill/invocation.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { TaskSession } from '../../features/task/session.js'
@@ -138,7 +138,6 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
   }
 
   function handleLoadingEnter() {
-    deps.suggestions.cancel()
     const displayText = deps.getDisplayText()
     const historyText = deps.getHistoryText()
     const imageResult = deps.buildImageContentBlocks()
@@ -153,6 +152,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       compacting: deps.manualCompaction.active, editingQueue: deps.queueEdit.editingEntry() !== null,
       hasRun: st.isLoading,
     })
+    if (action !== 'show_log' && action !== 'run_readonly_command') deps.suggestions.cancel()
     if (deps.manualCompaction.active) {
       if (action === 'blocked_compaction_command') {
         // Not silently swallowed: commands cannot run mid-compaction and are
@@ -229,11 +229,14 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       : deps.getExpandedText()
     // Allow image-only or text-only submissions
     if (!expandedText && !imageBlocks) return
-    deps.suggestions.cancel()
+    const input = expandedText || submitRaw
+    const modelText = promptInput(input, st.skillEntries)
+    // Read-only commands temporarily hide the empty-composer batch; clearing
+    // the command draft reveals the same selection without another request.
+    if (modelText !== null || (input.trim() !== '/log' && !isRunSafeCommand(input))) deps.suggestions.cancel()
     if (historyText) deps.saveInputHistory(historyText)
     deps.clearAll()
     deps.renderer.requestRender()
-    const modelText = promptInput(expandedText || submitRaw, st.skillEntries)
     if (imageBlocks && modelText !== null && modelText !== expandedText) {
       for (const block of imageBlocks) if (block.type === 'text') block.text = promptInput(block.text, st.skillEntries) ?? block.text
     }

@@ -15,9 +15,10 @@ export interface PrivacyKindStats { kind: string; values: number; verified?: num
 /** A kind the rule packs define; the CLI holds no list of its own. */
 export interface PrivacyKind { kind: string; category: 'secret' | 'custom' }
 export interface PrivacyPack { id: string; rules: number; source?: string | null; license?: string | null }
+export interface PrivacyBlockedFinding { kind: string; rule: string; n: number; lines?: number[] }
 /** One place in a request that held values. `label` is a command's description
  * or head, a path: taken after masking, never a piece of a value. */
-export interface PrivacyOrigin { at: string; label?: string | null; n: number }
+export interface PrivacyOrigin { at: string; label?: string | null; n: number; lines?: number[]; blocks?: PrivacyBlockedFinding[] }
 export interface PrivacyRuleCount { rule: string; values: number }
 export interface PrivacyEvent {
   time: string; target: string; session?: string | null; blocked: boolean; kinds: string[]; reason: string
@@ -42,7 +43,9 @@ export const privacySettings = object({
   actions: json, terms: array(text), terms_any_case: boolean, allow: array(text),
 }) as unknown as Schema<PrivacySettings>
 
-const origin = object({ at: text, label: optional(nullable(text)), n: uint })
+const sourceLines = optional(array(uint))
+const blockedFinding = object({ kind: text, rule: text, n: uint, lines: sourceLines })
+const origin = object({ at: text, label: optional(nullable(text)), n: uint, lines: sourceLines, blocks: optional(array(blockedFinding)) })
 const ruleCount = object({ rule: text, values: uint })
 const eventFields = {
   time: text, target: oneOf('llm', 'share', 'sync', 'task', 'task_report', 'delivery'), session: optional(nullable(text)),

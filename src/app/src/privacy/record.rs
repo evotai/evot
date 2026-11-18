@@ -23,6 +23,7 @@ use crate::base::error::Result;
 pub const RECORD_SCHEMA_VERSION: u32 = 1;
 const KEEP_DAYS: i64 = 30;
 const RECENT: usize = 10;
+const MAX_ORIGIN_LINES: usize = 16;
 
 /// Where the data was going.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -70,6 +71,64 @@ pub struct OriginRecord {
     pub label: Option<String>,
     /// Places (occurrences), not distinct values.
     pub n: usize,
+    /// The first distinct source lines, when a text read could be located.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<usize>,
+    /// Only findings that actually stopped the request, grouped by kind and rule.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<BlockedFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockedFinding {
+    pub kind: String,
+    pub rule: String,
+    pub n: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<usize>,
+}
+
+impl OriginRecord {
+    fn add(&mut self, hit: &Hit) {
+        self.n += 1;
+        add_line(&mut self.lines, hit.line);
+        if hit.action == Action::Block {
+            let rule = rule_name(hit.rule.as_deref(), hit.by);
+            if let Some(block) = self
+                .blocks
+                .iter_mut()
+                .find(|b| b.kind == hit.kind && b.rule == rule)
+            {
+                block.n += 1;
+                add_line(&mut block.lines, hit.line);
+            } else {
+                self.blocks.push(BlockedFinding {
+                    kind: hit.kind.clone(),
+                    rule,
+                    n: 1,
+                    lines: hit.line.into_iter().collect(),
+                });
+            }
+        }
+    }
+}
+
+fn add_line(lines: &mut Vec<usize>, line: Option<usize>) {
+    if let Some(line) = line {
+        if let Err(index) = lines.binary_search(&line) {
+            if index < MAX_ORIGIN_LINES {
+                lines.insert(index, line);
+                lines.truncate(MAX_ORIGIN_LINES);
+            }
+        }
+    }
+}
+
+fn rule_name(rule: Option<&str>, by: Finder) -> String {
+    match rule {
+        Some(rule) => rule.to_string(),
+        None => format!("{by:?}").to_lowercase(),
+    }
 }
 
 /// Distinct values one rule found.
@@ -126,12 +185,18 @@ impl Record {
                     .iter_mut()
                     .find(|o| o.at == origin.at && o.label == origin.label)
                 {
-                    Some(place) => place.n += 1,
-                    None => origins.push(OriginRecord {
-                        at: origin.at.clone(),
-                        label: origin.label.clone(),
-                        n: 1,
-                    }),
+                    Some(place) => place.add(hit),
+                    None => {
+                        let mut place = OriginRecord {
+                            at: origin.at.clone(),
+                            label: origin.label.clone(),
+                            n: 0,
+                            lines: Vec::new(),
+                            blocks: Vec::new(),
+                        };
+                        place.add(hit);
+                        origins.push(place);
+                    }
                 }
             }
         }
@@ -164,11 +229,7 @@ impl Record {
         };
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();
         for v in values {
-            let rule = match (&v.rule, v.by) {
-                (Some(rule), _) => rule.clone(),
-                (None, Finder::Known) => "known".to_string(),
-                (None, by) => format!("{by:?}").to_lowercase(),
-            };
+            let rule = rule_name(v.rule.as_deref(), v.by);
             *counts.entry(rule).or_default() += 1;
         }
         let mut counts: Vec<RuleCount> = counts
@@ -200,35 +261,33 @@ impl Record {
         kinds.into_iter().map(str::to_string).collect()
     }
 
-    /// What was found, in one clause the user reads: `masked API_KEY ×2 ·
-    /// EMAIL ×1`, or `contains …` when it was stopped.
+    /// What was done: warnings are not reported as masks.
     pub fn reason(&self) -> String {
-        let values: Vec<&ValueRecord> = self
-            .values
-            .iter()
-            .filter(|v| v.action == Action::Block)
-            .collect();
-        let values = if values.is_empty() {
-            self.values.iter().collect()
+        let actions: &[(Action, &str)] = if self.blocked {
+            &[(Action::Block, "contains")]
         } else {
-            values
+            &[
+                (Action::Mask, "masked"),
+                (Action::Warn, "warned (not masked)"),
+            ]
         };
-        // `API_KEY ×2 · EMAIL ×1`, most places first.
-        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-        for v in &values {
-            *counts.entry(v.kind.as_str()).or_default() += v.n;
-        }
-        let mut counts: Vec<(&str, usize)> = counts.into_iter().collect();
-        counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
-        let kinds: Vec<String> = counts
+        actions
             .iter()
-            .map(|(kind, n)| format!("{kind} ×{n}"))
-            .collect();
-        format!(
-            "{} {}",
-            if self.blocked { "contains" } else { "masked" },
-            kinds.join(" · ")
-        )
+            .filter_map(|&(action, verb)| {
+                let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+                for value in self.values.iter().filter(|value| value.action == action) {
+                    *counts.entry(value.kind.as_str()).or_default() += value.n;
+                }
+                let mut counts: Vec<_> = counts.into_iter().collect();
+                counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+                let kinds: Vec<_> = counts
+                    .iter()
+                    .map(|(kind, n)| format!("{kind} ×{n}"))
+                    .collect();
+                (!kinds.is_empty()).then(|| format!("{verb} {}", kinds.join(" · ")))
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 }
 

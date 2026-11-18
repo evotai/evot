@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "time": "2026-11-18T08:35:58+08:00",
+  "target": "llm",
+  "session": null,
+  "provider": null,
+  "model": null,
+  "blocked": false,
+  "values": [
+    { "kind": "PASSWORD", "by": "rule", "rule": "contexts.url-password", "confidence": "high", "action": "mask", "tag": "{{PASSWORD_aaaaaaaa}}", "len": 8, "n": 2 }
+  ],
+  "origins": [
+    { "at": "read result", "label": "src/mask.rs", "n": 2 }
+  ]
+}

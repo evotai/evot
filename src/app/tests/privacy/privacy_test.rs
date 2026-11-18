@@ -412,6 +412,10 @@ fn actions_terms_and_allow_list() -> TestResult {
         "{GH_TOKEN} {AWS_KEY} project NIGHTJAR"
     ))]);
     let report = masker.mask_request(&mut request)?;
+    assert_eq!(
+        report.record(Target::Llm).reason(),
+        "masked TERM ×1; warned (not masked) TOKEN ×1"
+    );
     let text = first_text(&request.messages[0]);
     assert!(text.contains(GH_TOKEN), "warn sends as written");
     assert!(text.contains(AWS_KEY), "allowed");
@@ -856,8 +860,14 @@ fn record_contract() -> TestResult {
     // Old lines have no origins; events built from them say so, not `null`.
     assert!(written.get("origins").is_none() && written.get("model").is_none());
 
+    let old: evot::privacy::Record =
+        serde_json::from_str(include_str!("../fixtures/privacy/record-v1.json"))?;
+    assert_eq!(old.origins[0].n, 2);
+    assert!(old.origins[0].lines.is_empty() && old.origins[0].blocks.is_empty());
+    assert_eq!(old.reason(), "masked PASSWORD ×2");
+
     // A record written now still reads as the v1 shape a strict older reader
-    // knows, with `origins` an extra it ignores.
+    // knows. v1 origin entries tolerated additive metadata.
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct LegacyRecord {
@@ -870,21 +880,163 @@ fn record_contract() -> TestResult {
         blocked: bool,
         values: Vec<evot::privacy::ValueRecord>,
         #[serde(default)]
-        origins: serde_json::Value,
+        origins: Vec<LegacyOrigin>,
     }
-    let masker = masker()?;
-    let mut config = self::config(vec![user(&format!("gh {GH_TOKEN}"))]);
+    #[derive(serde::Deserialize)]
+    struct LegacyOrigin {
+        at: String,
+        label: Option<String>,
+        n: usize,
+    }
+    let mut settings = PrivacySettings::default();
+    settings.actions.insert("TOKEN".into(), Action::Block);
+    let masker = masker_with(settings)?;
+    let mut config = self::config(vec![
+        read_call("one", json!({"path": "src/mask.rs", "offset": 940})),
+        tool_result("one", &format!("\ngh {GH_TOKEN}")),
+    ]);
     let record = masker.mask_request(&mut config)?.record(Target::Llm);
     let line = serde_json::to_string(&record)?;
     let legacy: LegacyRecord = serde_json::from_str(&line)?;
     assert_eq!(
         (legacy.v, legacy.target, legacy.blocked),
-        (1, Target::Llm, false)
+        (1, Target::Llm, true)
     );
     assert_eq!(legacy.values.len(), 1);
     assert!(legacy.session.is_none() && legacy.provider.is_none() && legacy.model.is_none());
     assert_eq!(legacy.time, record.time);
-    assert_eq!(legacy.origins[0]["at"], json!("user"));
+    assert_eq!(legacy.origins[0].at, "read result");
+    assert_eq!(legacy.origins[0].label.as_deref(), Some("src/mask.rs"));
+    assert_eq!(legacy.origins[0].n, 1);
+    assert_eq!(record.origins[0].lines, [941]);
+    assert_eq!(record.origins[0].blocks[0].lines, [941]);
+    assert!(line.contains("\"blocks\":["));
+    assert!(!line.contains(GH_TOKEN));
+    Ok(())
+}
+
+fn read_call(id: &str, arguments: serde_json::Value) -> Message {
+    assistant(vec![Content::ToolCall {
+        id: id.into(),
+        name: "read".into(),
+        arguments,
+        metadata: None,
+    }])
+}
+
+#[test]
+fn records_source_lines_across_partial_reads_without_recording_values() -> TestResult {
+    let masker = masker_with(PrivacySettings {
+        terms: vec!["continue".into()],
+        ..PrivacySettings::default()
+    })?;
+    let mut request = config(vec![
+        read_call("a", json!({"path": "parser/mask.rs", "offset": 940})),
+        tool_result("a", &format!("\n中文 {GH_TOKEN} {API_KEY}\n\n[2 more lines in file. Use offset=942 to continue.]")),
+        read_call("b", json!({"path": "parser/mask.rs"})),
+        tool_result("b", &format!("{API_KEY}\n\n{GH_TOKEN}")),
+    ]);
+    let record = masker.mask_request(&mut request)?.record(Target::Llm);
+    assert_eq!(record.origins.len(), 1);
+    let origin = &record.origins[0];
+    assert_eq!(origin.label.as_deref(), Some("parser/mask.rs"));
+    assert_eq!(
+        origin.n, 5,
+        "four credentials and a match in the tool footer"
+    );
+    assert_eq!(origin.lines, [1, 3, 941]);
+    let sent = sent(&request)?;
+    let written = serde_json::to_string(&record)?;
+    for value in [GH_TOKEN, API_KEY, "continue"] {
+        assert!(!sent.contains(value) && !written.contains(value));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn blocked_notice_links_each_password_rule_to_only_its_location() -> TestResult {
+    let url_password = ["fixture", "url"].concat();
+    let config_password = ["fixture", "config"].concat();
+    let mut settings = PrivacySettings::default();
+    settings.actions.insert("PASSWORD".into(), Action::Block);
+    let echo = Arc::new(Echo {
+        seen: Mutex::new(None),
+    });
+    let provider = MaskingProvider::with_masker(echo.clone(), Arc::new(masker_with(settings)?));
+    let mut request = config(vec![
+        read_call("db", json!({"path": "config/db.env", "offset": 10})),
+        tool_result("db", &format!("postgres://app:{url_password}@db.example/app\nDB_PASSWORD={config_password}\n{API_KEY}")),
+        read_call("sensitive-label", json!({"path": format!("src/{config_password}.rs")})),
+        tool_result("sensitive-label", &format!("DB_PASSWORD={config_password}")),
+    ]);
+    request.prompt_cache_key = Some("blocked-password-test".into());
+    let (before, _) = evot::privacy::live_notices(0);
+    let (tx, _rx) = mpsc::channel(16);
+    let result = provider
+        .stream_bounded(request, tx, CancellationToken::new())
+        .await;
+    assert!(matches!(result, Err(ProviderError::InvalidRequest(_))));
+    assert!(echo.seen.lock().is_none());
+    let (_, notices) = evot::privacy::live_notices(before);
+    let notice = notices
+        .iter()
+        .find(|n| n.event.session.as_deref() == Some("blocked-password-test"))
+        .ok_or("missing blocked notice")?;
+    assert_eq!(notice.event.reason, "contains PASSWORD ×3");
+    let origin = &notice.event.origins[0];
+    assert_eq!(origin.label.as_deref(), Some("config/db.env"));
+    assert_eq!(origin.lines, [10, 11, 12]);
+    assert_eq!(
+        serde_json::to_value(&origin.blocks)?,
+        json!([
+            {"kind": "PASSWORD", "rule": "contexts.url-password", "n": 1, "lines": [10]},
+            {"kind": "PASSWORD", "rule": "contexts.password-assignment", "n": 1, "lines": [11]}
+        ])
+    );
+    assert!(notice.event.origins[1].label.is_none());
+    let written = serde_json::to_string(notice)?;
+    for value in [url_password.as_str(), config_password.as_str(), API_KEY] {
+        assert!(!written.contains(value));
+    }
+    Ok(())
+}
+
+#[test]
+fn omits_line_guesses_for_unlocatable_reads() -> TestResult {
+    let masker = masker()?;
+    let mut failed = tool_result("failed", API_KEY);
+    if let Message::ToolResult { is_error, .. } = &mut failed {
+        *is_error = true;
+    }
+    let mut request = config(vec![
+        tool_result("missing-call", GH_TOKEN),
+        read_call("failed", json!({"path": "failed"})),
+        failed,
+        read_call("spilled", json!({"path": "spilled", "offset": 10})),
+        tool_result("spilled", &format!("Tool output was too large (999 bytes) and was saved to:\n/path\n\nPreview:\n{GH_TOKEN}")),
+        read_call("truncated", json!({"path": "truncated", "offset": 10})),
+        tool_result("truncated", &format!("header\n\n... [500 bytes truncated] ...\n\n{GH_TOKEN}")),
+    ]);
+    let record = masker.mask_request(&mut request)?.record(Target::Llm);
+    assert_eq!(record.origins.len(), 4);
+    assert!(record.origins.iter().all(|origin| origin.lines.is_empty()));
+    let sent = sent(&request)?;
+    assert!(!sent.contains(GH_TOKEN) && !sent.contains(API_KEY));
+    Ok(())
+}
+
+#[test]
+fn caps_recorded_line_numbers_without_capping_hits() -> TestResult {
+    let masker = masker()?;
+    let mut request = config(vec![
+        read_call("high", json!({"path": "large.rs", "offset": 100})),
+        tool_result("high", &format!("{GH_TOKEN}\n").repeat(20)),
+        read_call("low", json!({"path": "large.rs", "offset": 2})),
+        tool_result("low", &format!("{GH_TOKEN}\n").repeat(20)),
+    ]);
+    let record = masker.mask_request(&mut request)?.record(Target::Llm);
+    assert_eq!(record.origins[0].n, 40);
+    assert_eq!(record.origins[0].lines, (2..18).collect::<Vec<_>>());
     Ok(())
 }
 

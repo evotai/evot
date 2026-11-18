@@ -1,6 +1,8 @@
 /** Privacy stops, read back out of error text. The wording is owned by
  * `src/app/src/privacy/notice.rs` and pinned by tests on both sides; this
- * module is the only place that parses it. No TUI or native dependency. */
+ * module is the only place that parses it. No TUI or native runtime dependency. */
+
+import type { PrivacyOrigin, PrivacyRuleCount } from '../native/contracts/privacy.js'
 
 export type PrivacyTarget = 'request' | 'share' | 'sync' | 'task' | 'task report' | 'delivery'
 
@@ -33,8 +35,8 @@ export interface PrivacyDetail {
   model?: string | null
   /** `KIND ×n` clauses, most first, as `reason` already words them. */
   reason?: string
-  rules?: { rule: string; values: number }[]
-  origins?: { at: string; label?: string | null; n: number }[]
+  rules?: PrivacyRuleCount[]
+  origins?: PrivacyOrigin[]
 }
 
 const SHOWN = 3
@@ -51,12 +53,46 @@ export function privacyOriginsRow(detail: PrivacyDetail | undefined): string | n
   const origins = detail?.origins ?? []
   if (origins.length === 0) return null
   const one = origins.length === 1
-  const parts = origins.slice(0, SHOWN).map(origin => {
-    const label = origin.label ? ` ${JSON.stringify(origin.label)}` : ''
-    return `${origin.at}${label}${one ? '' : ` ×${origin.n}`}`
-  })
+  const parts = origins.slice(0, SHOWN).map(origin => `${originLocation(origin, origin.lines)}${one ? '' : ` ×${origin.n}`}`)
   if (origins.length > SHOWN) parts.push(`+${origins.length - SHOWN} more`)
   return `in: ${parts.join(' · ')}`
+}
+
+function originLocation(origin: PrivacyOrigin, lines: number[] = []): string {
+  const label = origin.label ? ` ${JSON.stringify(origin.label)}` : ''
+  const location = lines.length ? ` (${lines.length === 1 ? 'line' : 'lines'} ${lines.join(', ')})` : ''
+  return `${origin.at}${label}${location}`
+}
+
+const RULE_DESCRIPTION: ReadonlyMap<string, string> = new Map([
+  ['contexts.url-password', 'Password embedded in a URL or connection string'],
+  ['contexts.password-assignment', 'Password in a variable, config entry, or command flag'],
+  ['contexts.password-field', 'Password in a password field'],
+  ['contexts.curl-user', 'Password supplied to curl via -u or --user'],
+  ['contexts.cjk-password', 'Password written inline next to a password label'],
+  ['contexts.credential-assignment', 'Credential in a key, token, or secret assignment'],
+  ['contexts.credential-field', 'Credential in a key, token, or secret field'],
+  ['contexts.authorization', 'Credential in an Authorization header'],
+  ['formats.private-key', 'Private key block'],
+  ['secrets.ssh-private-key', 'SSH private key block'],
+  ['formats.github-classic', 'GitHub personal access token'],
+  ['formats.github-fine-grained', 'GitHub fine-grained personal access token'],
+  ['formats.aws-access-key', 'AWS access key ID'],
+  ['formats.jwt', 'JSON Web Token (JWT)'],
+  ['term', 'A term you configured Privacy to protect'],
+  ['known', 'A previously recognized protected value'],
+])
+
+/** Only lines associated with the specific rule and finding that stopped the request. */
+export function privacyBlockedRows(detail: PrivacyDetail | undefined): string[] {
+  const blocked = (detail?.origins ?? []).flatMap(origin => (origin.blocks ?? []).map(finding => ({ origin, finding })))
+  blocked.sort((a, b) => b.finding.n - a.finding.n)
+  const rows = blocked.slice(0, SHOWN).map(({ origin, finding }) => {
+    const description = RULE_DESCRIPTION.get(finding.rule) ?? `${finding.kind} (rule: ${finding.rule})`
+    return `${description}${finding.n > 1 ? ` ×${finding.n}` : ''} — ${originLocation(origin, finding.lines)}`
+  })
+  if (blocked.length > SHOWN) rows.push(`+${blocked.length - SHOWN} more source groups`)
+  return rows
 }
 
 /** `by rule: secrets.ssh-private-key · core.file-assignment 87 · known 9`. */
@@ -87,12 +123,23 @@ export function privacyCard(stop: PrivacyStop, detail?: PrivacyDetail): PrivacyC
     // `contains PRIVATE_KEY ×1`: the record's clause when there is one, else
     // the kinds the error named.
     const contains = detail?.reason && detail.reason.startsWith('contains') ? detail.reason : `contains ${stop.kinds.join(' · ')}`
-    const rows: PrivacyCardRow[] = [{ tone: 'status', text: `✗ · ${contains} · nothing was sent` }]
-    const origins = privacyOriginsRow(detail)
-    if (origins) rows.push({ tone: 'error', text: origins })
-    const rules = privacyRulesRow(detail)
-    if (rules) rows.push({ tone: 'error', text: rules })
-    rows.push({ tone: 'hint', text: `Still in this session's history, so the next request stops here too · /privacy shows the record · /new starts clean` })
+    const rows: PrivacyCardRow[] = [{ tone: 'status', text: `✗ · nothing was sent · ${contains}` }]
+    const blocked = privacyBlockedRows(detail)
+    for (const cause of blocked) rows.push({ tone: 'error', text: cause })
+    if (blocked.length === 0) {
+      // Older records do not tie individual rules to locations. Don't imply that
+      // a line matched a blocking rule when it may have been only masked.
+      const descriptions = [...new Set((detail?.rules ?? []).map(({ rule }) => RULE_DESCRIPTION.get(rule)).filter(Boolean))]
+      if (descriptions.length) rows.push({ tone: 'error', text: descriptions.join(' · ') })
+      const origins = privacyOriginsRow(detail)
+      if (origins) rows.push({ tone: 'hint', text: `Request findings (not all blocked) ${origins}` })
+      const rules = privacyRulesRow(detail)
+      if (rules) rows.push({ tone: 'hint', text: rules })
+    }
+    rows.push(
+      { tone: 'hint', text: 'Remove the value from its source before retrying.' },
+      { tone: 'hint', text: 'In chat history? Start a new session with /new. · /privacy for the record' },
+    )
     return { title: `blocked request${privacyDestination(detail)}`, rows }
   }
   const mask = stop.kinds.map(kind => `/privacy ${kind} mask`).join(' · ')

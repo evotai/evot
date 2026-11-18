@@ -125,12 +125,17 @@ describe('/privacy recent with record detail', () => {
     s.summary.recent = [
       { time: '2026-01-02T10:05:00+08:00', target: 'llm', blocked: true, kinds: ['PRIVATE_KEY'], reason: 'contains PRIVATE_KEY ×1',
         model: 'claude-opus-5.5', provider: 'evot-pro-anthropic', rules: [{ rule: 'secrets.ssh-private-key', values: 1 }],
-        origins: [{ at: 'Bash result', label: 'cat ~/.ssh/id_ed25519', n: 1 }] },
+        origins: [{ at: 'read result', label: 'parser/mask.rs', n: 2, lines: [307, 942],
+          blocks: [{ kind: 'PRIVATE_KEY', rule: 'secrets.ssh-private-key', n: 1, lines: [942] }] }] },
       { time: '2026-01-02T09:00:00+08:00', target: 'llm', blocked: false, kinds: ['EMAIL'], reason: 'masked EMAIL ×2' },
     ]
-    const lines = renderStatus(s, '2026-01-02').split('\n')
+    const decoded = privacyStatus.read(JSON.parse(JSON.stringify(s)), '$')
+    expect(decoded).toEqual(s)
+    const lines = renderStatus(decoded, '2026-01-02').split('\n')
     expect(lines[4]).toBe('  10:05  model request  ✗ contains PRIVATE_KEY ×1 → claude-opus-5.5')
-    expect(lines[5]).toBe('         ' + ' '.repeat('model request'.length) + '  in: Bash result "cat ~/.ssh/id_ed25519"')
-    expect(lines[6]).toBe('  09:00  model request  masked EMAIL ×2')
+    const indent = ' '.repeat(24)
+    expect(lines[5]).toBe(`${indent}SSH private key block — read result "parser/mask.rs" (line 942)`)
+    expect(lines[6]).toBe(`${indent}by rule: secrets.ssh-private-key`)
+    expect(lines[7]).toBe('  09:00  model request  masked EMAIL ×2')
   })
 })

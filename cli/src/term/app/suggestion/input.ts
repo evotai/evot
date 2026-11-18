@@ -41,7 +41,10 @@ export function createSuggestionInput(host: {
       return true
     }
     if (event.type === 'right' && host.controller.text()) {
-      host.replace(host.controller.take())
+      // Right edits the composer; it does not submit. Keep an empty-input
+      // batch underneath the inserted draft, just as for hand-typed text.
+      host.replace(host.controller.completing() ? host.controller.take() : host.controller.text())
+      host.controller.reconcile()
       host.changed()
       return true
     }

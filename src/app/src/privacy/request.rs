@@ -7,9 +7,11 @@
 //! Signed thinking (an Anthropic signature, a Responses item) is sent back
 //! byte for byte so its signature holds; if it holds a value the user's
 //! side sent, it is masked and sent as plain text without its signature.
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use evot_engine::provider::StreamConfig;
+use evot_engine::tools::FILE_UNCHANGED_STUB;
 use evot_engine::types::Content;
 use evot_engine::types::Message;
 use evot_engine::types::ThinkingMetadata;
@@ -49,7 +51,7 @@ pub(super) fn mask_config(
     vault: &Vault,
     config: &mut StreamConfig,
 ) -> Result<Vec<Hit>> {
-    let sensitive = sensitive_results(policy.engine.as_ref(), &config.messages);
+    let sources = ToolSources::index(policy.engine.as_ref(), &config.messages);
     // What this session found before: its history may have been compacted
     // away since. Other sessions' findings are not looked for.
     let session = vault.session(config.prompt_cache_key.as_deref());
@@ -62,7 +64,7 @@ pub(super) fn mask_config(
     // wherever it is, even in a text that names it without context.
     let mut found = Vec::new();
     let mut inbound: HashSet<String> = HashSet::new();
-    walk(config, &sensitive, &mut |text, slot, field, _| {
+    walk(config, &sources, &mut |text, slot, field, _| {
         let spans = scan::find(
             policy,
             text,
@@ -93,9 +95,10 @@ pub(super) fn mask_config(
         false
     });
     let mut hits = Vec::new();
+    let mut hidden_labels = HashSet::new();
     let mut found = found.into_iter();
     let mut error = None;
-    walk(config, &sensitive, &mut |text, slot, _, origin| {
+    walk(config, &sources, &mut |text, slot, _, origin| {
         if error.is_some() {
             return false;
         }
@@ -109,18 +112,22 @@ pub(super) fn mask_config(
         let put = |kind: &str, value: &str| vault.put(kind, value);
         let before = hits.len();
         match scan::try_apply(Mode::Llm, text, spans, policy, vault, &put, &mut hits) {
-            Ok(Some(masked)) => {
-                *text = masked;
-                for hit in &mut hits[before..] {
-                    hit.origin = Some(origin.clone());
+            Ok(masked) => {
+                annotate_hits(&mut hits[before..], text, origin);
+                for hit in &hits[before..] {
+                    if hit.action != Action::Mask {
+                        let value = &text[hit.start..hit.end];
+                        if !hidden_labels.contains(value) {
+                            hidden_labels.insert(value.to_string());
+                        }
+                    }
                 }
-                true
-            }
-            Ok(None) => {
-                for hit in &mut hits[before..] {
-                    hit.origin = Some(origin.clone());
+                if let Some(masked) = masked {
+                    *text = masked;
+                    true
+                } else {
+                    false
                 }
-                false
             }
             Err(failed) => {
                 error = Some(failed);
@@ -131,9 +138,9 @@ pub(super) fn mask_config(
     if let Some(error) = error {
         return Err(error);
     }
-    // Labels come from the request as it now is, placeholders included, so
-    // a command that carried the value names it by placeholder, not value.
-    let labels = call_labels(&config.messages);
+    // Labels come from the masked request. Drop labels containing a warned
+    // value or a blocked value that still appears bare in the label.
+    let labels = call_labels(&config.messages, &hidden_labels);
     for hit in &mut hits {
         if let Some(origin) = &mut hit.origin {
             if let Some(call) = &origin.call {
@@ -144,12 +151,55 @@ pub(super) fn mask_config(
     Ok(hits)
 }
 
+/// Report the line where a match begins, in the original read text. Hits
+/// arrive in byte order, so each part of the result is counted at most once.
+fn annotate_hits(hits: &mut [Hit], text: &str, origin: &Origin) {
+    if hits.is_empty() {
+        return;
+    }
+    let mut file = origin
+        .read_offset
+        .and_then(|offset| read_body_len(text).map(|end| (offset, end)));
+    let mut previous = 0;
+    for hit in hits {
+        if let Some((line, end)) = file {
+            if hit.start < end {
+                let newlines = text.as_bytes()[previous..hit.start]
+                    .iter()
+                    .filter(|&&b| b == b'\n')
+                    .count();
+                hit.line = line.checked_add(newlines);
+                file = hit.line.map(|number| (number, end));
+                previous = hit.start;
+            }
+        }
+        hit.origin = Some(origin.clone());
+    }
+}
+
+/// `read` starts at the requested offset, but its footer is not file text.
+/// Runner previews and head/tail truncation are not contiguous file text.
+fn read_body_len(text: &str) -> Option<usize> {
+    if text == FILE_UNCHANGED_STUB
+        || text.starts_with("Tool output was too large (")
+        || text.contains(" bytes truncated] ...\n\n")
+    {
+        return None;
+    }
+    let footer = text.rsplit_once("\n\n").filter(|(_, footer)| {
+        footer.starts_with('[')
+            && (footer.starts_with("[Showing lines ") || footer.contains(" more lines in file."))
+            && footer.ends_with(" to continue.]")
+    });
+    Some(footer.map_or(text.len(), |(body, _)| body.len()))
+}
+
 /// How many characters of a command or path the record keeps as a label.
 const LABEL_CHARS: usize = 60;
 
 /// A safe label per tool call, from its (already masked) arguments: a
 /// bash command's description, else its head; a path for file tools.
-fn call_labels(messages: &[Message]) -> std::collections::HashMap<String, String> {
+fn call_labels(messages: &[Message], hidden: &HashSet<String>) -> HashMap<String, String> {
     let mut labels = std::collections::HashMap::new();
     for message in messages {
         let Message::Assistant { content, .. } = message else {
@@ -173,6 +223,9 @@ fn call_labels(messages: &[Message]) -> std::collections::HashMap<String, String
             .filter(|text| !text.is_empty());
             if let Some(text) = text {
                 let first = text.lines().next().unwrap_or_default();
+                if hidden.iter().any(|value| first.contains(value.as_str())) {
+                    continue;
+                }
                 let first = if is_path(first) {
                     path_tail(first)
                 } else {
@@ -269,12 +322,13 @@ fn assignment_end(text: &str) -> Option<usize> {
 /// Visit every string a request sends that may carry user data. `f` gets
 /// the text, where it sits and its origin, and says whether it changed
 /// the text.
-fn walk(config: &mut StreamConfig, sensitive: &HashSet<String>, f: &mut Visit<'_>) {
+fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
     let inbound = Slot::Inbound { sensitive: false };
     let at = |at: &str| Origin {
         at: at.to_string(),
         call: None,
         label: None,
+        read_offset: None,
     };
     f(
         &mut config.system_prompt,
@@ -295,13 +349,23 @@ fn walk(config: &mut StreamConfig, sensitive: &HashSet<String>, f: &mut Visit<'_
                 content,
                 tool_call_id,
                 tool_name,
+                is_error,
                 ..
             } => {
-                let sensitive = sensitive.contains(tool_call_id);
+                let sensitive = sources.sensitive.contains(tool_call_id);
+                let read_offset = if !*is_error
+                    && tool_name.eq_ignore_ascii_case("read")
+                    && matches!(content.as_slice(), [Content::Text { .. }])
+                {
+                    sources.read_offsets.get(tool_call_id).copied()
+                } else {
+                    None
+                };
                 let origin = Origin {
                     at: format!("{tool_name} result"),
                     call: Some(tool_call_id.clone()),
                     label: None,
+                    read_offset,
                 };
                 (content, Slot::Inbound { sensitive }, origin)
             }
@@ -332,6 +396,7 @@ fn walk(config: &mut StreamConfig, sensitive: &HashSet<String>, f: &mut Visit<'_
                         at: format!("{name} call"),
                         call: Some(id.clone()),
                         label: None,
+                        read_offset: None,
                     };
                     walk_value(arguments, Slot::Model, None, &origin, f)
                 }
@@ -431,8 +496,35 @@ fn walk_value(
     }
 }
 
-/// Tool calls whose results are a sensitive source (by the packs' `sources`).
-fn sensitive_results(engine: &Engine, messages: &[Message]) -> HashSet<String> {
+/// What the tool call tells us about its result, before masking changes it.
+#[derive(Default)]
+struct ToolSources {
+    sensitive: HashSet<String>,
+    read_offsets: HashMap<String, usize>,
+}
+
+impl ToolSources {
+    fn index(engine: &Engine, messages: &[Message]) -> Self {
+        let mut sources = Self::default();
+        for (id, name, args) in tool_calls(messages) {
+            if engine.sensitive_call(name, args) {
+                sources.sensitive.insert(id.to_string());
+            }
+            if name.eq_ignore_ascii_case("read") {
+                let offset = match args.get("offset") {
+                    None => Some(1),
+                    Some(value) => value.as_u64().and_then(|value| usize::try_from(value).ok()),
+                };
+                if let Some(offset) = offset.filter(|&offset| offset > 0) {
+                    sources.read_offsets.insert(id.to_string(), offset);
+                }
+            }
+        }
+        sources
+    }
+}
+
+fn tool_calls(messages: &[Message]) -> impl Iterator<Item = (&str, &str, &Value)> {
     messages
         .iter()
         .filter_map(|message| match message {
@@ -446,10 +538,9 @@ fn sensitive_results(engine: &Engine, messages: &[Message]) -> HashSet<String> {
                 name,
                 arguments,
                 ..
-            } if engine.sensitive_call(name, arguments) => Some(id.clone()),
+            } => Some((id.as_str(), name.as_str(), arguments)),
             _ => None,
         })
-        .collect()
 }
 
 /// Put the values back in a reply. Signed thinking stays as the provider

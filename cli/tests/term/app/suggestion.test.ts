@@ -330,7 +330,36 @@ test('draft-bound completions do not reappear after editing back to their origin
   expect(h.controller.text()).toBe('')
 })
 
-test('typing cancels transport and late success cannot reappear', async () => {
+test('a pending empty-input request can finish underneath a draft and local menu', async () => {
+  const h = harness()
+  h.start(messages())
+  h.setDraft('/lo'); h.setEligible(false)
+  h.controller.reconcile(); h.controller.yieldToLocalInput()
+  h.requests[0]!.resolve(['Run the tests']); await tick()
+  expect(h.controller.text()).toBe('')
+  expect(h.controller.next()).toBe(false)
+  h.setDraft(''); h.setEligible(true); h.controller.reconcile()
+  expect(h.controller.text()).toBe('Run the tests')
+  expect(h.requests).toHaveLength(1)
+})
+
+test('answer arriving during typing samples once after clearing, unless invalidated', async () => {
+  for (const change of ['clear', 'session', 'cancel']) {
+    const h = harness()
+    h.setDraft('still typing'); h.start(messages()); h.controller.reconcile()
+    expect(h.requests).toHaveLength(0)
+    if (change === 'session') h.setKey('new session')
+    if (change === 'cancel') h.controller.cancel()
+    h.setDraft(''); h.controller.reconcile(); h.controller.reconcile()
+    expect(h.requests).toHaveLength(change === 'clear' ? 1 : 0)
+    if (change === 'clear') {
+      h.requests[0]!.resolve(['Run the tests']); await tick()
+      expect(h.controller.text()).toBe('Run the tests')
+    }
+  }
+})
+
+test('explicit cancellation aborts transport and late success cannot reappear', async () => {
   const { controller, requests, start } = harness()
   start(messages())
   controller.cancel()

@@ -1467,7 +1467,7 @@ describe('term stream machine', () => {
     }, { termRows: 24 })
     const text = failed.commitLines.map(l => l.text).join('\n')
     expect(text).toContain('⊘ privacy  blocked request')
-    expect(text).toContain('contains PRIVATE_KEY · nothing was sent')
+    expect(text).toContain('nothing was sent · contains PRIVATE_KEY')
     expect(text).not.toContain('Invalid request')
     // The record behind the block enriches the card when the host has it.
     const detailed = reduceRunEvent(state, {

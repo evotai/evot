@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from 'bun:test'
 import { buildOutputBlocks, THINKING_FOLD_ROWS } from '../../../src/term/viewmodel/output.js'
 import { blocksToLines, styledLineToAnsi, paintBackground, line, colored, dim } from '../../../src/term/viewmodel/types.js'
-import { buildUserMessage, buildAssistantLines, buildToolCard, buildEventCard, buildPrivacyCard, buildPrivacyActionCard, buildPrivacyHappeningCard, type OutputLine } from '../../../src/render/output.js'
+import { buildUserMessage, buildAssistantLines, buildToolCard, buildEventCard, buildPrivacyCard, buildPrivacyCommandCard, buildPrivacyNoticeCard, type OutputLine } from '../../../src/render/output.js'
 import { getTheme } from '../../../src/ui/theme/index.js'
 import { assistantMessageToOutputLines } from '../../../src/render/assistant.js'
 import { colorizeUnifiedDiffRows } from '../../../src/render/diff.js'
@@ -364,20 +364,33 @@ describe('buildOutputBlocks', () => {
     const { accentHex, toolCardBg } = getTheme()
     const tool = buildOutputBlocks(buildToolCard({ id: 't', name: 'bash', args: { command: 'ls' }, status: 'running' }), { columns: 60 })
     for (const l of tool.flatMap(b => b.lines)) expect(l.spans[0]).toEqual({ text: ' ' })
-    const notice = buildOutputBlocks(buildPrivacyHappeningCard({ target: 'llm', reason: 'masked SECRET ×1' }, 1), { columns: 60 })
+    const notice = buildOutputBlocks(buildPrivacyCard({ kind: 'unavailable', reason: 'rule failed' }), { columns: 120 })
     const rows = notice.flatMap(b => b.lines)
     // Padding rows above and below are railed too, so the slab reads as one.
-    expect(rows.length).toBe(5)
+    expect(rows.length).toBeGreaterThanOrEqual(5)
     for (const l of rows) {
       expect(l.spans[0]).toEqual({ text: '┃', hex: accentHex })
       expect(l.bg).toBe(toolCardBg)
     }
     // The glyph and status keep the shared scheme: the rail is the signal.
     expect(rows[1]!.spans[2]).toMatchObject({ text: '⊘', fg: 'cyan' })
-    expect(rows[2]!.spans[2]).toMatchObject({ text: '  ✓', fg: 'green' })
-    // Stops and `/privacy` actions are notices as well.
+    expect(rows[2]!.spans[2]).toMatchObject({ text: '  ✗', fg: 'red' })
+    const brief = buildOutputBlocks(buildPrivacyNoticeCard({ target: 'llm', reason: 'masked SECRET ×1' }), { columns: 60 })
+    expect(brief.flatMap(b => b.lines)).toHaveLength(4)
+    expect(brief.flatMap(b => b.lines).every(l => l.bg === toolCardBg && l.spans[0]?.text === '┃')).toBe(true)
+    // Stops and `/privacy` commands are notices as well.
     expect(buildPrivacyCard({ kind: 'blocked', target: 'request', kinds: ['API_KEY'] })[0]!.toolCard?.tone).toBe('notice')
-    expect(buildPrivacyActionCard('term x', '  term added: x')[0]!.toolCard?.tone).toBe('notice')
+    expect(buildPrivacyCommandCard('term x', '  term added: x')[0]!.toolCard?.tone).toBe('notice')
+  })
+
+  test('the /privacy report uses a card and wraps long location rows', () => {
+    const report = buildPrivacyCommandCard('', '  Privacy on\n\n  09:00  model request\n    Password embedded in a URL or connection string — read result "config.toml" (line 14)')
+    expect(report[0]!.text).toBe('⊘ privacy  report')
+    expect(report[2]!.text).toBe('  ')
+    expect(report[4]!.text).toStartWith('    Password')
+    const blocks = buildOutputBlocks(report, { columns: 48 })
+    expect(blocks.flatMap(b => b.lines).length).toBeGreaterThan(report.length + 2)
+    expect(stripAnsi(blocksToLines(blocks).join('\n'))).toContain('(line 14)')
   })
 
   test('long tool command wraps instead of truncating', () => {

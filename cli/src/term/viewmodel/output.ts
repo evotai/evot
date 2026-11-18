@@ -225,9 +225,12 @@ export function buildOutputBlocks(lines: OutputLine[], context: OutputContext | 
         blocks.push(buildToolBlock(ol.text, wrapColumns, ol.commandMaxRows))
         break
 
-      case 'tool_result':
-        blocks.push(block([line(colored(ol.text, 'gray'))]))
+      case 'tool_result': {
+        const rows = ol.toolCard?.tone === 'notice' && wrapColumns
+          ? wrapTextWithAnsi(ol.text, wrapColumns) : [ol.text]
+        blocks.push(block(rows.map(row => line(colored(row, 'gray')))))
         break
+      }
 
       case 'verbose':
         blocks.push(buildVerboseBlock(ol.text, initialContext.columns))

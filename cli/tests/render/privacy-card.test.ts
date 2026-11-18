@@ -34,8 +34,9 @@ test('a blocked LLM request is a privacy card, not "Invalid request"', () => {
   const card = buildEventCard(event.text)
   expect(texts(card)).toEqual([
     '⊘ privacy  blocked request',
-    '  ✗ · contains API_KEY · PRIVATE_KEY · nothing was sent',
-    "  Still in this session's history, so the next request stops here too · /privacy shows the record · /new starts clean",
+    '  ✗ · nothing was sent · contains API_KEY · PRIVATE_KEY',
+    '  Remove the value from its source before retrying.',
+    '  In chat history? Start a new session with /new. · /privacy for the record',
   ])
   expect(card[0]!.toolCard).toEqual({ state: 'error', first: true, last: false, tone: 'notice' })
   expect(card.at(-1)!.toolCard?.last).toBe(true)
@@ -52,10 +53,12 @@ test('with the record, the blocked card says which model, where the values sat a
   }
   expect(texts(buildEventCard(event.text, () => detail))).toEqual([
     '⊘ privacy  blocked request → claude-opus-5.5 · evot-pro-anthropic',
-    '  ✗ · contains PRIVATE_KEY ×1 · nothing was sent',
-    '  in: Bash result "cat ~/.ssh/id_ed25519"',
+    '  ✗ · nothing was sent · contains PRIVATE_KEY ×1',
+    '  SSH private key block',
+    '  Request findings (not all blocked) in: Bash result "cat ~/.ssh/id_ed25519"',
     '  by rule: secrets.ssh-private-key',
-    "  Still in this session's history, so the next request stops here too · /privacy shows the record · /new starts clean",
+    '  Remove the value from its source before retrying.',
+    '  In chat history? Start a new session with /new. · /privacy for the record',
   ])
   // Several places and rules: counts, most first, the long tail folded.
   const many = {
@@ -64,20 +67,29 @@ test('with the record, the blocked card says which model, where the values sat a
     origins: [{ at: 'Bash result', label: "ssh db0-aws 'cat ~/perf/config.toml'", n: 224 }, { at: 'user', n: 9 }],
   }
   const rows = texts(buildEventCard(event.text, () => many))
-  expect(rows[2]).toBe('  in: Bash result "ssh db0-aws \'cat ~/perf/config.toml\'" ×224 · user ×9')
-  expect(rows[3]).toBe('  by rule: core.file-assignment 87 · known 9 · secrets.bare-key-field · +1 more')
-  // The masked card reads the same way.
-  const { buildPrivacyHappeningCard } = require('../../src/render/output.js') as typeof import('../../src/render/output.js')
-  const masked = texts(buildPrivacyHappeningCard({ ...many, target: 'llm', reason: 'masked SECRET ×233' }, 97))
-  expect(masked).toEqual([
-    '⊘ privacy  masked request → claude-opus-5.5 · evot-pro-anthropic',
-    '  ✓ · masked SECRET ×233 · 97 values first seen now',
-    '  in: Bash result "ssh db0-aws \'cat ~/perf/config.toml\'" ×224 · user ×9',
-    '  by rule: core.file-assignment 87 · known 9 · secrets.bare-key-field · +1 more',
-    '  The model saw placeholders; the reply was restored · /privacy shows the record',
+  expect(rows[3]).toBe('  Request findings (not all blocked) in: Bash result "ssh db0-aws \'cat ~/perf/config.toml\'" ×224 · user ×9')
+  expect(rows[4]).toBe('  by rule: core.file-assignment 87 · known 9 · secrets.bare-key-field · +1 more')
+})
+
+test('blocked password card describes the evidence and only the lines that blocked', () => {
+  const card = buildPrivacyCard({ kind: 'blocked', target: 'request', kinds: ['PASSWORD'] }, {
+    reason: 'contains PASSWORD ×3',
+    origins: [
+      { at: 'read result', label: 'config.toml', n: 4, lines: [8, 9, 14, 31], blocks: [
+        { kind: 'PASSWORD', rule: 'contexts.url-password', n: 2, lines: [8, 9] },
+        { kind: 'PASSWORD', rule: 'contexts.password-assignment', n: 1, lines: [14] },
+      ] },
+      { at: 'user', n: 1 },
+    ],
+  })
+  expect(texts(card).slice(0, 4)).toEqual([
+    '⊘ privacy  blocked request',
+    '  ✗ · nothing was sent · contains PASSWORD ×3',
+    '  Password embedded in a URL or connection string ×2 — read result "config.toml" (lines 8, 9)',
+    '  Password in a variable, config entry, or command flag — read result "config.toml" (line 14)',
   ])
-  // A notice without detail (older record) is the three-row card it was.
-  expect(texts(buildPrivacyHappeningCard({ target: 'llm', reason: 'masked SECRET ×1' }, 1))).toHaveLength(3)
+  expect(texts(card).join('\n')).not.toContain('31')
+  expect(texts(card).join('\n')).not.toContain('user')
 })
 
 test('unavailable masking says nothing was sent and how to get out', () => {

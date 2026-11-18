@@ -9,7 +9,7 @@
  */
 
 import { providerFailurePresentation } from './provider-error.js'
-import { parsePrivacyStop, privacyCard, privacyDestination, privacyOriginsRow, privacyRulesRow, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
+import { parsePrivacyStop, privacyCard, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from '../ui/format.js'
@@ -908,59 +908,38 @@ export function buildEventCard(text: string, privacyDetail?: () => PrivacyDetail
  *     <why> / <the command that undoes it>
  */
 export function buildPrivacyCard(stop: PrivacyStop, detail?: PrivacyDetail): OutputLine[] {
-  const card = privacyCard(stop, detail)
+  return renderPrivacyCard(privacyCard(stop, detail), 'error')
+}
+
+function renderPrivacyCard(card: PrivacyCard, state: ToolCardState): OutputLine[] {
   const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${card.title}` }]
   for (const row of card.rows) {
     const kind = row.tone === 'status' ? 'tool' : row.tone === 'error' ? 'error' : 'tool_result'
     lines.push({ id: genId(row.tone === 'status' ? 'tool' : 'tool-res'), kind, text: `  ${row.text}` })
   }
-  return stampPrivacyCard(lines, 'error')
-}
-
-const HAPPENING_TITLE: Record<string, string> = {
-  llm: 'masked request', share: 'scrubbed share', sync: 'scrubbed sync',
-  task: 'scrubbed task', task_report: 'scrubbed task report', delivery: 'scrubbed chat reply',
-}
-
-/**
- * Something privacy just did, shown as it happens so the user knows at once:
- *   ⊘ privacy  masked request → claude-opus-5.5 · evot-pro-anthropic
- *     ✓ · masked SECRET ×233 · 97 values first seen now
- *     in: Bash result "ssh db0-aws 'cat ~/perf/config.toml'" ×224 · user ×9
- *     by rule: core.file-assignment 87 · known 9 · secrets.bare-key-field
- *     The model saw placeholders; the reply was restored · /privacy shows the record
- */
-export function buildPrivacyHappeningCard(notice: { target: string; reason: string } & PrivacyDetail, fresh: number): OutputLine[] {
-  const title = `${HAPPENING_TITLE[notice.target] ?? `scrubbed ${notice.target}`}${privacyDestination(notice)}`
-  const status = ['✓', notice.reason]
-  if (fresh > 0) status.push(`${fresh} ${fresh === 1 ? 'value' : 'values'} first seen now`)
-  const hint = notice.target === 'llm'
-    ? 'The model saw placeholders; the reply was restored · /privacy shows the record'
-    : 'Masked values were scrubbed for good before upload · /privacy shows the record'
-  const lines: OutputLine[] = [
-    { id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${title}` },
-    { id: genId('tool'), kind: 'tool', text: `  ${status.join(' · ')}` },
-  ]
-  for (const row of [privacyOriginsRow(notice), privacyRulesRow(notice)]) {
-    if (row) lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${row}` })
-  }
-  lines.push({ id: genId('tool-res'), kind: 'tool_result', text: `  ${hint}` })
-  return stampPrivacyCard(lines, 'success')
-}
-
-/**
- * A `/privacy` action the user ran, as the same kind of card as a stop, so
- * what changed is as visible as what it answers:
- *   ⊘ privacy  term Project Nightjar
- *     term added: Project Nightjar
- */
-export function buildPrivacyActionCard(args: string, text: string, state: ToolCardState = 'success'): OutputLine[] {
-  const lines: OutputLine[] = [{ id: genId('tool'), kind: 'tool', text: `⊘ privacy  ${args.trim().replace(/\s+/g, ' ')}` }]
-  for (const row of text.split('\n')) {
-    const body = row.trim()
-    if (body) lines.push({ id: genId('tool-res'), kind: state === 'error' ? 'error' : 'tool_result', text: `  ${body}` })
-  }
   return stampPrivacyCard(lines, state)
+}
+
+const PRIVACY_TARGET_LABEL: Record<string, string> = {
+  llm: 'model request', share: 'share', sync: 'sync', task: 'task', task_report: 'task report', delivery: 'chat reply',
+}
+
+/** Routine findings stay compact; the record has the full detail. */
+export function buildPrivacyNoticeCard({ target, reason }: { target: string; reason: string }): OutputLine[] {
+  return renderPrivacyCard({
+    title: PRIVACY_TARGET_LABEL[target] ?? target,
+    rows: [{ tone: 'hint', text: `${reason} · /privacy for details` }],
+  }, 'success')
+}
+
+/**
+ * The command result uses the same card as automatic notices. Keep the report's
+ * spacing and indentation so grouped locations stay with their request.
+ */
+export function buildPrivacyCommandCard(args: string, text: string, state: ToolCardState = 'success'): OutputLine[] {
+  const title = args.trim().replace(/\s+/g, ' ') || 'report'
+  const tone = state === 'error' ? 'error' : 'hint'
+  return renderPrivacyCard({ title, rows: text.trimEnd().split('\n').map(row => ({ tone, text: row.replace(/^  /, '') })) }, state)
 }
 
 export function buildError(message: string): OutputLine[] {

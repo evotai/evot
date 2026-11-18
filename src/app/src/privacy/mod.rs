@@ -42,6 +42,7 @@ pub use provider::wrap;
 pub use provider::MaskingProvider;
 pub use record::session_tags as session_record_tags;
 pub use record::summarize as summarize_records;
+pub use record::BlockedFinding;
 pub use record::Event;
 pub use record::KindStats;
 pub use record::LiveNotice;

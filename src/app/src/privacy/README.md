@@ -90,9 +90,13 @@ work, but do not broaden the built-in policy.
 
 Each request/upload with a finding appends a value-free JSONL record under
 `~/.evotai/privacy/records/<day>.jsonl`: kind, rule, keyed placeholder, length,
-count and masked origin labels. No raw value, prefix or suffix is recorded.
-`/privacy` summarizes the records. The TUI shows newly seen tags rather than
-re-announcing the same history each turn; resume seeds tags from past records.
+count and masked origin labels, with up to 16 source lines per origin when a
+text `read` result can be located. No raw value, prefix or suffix is recorded.
+`/privacy` shows recent origins and rules in a report card. Routine masking uses
+compact cards for new findings rather than repeating the same history each turn;
+resume seeds tags from past records. Blocked requests link each blocking rule and
+kind to its source and available line numbers, separate from findings that were
+only masked or warned. No credential value or snippet is shown.
 Historical settings, packs and records remain readable; no schema change is
 needed to narrow the default detection policy.
 

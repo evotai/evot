@@ -1,5 +1,5 @@
 import type { PrivacyEvent, PrivacySettings, PrivacyStatus } from '../native/index.js'
-import { privacyOriginsRow } from '../render/privacy-notice.js'
+import { privacyBlockedRows, privacyOriginsRow, privacyRulesRow } from '../render/privacy-notice.js'
 
 export interface PrivacyPort {
   status: (days: number) => Promise<PrivacyStatus>
@@ -96,9 +96,13 @@ export function renderStatus({ settings, summary }: PrivacyStatus, today = local
     recent.forEach((event, i) => {
       const to = event.model ? ` → ${event.model}` : ''
       lines.push(`  ${stamps[i]!.padEnd(stamp)}  ${actor(event).padEnd(width)}  ${event.blocked ? '✗ ' : ''}${event.reason}${to}`)
-      // Where the values sat, when the record knows (one line, folded).
-      const origins = privacyOriginsRow(event)
-      if (origins) lines.push(`  ${' '.repeat(stamp)}  ${' '.repeat(width)}  ${origins}`)
+      const indent = ' '.repeat(stamp + width + 6)
+      const blocked = event.blocked ? privacyBlockedRows(event) : []
+      const origin = privacyOriginsRow(event)
+      const locations = blocked.length ? blocked : origin && event.blocked ? [`Request findings (not all blocked) ${origin}`] : [origin]
+      for (const row of [...locations, privacyRulesRow(event)]) {
+        if (row) lines.push(`${indent}${row}`)
+      }
     })
   }
   lines.push('', renderSettings(settings), settings.enabled ? '  /privacy term WORD · /privacy off' : '  /privacy on')

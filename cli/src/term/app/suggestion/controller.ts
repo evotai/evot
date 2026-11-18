@@ -21,6 +21,7 @@ export class PromptSuggestion {
   private intent: Intent | null = null
   private batch: SuggestionCandidates | null = null
   private lastAutomaticAttempt = ''
+  private deferred: { key: string; trigger: SuggestionTrigger } | null = null
   private explicit = false
   private waitingForNext = false
   private readonly cache = new SuggestionCache()
@@ -50,6 +51,7 @@ export class PromptSuggestion {
 
   cancel(): void {
     const changed = Boolean(this.request || this.intent || this.batch || this.notice)
+    this.deferred = null
     this.generation++
     this.request?.abort()
     this.request = null
@@ -73,13 +75,14 @@ export class PromptSuggestion {
   /** Local Tab/Right routing invalidates draft-bound completions, not the
    * placeholder waiting underneath the user's temporary input. */
   yieldToLocalInput(): void {
-    if (this.intent?.draft === '' && this.batch?.count()) this.reconcile()
+    if (!this.intent || this.intent.draft === '') this.reconcile()
     else this.cancel()
   }
 
   /** Background task transitions only invalidate speculative suggestions.
    * With a trigger, only automatic work started by that trigger is withdrawn. */
   cancelAutomatic(trigger?: SuggestionTrigger): void {
+    if (!trigger || this.deferred?.trigger === trigger) this.deferred = null
     if (this.explicit) return
     if (trigger && this.intent?.trigger !== trigger) return
     this.cancel()
@@ -102,7 +105,13 @@ export class PromptSuggestion {
   start(trigger: SuggestionTrigger = 'answer'): boolean {
     if (this.explicit && this.valid()) return true
     if (this.credentialsRejected) return false
-    if (!this.host.eligible() || this.host.automaticEligible?.() === false || (this.host.draft?.() ?? '')) return false
+    if (this.host.automaticEligible?.() === false) return false
+    if (!this.host.eligible() || this.host.draft?.()) {
+      // Single-shot triggers (especially answer completion) can arrive while
+      // the user is editing. Retry once the composer is available again.
+      this.deferred = { key: this.host.key(), trigger }
+      return false
+    }
     const context = this.host.context()
     if (!context.automatic || (trigger === 'answer' && !context.answered)) return false
     const lastUser = context.messages.findLast(message => message.role === 'user')
@@ -132,6 +141,12 @@ export class PromptSuggestion {
   private current(): boolean {
     return (this.explicit || this.host.automaticEligible?.() !== false)
       && this.intent !== null && this.intent.key === this.host.key()
+  }
+
+  // An empty-input request can finish underneath temporary typing. Its
+  // result still goes through valid() before it can be shown or accepted.
+  private hiddenByDraft(): boolean {
+    return this.intent?.draft === '' && !!this.host.draft?.() && this.current()
   }
 
   private valid(): boolean {
@@ -196,7 +211,7 @@ export class PromptSuggestion {
       void result.then(outcome => {
         if (generation !== this.generation) return
         this.request = null
-        if (!this.valid()) { this.cancel(); return }
+        if (!this.valid() && !this.hiddenByDraft()) { this.cancel(); return }
         if (this.batch) this.batch.finish(outcome.candidates)
         else this.batch = makeBatch(outcome.candidates)
         if (outcome.status === 'unauthorized') {
@@ -235,7 +250,16 @@ export class PromptSuggestion {
   }
 
   reconcile(): void {
+    if (this.deferred) {
+      const { key, trigger } = this.deferred
+      if (key !== this.host.key() || this.host.automaticEligible?.() === false) this.deferred = null
+      else if (this.host.eligible() && !this.host.draft?.()) {
+        this.deferred = null
+        this.start(trigger)
+      }
+    }
     if (!this.intent || this.valid()) return
+    if (this.request && !this.batch && this.hiddenByDraft()) return
     if (this.current() && this.intent.draft === '' && this.batch?.count()) {
       // Local completion/command windows temporarily own the composer, just
       // like a nonempty draft. Neither should discard its empty-input batch.
