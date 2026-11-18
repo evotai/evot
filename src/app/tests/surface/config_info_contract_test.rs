@@ -228,6 +228,35 @@ fn compaction_activity_retains_legacy_phase_contract() -> TestResult {
 }
 
 #[test]
+fn call_model_metadata_retains_legacy_payload_contract() -> TestResult {
+    #[derive(serde::Deserialize)]
+    struct LegacyCall {
+        model: String,
+        turn: usize,
+    }
+
+    let examples: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../../cli/tests/fixtures/contracts/run-payloads-rich.json"
+    ))?;
+    let example = examples
+        .iter()
+        .find(|event| event["kind"] == "llm_call_started")
+        .ok_or("missing call fixture")?;
+    let event = serde_json::json!({
+        "event_id": "fixture", "run_id": "run", "session_id": "session", "turn": 1,
+        "created_at": "2026-01-01T00:00:00Z", "kind": example["kind"], "payload": example["payload"],
+    });
+    let parsed: evot::session::conversation::RunEvent = serde_json::from_value(event)?;
+    let written = serde_json::to_value(parsed)?;
+    assert_eq!(written["payload"]["provider"], "fixture-provider");
+    assert_eq!(written["payload"]["thinking_level"], "medium");
+    let legacy: LegacyCall = serde_json::from_value(written["payload"].clone())?;
+    assert_eq!(legacy.model, "fixture");
+    assert_eq!(legacy.turn, 1);
+    Ok(())
+}
+
+#[test]
 fn config_info_writer_and_reader_use_the_contract_boundary() {
     for source in [
         include_str!("../../../../cli/addon/src/run.rs"),

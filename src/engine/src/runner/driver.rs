@@ -21,16 +21,24 @@ use super::llm_call::AssistantStreamInput;
 use super::thinking_only_guard::ThinkingOnlyGuard;
 use super::tool_exec::build_tool_definitions;
 use super::tool_exec::execute_tool_calls;
-use super::tool_exec::fail_truncated_tool_calls;
+use super::tool_exec::fail_tool_calls;
 use super::tool_exec::skip_tool_call_doom_loop;
 use crate::context::ContextTracker;
 use crate::context::ExecutionTracker;
+use crate::context::SharedExecutionTracker;
 use crate::context::{self};
 use crate::event::AgentErrorInfo;
 use crate::event::AgentErrorKind;
 use crate::event::AgentEvent;
 use crate::time::now_ms;
 use crate::types::*;
+
+#[derive(Default)]
+pub(crate) struct LoopProgress {
+    pub(crate) turn_offset: usize,
+    pub(crate) tracker: Option<SharedExecutionTracker>,
+    pub(crate) check_context: bool,
+}
 
 pub(crate) struct AgentLoopOutcome {
     pub(crate) messages: Vec<AgentMessage>,
@@ -45,9 +53,16 @@ pub async fn agent_loop(
     tx: mpsc::UnboundedSender<AgentEvent>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Vec<AgentMessage> {
-    agent_loop_with_state(prompts, context, config, tx.into(), cancel)
-        .await
-        .messages
+    agent_loop_with_state(
+        prompts,
+        context,
+        config,
+        tx.into(),
+        cancel,
+        LoopProgress::default(),
+    )
+    .await
+    .messages
 }
 
 pub(crate) async fn agent_loop_with_state(
@@ -56,13 +71,22 @@ pub(crate) async fn agent_loop_with_state(
     config: &AgentLoopConfig,
     tx: EventSink,
     cancel: tokio_util::sync::CancellationToken,
+    progress: LoopProgress,
 ) -> AgentLoopOutcome {
     tx.send(AgentEvent::AgentStart).await.ok();
     let mut new_messages = prompts.clone();
     tx.send(AgentEvent::TurnStart).await.ok();
 
-    let compaction_state =
-        run_loop(context, &mut new_messages, prompts, config, &tx, &cancel).await;
+    let compaction_state = run_loop(
+        context,
+        &mut new_messages,
+        prompts,
+        config,
+        &tx,
+        &cancel,
+        progress,
+    )
+    .await;
 
     tx.send(AgentEvent::AgentEnd {
         messages: new_messages.clone(),
@@ -82,7 +106,7 @@ pub async fn agent_loop_continue(
     tx: mpsc::UnboundedSender<AgentEvent>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Vec<AgentMessage> {
-    agent_loop_continue_with_state(context, config, tx.into(), cancel)
+    agent_loop_continue_with_state(context, config, tx.into(), cancel, LoopProgress::default())
         .await
         .messages
 }
@@ -92,6 +116,7 @@ pub(crate) async fn agent_loop_continue_with_state(
     config: &AgentLoopConfig,
     tx: EventSink,
     cancel: tokio_util::sync::CancellationToken,
+    progress: LoopProgress,
 ) -> AgentLoopOutcome {
     tx.send(AgentEvent::AgentStart).await.ok();
 
@@ -127,8 +152,16 @@ pub(crate) async fn agent_loop_continue_with_state(
     let mut new_messages = Vec::new();
     tx.send(AgentEvent::TurnStart).await.ok();
 
-    let compaction_state =
-        run_loop(context, &mut new_messages, Vec::new(), config, &tx, &cancel).await;
+    let compaction_state = run_loop(
+        context,
+        &mut new_messages,
+        Vec::new(),
+        config,
+        &tx,
+        &cancel,
+        progress,
+    )
+    .await;
 
     tx.send(AgentEvent::AgentEnd {
         messages: new_messages.clone(),
@@ -152,13 +185,22 @@ async fn run_loop(
     config: &AgentLoopConfig,
     tx: &EventSink,
     cancel: &tokio_util::sync::CancellationToken,
+    progress: LoopProgress,
 ) -> Option<crate::context::CompactionState> {
+    let LoopProgress {
+        turn_offset,
+        tracker,
+        check_context,
+    } = progress;
     let mut first_turn = true;
-    let mut turn_number: usize = 0;
-    let mut tracker = config
-        .execution_limits
-        .as_ref()
-        .map(|limits| ExecutionTracker::new(limits.clone()));
+    let mut turn_number = turn_offset;
+    let tracker = tracker.or_else(|| {
+        config
+            .execution_limits
+            .clone()
+            .map(|limits| Arc::new(parking_lot::Mutex::new(ExecutionTracker::new(limits))))
+    });
+    let idle_clock = tracker.as_ref().map(|tracker| tracker.lock().idle_clock());
     let mut doom_detector = DoomLoopDetector::new(3);
 
     let mut thinking_only_guard = ThinkingOnlyGuard::new();
@@ -192,7 +234,7 @@ async fn run_loop(
     // Match pi's prompt-time compaction check: inspect the previous assistant
     // before the new explicit prompt enters context. This runs once per agent
     // prompt, not before every provider call in the tool/retry loop.
-    if !initial_prompts.is_empty() {
+    if (!initial_prompts.is_empty() || check_context) && !cancel.is_cancelled() {
         let previous_assistant = context
             .messages
             .iter()
@@ -215,32 +257,36 @@ async fn run_loop(
                         tools: &tool_defs,
                         prompt_cache_key: context.prompt_cache_key.as_deref(),
                     },
-                    phase: CompactionCheckPhase::BeforePrompt,
+                    phase: if check_context {
+                        CompactionCheckPhase::BeforeResume
+                    } else {
+                        CompactionCheckPhase::BeforePrompt
+                    },
                 },
                 cancel.clone(),
                 tx,
             )
             .await;
         }
+    }
 
-        for prompt in initial_prompts {
-            if matches!(prompt, AgentMessage::Llm(Message::User { .. })) {
-                if let Some(controller) = compaction_controller.as_mut() {
-                    controller.on_user_message();
-                }
+    for prompt in initial_prompts {
+        if matches!(prompt, AgentMessage::Llm(Message::User { .. })) {
+            if let Some(controller) = compaction_controller.as_mut() {
+                controller.on_user_message();
             }
-            tx.send(AgentEvent::MessageStart {
-                message: prompt.clone(),
-            })
-            .await
-            .ok();
-            tx.send(AgentEvent::MessageEnd {
-                message: prompt.clone(),
-            })
-            .await
-            .ok();
-            context.messages.push(prompt);
         }
+        tx.send(AgentEvent::MessageStart {
+            message: prompt.clone(),
+        })
+        .await
+        .ok();
+        tx.send(AgentEvent::MessageEnd {
+            message: prompt.clone(),
+        })
+        .await
+        .ok();
+        context.messages.push(prompt);
     }
 
     // Check for steering messages at start
@@ -290,29 +336,30 @@ async fn run_loop(
         }
 
         // Check execution limits
-        if let Some(ref tracker) = tracker {
-            if let Some(reason) = tracker.check_limits() {
-                let limit_msg = AgentMessage::Llm(Message::User {
-                    provenance: Some(crate::InputProvenance::runtime(1, "execution_limit", None)),
-                    content: vec![Content::Text {
-                        text: format!("[Agent stopped: {}]", reason),
-                    }],
-                    timestamp: now_ms(),
-                });
-                tx.send(AgentEvent::MessageStart {
-                    message: limit_msg.clone(),
-                })
-                .await
-                .ok();
-                tx.send(AgentEvent::MessageEnd {
-                    message: limit_msg.clone(),
-                })
-                .await
-                .ok();
-                context.messages.push(limit_msg.clone());
-                new_messages.push(limit_msg);
-                break;
-            }
+        if let Some(reason) = tracker
+            .as_ref()
+            .and_then(|tracker| tracker.lock().check_limits())
+        {
+            let limit_msg = AgentMessage::Llm(Message::User {
+                provenance: Some(crate::InputProvenance::runtime(1, "execution_limit", None)),
+                content: vec![Content::Text {
+                    text: format!("[Agent stopped: {}]", reason),
+                }],
+                timestamp: now_ms(),
+            });
+            tx.send(AgentEvent::MessageStart {
+                message: limit_msg.clone(),
+            })
+            .await
+            .ok();
+            tx.send(AgentEvent::MessageEnd {
+                message: limit_msg.clone(),
+            })
+            .await
+            .ok();
+            context.messages.push(limit_msg.clone());
+            new_messages.push(limit_msg);
+            break;
         }
 
         // before_turn callback — abort if it returns false
@@ -342,7 +389,7 @@ async fn run_loop(
                 turn: turn_number,
                 injected_count,
                 budget: budget_snapshot,
-                idle_clock: tracker.as_ref().map(ExecutionTracker::idle_clock),
+                idle_clock: idle_clock.clone(),
             })
             .await;
         let message = assistant_result.message;
@@ -473,13 +520,7 @@ async fn run_loop(
                 pending.push(intervention.steering_message);
 
                 // Track turn + emit TurnEnd, then continue inner loop.
-                if let Some(ref mut tracker) = tracker {
-                    let turn_tokens = match &message {
-                        Message::Assistant { usage, .. } => usage.context_tokens() as usize,
-                        _ => context::message_tokens(&agent_msg),
-                    };
-                    tracker.record_turn(turn_tokens);
-                }
+                record_execution_turn(tracker.as_ref(), &message, &agent_msg);
                 if let Some(ref after_turn) = config.after_turn {
                     let usage = match &message {
                         Message::Assistant { usage, .. } => usage.clone(),
@@ -497,6 +538,14 @@ async fn run_loop(
             }
         }
 
+        let segment_tool = tool_calls.iter().any(|(_, name, _)| {
+            context
+                .tools
+                .iter()
+                .find(|tool| tool.matches_call_name(name))
+                .is_some_and(|tool| tool.ends_segment())
+        });
+        let mut segment_ended = false;
         let mut tool_results = Vec::new();
         if has_tool_calls {
             if matches!(message, Message::Assistant {
@@ -507,15 +556,30 @@ async fn run_loop(
                 // provider JSON repair. They may parse successfully while
                 // still being incomplete, so fail the whole batch and let the
                 // model re-issue it rather than executing corrupted input.
-                tool_results = fail_truncated_tool_calls(&tool_calls, tx).await;
+                tool_results = fail_tool_calls(
+                    &tool_calls,
+                    tx,
+                    "the response hit the output token limit, so its arguments may be truncated. \
+                     Re-issue the tool call with complete arguments.",
+                )
+                .await;
+            } else if segment_tool && tool_calls.len() != 1 {
+                tool_results = fail_tool_calls(
+                    &tool_calls,
+                    tx,
+                    "a segment-ending tool must be called alone. Re-issue it in its own response.",
+                )
+                .await;
             } else {
-                let idle_clock = tracker.as_ref().map(|t| t.idle_clock());
                 let execution = execute_tool_calls(
                     &context.tools,
                     &tool_calls,
                     tx,
                     cancel,
-                    config.get_steering_messages.as_ref(),
+                    config
+                        .get_steering_messages
+                        .as_ref()
+                        .filter(|_| !segment_tool),
                     &config.tool_execution,
                     &context.cwd,
                     &context.path_guard,
@@ -533,6 +597,11 @@ async fn run_loop(
                 steering_after_tools = execution.steering_messages;
             }
 
+            segment_ended = segment_tool
+                && matches!(tool_results.as_slice(), [Message::ToolResult {
+                    is_error: false,
+                    ..
+                }]);
             turn_settled = settles_run(&context.tools, &tool_calls, &tool_results);
 
             for result in &tool_results {
@@ -541,7 +610,7 @@ async fn run_loop(
                 new_messages.push(am);
             }
 
-            if steering_after_tools.is_none() {
+            if !segment_ended && steering_after_tools.is_none() {
                 let steering = config
                     .get_steering_messages
                     .as_ref()
@@ -554,13 +623,7 @@ async fn run_loop(
         }
 
         // Track turn for execution limits
-        if let Some(ref mut tracker) = tracker {
-            let turn_tokens = match &message {
-                Message::Assistant { usage, .. } => usage.context_tokens() as usize,
-                _ => context::message_tokens(&agent_msg),
-            };
-            tracker.record_turn(turn_tokens);
-        }
+        record_execution_turn(tracker.as_ref(), &message, &agent_msg);
 
         // after_turn callback
         if let Some(ref after_turn) = config.after_turn {
@@ -577,6 +640,10 @@ async fn run_loop(
         })
         .await
         .ok();
+
+        if segment_ended {
+            break;
+        }
 
         // A tool turn that has grown the active context to the summary
         // threshold compacts here, before the next provider call, instead of
@@ -687,6 +754,20 @@ async fn run_loop(
     compaction_controller
         .map(|controller| controller.state().clone())
         .or_else(|| config.initial_compaction_state.clone())
+}
+
+fn record_execution_turn(
+    tracker: Option<&SharedExecutionTracker>,
+    message: &Message,
+    agent_msg: &AgentMessage,
+) {
+    if let Some(tracker) = tracker {
+        let tokens = match message {
+            Message::Assistant { usage, .. } => usage.context_tokens() as usize,
+            _ => context::message_tokens(agent_msg),
+        };
+        tracker.lock().record_turn(tokens);
+    }
 }
 
 /// A tool turn settles the run when every call went to an `ends_turn` tool

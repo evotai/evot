@@ -9,12 +9,22 @@ import type { UIMessage, UIAssistantBlock, RunStats, VerboseEvent, AskUserReques
 // App state
 // ---------------------------------------------------------------------------
 
+interface CallModel {
+  model: string
+  provider?: string
+  thinkingLevel?: string
+}
+
 export interface AppState {
   /** Newest completed assistant messages only; see `MAX_RETAINED_MESSAGES`. */
   messages: UIMessage[]
   isLoading: boolean
   sessionId: string | null
   model: string
+  /** First request's identity, pinned even if the user changes the selection. */
+  firstCallModel?: Pick<CallModel, 'model' | 'provider'>
+  /** Active call model, retained after a run only when it ended on a different route. */
+  lastCallModel?: CallModel
   cwd: string
   error: string | null
   /** Ordered blocks for the current partial assistant message. */
@@ -35,6 +45,15 @@ export interface AppState {
   forkTrail: string[]
   /** `☁` while this session syncs to the cloud, `🌐` when it also has a public page. */
   cloudBadge: string
+}
+
+/** Drop the transient call identity unless the run ended on a different route. */
+export function settleRunCallModel(state: AppState): AppState {
+  const { firstCallModel: first, lastCallModel: last } = state
+  if (!first) return state
+  const changedRoute = last && (first.model !== last.model
+    || (first.provider && last.provider && first.provider !== last.provider))
+  return { ...state, firstCallModel: undefined, lastCallModel: changedRoute ? last : undefined }
 }
 
 export interface SessionTokenStats {

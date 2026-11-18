@@ -30,6 +30,23 @@ describe('transcript conversion', () => {
       expect(texts.filter(text => text.startsWith('⊘ privacy'))).toHaveLength(1)
     }
   })
+  test('replays a single model handoff card in both views', () => {
+    const messages = transcriptToMessages([
+      { type: 'assistant', content: [{ type: 'tool_call', id: 'switch', name: 'handoff_model', input: { model: 'target:shared' } }] },
+      { type: 'tool_result', tool_call_id: 'switch', tool_name: 'handoff_model', is_error: false,
+        content: "Model handoff: origin:shared → target:shared\nContinue the user's request: Implement it" },
+      { type: 'assistant', content: [{ type: 'text', text: 'continued' }] },
+    ])
+    for (const expanded of [false, true]) {
+      const lines = messagesToOutputLines(messages, expanded)
+      const cards = lines.filter(line => line.toolCard?.first)
+      expect(cards.map(card => card.text)).toEqual(['⇄ model handoff  origin:shared → target:shared'])
+      expect(lines.indexOf(cards[0]!)).toBeLessThan(lines.findIndex(line => line.text === 'continued'))
+      expect(blocksToLines(buildOutputBlocks(lines, { columns: 80 })).map(stripAnsi).join('\n'))
+        .toContain('⇄ model handoff  origin:shared → target:shared')
+    }
+  })
+
   test('replay accepts opaque JSON tool arguments without crashing preview reconstruction', () => {
     for (const input of [null, false, 1, 'text', []]) {
       for (const name of ['bash', 'read', 'write', 'edit']) {

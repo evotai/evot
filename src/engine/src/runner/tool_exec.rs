@@ -426,21 +426,20 @@ async fn run_tool_once(
     }
 }
 
-pub(super) async fn fail_truncated_tool_calls(
+pub(super) async fn fail_tool_calls(
     tool_calls: &[(String, String, serde_json::Value)],
     tx: &EventSink,
+    reason: &str,
 ) -> Vec<Message> {
     let mut messages = Vec::with_capacity(tool_calls.len());
     for (tool_call_id, tool_name, args) in tool_calls {
         let result = ToolResult {
-                content: vec![Content::Text {
-                    text: format!(
-                        "Tool call \"{tool_name}\" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments."
-                    ),
-                }],
-                details: serde_json::Value::Null,
-                retention: Retention::Normal,
-            };
+            content: vec![Content::Text {
+                text: format!("Tool call \"{tool_name}\" was not executed: {reason}"),
+            }],
+            details: serde_json::Value::Null,
+            retention: Retention::Normal,
+        };
 
         tx.send(AgentEvent::ToolExecutionStart {
             tool_call_id: tool_call_id.clone(),

@@ -14,13 +14,14 @@ use crate::runner::agent_loop_continue_with_state;
 use crate::runner::agent_loop_with_state;
 use crate::runner::event_sink::EventSink;
 use crate::runner::AgentLoopConfig;
+use crate::runner::LoopProgress;
 use crate::types::*;
 
 /// What the spawned loop starts from: an explicit prompt or a continue
 /// from existing context.
 enum RunKind {
     Prompt { messages: Vec<AgentMessage> },
-    Continue,
+    Continue { check_context: bool },
 }
 
 impl Agent {
@@ -74,7 +75,10 @@ impl Agent {
             return (RunHandle::noop(), rx);
         }
 
-        self.spawn_run(RunKind::Continue).await
+        self.spawn_run(RunKind::Continue {
+            check_context: false,
+        })
+        .await
     }
 
     /// Bounded execution stream for hosts that consume while the run executes.
@@ -87,6 +91,24 @@ impl Agent {
         let cancel = CancellationToken::new();
         let (tx, rx) = EventSink::bounded(cancel.clone());
         let handle = self.spawn_with_sink(RunKind::Prompt { messages }, tx, cancel);
+        (handle, rx)
+    }
+
+    /// Continue a settled tool exchange, checking that history fits this model
+    /// before issuing the next provider request.
+    pub async fn resume_bounded(
+        &mut self,
+        cancel: CancellationToken,
+    ) -> (RunHandle, mpsc::Receiver<AgentEvent>) {
+        self.finish().await;
+        let (tx, rx) = EventSink::bounded(cancel.clone());
+        let handle = self.spawn_with_sink(
+            RunKind::Continue {
+                check_context: true,
+            },
+            tx,
+            cancel,
+        );
         (handle, rx)
     }
 
@@ -150,18 +172,38 @@ impl Agent {
         };
 
         let config = self.build_config_with_queues(steering_queue, follow_up_queue);
+        let progress = LoopProgress {
+            turn_offset: self.turn_offset,
+            tracker: self.execution_tracker.clone(),
+            check_context: matches!(&kind, RunKind::Continue {
+                check_context: true
+            }),
+        };
 
         let handle = tokio::spawn(async move {
             let mut compaction_state = config.initial_compaction_state.clone();
             let result = std::panic::AssertUnwindSafe(async {
                 let outcome = match kind {
                     RunKind::Prompt { messages } => {
-                        agent_loop_with_state(messages, &mut context, &config, tx.clone(), cancel)
-                            .await
+                        agent_loop_with_state(
+                            messages,
+                            &mut context,
+                            &config,
+                            tx.clone(),
+                            cancel,
+                            progress,
+                        )
+                        .await
                     }
-                    RunKind::Continue => {
-                        agent_loop_continue_with_state(&mut context, &config, tx.clone(), cancel)
-                            .await
+                    RunKind::Continue { .. } => {
+                        agent_loop_continue_with_state(
+                            &mut context,
+                            &config,
+                            tx.clone(),
+                            cancel,
+                            progress,
+                        )
+                        .await
                     }
                 };
                 compaction_state = outcome.compaction_state;

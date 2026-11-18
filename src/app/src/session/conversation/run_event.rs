@@ -99,6 +99,10 @@ pub enum RunEventPayload {
         attempt: usize,
         injected_count: usize,
         model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thinking_level: Option<String>,
         message_count: usize,
         message_bytes: usize,
         /// Estimated total context tokens (same source as compaction events).

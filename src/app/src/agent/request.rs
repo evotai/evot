@@ -32,6 +32,8 @@ pub struct QueryRequest {
     pub mode: ToolMode,
     pub source: String,
     pub llm: Option<LlmConfig>,
+    /// Whether this surface allows the model to request run-local handoffs.
+    pub allow_model_handoff: bool,
     pub host_tools: Option<HostTools>,
     pub cwd: Option<String>,
     /// Run-local scratch, propagated to every turn and shell subprocess.
@@ -46,20 +48,9 @@ pub struct QueryRequest {
 
 impl QueryRequest {
     pub fn text(prompt: impl Into<String>) -> Self {
-        Self {
-            input: vec![evot_engine::Content::Text {
-                text: prompt.into(),
-            }],
-            session_id: None,
-            mode: ToolMode::Headless,
-            source: String::new(),
-            llm: None,
-            host_tools: None,
-            cwd: None,
-            scratch_dir: None,
-            extra_tools: Vec::new(),
-            approver: None,
-        }
+        Self::with_input(vec![evot_engine::Content::Text {
+            text: prompt.into(),
+        }])
     }
 
     pub fn with_input(input: Vec<evot_engine::Content>) -> Self {
@@ -69,6 +60,7 @@ impl QueryRequest {
             mode: ToolMode::Headless,
             source: String::new(),
             llm: None,
+            allow_model_handoff: false,
             host_tools: None,
             cwd: None,
             scratch_dir: None,
@@ -93,6 +85,11 @@ impl QueryRequest {
 
     pub fn llm(mut self, llm: LlmConfig) -> Self {
         self.llm = Some(llm);
+        self
+    }
+
+    pub fn allow_model_handoff(mut self) -> Self {
+        self.allow_model_handoff = true;
         self
     }
 

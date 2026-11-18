@@ -289,7 +289,8 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     }
     commitLines.push(...flushed.lines)
     if (known.kind === 'quota_waiting' && !quotaWaitAlreadyShown) {
-      const lines = buildEventCard(formatLongWaitError(state.appState.model, quotaError, waitDelayMs))
+      const model = state.appState.lastCallModel?.model ?? state.appState.model
+      const lines = buildEventCard(formatLongWaitError(model, quotaError, waitDelayMs))
       commitLines.push(...lines)
       noticeLines.push(...buildSystem(lines.map(line => line.text).join('\n')))
     }

@@ -310,7 +310,7 @@ fn all_builtin_skills_load() -> Result<(), Box<dyn std::error::Error>> {
     let specs = load_skills(&[builtin])?;
     let names: Vec<&str> = specs.iter().map(|skill| skill.name.as_str()).collect();
 
-    assert_eq!(names, vec!["memory", "session-search"]);
+    assert_eq!(names, vec!["memory", "model-handoff", "session-search"]);
     assert!(specs.iter().all(|skill| !skill.description.is_empty()));
     Ok(())
 }

@@ -1,3 +1,4 @@
+use super::super::capabilities::AnthropicThinkingWire;
 use super::profile::ModelProfile;
 use super::profile::ReasoningProfile;
 use super::profile::BASE;
@@ -25,7 +26,7 @@ const V4_LEVELS: &[(ThinkingLevel, Option<&str>)] = &[
 const V4_REASONING: ReasoningProfile = ReasoningProfile {
     levels: V4_LEVELS,
     default: ThinkingLevel::High,
-    anthropic_wire: Some(super::super::capabilities::AnthropicThinkingWire::Enabled),
+    anthropic_wire: Some(AnthropicThinkingWire::DeepSeek),
 };
 
 const V4_FLASH_LEVELS: &[(ThinkingLevel, Option<&str>)] = &[
@@ -37,7 +38,7 @@ const V4_FLASH_LEVELS: &[(ThinkingLevel, Option<&str>)] = &[
 const V4_FLASH_REASONING: ReasoningProfile = ReasoningProfile {
     levels: V4_FLASH_LEVELS,
     default: ThinkingLevel::High,
-    anthropic_wire: Some(super::super::capabilities::AnthropicThinkingWire::Enabled),
+    anthropic_wire: Some(AnthropicThinkingWire::DeepSeek),
 };
 
 // The documented 1M total context leaves 616K input at the maximum 384K output.

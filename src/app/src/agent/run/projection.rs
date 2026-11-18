@@ -368,6 +368,8 @@ pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
                     attempt: *attempt,
                     injected_count: *injected_count,
                     model: request.model.clone(),
+                    provider: request.provider.clone(),
+                    thinking_level: Some(request.thinking_level.as_str().into()),
                     message_count,
                     message_bytes,
                     estimated_context_tokens: budget.estimated_tokens,

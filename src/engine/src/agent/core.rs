@@ -12,6 +12,7 @@ use super::PromptQueue;
 use super::RunHandle;
 use crate::context::ContextConfig;
 use crate::context::ExecutionLimits;
+use crate::context::SharedExecutionTracker;
 use crate::provider::ModelConfig;
 use crate::provider::StreamProvider;
 use crate::runner::AfterTurnFn;
@@ -52,6 +53,8 @@ pub struct Agent {
     pub(super) compaction_state: Option<crate::context::CompactionState>,
     pub(super) context_management_disabled: bool,
     pub(super) execution_limits: Option<ExecutionLimits>,
+    pub(super) turn_offset: usize,
+    pub(super) execution_tracker: Option<SharedExecutionTracker>,
     pub(super) cache_config: CacheConfig,
     pub(super) prompt_cache_key: Option<String>,
     pub(super) tool_execution: ToolExecutionStrategy,
@@ -109,6 +112,8 @@ impl Agent {
             compaction_state: None,
             context_management_disabled: false,
             execution_limits: Some(ExecutionLimits::default()),
+            turn_offset: 0,
+            execution_tracker: None,
             cache_config: CacheConfig::default(),
             prompt_cache_key: None,
             tool_execution: ToolExecutionStrategy::default(),
@@ -215,6 +220,17 @@ impl Agent {
     /// more work (interactive parity with pi).
     pub fn with_execution_limits_opt(mut self, limits: Option<ExecutionLimits>) -> Self {
         self.execution_limits = limits;
+        self
+    }
+
+    /// Continue a host-owned budget and turn numbering across engine instances.
+    pub fn with_run_progress(
+        mut self,
+        turn_offset: usize,
+        tracker: Option<SharedExecutionTracker>,
+    ) -> Self {
+        self.turn_offset = turn_offset;
+        self.execution_tracker = tracker;
         self
     }
 

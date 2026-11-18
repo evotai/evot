@@ -20,6 +20,8 @@ import { getTheme } from '../../ui/theme/index.js'
 export interface PromptFooterVM {
   columns: number
   model: string
+  /** Present after a run that used a different model from the next prompt. */
+  nextModel?: string
   provider: string
   thinkingLevel: string
   /** The active model's effort ladder; with it the footer draws a gauge. */
@@ -173,6 +175,7 @@ function buildFooter(input: PromptFooterVM, columns: number, modeShownAbove: boo
     : 0
 
   for (const layout of FOOTER_LAYOUTS) {
+    if (layout.nextOnly && !input.nextModel) continue
     const candidate = buildFooterCandidate(input, mode, cwd, contextPercent, layout, columns)
     if (footerCandidateWidth(candidate) <= columns) return block([renderFooterCandidate(candidate, columns)])
   }
@@ -188,6 +191,7 @@ interface FooterLayout {
   branch: boolean
   thinking: boolean
   model: boolean
+  nextOnly?: true
   truncateCwd: boolean
 }
 
@@ -199,6 +203,7 @@ const FOOTER_LAYOUTS: FooterLayout[] = [
   { dashboard: 'port', context: 'compact', branch: false, thinking: true, model: true, truncateCwd: true },
   { dashboard: 'port', context: 'hidden', branch: false, thinking: true, model: true, truncateCwd: true },
   { dashboard: 'port', context: 'hidden', branch: false, thinking: false, model: true, truncateCwd: true },
+  { dashboard: false, context: 'hidden', branch: false, thinking: false, model: true, truncateCwd: true, nextOnly: true },
   { dashboard: 'port', context: 'hidden', branch: false, thinking: false, model: false, truncateCwd: true },
   { dashboard: false, context: 'hidden', branch: false, thinking: false, model: false, truncateCwd: true },
 ]
@@ -226,11 +231,14 @@ function buildFooterCandidate(
   const buildLeft = (location: string): StyledSpan[] => {
     const groups: StyledSpan[][] = [[dim(location)]]
     if (layout.model && input.model) {
-      const identity: StyledSpan[] = [dim(input.model)]
-      if (layout.thinking && input.thinkingLevel) {
-        identity.push(dim(' • '), ...thinkingBadge(input.thinkingLevel, input.thinkingLevels))
+      if (!layout.nextOnly) {
+        const identity: StyledSpan[] = [dim(input.nextModel ? `last: ${input.model}` : input.model)]
+        if (layout.thinking && input.thinkingLevel) {
+          identity.push(dim(' • '), ...thinkingBadge(input.thinkingLevel, input.thinkingLevels))
+        }
+        groups.push(identity)
       }
-      groups.push(identity)
+      if (input.nextModel) groups.push([dim(`next: ${input.nextModel}`)])
     }
     if (layout.context !== 'hidden' && contextPercent > 0) {
       const warning = contextPercent > 90 ? ' ⚠' : ''

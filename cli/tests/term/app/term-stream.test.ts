@@ -1898,6 +1898,25 @@ describe('term stream machine', () => {
     expect(finalized?.argsComplete).toBe(true)
   })
 
+  test('commits the model handoff card once before the receiving model starts', () => {
+    const tool = { tool_call_id: 'switch', tool_name: 'handoff_model' }
+    const ctx = { termRows: 24 }
+    const initial = createStreamMachineState(createInitialState('original', '/tmp'), createSpinnerState())
+    const requested = reduceRunEvent(initial, {
+      kind: 'assistant_completed',
+      payload: { stop_reason: 'tool_use', content: [{ type: 'tool_call', id: 'switch', name: 'handoff_model', input: { model: 'next:target' } }] },
+    }, ctx)
+    expect(requested.commitLines).toEqual([])
+    const started = reduceRunEvent(requested.state, { kind: 'tool_started', payload: { ...tool, args: { model: 'next:target' } } }, ctx)
+    const accepted = reduceRunEvent(started.state, {
+      kind: 'tool_finished',
+      payload: { ...tool, content: "Model handoff: current:original → next:target\nContinue the user's request: Implement it", is_error: false },
+    }, ctx)
+    expect(accepted.commitLines.filter(line => line.toolCard?.first).map(line => line.text))
+      .toEqual(['⇄ model handoff  current:original → next:target'])
+    expect(reduceRunEvent(accepted.state, { kind: 'turn_started', payload: {} }, ctx).commitLines).toEqual([])
+  })
+
   test('last tool completion flushes the ordered assistant message once', () => {
     const appState = createInitialState('model', '/tmp')
     appState.currentAssistantContent = [

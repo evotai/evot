@@ -1434,6 +1434,75 @@ async fn test_no_usage_anchor_compacts_from_local_estimate() {
 }
 
 #[tokio::test]
+async fn test_foreign_usage_compacts_before_prompt_using_the_selected_window() {
+    use evotengine::context::ContextConfig;
+
+    const WINDOW: usize = 1_100;
+    let output = TestHarness::new()
+        .responses(vec![
+            MockResponse::Text("summary".into()),
+            MockResponse::Text("provider accepted request".into()),
+        ])
+        .prior_messages(
+            (0..12)
+                .flat_map(|index| {
+                    [
+                        AgentMessage::Llm(Message::user(format!(
+                            "history {index} {}",
+                            "x".repeat(400)
+                        ))),
+                        AgentMessage::Llm(Message::Assistant {
+                            content: vec![Content::Text {
+                                text: "answer from another model".into(),
+                            }],
+                            stop_reason: StopReason::Stop,
+                            model: "large-window-model".into(),
+                            provider: "mock".into(),
+                            usage: Usage {
+                                input: (index + 1) * 110,
+                                output: 10,
+                                ..Default::default()
+                            },
+                            timestamp: index + 1,
+                            error_message: None,
+                            response_id: None,
+                        }),
+                    ]
+                })
+                .collect(),
+        )
+        .context_config(ContextConfig {
+            max_context_tokens: WINDOW,
+            system_prompt_tokens: 0,
+            advertised_context_window: None,
+            reserve_tokens: Some(137),
+            trigger_tokens: None,
+            keep_recent_tokens: Some(220),
+        })
+        .run("continue")
+        .await;
+
+    let mut events = output.events.iter().filter(|event| {
+        matches!(
+            event,
+            AgentEvent::ContextCompactionEnd { .. } | AgentEvent::LlmCallStart { .. }
+        )
+    });
+    assert!(matches!(
+        events.next(),
+        Some(AgentEvent::ContextCompactionEnd { .. })
+    ));
+    assert!(
+        matches!(events.next(), Some(AgentEvent::LlmCallStart { budget, .. }) if budget.estimated_tokens < WINDOW)
+    );
+    assert!(output.messages.iter().any(|message| matches!(
+        message,
+        AgentMessage::Llm(Message::Assistant { content, .. })
+            if content.iter().any(|block| matches!(block, Content::Text { text } if text == "provider accepted request"))
+    )));
+}
+
+#[tokio::test]
 async fn test_no_usage_anchor_below_threshold_does_not_compact() {
     use evotengine::context::ContextConfig;
 

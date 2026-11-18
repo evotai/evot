@@ -522,6 +522,8 @@ fn sse_map_call_start_reports_context_breakdown() {
             attempt: 1,
             injected_count: 2,
             model: "claude-sonnet-4-6".into(),
+            provider: None,
+            thinking_level: None,
             message_count: 4,
             message_bytes: 900,
             estimated_context_tokens: 2_000,

@@ -24,6 +24,7 @@ use crate::session::SessionGates;
 
 pub struct Agent {
     pub(super) selection: ModelSelection,
+    pub(super) model_catalog_config: RwLock<Arc<Config>>,
     pub(super) system_prompt: RwLock<String>,
     pub(super) assembler: Arc<TurnAssembler>,
     pub(super) cwd: String,
@@ -60,6 +61,7 @@ impl Agent {
                     .active_llm()
                     .unwrap_or_else(|_| LlmConfig::unconfigured()),
             ),
+            model_catalog_config: RwLock::new(Arc::new(config.clone())),
             system_prompt: RwLock::new(system_prompt),
             assembler: Arc::new(TurnAssembler::new(config)?),
             cwd,

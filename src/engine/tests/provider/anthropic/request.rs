@@ -150,6 +150,146 @@ fn normalized_history_serializes_all_parallel_results_in_the_next_message() {
     assert!(!body.to_string().contains("old-sig"));
 }
 
+#[test]
+fn deepseek_handoff_preserves_old_tool_history_without_replaying_foreign_thinking() {
+    use evotengine::context::transform_messages_for_model;
+    use evotengine::provider::ApiProtocol;
+    use evotengine::provider::ResolveModelRequest;
+
+    let target = ModelConfig::resolve_with_profile(
+        ResolveModelRequest {
+            protocol: ApiProtocol::AnthropicMessages,
+            provider: "evot-pro-anthropic".into(),
+            model_id: "evot-fast".into(),
+            base_url: "https://gateway.example.test/v1".into(),
+            headers: Default::default(),
+            compat: None,
+            route_capabilities: Default::default(),
+            overrides: Default::default(),
+        },
+        Some("deepseek-v4.1-flash"),
+    );
+    let history_call =
+        |provider: &str, model: &str, id: &str, name: &str, thought: &str| Message::Assistant {
+            content: vec![
+                Content::Thinking {
+                    thinking: thought.into(),
+                    metadata: Some(ThinkingMetadata::Anthropic {
+                        signature: "opaque".into(),
+                    }),
+                },
+                Content::ToolCall {
+                    id: id.into(),
+                    name: name.into(),
+                    arguments: serde_json::json!({"arg": id}),
+                    metadata: None,
+                },
+            ],
+            stop_reason: StopReason::ToolUse,
+            provider: provider.into(),
+            model: model.into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        };
+    let result = |id: &str, name: &str, text: &str, is_error: bool| Message::ToolResult {
+        tool_call_id: id.into(),
+        tool_name: name.into(),
+        content: vec![Content::Text { text: text.into() }],
+        is_error,
+        timestamp: 1,
+        retention: Retention::Normal,
+    };
+    let messages = transform_messages_for_model(
+        vec![
+            Message::user("Switch to fast and continue"),
+            history_call(
+                "previous",
+                "previous-model",
+                "read-1",
+                "read",
+                "foreign private reasoning",
+            ),
+            result("read-1", "read", "file contents", false),
+            history_call(
+                "previous",
+                "previous-model",
+                "switch-1",
+                "handoff_model",
+                "foreign private reasoning",
+            ),
+            result(
+                "switch-1",
+                "handoff_model",
+                "Continue the requested implementation",
+                false,
+            ),
+        ],
+        target.provider(),
+        target.id(),
+        ApiProtocol::AnthropicMessages,
+    );
+    let mut config = StreamConfigBuilder::anthropic()
+        .model("evot-fast")
+        .model_config(target.clone())
+        .messages(messages)
+        .tools(vec![tool_def("read", "Read a file")])
+        .thinking(ThinkingLevel::Max)
+        .build();
+    let first = build_request_body(&config, false);
+    assert_eq!(first["model"], "evot-fast");
+    assert_eq!(first["output_config"]["effort"], "max");
+    assert_eq!(first["thinking"]["type"], "enabled");
+    assert_eq!(first["tools"][0]["name"], "read");
+    assert_eq!(
+        first["messages"][0]["content"][0]["text"],
+        "Switch to fast and continue"
+    );
+    for (at, label, value) in [
+        (1, "call", "read-1"),
+        (2, "result", "file contents"),
+        (3, "call", "handoff_model"),
+        (4, "result", "Continue the requested implementation"),
+    ] {
+        let block = &first["messages"][at]["content"][0];
+        assert_eq!(block["type"], "text");
+        let text = block["text"].as_str().unwrap_or_default();
+        assert!(text.starts_with(&format!("[Historical tool {label}]")) && text.contains(value));
+    }
+    assert!(!first["messages"]
+        .to_string()
+        .contains("foreign private reasoning"));
+
+    config.messages.extend([
+        history_call(
+            target.provider(),
+            target.id(),
+            "read-2",
+            "read",
+            "native thinking",
+        ),
+        result("read-2", "read", "not found", true),
+    ]);
+    let followup = build_request_body(&config, false);
+    assert_eq!(
+        followup["messages"][5]["content"][0]["thinking"],
+        "native thinking"
+    );
+    assert_eq!(followup["messages"][5]["content"][1]["type"], "tool_use");
+    assert_eq!(
+        followup["messages"][6]["content"][0]["tool_use_id"],
+        "read-2"
+    );
+    assert_eq!(followup["messages"][6]["content"][0]["is_error"], true);
+
+    config.thinking_level = ThinkingLevel::Off;
+    let off = build_request_body(&config, false);
+    assert_eq!(off["thinking"]["type"], "disabled");
+    assert_eq!(off["messages"][1]["content"][0]["type"], "tool_use");
+    assert_eq!(off["messages"][2]["content"][0]["tool_use_id"], "read-1");
+}
+
 // ---------------------------------------------------------------------------
 // Thinking
 // ---------------------------------------------------------------------------

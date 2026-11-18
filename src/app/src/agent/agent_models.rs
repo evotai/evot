@@ -50,7 +50,9 @@ impl Agent {
     /// active LLM. Explicit `provider:model` remains the escape hatch for model
     /// ids not listed in config, as long as the provider itself exists.
     pub fn set_model_by_spec(&self, config: &Config, spec: &str) -> Result<()> {
-        self.selection.select_by_spec(config, spec)
+        self.selection.select_by_spec(config, spec)?;
+        self.refresh_model_catalog(config);
+        Ok(())
     }
 
     /// Select a model from the configured directory and return the exact
@@ -62,8 +64,11 @@ impl Agent {
         model: &str,
         thinking_level: Option<&str>,
     ) -> Result<LlmConfig> {
-        self.selection
-            .select_configured(config, provider, model, thinking_level)
+        let llm = self
+            .selection
+            .select_configured(config, provider, model, thinking_level)?;
+        self.refresh_model_catalog(config);
+        Ok(llm)
     }
 
     /// Re-resolve the live selection against a reloaded config, after login,
@@ -79,6 +84,7 @@ impl Agent {
     /// Total by construction: every config maps to one of the three landings, so
     /// callers never have to invent a recovery of their own.
     pub fn reload_selection(&self, config: &Config) -> SelectionReload {
+        self.refresh_model_catalog(config);
         self.selection.reload_selection(config)
     }
 
@@ -87,7 +93,13 @@ impl Agent {
     /// provider dropped from config), so its thinking level still refreshes.
     /// Returns whether the saved selection was restored.
     pub fn reload_provider_for_resume(&self, config: &Config, spec: &str) -> Result<bool> {
+        self.refresh_model_catalog(config);
         self.selection.reload_provider_for_resume(config, spec)
+    }
+
+    /// Refresh the available handoff targets without changing the active model.
+    pub fn refresh_model_catalog(&self, config: &Config) {
+        *self.model_catalog_config.write() = std::sync::Arc::new(config.clone());
     }
 
     /// The session-facing label for the agent's current thinking level, or

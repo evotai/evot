@@ -63,6 +63,19 @@ fn cloud_alias_capabilities_reach_runtime_and_request_without_renaming_model() -
         assert_eq!(request["thinking"]["type"], "enabled");
         assert_eq!(request["output_config"]["effort"], "max");
 
+        // Older deployed catalogs served the alias with an empty profile.
+        let legacy = CACHE.replace(
+            "\"capability_profile\": \"deepseek-v4.1-flash\"",
+            "\"capability_profile\": \"\"",
+        );
+        assert_ne!(legacy, CACHE);
+        std::fs::write(root.join("models.cache.json"), legacy)?;
+        let legacy = Config::load()?.build_llm("evot-free", Some("evot-fast".into()))?;
+        assert_eq!(legacy.model, "evot-fast");
+        assert_eq!(legacy.model_config.context_window(), 616_000);
+        assert_eq!(legacy.model_config.max_tokens(), 256_000);
+        assert_eq!(legacy.thinking_level, ThinkingLevel::Max);
+
         let fallback = config.build_llm("evot-free", Some("opaque-alias".into()))?;
         assert_eq!(fallback.model_config.max_tokens(), 128_000);
         assert_eq!(fallback.thinking_level, ThinkingLevel::Max);

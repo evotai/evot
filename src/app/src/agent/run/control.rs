@@ -57,6 +57,10 @@ impl RunControl {
         self.cancel.is_cancelled()
     }
 
+    pub(super) fn segment_cancellation(&self) -> CancellationToken {
+        self.cancel.child_token()
+    }
+
     pub fn steer(&self, msg: evot_engine::AgentMessage) -> evot_engine::PromptQueueEntry {
         self.queues.enqueue_steering(msg)
     }

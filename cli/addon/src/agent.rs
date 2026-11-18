@@ -150,7 +150,7 @@ impl NapiAgent {
 
         let outcome = self
             .agent
-            .submit(request)
+            .submit(request.allow_model_handoff())
             .await
             .map_err(|e| Error::from_reason(format!("query failed: {e}")))?;
 
@@ -196,6 +196,7 @@ impl NapiAgent {
     #[napi]
     pub fn config_info(&self) -> Result<String> {
         let config = self.load_config()?;
+        self.agent.refresh_model_catalog(&config);
         let llm = self.agent.llm();
         let provider = llm.provider.clone();
         let env_path = config.env_file_path.to_string_lossy().to_string();

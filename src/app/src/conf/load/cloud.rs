@@ -134,10 +134,18 @@ pub(super) fn apply_cloud_provider(config: &mut Config) -> Result<()> {
             model_tiers.insert(model.id.clone(), model.tier.clone());
         }
         model_sorts.insert(model.id.clone(), model.sort_order);
+        let profile = match model.capability_profile.trim() {
+            // Older cloud catalogs omit the intrinsic profile for this alias.
+            // Explicit catalog profiles win; BYOK models never use this map.
+            "" if model.id == "evot-fast" && model.protocol.eq_ignore_ascii_case("anthropic") => {
+                "deepseek-v4.1-flash"
+            }
+            profile => profile,
+        };
         model_capabilities.insert(
             model.id.clone(),
             crate::conf::config::CloudModelCapabilities {
-                profile: model.capability_profile.trim().to_string(),
+                profile: profile.to_string(),
                 max_output_tokens: model.max_output_tokens.filter(|value| *value > 0),
             },
         );

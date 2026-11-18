@@ -178,6 +178,7 @@ pub enum AgentEvent {
 #[derive(Debug, Clone)]
 pub struct LlmCallRequest {
     pub model: String,
+    pub provider: Option<String>,
     /// Effective level after model capability clamping, not just the configured request.
     pub thinking_level: ThinkingLevel,
     pub system_prompt: String,

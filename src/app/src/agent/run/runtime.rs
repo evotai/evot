@@ -3,7 +3,7 @@
 //! `projection` translates engine events; `engine` constructs execution state;
 //! `outbox` owns bounded live delivery. This module orders those effects.
 //!
-//! A single `Run` comprises one engine turn. Consumers see one `RunStarted`
+//! A run can span multiple model segments. Consumers see one `RunStarted`
 //! and one aggregated `RunFinished`.
 
 use std::collections::VecDeque;
@@ -11,16 +11,21 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use evot_engine::context::SharedExecutionTracker;
 
 use super::control::RunControl;
 use super::engine::build_engine;
+use super::engine::execution_tracker;
 use super::engine::EngineOptions;
 use super::outbox::event_channel;
 use super::outbox::EventSender;
 use super::projection::map_agent_event;
 use super::projection::RuntimeEvent;
 use super::run::Run;
+use crate::agent::model_handoff::ModelHandoff;
+use crate::agent::model_handoff::MAX_HANDOFFS;
 use crate::base::error::Result;
+use crate::conf::LlmConfig;
 use crate::observability::ContextCompactionCompletedStats;
 use crate::observability::RunFinishedStats;
 use crate::observability::TranscriptStats;
@@ -41,6 +46,7 @@ pub struct TurnInput {
     pub history: Vec<evot_engine::AgentMessage>,
     pub input: Vec<evot_engine::Content>,
     pub provenance: Option<evot_engine::InputProvenance>,
+    pub(crate) resume: bool,
     pub session: Arc<Session>,
     /// Persisted transcript generation used to build `history`.
     pub transcript_seq: u64,
@@ -50,15 +56,26 @@ pub struct TurnInput {
 // TurnFactory — caller-provided builder of per-turn engine state
 // ---------------------------------------------------------------------------
 
-/// Rebuilds the engine input for the next internal turn.
-///
-/// The runtime calls this once per turn. The factory captures whatever
-/// the agent layer needs (config, sandbox, tools, system prompt) and
-/// resolves the latest history at call time.
+pub(in crate::agent) enum SegmentStart {
+    Prompt(Vec<evot_engine::Content>),
+    Resume(Box<ModelTransition>),
+}
+
+pub(in crate::agent) struct ModelTransition {
+    pub llm: LlmConfig,
+    pub previous_llm: LlmConfig,
+}
+
+pub(in crate::agent) struct Segment {
+    pub turn: TurnInput,
+    pub llm: LlmConfig,
+    pub handoff: Option<Arc<ModelHandoff>>,
+}
+
+/// Resolve engine options, tools, and persisted session history for a segment.
 #[async_trait]
 pub(in crate::agent) trait TurnFactory: Send + Sync + 'static {
-    /// Build the engine options + history + initial user input for this turn.
-    async fn build(&self, input: Vec<evot_engine::Content>) -> Result<TurnInput>;
+    async fn build(&self, start: SegmentStart, allow_handoff: bool) -> Result<Segment>;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,52 +127,83 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
     let mut last_text = String::new();
     let mut compact_records: Vec<CompactRecord> = Vec::new();
 
-    if !control.is_cancelled() {
-        let outcome = match factory.build(initial_input).await {
-            // A stale notification wake has no input left to process.
-            Ok(turn) if turn.input.is_empty() => None,
-            Ok(turn) => {
-                Some(drive_one_turn(turn, &tx, &control, &run_id, &session_id, started_at).await)
-            }
-            Err(e) => {
-                tracing::error!(
-                    stage = "run",
-                    status = "build_turn_failed",
-                    run_id = %run_id,
-                    session_id = %session_id,
-                    error = %e,
+    let mut start = SegmentStart::Prompt(initial_input);
+    let mut tracker = None;
+    for index in 0..=MAX_HANDOFFS {
+        if control.is_cancelled() {
+            break;
+        }
+        let Segment { turn, llm, handoff } = match factory.build(start, index < MAX_HANDOFFS).await
+        {
+            Ok(segment) => segment,
+            Err(error) => {
+                tracing::error!(stage = "run", status = "build_segment_failed", %run_id, %session_id, %error);
+                let _ = tx.send(
+                    RunEventContext::new(&run_id, &session_id, total_turns).event(
+                        RunEventPayload::Error {
+                            message: error.to_string(),
+                        },
+                    ),
                 );
-                // Surface the failure to the caller instead of ending the run
-                // silently — e.g. a missing API key must be visible in the UI.
-                let _ = tx.send(RunEventContext::new(&run_id, &session_id, 0).event(
-                    RunEventPayload::Error {
-                        message: e.to_string(),
-                    },
-                ));
-                None
+                break;
             }
         };
-
-        if let Some(outcome) = outcome {
-            let TurnOutcome {
-                turn_count,
-                usage,
-                transcript_count,
-                last_text: turn_last_text,
-                compact_records: turn_compacts,
-            } = outcome;
-
-            total_turns = total_turns.saturating_add(turn_count);
-            total_usage.input = total_usage.input.saturating_add(usage.input);
-            total_usage.output = total_usage.output.saturating_add(usage.output);
-            total_usage.cache_read = total_usage.cache_read.saturating_add(usage.cache_read);
-            total_usage.cache_write = total_usage.cache_write.saturating_add(usage.cache_write);
-            total_transcripts = total_transcripts.saturating_add(transcript_count);
-            if !turn_last_text.is_empty() {
-                last_text = turn_last_text;
-            }
-            compact_records.extend(turn_compacts);
+        // A stale notification wake has no input left to process.
+        if control.is_cancelled() || (!turn.resume && turn.input.is_empty()) {
+            break;
         }
+        if !turn.resume {
+            tracker = execution_tracker(turn.options.limits.as_ref());
+        }
+        let outcome = drive_segment(
+            turn,
+            tracker.clone(),
+            &tx,
+            &control,
+            &run_id,
+            &session_id,
+            total_turns,
+        )
+        .await;
+
+        total_turns = total_turns.saturating_add(outcome.turn_count);
+        total_usage.input = total_usage.input.saturating_add(outcome.usage.input);
+        total_usage.output = total_usage.output.saturating_add(outcome.usage.output);
+        total_usage.cache_read = total_usage
+            .cache_read
+            .saturating_add(outcome.usage.cache_read);
+        total_usage.cache_write = total_usage
+            .cache_write
+            .saturating_add(outcome.usage.cache_write);
+        total_transcripts = total_transcripts.saturating_add(outcome.transcript_count);
+        if !outcome.last_text.is_empty() {
+            last_text = outcome.last_text;
+        }
+        compact_records.extend(outcome.compact_records);
+
+        if !outcome.completed || control.is_cancelled() {
+            break;
+        }
+        let Some(next) = handoff.and_then(|handoff| handoff.take()) else {
+            break;
+        };
+        if let Some(reason) = tracker
+            .as_ref()
+            .and_then(|tracker| tracker.lock().check_limits())
+        {
+            let _ = tx.send(
+                RunEventContext::new(&run_id, &session_id, total_turns).event(
+                    RunEventPayload::Error {
+                        message: format!("Model handoff stopped: {reason}"),
+                    },
+                ),
+            );
+            break;
+        }
+        start = SegmentStart::Resume(Box::new(ModelTransition {
+            llm: next,
+            previous_llm: llm,
+        }));
     }
 
     // Emit the aggregated run-finished event and a single transcript stats
@@ -207,31 +255,34 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
 }
 
 // ---------------------------------------------------------------------------
-// drive_one_turn — single engine submit: forward events, persist transcripts
+// drive_segment — forward events and persist transcripts for one model
 // ---------------------------------------------------------------------------
 
-struct TurnOutcome {
+struct SegmentOutcome {
+    completed: bool,
     turn_count: u32,
     usage: UsageSummary,
     transcript_count: usize,
     last_text: String,
-    /// Compact records produced during this engine turn, in order.
+    /// Compact records produced during this engine segment, in order.
     compact_records: Vec<CompactRecord>,
 }
 
-async fn drive_one_turn(
+async fn drive_segment(
     turn: TurnInput,
+    tracker: Option<SharedExecutionTracker>,
     tx: &EventSender,
     control: &RunControl,
     run_id: &str,
     session_id: &str,
-    _started_at: Instant,
-) -> TurnOutcome {
+    turn_offset: u32,
+) -> SegmentOutcome {
     let TurnInput {
         options,
         history,
         input,
         provenance,
+        resume,
         session,
         transcript_seq,
     } = turn;
@@ -239,13 +290,18 @@ async fn drive_one_turn(
     let cwd = options.cwd.to_string_lossy().into_owned();
     let mut privacy_seen = session.privacy_card_tags().await;
     let mut engine = build_engine(options, history)
+        .with_run_progress(turn_offset as usize, tracker)
         .with_prompt_queues(control.queues().steering(), control.queues().follow_up());
-    let user_msg = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
-        provenance,
-        content: input.clone(),
-        timestamp: evot_engine::now_ms(),
-    });
-    let (engine_handle, mut engine_rx) = engine.submit_bounded(vec![user_msg]).await;
+    let (engine_handle, mut engine_rx) = if resume {
+        engine.resume_bounded(control.segment_cancellation()).await
+    } else {
+        let user_msg = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
+            provenance,
+            content: input,
+            timestamp: evot_engine::now_ms(),
+        });
+        engine.submit_bounded(vec![user_msg]).await
+    };
     control.install_engine(engine_handle);
     // Map one engine event at a time in the consumer. No forwarding task or
     // second unbounded queue is needed; only this event's expansion is buffered.
@@ -266,8 +322,9 @@ async fn drive_one_turn(
     // task notice used to summarize 500k tokens and then throw the result away.
     let mut context_rebased = false;
     let mut persistence_failed = false;
-    let mut turn_count: u32 = 0;
-    let mut outcome = TurnOutcome {
+    let mut turn_count = turn_offset;
+    let mut outcome = SegmentOutcome {
+        completed: false,
         turn_count: 0,
         usage: UsageSummary::default(),
         transcript_count: 0,
@@ -477,7 +534,7 @@ async fn drive_one_turn(
                 usage,
                 transcript_count,
             } => {
-                outcome.turn_count = turn_count;
+                outcome.completed = transcript_count > 0;
                 outcome.usage = usage;
                 outcome.transcript_count = transcript_count;
                 outcome.last_text = last_text;
@@ -512,9 +569,7 @@ async fn drive_one_turn(
     }
 
     control.detach_engine();
-    if outcome.turn_count == 0 {
-        outcome.turn_count = turn_count;
-    }
+    outcome.turn_count = turn_count.saturating_sub(turn_offset);
     outcome
 }
 

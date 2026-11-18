@@ -24,6 +24,7 @@ impl Agent {
     pub fn fork(self: &Arc<Self>, request: ForkRequest) -> Result<ForkedAgent> {
         let Self {
             selection,
+            model_catalog_config,
             system_prompt: _,
             assembler,
             cwd,
@@ -37,6 +38,7 @@ impl Agent {
         let (system_prompt, sections) = SystemPrompt::side_session(cwd, &request.system_prompt);
         let forked = Arc::new(Self {
             selection: ModelSelection::new(selection.snapshot()),
+            model_catalog_config: RwLock::new(model_catalog_config.read().clone()),
             system_prompt: RwLock::new(system_prompt),
             assembler: Arc::new(assembler.fork(sections)),
             cwd: cwd.clone(),

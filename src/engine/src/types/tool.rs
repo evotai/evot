@@ -200,6 +200,13 @@ pub trait AgentTool: Send + Sync {
         false
     }
 
+    /// Run this tool alone. On success, stop at the completed tool exchange,
+    /// before consuming queued inputs or issuing another provider request.
+    /// The caller can resume the conversation with a different engine.
+    fn ends_segment(&self) -> bool {
+        false
+    }
+
     /// Resolve the tool name to present to a given model.
     fn resolve_name(&self, model: &str) -> String {
         let model_lower = model.to_lowercase();

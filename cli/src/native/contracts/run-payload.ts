@@ -47,6 +47,7 @@ export const runPayloadSchemas = {
   }),
   llm_call_started: object({
     turn: uint, attempt: uint, injected_count: uint, model: text, message_count: uint, message_bytes: uint,
+    provider: optional(text), thinking_level: optional(text),
     estimated_context_tokens: optional(uint), system_prompt_tokens: uint, tool_definition_tokens: optional(uint),
     tool_count: uint, message_stats: optional(nullable(messageStats)), budget_tokens: optional(uint), context_window: optional(uint),
   }),

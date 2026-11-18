@@ -186,6 +186,9 @@ impl evot_engine::AgentTool for SharedTool {
     fn ends_turn(&self) -> bool {
         self.0.ends_turn()
     }
+    fn ends_segment(&self) -> bool {
+        self.0.ends_segment()
+    }
     async fn execute(
         &self,
         params: serde_json::Value,

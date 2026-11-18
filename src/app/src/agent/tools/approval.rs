@@ -99,6 +99,9 @@ impl AgentTool for ApprovedTool {
     fn ends_turn(&self) -> bool {
         self.inner.ends_turn()
     }
+    fn ends_segment(&self) -> bool {
+        self.inner.ends_segment()
+    }
 
     async fn execute(
         &self,

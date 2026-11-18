@@ -10,7 +10,7 @@ import { resolveRunInteraction, type RunInteractionState } from '../app/run/run-
 
 export interface PromptSnapshot {
   editor: EditorState
-  session: Pick<AppState, 'model' | 'cwd' | 'sessionTokens'> & Partial<Pick<AppState, 'forkTrail' | 'cloudBadge'>>
+  session: Pick<AppState, 'model' | 'cwd' | 'sessionTokens' | 'lastCallModel'> & Partial<Pick<AppState, 'forkTrail' | 'cloudBadge'>>
   config?: ConfigInfo
   active: boolean
   logMode: boolean
@@ -48,15 +48,32 @@ export interface PromptSnapshot {
 export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
   const { editor, session, config } = input
   const empty = isEditorEmpty(editor)
-  const active = config?.availableModels.find(model => model.model === session.model && model.provider === (config?.provider ?? ''))
-    ?? config?.availableModels.find(model => model.model === session.model)
+  const call = session.lastCallModel
+  const selectedProvider = config?.provider ?? ''
+  const providerChanged = call?.provider && selectedProvider && call.provider !== selectedProvider
+  const differentModel = call && (call.model !== session.model || providerChanged)
+  const shownCall = input.busy || differentModel ? call : undefined
+  const model = shownCall?.model ?? session.model
+  const provider = shownCall?.provider ?? (differentModel ? '' : selectedProvider)
+  const active = config?.availableModels.find(option => option.model === model && option.provider === provider)
+    ?? (!provider ? config?.availableModels.find(option => option.model === model) : undefined)
+  const thinkingLevels = active?.thinking_levels
+  const selectedThinkingLevel = config?.thinkingLevel ?? ''
+  const thinkingLevel = !shownCall ? selectedThinkingLevel
+    : !thinkingLevels?.length ? ''
+    : shownCall.thinkingLevel ?? (differentModel ? '' : selectedThinkingLevel)
+  // Compare provider-qualified names only when the two providers serve the same model ID.
+  const qualify = providerChanged && model === session.model
+  const modelLabel = qualify ? `${provider}:${model}` : model
+  const nextModel = qualify ? `${selectedProvider}:${session.model}` : session.model
   return {
     lines: editor.lines,
     cursorLine: editor.cursorLine,
     cursorCol: editor.cursorCol,
     active: input.active,
-    model: session.model,
-    provider: providerDisplayName(active, config?.provider ?? ''),
+    model: modelLabel,
+    nextModel: differentModel && !input.busy ? nextModel : undefined,
+    provider: providerDisplayName(active, provider),
     logMode: input.logMode,
     dashboardUrl: input.dashboardUrl,
     exitHint: input.exitHint,
@@ -89,7 +106,7 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     ...(input.suggestionExplicit ? { suggestionExplicit: true } : {}),
     loopParked: input.loopParked ?? false,
     queuedCount: input.queuedCount ?? 0,
-    thinkingLevel: config?.thinkingLevel ?? '',
-    ...(active?.thinking_levels?.length ? { thinkingLevels: active.thinking_levels } : {}),
+    thinkingLevel,
+    ...(thinkingLevels?.length ? { thinkingLevels } : {}),
   }
 }

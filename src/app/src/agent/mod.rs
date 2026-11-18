@@ -6,6 +6,7 @@ mod agent_sessions;
 pub mod bootstrap;
 pub mod command;
 mod fork;
+mod model_handoff;
 pub mod models;
 pub mod orphaned_tasks;
 pub mod processes;

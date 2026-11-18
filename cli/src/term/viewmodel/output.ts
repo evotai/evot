@@ -373,7 +373,7 @@ function buildToolBlock(text: string, columns?: number, maxRows?: number): ViewB
   // the subordinate line below). Paint glyph cyan, name bold, arg dim. When the
   // line exceeds the terminal width, wrap the arg with aligned continuations.
   // Compact shell headings have a row budget; expanded headings show it all.
-  const cardMatch = text.match(/^([⌘◫⌕⊕✎·✦◇◷⊘✂⚖]) (.+)$/u)
+  const cardMatch = text.match(/^([⌘◫⌕⊕✎·✦◇◷⊘✂⚖⇄]) (.+)$/u)
   if (cardMatch) {
     const glyph = cardMatch[1]!
     const rest = cardMatch[2]!.trimEnd()

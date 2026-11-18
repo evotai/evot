@@ -170,9 +170,8 @@ impl Agent {
     // -- query ---------------------------------------------------------------
 
     pub async fn submit(self: &Arc<Self>, mut request: QueryRequest) -> Result<SubmitOutcome> {
-        // Freeze one selection for session metadata and every turn in this run.
-        // Without this snapshot, concurrent callers changing the live model
-        // could make a run start or auto-continue on a different provider.
+        // Pin the initial selection for this run. Only a handoff made within
+        // the run can replace it; other callers' selections cannot.
         let llm = request.llm.clone().unwrap_or_else(|| self.llm());
         request.llm = Some(llm.clone());
         let session = self
@@ -368,6 +367,9 @@ impl Agent {
             active_runs.complete(&sid, &rid, &completed_signal);
         });
 
+        let model_catalog = (request.allow_model_handoff
+            && request.mode.policy().tools == super::run::policy::ToolAccess::Full)
+            .then(|| self.model_catalog_config.read().clone());
         let factory: Arc<dyn TurnFactory> = Arc::new(AgentTurnFactory {
             assembler: Arc::clone(&self.assembler),
             session: Arc::clone(&session),
@@ -375,6 +377,7 @@ impl Agent {
             session_id: session_id.clone(),
             llm,
             previous_llm: self.selection.previous_llm(),
+            model_catalog,
             host_tools: request.host_tools.clone(),
             extra_tools: request.extra_tools.clone(),
             approver: request.approver.clone(),

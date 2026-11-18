@@ -143,6 +143,19 @@ impl TurnAssembler {
         session_id: &str,
         request: TurnBuildRequest,
     ) -> Result<TurnInput> {
+        self.build_segment(llm, mode, session, session_id, request, false)
+            .await
+    }
+
+    pub(super) async fn build_segment(
+        &self,
+        llm: &LlmConfig,
+        mode: ToolMode,
+        session: Arc<Session>,
+        session_id: &str,
+        request: TurnBuildRequest,
+        resume: bool,
+    ) -> Result<TurnInput> {
         let TurnBuildRequest {
             input,
             host_tools,
@@ -184,11 +197,17 @@ impl TurnAssembler {
         let policy = mode.policy();
         // Skills and run-scoped tools only matter when the model can call tools.
         let tool_free = policy.tools == ToolAccess::None;
-        let skills = if tool_free {
+        let mut skills = if tool_free {
             Vec::new()
         } else {
             load_turn_skills(&skill_dirs, selected_skill_names.as_deref())?
         };
+        if !extra_tools
+            .iter()
+            .any(|tool| tool.name() == super::model_handoff::NAME)
+        {
+            skills.retain(|skill| skill.name != "model-handoff");
+        }
         let mut system_dirs = skill_dirs.clone();
         if let Err(e) = std::fs::create_dir_all(&self.memory_dir) {
             tracing::warn!(
@@ -282,11 +301,12 @@ impl TurnAssembler {
             .join("\n\n");
         let (prior_messages, compaction_state, transcript_seq) = session.context_snapshot().await;
         let compaction_llm = previous_llm.filter(|previous| {
-            previous.model != llm.model
-                && last_assistant_model(&prior_messages) == Some(previous.model.as_str())
+            (previous.model != llm.model || previous.provider != llm.provider)
+                && (resume
+                    || last_assistant_model(&prior_messages) == Some(previous.model.as_str()))
         });
         // Replay normalization belongs at the engine LLM boundary, not here.
-        if let Some(process_manager) = &process_manager {
+        if let Some(process_manager) = process_manager.as_ref().filter(|_| !resume) {
             // Tasks the transcript announced but this process never ran
             // died with an earlier evot; say so once before the model
             // treats them as live watchers. Checked before the drain so
@@ -334,6 +354,7 @@ impl TurnAssembler {
             history: prior_messages,
             input,
             provenance,
+            resume,
             session,
             transcript_seq,
         })

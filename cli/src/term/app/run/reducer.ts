@@ -4,7 +4,7 @@
 
 import { isKnownRunEvent, type RunEvent } from '../../../native/contracts/query-event.js'
 import { formatLlmCallStarted, formatLlmCallRetry, formatLlmCallCompleted, formatCompactionStarted, formatCompactionCompleted } from '../../../render/verbose.js'
-import { emptyRunStats, type AppState } from './state.js'
+import { emptyRunStats, settleRunCallModel, type AppState } from './state.js'
 import { streamTokenRate } from '../../../render/stream-rate.js'
 import type { MessageStats, UIAssistantBlock, UIMessage, UIToolCall } from '../../../render/message-types.js'
 import { appendAssistantDelta, assistantToolCalls, completedAssistantContent, findAssistantToolCall, updateAssistantToolCall, updateToolCallInMessages, upsertAssistantToolCall } from './assistant-content.js'
@@ -45,6 +45,8 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
         ...state,
         isLoading: true,
         sessionId: event.session_id,
+        firstCallModel: undefined,
+        lastCallModel: undefined,
         error: null,
         currentAssistantContent: [],
         currentRunStats: emptyRunStats(),
@@ -277,6 +279,8 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
 
       return {
         ...state,
+        firstCallModel: state.firstCallModel ?? { model, provider: p.provider },
+        lastCallModel: { model, provider: p.provider, thinkingLevel: p.thinking_level },
         currentRunStats: {
           ...state.currentRunStats,
           contextTokens: p.estimated_context_tokens ?? state.currentRunStats.contextTokens,
@@ -319,7 +323,7 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
 
       const cacheReadTok = usage?.cache_read ?? 0
       const cacheWriteTok = usage?.cache_write ?? 0
-      const model = typeof rawPayload.model === 'string' ? rawPayload.model : state.model
+      const model = typeof rawPayload.model === 'string' ? rawPayload.model : state.lastCallModel?.model ?? state.model
 
       if (usage) {
         stats.inputTokens += inputTok
@@ -444,7 +448,7 @@ export function applyEvent(state: AppState, event: RunEvent): AppState {
       }
 
       return {
-        ...state,
+        ...settleRunCallModel(state),
         isLoading: false,
         currentRunStats: stats,
       }

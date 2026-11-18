@@ -153,6 +153,26 @@ describe('typed run reducer', () => {
     expect(text).toContain('120k / 1M')
   })
 
+  test('handoffs retain the final model only when its route differs from the first call', () => {
+    const initial = createInitialState('original', '/tmp')
+    const call = {
+      turn: 1, attempt: 0, injected_count: 0, model: 'original', provider: 'original-provider', thinking_level: 'medium',
+      message_count: 3, message_bytes: 1, system_prompt_tokens: 4, tool_count: 0,
+    }
+    const first = apply(initial, 'llm_call_started', call)
+    const finish = { text: '', usage: { input: 0, output: 0 }, turn_count: 2, duration_ms: 1, transcript_count: 0 }
+    for (const route of [{ model: 'target', provider: call.provider }, { model: call.model, provider: 'new-provider' }]) {
+      const target = apply(first, 'llm_call_started', { ...call, ...route, turn: 2 })
+      expect(target.model).toBe('original')
+      expect(target.lastCallModel).toEqual({ ...route, thinkingLevel: 'medium' })
+      const finished = apply(target, 'run_finished', finish)
+      expect(finished.lastCallModel).toEqual(target.lastCallModel)
+      expect(apply(finished, 'run_started', {}).lastCallModel).toBeUndefined()
+      const returned = apply(target, 'llm_call_started', { ...call, turn: 3 })
+      expect(apply(returned, 'run_finished', { ...finish, turn_count: 3 }).lastCallModel).toBeUndefined()
+    }
+  })
+
   test('implausible provider usage keeps the engine estimate for the footer', () => {
     const initial = createInitialState('model', '/tmp')
     const started = apply(initial, 'llm_call_started', {

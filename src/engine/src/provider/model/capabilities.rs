@@ -39,6 +39,8 @@ pub(crate) enum AnthropicThinkingWire {
     /// Both fields are sent together — omitting `budget_tokens` can cause
     /// some endpoints to reject the request or silently disable thinking.
     Enabled,
+    /// DeepSeek's enabled dialect also requires replayable thinking for native tool exchanges.
+    DeepSeek,
 }
 
 /// Effective policy for one thinking level.

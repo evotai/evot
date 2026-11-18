@@ -81,6 +81,9 @@ impl Drop for IdlePause {
     }
 }
 
+/// One execution budget shared by sequential engine segments of a host run.
+pub type SharedExecutionTracker = std::sync::Arc<parking_lot::Mutex<ExecutionTracker>>;
+
 /// Tracks execution state against limits
 pub struct ExecutionTracker {
     pub limits: ExecutionLimits,

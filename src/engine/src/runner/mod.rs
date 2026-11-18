@@ -19,4 +19,5 @@ pub use driver::agent_loop;
 pub use driver::agent_loop_continue;
 pub(crate) use driver::agent_loop_continue_with_state;
 pub(crate) use driver::agent_loop_with_state;
+pub(crate) use driver::LoopProgress;
 pub use thinking_only_guard::ThinkingOnlyGuard;

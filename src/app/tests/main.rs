@@ -91,6 +91,8 @@ mod input_provenance_test;
 mod manual_compact_llm_test;
 #[path = "agent/model_catalog_test.rs"]
 mod model_catalog_test;
+#[path = "agent/model_handoff_test.rs"]
+mod model_handoff_test;
 #[path = "conf/model_metadata_test.rs"]
 mod model_metadata_test;
 #[path = "agent/model_selection_test.rs"]

@@ -129,6 +129,33 @@ describe('buildThinkingLines', () => {
 // buildToolCall
 // ---------------------------------------------------------------------------
 
+describe('model handoff card', () => {
+  const call = { id: 'handoff', name: 'handoff_model', args: { model: 'next:target', handoff: 'Continue the implementation' } }
+
+  test('renders one settled card with the confirmed route, without the instruction body', () => {
+    const lines = buildToolCard({
+      ...call, status: 'done',
+      result: `Model handoff: current:original → next:target\nContinue the user's request: ${call.args.handoff}`,
+    })
+    expect(lines.map(line => line.text)).toEqual([
+      '⇄ model handoff  current:original → next:target', '  ✓ · accepted · same run',
+    ])
+    expect(lines.map(line => line.toolCard)).toEqual([
+      { state: 'success', first: true, last: false }, { state: 'success', first: false, last: true },
+    ])
+  })
+
+  test('shows a pending target and reports rejection without claiming a switch', () => {
+    const pending = buildToolCard({ ...call, status: 'running' })
+    expect(pending.map(line => line.text)).toEqual(['⇄ model handoff  → next:target', '  ● · pending'])
+    const failed = buildToolCard({ ...call, status: 'error', result: 'invalid target\n\x1b[31mnot configured\x1b[0m' })
+    expect(failed.map(line => line.text)).toEqual([
+      '⇄ model handoff  → next:target', '  ✗ · not switched', '  invalid target not configured',
+    ])
+    expect(failed.every(line => line.toolCard?.state === 'error')).toBe(true)
+  })
+})
+
 describe('buildToolCall', () => {
   test('regular tool call emits a call line with glyph and command (no status mark)', () => {
     const preview = 'python3 -c "print(1)"'

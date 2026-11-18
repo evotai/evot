@@ -8,6 +8,7 @@
  * This module is pure logic — no React, no stdout. Easy to test.
  */
 
+import stripAnsi from 'strip-ansi'
 import type { PrivacyLiveFinding, SavedPrivacyCard } from '../native/contracts/privacy.js'
 import { providerFailurePresentation } from './provider-error.js'
 import { parsePrivacyStop, privacyActionLabel, privacyCard, privacyFindingRows, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
@@ -534,6 +535,7 @@ export function buildToolCard(call: UIToolCall, expanded?: boolean, _now = Date.
   if (isAskUserTool(call.name)) return []
   if (isScheduleWakeupTool(call.name)) return buildLoopCard(call, _now)
   if (isLoopPlanTool(call.name)) return buildLoopPlanCard(call, expanded)
+  if (call.name === 'handoff_model') return buildModelHandoffCard(call)
 
   const details = asDetails(call.details)
   const diff = typeof details.diff === 'string' ? details.diff : undefined
@@ -1266,6 +1268,37 @@ function buildLoopCard(call: UIToolCall, now: number): OutputLine[] {
   const early = typeof call.result === 'string' ? earlyWakeFromResult(call.result) : null
   if (early) lines.push(line(`  ${early}`))
   return stampToolCard(lines, 'success')
+}
+
+function buildModelHandoffCard(call: UIToolCall): OutputLine[] {
+  const inline = (text: string) => stripAnsi(text).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]+/g, ' ').trim()
+  const target = toolDraftText(call.args, ['model'])
+  // The successful tool result starts with the resolved route. The remaining
+  // lines are instructions for the receiving model, not card content.
+  const confirmed = call.status === 'done' ? call.result?.match(/^Model handoff: ([^\r\n]+)/)?.[1] : undefined
+  const route = confirmed && target && confirmed.endsWith(` → ${target}`)
+    ? inline(confirmed) : target ? `→ ${inline(target)}` : ''
+  const lines: OutputLine[] = [{
+    id: genId('model-handoff'),
+    kind: 'tool',
+    text: `⇄ model handoff${route ? `  ${route}` : ''}`,
+  }]
+  switch (call.status) {
+    case 'queued':
+    case 'running':
+      lines.push(toolStatusLine(call.status === 'running' ? '●' : '○', ['pending']))
+      return stampToolCard(lines, 'pending')
+    case 'error': {
+      lines.push(toolStatusLine('✗', ['not switched']))
+      const reason = inline(call.result ?? '')
+      if (reason) lines.push({ id: genId('model-handoff-error'), kind: 'error', text: `  ${reason}` })
+      return stampToolCard(lines, 'error')
+    }
+    case 'done':
+      // The receiving request can still be cancelled or fail before it starts.
+      lines.push(toolStatusLine('✓', ['accepted · same run']))
+      return stampToolCard(lines, 'success')
+  }
 }
 
 function loopNextWakeup(args: Record<string, unknown>, from: number): string {

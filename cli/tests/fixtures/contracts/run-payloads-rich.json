@@ -6,6 +6,8 @@
       "attempt": 0,
       "injected_count": 1,
       "model": "fixture",
+      "provider": "fixture-provider",
+      "thinking_level": "medium",
       "message_count": 2,
       "message_bytes": 128,
       "system_prompt_tokens": 10,

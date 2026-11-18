@@ -288,7 +288,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
               usagePending,
             ),
         {
-          model: st.appState.model,
+          model: st.appState.lastCallModel?.model ?? st.appState.model,
           columns: deps.renderer.termCols,
           interaction: deps.runInteraction.snapshot(deps.runInteractionInput()),
           awaitedTasks: deps.awaitedTaskSummary(toolCalls),

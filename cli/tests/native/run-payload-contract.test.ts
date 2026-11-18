@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeQueryEvent, isHostToolEvent, isKnownRunEvent } from '../../src/native/contracts/query-event.js'
 import { runPayloadSchemas } from '../../src/native/contracts/run-payload.js'
-import { object, oneOf } from '../../src/native/contracts/schema.js'
+import { object, oneOf, text, uint } from '../../src/native/contracts/schema.js'
 import compactionProgress from '../fixtures/contracts/compaction-progress.json'
 import rich from '../fixtures/contracts/run-payloads-rich.json'
 import current from '../fixtures/contracts/run-payloads-current.json'
@@ -28,6 +28,15 @@ describe('known run payload contracts', () => {
       expect(legacyReader.read(written, '$')).toEqual(fixture.payload)
     }
     expect(() => decode('context_compaction_phase', { phase: 'local', activity: 'invalid' })).toThrow('$.payload.activity')
+  })
+
+  test('call model metadata is additive and readable by the legacy decoder', () => {
+    const legacy = object({ turn: uint, attempt: uint, model: text })
+    const historical = fixtures.find(f => f.kind === 'llm_call_started')!
+    expect(decode(historical.kind, historical.payload).payload).not.toHaveProperty('provider')
+    const written = decode(rich[0]!.kind, rich[0]!.payload).payload
+    expect(written).toMatchObject({ provider: 'fixture-provider', thinking_level: 'medium' })
+    expect(legacy.read(written, '$')).toEqual(written)
   })
 
   test('the discriminated payload follows the event kind', () => {

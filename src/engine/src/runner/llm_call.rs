@@ -149,6 +149,10 @@ pub(super) async fn stream_assistant_response(
                 injected_count,
                 request: LlmCallRequest {
                     model: config.model.clone(),
+                    provider: config
+                        .model_config
+                        .as_ref()
+                        .map(|model| model.provider().to_string()),
                     thinking_level,
                     system_prompt: context.system_prompt.clone(),
                     messages: llm_messages.clone(),

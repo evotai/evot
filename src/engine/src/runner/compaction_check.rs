@@ -69,6 +69,8 @@ impl CompactionRequestShape<'_> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CompactionCheckPhase {
     BeforePrompt,
+    /// A host resumed a settled tool exchange, possibly with a new model.
+    BeforeResume,
     /// Between tool turns of one run, once the local estimate or the latest
     /// real usage says the active context has reached the summary threshold.
     /// Without this a tool-heavy run only compacts when the provider rejects
@@ -161,7 +163,9 @@ pub(super) async fn check_compaction(
     // takes over unless an explicit fallback was configured.
     let checkpoint = match phase {
         CompactionCheckPhase::RunEnd => Checkpoint::RunEnd,
-        CompactionCheckPhase::BeforePrompt | CompactionCheckPhase::ToolTurn => Checkpoint::MidRun,
+        CompactionCheckPhase::BeforePrompt
+        | CompactionCheckPhase::BeforeResume
+        | CompactionCheckPhase::ToolTurn => Checkpoint::MidRun,
     };
     let active_ctx = request_shape.summarizer_context(config);
     let llm_ctx = config.compaction_context.as_ref().unwrap_or(&active_ctx);
@@ -197,12 +201,20 @@ pub(super) async fn check_compaction(
     // A tool turn always takes the anchor path when usage alone did not act:
     // the response's usage predates the tool results just appended, and the
     // anchor adds those trailing messages, so the summary happens before the
-    // oversized request is sent instead of one turn later.
+    // oversized request is sent instead of one turn later. Before an explicit
+    // prompt on a different route, also size the history for the selected
+    // model: the foreign response's usage cannot trigger its compaction.
+    let model_changed_before_prompt =
+        phase == CompactionCheckPhase::BeforePrompt && usage.model != current_model;
     let anchor_estimate = if response.action == AfterResponseAction::Continue
         && response.stats.is_none()
         && response.reason.is_none()
         && (usage_rejected
-            || phase == CompactionCheckPhase::ToolTurn
+            || matches!(
+                phase,
+                CompactionCheckPhase::ToolTurn | CompactionCheckPhase::BeforeResume
+            )
+            || model_changed_before_prompt
             || needs_usage_anchor_estimate(assistant_message))
     {
         Some(

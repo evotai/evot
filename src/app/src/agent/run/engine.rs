@@ -1,5 +1,10 @@
 use std::sync::Arc;
 
+use evot_engine::context::ExecutionLimits;
+use evot_engine::context::ExecutionTracker;
+use evot_engine::context::SharedExecutionTracker;
+use parking_lot::Mutex;
+
 use crate::conf::Protocol;
 
 /// Fully resolved engine construction input. No transport or session I/O is
@@ -25,6 +30,18 @@ pub struct EngineOptions {
     /// condensed by the model that fits it; the active model is the fallback.
     pub compaction_llm: Option<crate::conf::LlmConfig>,
     pub compaction_state: Option<evot_engine::CompactionState>,
+}
+
+pub(super) fn execution_tracker(
+    limits: Option<&crate::agent::ExecutionLimits>,
+) -> Option<SharedExecutionTracker> {
+    limits.map(|limits| {
+        Arc::new(Mutex::new(ExecutionTracker::new(ExecutionLimits {
+            max_turns: limits.max_turns as usize,
+            max_total_tokens: limits.max_total_tokens as usize,
+            max_duration: std::time::Duration::from_secs(limits.max_duration_secs),
+        })))
+    })
 }
 
 pub(super) fn build_engine(
@@ -67,13 +84,6 @@ pub(super) fn build_engine(
         &options.provider,
         &model_config,
     ));
-    let limits = options
-        .limits
-        .map(|limits| evot_engine::context::ExecutionLimits {
-            max_turns: limits.max_turns as usize,
-            max_total_tokens: limits.max_total_tokens as usize,
-            max_duration: std::time::Duration::from_secs(limits.max_duration_secs),
-        });
     let agent = provider_agent
         .with_model(&options.model)
         .with_api_key(&options.api_key)
@@ -81,7 +91,7 @@ pub(super) fn build_engine(
         .with_context_config(context_config)
         .with_system_prompt(&options.system_prompt)
         .with_messages(prior_messages)
-        .with_execution_limits_opt(limits)
+        .with_execution_limits_opt(None)
         .with_tools(options.tools)
         .with_cwd(options.cwd)
         .with_path_guard(options.path_guard)

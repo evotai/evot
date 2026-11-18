@@ -164,7 +164,7 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
       deps.sessionHook.state('idle')
       deps.rendererTrace.bind(session.session_id)
       deps.refreshConfigInfo()
-      st.appState = { ...st.appState, sessionId: session.session_id, model: deps.agent.model }
+      st.appState = { ...st.appState, sessionId: session.session_id, model: deps.agent.model, firstCallModel: undefined, lastCallModel: undefined }
       const { messagesToOutputLines } = await import('../../render/output.js')
       const { transcriptToMessages } = await import('../../session/transcript.js')
       const messages = transcriptToMessages(transcript)

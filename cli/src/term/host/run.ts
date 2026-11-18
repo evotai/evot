@@ -13,6 +13,7 @@ import type { PrivacyFeed } from '../app/privacy-feed.js'
 import type { ManualCompaction } from '../app/run/manual-compaction.js'
 import type { RunInteraction, RunInteractionInput } from '../app/run/run-interaction.js'
 import type { RunOwnership } from '../app/run/run-ownership.js'
+import { settleRunCallModel } from '../app/run/state.js'
 import { createStreamMachineState, flushStreaming, reduceRunEvent } from '../app/run/stream.js'
 import type { SuggestionContext } from '../app/suggestion/context.js'
 import type { PromptSuggestion, TaskWaitSuggestion } from '../app/suggestion/index.js'
@@ -179,6 +180,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     st.liveContentMaxHeight = 0
     st.isLoading = true
     st.spinnerState = createSpinnerState()
+    st.appState = { ...st.appState, firstCallModel: undefined, lastCallModel: undefined }
     st.streamMachine = createStreamMachineState(st.appState, st.spinnerState)
     startSpinner()
     deps.renderer.requestRender()
@@ -338,6 +340,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         deps.queueLifecycle.settled(st.streamRef, queueChain, completed)
         st.streamRef = null
         st.isLoading = false
+        st.appState = settleRunCallModel(st.appState)
         st.streamMachine = null
         stopSpinner()
         // The run no longer holds a wait; do not leave its suggestion until the next poll.
@@ -386,6 +389,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     st.streamRef = null
     st.isLoading = false
     flushStreamContent()
+    st.appState = settleRunCallModel(st.appState)
     st.streamMachine = null
     stopSpinner()
     st.runStartedAt = null
@@ -423,6 +427,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     st.streamRef = null
     st.isLoading = false
     flushStreamContent()
+    st.appState = settleRunCallModel(st.appState)
     st.streamMachine = null
     stopSpinner()
     // Unconsumed work stays paused and individually recoverable with Esc.
