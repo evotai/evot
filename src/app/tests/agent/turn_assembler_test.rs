@@ -77,7 +77,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: false,
                 previous_llm: None,
             },
         )
@@ -107,7 +106,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
-                    consume_process_notifications: true,
                     previous_llm: None,
                 },
             )
@@ -119,16 +117,7 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
             matches!(prepared.input.as_slice(), [evot_engine::Content::Text { text }]
             if text == "继续任务")
         );
-        assert_eq!(
-            prepared.options.system_prompt,
-            prepared
-                .options
-                .system_prompt_sections
-                .iter()
-                .map(|section| section.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        );
+        assert!(!prepared.options.system_prompt.is_empty());
     }
     for input in [Vec::new(), vec![evot_engine::Content::Text {
         text: " \n\t".into(),
@@ -145,7 +134,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
-                    consume_process_notifications: true,
                     previous_llm: None,
                 },
             )
@@ -171,7 +159,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: true,
                 previous_llm: None,
             },
         )
@@ -215,7 +202,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
-                    consume_process_notifications: true,
                     previous_llm: None,
                 },
             )
@@ -259,7 +245,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: true,
                 previous_llm: None,
             },
         )
@@ -287,7 +272,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                     host_tools: None,
                     extra_tools: Vec::new(),
                     approver: None,
-                    consume_process_notifications: false,
                     previous_llm: None,
                 },
             )
@@ -349,7 +333,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: true,
                 previous_llm: None,
             },
         )
@@ -390,7 +373,6 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: true,
                 previous_llm: None,
             },
         )
@@ -400,24 +382,5 @@ async fn assembles_a_turn_without_an_agent() -> TestResult {
         1,
         "the orphan notice is delivered once per session"
     );
-    // Dump/inspection turns never drain notices, and never announce orphans.
-    let inspected = assembler
-        .build_turn(
-            &llm,
-            ToolMode::Interactive,
-            session.clone(),
-            &locator.session_id(),
-            TurnBuildRequest {
-                input: Vec::new(),
-                scratch_dir: None,
-                host_tools: None,
-                extra_tools: Vec::new(),
-                approver: None,
-                consume_process_notifications: false,
-                previous_llm: None,
-            },
-        )
-        .await?;
-    assert!(inspected.input.is_empty());
     Ok(())
 }

@@ -340,24 +340,6 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       leaveLogMode()
     } else if (name === '/_mem') {
       deps.scrollback.commitSystem('sys-mem', `  ${deps.scrollback.memoryLine()}`)
-    } else if (name === '/_dump') {
-      try {
-        const outcome = await deps.agent.submit(
-          `/_dump${args ? ' ' + args : ''}`,
-          st.sessionId ?? undefined,
-          'interactive',
-        )
-        if (outcome.kind === 'command') {
-          const lines = (outcome.message ?? '').split('\n').map((line, i) => ({
-            id: `sys-dump-${i}`,
-            kind: 'system' as const,
-            text: `  ${line}`,
-          }))
-          deps.scrollback.commitLines(lines.length > 0 ? lines : [{ id: 'sys-dump', kind: 'system', text: '  (no dump output)' }])
-        }
-      } catch (err) {
-        deps.scrollback.commitSystem('sys-dump-err', renderErrorNotice(`/_dump failed: ${errorText(err)}`))
-      }
     } else if (name === '/log') {
       await handleLogCommand(args)
     } else if (name === '/fork') {

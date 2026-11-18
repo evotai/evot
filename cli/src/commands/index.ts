@@ -55,7 +55,6 @@ export const HIDDEN_COMMANDS: SlashCommand[] = [
   { name: '/privacy', description: 'Privacy: what was masked; add your own words to mask, or turn masking off/on', usage: '/privacy [days | term [rm] WORD | off | on]', handler: 'builtin', minPrefixLength: 4 },
   { name: '/env', description: 'Manage variables', usage: '/env [list | get KEY [--reveal] | set K=V | del K | load FILE]', handler: 'builtin' },
   { name: '/log', description: 'Show or analyze session logs; shot exports markdown', usage: '/log [shot | query]', handler: 'builtin' },
-  { name: '/_dump', description: 'Dump system prompt + tools + skills as JSON', usage: '/_dump [path]', handler: 'builtin' },
   { name: '/_mem', description: 'Show process memory use and retained UI state', handler: 'builtin', runSafe: true },
 ]
 

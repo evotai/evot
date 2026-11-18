@@ -11,7 +11,6 @@ pub struct EngineOptions {
     pub api_key: String,
     pub model_config: evot_engine::provider::ModelConfig,
     pub system_prompt: String,
-    pub system_prompt_sections: Vec<crate::agent::prompt::Section>,
     pub limits: Option<crate::agent::ExecutionLimits>,
     pub tools: Vec<Box<dyn evot_engine::AgentTool>>,
     pub thinking_level: evot_engine::ThinkingLevel,

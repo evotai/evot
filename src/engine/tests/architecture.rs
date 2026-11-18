@@ -2,6 +2,9 @@
 
 use std::path::Path;
 
+#[path = "support/dependency_paths.rs"]
+mod dependency_paths;
+
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Lowest layer first. Modules on the same line may not use each other.
@@ -39,29 +42,19 @@ fn modules_only_depend_downward() -> TestResult {
     let mut violations = Vec::new();
     for file in files {
         let relative = file.strip_prefix(&src)?;
-        let Some(owner) = relative.iter().next().and_then(|part| part.to_str()) else {
+        let module = dependency_paths::module_path(relative);
+        let Some(owner) = module.first() else {
             continue;
         };
-        let owner = owner.trim_end_matches(".rs");
         let Some(owner_layer) = layer_of(owner) else {
+            violations.push(format!("undeclared module: {owner}"));
             continue;
         };
         let text = std::fs::read_to_string(&file)?;
-        for line in text.lines() {
-            if line.trim_start().starts_with("//") {
-                continue;
-            }
-            for (at, _) in line.match_indices("crate::") {
-                let used: String = line[at + "crate::".len()..]
-                    .chars()
-                    .take_while(|ch| ch.is_ascii_lowercase() || *ch == '_')
-                    .collect();
-                let Some(used_layer) = layer_of(&used) else {
-                    continue;
-                };
-                if used != owner && used_layer >= owner_layer {
-                    violations.push(format!("{} uses crate::{used}", relative.display()));
-                }
+        for path in dependency_paths::dependencies(&text, &module)? {
+            let Some(used) = path.first() else { continue };
+            if used != owner && layer_of(used).is_some_and(|layer| layer >= owner_layer) {
+                violations.push(format!("{} uses crate::{used}", relative.display()));
             }
         }
     }

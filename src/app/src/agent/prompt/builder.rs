@@ -38,9 +38,7 @@ const IDENTITY_OUTRO: &str =
 
 /// A named section of the system prompt.
 ///
-/// Preserved through the builder so callers (including prompt-dump tooling) can
-/// see which logical chunk each piece of text came from rather than diffing one
-/// big string. The final prompt is just `sections.join("\n\n")`.
+/// Sections can be bound to the workspace and extended before their text is joined.
 #[derive(Debug, Clone)]
 pub struct Section {
     pub name: &'static str,

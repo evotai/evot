@@ -162,7 +162,7 @@ describe('REPL host', () => {
   test('mutable host state lives in ReplState, not in startRepl locals', () => {
     const host = readFileSync(resolve(dir, '../repl.ts'), 'utf8')
     expect(host).not.toMatch(/^ {2}let /m)
-    expect(host).toContain('const st = {} as ReplState')
+    expect(host).not.toMatch(/\bas ReplState\b/)
   })
 
   test('controllers reach the host and each other only through declared ports', () => {

@@ -41,8 +41,6 @@ pub struct TurnBuildRequest {
     pub extra_tools: Vec<Arc<dyn evot_engine::AgentTool>>,
     /// Gate for every tool call of the turn, applied after the set is final.
     pub approver: Option<Arc<dyn super::tools::ToolApprover>>,
-    /// Dump/inspection callers must not drain pending process results.
-    pub consume_process_notifications: bool,
     /// Selection replaced by the latest model switch, if any.
     pub previous_llm: Option<LlmConfig>,
     /// Existing run-local directory for temporary files, outside the project.
@@ -150,7 +148,6 @@ impl TurnAssembler {
             host_tools,
             extra_tools,
             approver,
-            consume_process_notifications,
             previous_llm,
             scratch_dir,
         } = request;
@@ -289,27 +286,24 @@ impl TurnAssembler {
                 && last_assistant_model(&prior_messages) == Some(previous.model.as_str())
         });
         // Replay normalization belongs at the engine LLM boundary, not here.
-        if consume_process_notifications {
-            if let Some(process_manager) = &process_manager {
-                // Tasks the transcript announced but this process never ran
-                // died with an earlier evot; say so once before the model
-                // treats them as live watchers. Checked before the drain so
-                // a task that finished in this process is never mistaken
-                // for one.
-                let orphans =
-                    super::orphaned_tasks::orphaned_tasks(&prior_messages, process_manager);
-                if let Some(notice) = super::orphaned_tasks::orphan_notice(&orphans) {
-                    if self.processes.mark_orphans_announced(session_id) {
-                        input.runtime(
-                            notice,
-                            "previous_process_tasks",
-                            Some("Previous-process background tasks are no longer running".into()),
-                        );
-                    }
+        if let Some(process_manager) = &process_manager {
+            // Tasks the transcript announced but this process never ran
+            // died with an earlier evot; say so once before the model
+            // treats them as live watchers. Checked before the drain so
+            // a task that finished in this process is never mistaken
+            // for one.
+            let orphans = super::orphaned_tasks::orphaned_tasks(&prior_messages, process_manager);
+            if let Some(notice) = super::orphaned_tasks::orphan_notice(&orphans) {
+                if self.processes.mark_orphans_announced(session_id) {
+                    input.runtime(
+                        notice,
+                        "previous_process_tasks",
+                        Some("Previous-process background tasks are no longer running".into()),
+                    );
                 }
-                for notification in process_manager.take_notifications() {
-                    input.runtime(notification, "background_task", None);
-                }
+            }
+            for notification in process_manager.take_notifications() {
+                input.runtime(notification, "background_task", None);
             }
         }
         let (input, provenance) = input.finish();
@@ -321,7 +315,6 @@ impl TurnAssembler {
                 api_key: llm.api_key,
                 model_config: llm.model_config,
                 system_prompt,
-                system_prompt_sections: sections,
                 limits: if policy.budget == ExecutionBudget::Unbounded {
                     None
                 } else {

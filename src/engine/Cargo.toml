@@ -57,6 +57,7 @@ rayon = { version = "1.10" }
 
 
 [dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
 wiremock = "0.6"

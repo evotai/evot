@@ -1,7 +1,7 @@
 [
   {"text":"/compact","command":true},
   {"text":" /model change ","command":true},
-  {"text":"/_dump","command":true},
+  {"text":"/_mem","command":true},
   {"text":"/unknown","command":true},
   {"text":"/clear\targ","command":true},
   {"text":"/","command":false},

@@ -81,7 +81,7 @@ describe('file path completion', () => {
     const text = '/loop check ../evot/xx then report'
     const cursor = '/loop check ../evot/xx'.length
     expect(fileCompletionTarget(text, cursor)).toMatchObject({ word: '../evot/xx', wordStart: '/loop check '.length })
-    for (const text of ['plain prose', '/lo', '/loop', '/model', '/_dump', '/loop 5m run tests']) {
+    for (const text of ['plain prose', '/lo', '/loop', '/model', '/_mem', '/loop 5m run tests']) {
       expect(fileCompletionTarget(text, text.length)).toBeNull()
     }
   })

@@ -392,7 +392,6 @@ async fn scratch_is_allowed_by_the_file_sandbox_without_opening_the_startup_chec
                 host_tools: None,
                 extra_tools: Vec::new(),
                 approver: None,
-                consume_process_notifications: false,
                 previous_llm: None,
             },
         )

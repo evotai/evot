@@ -3,7 +3,6 @@ import { RenderDiagnostics } from './screen/render-diagnostics.js'
 import { watchOutputFile } from './app/run/output-watch.js'
 import { readOutputTail } from './app/run/output-tail.js'
 import { TerminalInputBuffer } from './input/buffer.js'
-import { createSpinnerState, setSpinnerPhase } from './widgets/spinner.js'
 import { forkNotice } from './app/session/fork-nav.js'
 import { isBackgroundSelector, SELECTOR_OWNER } from '../ui/selector-identity.js'
 import { type AskQuestion } from './widgets/ask.js'
@@ -11,7 +10,6 @@ import { buildPrivacyCard, type OutputLine } from '../render/output.js'
 import { createHyperlink } from '../ui/hyperlink.js'
 import { renderErrorNotice } from '../ui/command-notice.js'
 import { Agent, fastExit, authNotices, privacyLive, type SessionMeta } from '../native/index.js'
-import { createInitialState } from './app/run/state.js'
 import { assistantToolCalls } from './app/run/assistant-content.js'
 import { HistoryManager } from '../session/history.js'
 import { ScreenLog } from './diagnostics/screen-log.js'
@@ -24,7 +22,6 @@ import { createAdSlotState, triggerAdSlot } from './viewmodel/ad-slot.js'
 import { HistoryRenderCache } from './viewmodel/history-cache.js'
 import { Committer } from './screen/committer.js'
 import {
-  createEditorState,
   getEditorText,
   editorCursorOffset,
   replaceAfterCursor,
@@ -62,7 +59,7 @@ import { PendingImages } from './app/composer/pending-images.js'
 import { createPasteHandlers, createPasteStore } from './app/composer/paste-input.js'
 import { createQueueEdit } from './app/queue/queue-edit.js'
 import { createQueueLifecycle } from './app/queue/queue-lifecycle.js'
-import { PendingQueue, createPendingQueueState, currentQueueTarget } from './app/queue/pending-queue.js'
+import { PendingQueue, currentQueueTarget } from './app/queue/pending-queue.js'
 import { BackgroundTerminals } from './app/background/background-terminals.js'
 import { awaitedTaskIds } from './app/background/background-panel.js'
 import { FileCompletion } from './app/composer/file-completion-controller.js'
@@ -87,7 +84,7 @@ import {
   type ReplCommandContext,
 } from './command-handlers.js'
 
-import type { ReplState } from './host/state.js'
+import { createReplState } from './host/state.js'
 import { createCommandWindowController, type CommandWindowDeps } from './host/command-window.js'
 import { createScrollbackController, type ScrollbackDeps } from './host/scrollback.js'
 import { createAskController, type AskDeps } from './host/ask.js'
@@ -135,7 +132,8 @@ export interface ReplOptions {
 }
 
 export async function startRepl(opts: ReplOptions): Promise<void> {
-  const st = {} as ReplState
+  const { agent } = opts
+  const st = createReplState(agent.model, agent.cwd)
   // Ports the host controllers call back through. Getters resolve on every
   // use, so a controller sees a later-declared service exactly as a closure would.
   const host: ReplHost = {
@@ -249,13 +247,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const keys = createKeysController(st, host)
   const terminal = createTerminalController(st, host)
 
-  const { agent } = opts
   const { version } = await import('../native/index.js')
   const appVersion = version()
   const rendererTrace = new RendererTrace()
   const sessionHook = new SessionHook({ cwd: agent.cwd, command: agent.configInfo().sessionHook })
   sessionHook.startProcess(agent.cwd)
-  st.historyRowCount = 0
   // Created before the renderer so render diagnostics have a sink from the very
   // first frame; both are read only while rendering, which starts later.
   const screenLog = new ScreenLog()
@@ -277,38 +273,16 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // Armed by buildFrame only while visible text or its lifecycle needs a wakeup.
   const adSlotWakeup = new RenderWakeup(() => renderer.requestRender())
 
-  st.appState = {
-    ...createInitialState(agent.model, agent.cwd),
-  }
-  st.spinnerState = createSpinnerState()
-  st.backgroundWaitSpinner = setSpinnerPhase(createSpinnerState(), 'awaiting_background')
-  st.backgroundWaitSince = null
-  st.manualCompactionPhase = null
-  st.manualCompactionActivity = null
-  st.editor = createEditorState()
   // Undo stack lives outside EditorState so snapshots stay plain data. Cleared
   // on submit/clear so a previous prompt cannot be restored into a new one.
   const editorUndo = new UndoStack<EditorState>()
-  st.isLoading = false
-  st.loginInFlight = false
-  st.foregroundCommand = null
-  st.streamRef = null
   // Native abort settles asynchronously. Ownership is revoked before aborting
   // so an old Promise cannot report twice or clear a newer run's state.
   const runInteraction = new RunInteraction()
   const runOwnership = new RunOwnership()
-  st.runStartedAt = null
-  st.runTurnCount = 0
   const runThinking = new RunThinking()
   const manualCompaction = new ManualCompaction()
-  st.queueStartupTarget = { startup: 0 }
-  st.pendingQueue = createPendingQueueState()
   const pendingQueue = new PendingQueue(st.pendingQueue)
-  st.queueEditState = null
-  st.draftEpoch = 0
-  st.draftImageEpoch = 0
-  st.pendingEnqueue = null
-  st.queueDispatchId = null
   const queueLifecycle = createQueueLifecycle({
     queue: pendingQueue,
     getTarget: () => currentQueueTarget(st),
@@ -349,11 +323,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     commitSystem: scrollback.commitSystem,
     requestRender: () => renderer.requestRender(),
   })
-  st.spinnerTimer = null
   const terminalTitle = new TerminalTitle(agent.cwd, () => ownedDashboardPort(st.serverState))
   const setTerminalTitle = terminalTitle.set.bind(terminalTitle)
   const freezeTerminalTitle = terminalTitle.freeze.bind(terminalTitle)
-  st.shareSelector = null
   const loopSession = new LoopSession({
     runTurn: (userLine, prompt, extension) => {
       if (userLine) scrollback.commitUserMessage(userLine)
@@ -519,14 +491,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     columns: () => renderer.termCols,
     requestRender: () => renderer.requestRender(),
   }
-  st.destroyed = false
-  st.composerRevision = 0
-  st.suggestionContextId = 0
   const suggestionContext = new SuggestionContext()
   // What masking did this process, shown as it happens.
   const privacyFeed = new PrivacyFeed(privacyLive)
-  st.suggestionsReady = false
-  st.startupSuggestion = null
   const suggestionTicker = new SuggestionTicker({
     pending: () => suggestions.pending(),
     changed: () => renderer.requestRender(),
@@ -574,44 +541,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     showArguments: completion => { st.editor = showCompletions(st.editor, completion.items, completion.start, completion.end, completion.note) },
   })
   resources.add(() => { suggestions.cancel(); suggestionTicker.dispose() })
-  st.terminalSuspended = false
-  st.disableRaw = null
-  st.enhancedKeyboard = null
-  st.inputBuffer = null
-  st.onInputData = null
-  st.sessionId = null
-  st.lastLineage = []
-  st.nextBackgroundLineId = 1
-  st.logMode = null
-  st.logDiscardTarget = null
-  st.exitHint = false
-  st.exitHintTimer = null
-  st.overlay = { kind: 'none' }
-  st.commandWindowPreview = null
-  st.commandWindowPreviewGeneration = 0
-  st.focusedCommandWindowGeneration = null
-  st.commandWindowContentLines = null
-  st.commandWindowContentWidth = null
-  st.deferredCloudModelNotice = null
-  st.deferredCloudCampaignId = null
-  st.deferredSkillNotice = null
-  st.enrichedResumeMetadataGeneration = null
-  st.enrichedResumeTextGeneration = null
-  st.cancelSearchTextWarmup = null
-  st.preloadedSessions = []
   const resumeCache = new ResumeSessionCache(agent, rows => { st.preloadedSessions = rows })
   resources.add(() => resumeCache.dispose())
   // Reuses formatted rows across the rekey that every `/sessions` keystroke
   // performs, which also preserves the selector's lowercased-search cache.
   const resumeItems = new ResumeItemCache()
   resources.add(() => resumeItems.clear())
-  st.explicitResumeSelectorGeneration = 0
-  st.pendingAsk = null
-  st.pendingTaskModel = null
-
-  st.streamMachine = null
   st.skillEntries = getSkillEntries(agent.skillsDirs())
-  st.expanded = false
   // Rendered-history cache — see HistoryRenderCache. Committed history is
   // append-only (or fully cleared), never mutated in place, so the flattened
   // ANSI lines are extended incrementally instead of re-flattened every frame.
@@ -621,12 +557,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // source arrays are appended independently (expanded-only progress/thinking).
   const compactHistoryCache = new HistoryRenderCache()
   const expandedHistoryCache = new HistoryRenderCache()
-  st.committedBannerRows = null
-  st.committedHistoryRows = 0
-  st.committedPrefixMayReshape = false
-
-  st.unmountTaskPreview = null
-  st.unmountComputePreview = null
   const compactLines: OutputLine[] = []
   const expandedLines: OutputLine[] = []
   const fileCompletion = new FileCompletion(completeAtFile)
@@ -645,11 +575,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       renderer.invalidateScrollback()
     },
   })
-  st.liveContentMaxHeight = 0
   st.liveContentWidth = renderer.termCols
-  st.liveRegionStartRow = 0
-
-  st.serverState = null
 
   // Paste ref state
   const pasteStore = createPasteStore()
@@ -658,9 +584,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // the composer, so a submit has to await these before reading pastedImages.
   const pendingImages = new PendingImages()
 
-  st.updateAvailable = null
-  st.updateStatus = 'idle'
-  st.updateVersion = null
   const updateMgr = new (await import('../update/index.js')).UpdateManager(
     appVersion
   )
@@ -684,7 +607,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   }
   updateMgr.start()
 
-  st.installDrift = null
   try {
     const { checkInstallHealth } = await import('../update/state.js')
     const health = checkInstallHealth(appVersion)
@@ -704,9 +626,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const entries = historyMgr.load().map(text => inputImageHistory.deserialize(text, () => pasteStore.allocId()))
   st.historyState = createHistoryState(entries)
 
-  st.cloudLoginRequired = false
-  st.revocationCleanup = null
-  st.authWatcher = null
   const refreshConfigInfo = () => {
     // Re-read backend config after a model switch so the footer reflects the
     // new provider's effective thinking level (it can differ per provider).
@@ -780,7 +699,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   renderer.requestRender()
 
-  st.releaseNotes = null
   try {
     const { markReleaseNotesSeen, releaseNotesPending } = await import('../update/seen-version.js')
     if (releaseNotesPending(appVersion)) {
@@ -803,11 +721,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const bannerCache = new BannerCache(agent.cwd, agent.skillsDirs())
   // Catch edits made by other sessions without filesystem work in buildFrame.
   resources.add(backgroundJobs.register({ name: 'banner', intervalMs: 15_000, immediate: false, run: frames.refreshBannerData }))
-  st.partialBlocksMemo = null
 
   renderer.setRenderCallback(frames.buildFrame)
 
-  st.titleFrame = 0
 
   const backgroundTerminals = new BackgroundTerminals({
     columns: () => renderer.termCols,
@@ -875,7 +791,6 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     getExpandedText: composer.getExpandedText,
   })
 
-  st.inflightSync = null
   const CLOUD_SYNC_MS = 15_000
   const cloudSync = new CloudSync({
     authenticated: async () => {

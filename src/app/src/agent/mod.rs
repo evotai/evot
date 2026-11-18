@@ -5,7 +5,6 @@ mod agent_runs;
 mod agent_sessions;
 pub mod bootstrap;
 pub mod command;
-mod dump;
 mod fork;
 pub mod models;
 pub mod orphaned_tasks;

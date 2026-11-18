@@ -5,6 +5,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+#[path = "../../../engine/tests/support/dependency_paths.rs"]
+mod dependency_paths;
+
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Modules on one `Peers` line may not use each other. A `Group` is one unit
@@ -107,58 +110,6 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Module path of a source file relative to its scope: `a.rs` and `a/mod.rs`
-/// are `[a]`, `a/b.rs` is `[a, b]`.
-fn module_path(relative: &Path) -> Vec<String> {
-    let mut parts: Vec<String> = relative
-        .iter()
-        .filter_map(|part| part.to_str())
-        .map(|part| part.trim_end_matches(".rs").to_string())
-        .collect();
-    if parts.last().is_some_and(|last| last == "mod") {
-        parts.pop();
-    }
-    parts
-}
-
-fn ident(text: &str) -> String {
-    text.chars()
-        .take_while(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '_')
-        .collect()
-}
-
-/// Direct children of the scope that `line` names, via `crate::<scope>::x`
-/// or a `super::` chain that climbs back to the scope.
-fn used_children(line: &str, scope: &Scope, module: &[String]) -> Vec<String> {
-    let mut used = Vec::new();
-    let prefix = format!("{}::", scope.display());
-    for (at, _) in line.match_indices(&prefix) {
-        let before = line[..at].chars().next_back();
-        if before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':') {
-            continue;
-        }
-        used.push(ident(&line[at + prefix.len()..]));
-    }
-    for (at, _) in line.match_indices("super::") {
-        let before = line[..at].chars().next_back();
-        if before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == ':') {
-            continue;
-        }
-        let mut rest = &line[at..];
-        let mut depth = 0;
-        while let Some(next) = rest.strip_prefix("super::") {
-            depth += 1;
-            rest = next;
-        }
-        // `super` of a scope child is the scope itself.
-        if depth == module.len() {
-            used.push(ident(rest));
-        }
-    }
-    used.retain(|name| !name.is_empty());
-    used
-}
-
 #[test]
 fn modules_only_depend_downward() -> TestResult {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -172,31 +123,36 @@ fn modules_only_depend_downward() -> TestResult {
         collect(&root, &mut files)?;
         for file in files {
             let relative = file.strip_prefix(&root)?;
-            let module = module_path(relative);
-            let Some(owner) = module.first() else {
+            let module = dependency_paths::module_path(file.strip_prefix(&src)?);
+            let Some(owner) = module.get(scope.path.len()) else {
                 continue;
             };
             let Some((owner_layer, owner_unit)) = scope.place(owner) else {
                 continue;
             };
             let text = std::fs::read_to_string(&file)?;
-            for line in text.lines() {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with("//") {
+            for path in dependency_paths::dependencies(&text, &module)? {
+                if !path
+                    .iter()
+                    .map(String::as_str)
+                    .take(scope.path.len())
+                    .eq(scope.path.iter().copied())
+                {
                     continue;
                 }
-                for used in used_children(line, scope, &module) {
-                    let Some((used_layer, used_unit)) = scope.place(&used) else {
-                        continue;
-                    };
-                    if used_unit != owner_unit && used_layer >= owner_layer {
-                        violations.push(format!(
-                            "{}/{} uses {}::{used}",
-                            scope.display(),
-                            relative.display(),
-                            scope.display()
-                        ));
-                    }
+                let Some(used) = path.get(scope.path.len()) else {
+                    continue;
+                };
+                let Some((used_layer, used_unit)) = scope.place(used) else {
+                    continue;
+                };
+                if used_unit != owner_unit && used_layer >= owner_layer {
+                    violations.push(format!(
+                        "{}/{} uses {}::{used}",
+                        scope.display(),
+                        relative.display(),
+                        scope.display()
+                    ));
                 }
             }
         }

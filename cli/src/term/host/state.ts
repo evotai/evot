@@ -1,3 +1,8 @@
+import { createInitialState } from '../app/run/state.js'
+import { createPendingQueueState } from '../app/queue/pending-queue.js'
+import { createSpinnerState, setSpinnerPhase } from '../widgets/spinner.js'
+import { createEditorState, createHistoryState } from '../input/editor.js'
+import { createAdSlotState } from '../viewmodel/ad-slot.js'
 import type { AskUserAnswer } from '../../features/host-tools.js'
 import type { TaskModelSelection } from '../../features/task/model-picker.js'
 import type { ConfigInfo, ForkedAgent, QueryStream, SessionMeta } from '../../native/index.js'
@@ -30,8 +35,7 @@ export type CommandWindowPreview =
  * Mutable state of the interactive REPL host.
  *
  * One object shared by `startRepl` and the host controllers, so every writer
- * is visible as `st.<field> =`. Fields are assigned in `startRepl` in
- * declaration order before the first frame renders.
+ * is visible as `st.<field> =`. The state is complete before controllers attach.
  */
 export interface ReplState {
   historyRowCount: number
@@ -166,4 +170,96 @@ export interface ReplState {
   // Live sync: re-fetch the cloud catalog so new notices, ads and models
   // appear in-session without a restart. Silent when nothing changed.
   inflightSync: Promise<void> | null
+}
+
+export function createReplState(model: string, cwd: string): ReplState {
+  return {
+    historyRowCount: 0,
+    appState: createInitialState(model, cwd),
+    spinnerState: createSpinnerState(),
+    backgroundWaitSpinner: setSpinnerPhase(createSpinnerState(), 'awaiting_background'),
+    backgroundWaitSince: null,
+    manualCompactionPhase: null,
+    manualCompactionActivity: null,
+    editor: createEditorState(),
+    historyState: createHistoryState([]),
+    isLoading: false,
+    loginInFlight: false,
+    foregroundCommand: null,
+    streamRef: null,
+    runStartedAt: null,
+    runTurnCount: 0,
+    queueStartupTarget: { startup: 0 },
+    pendingQueue: createPendingQueueState(),
+    queueEditState: null,
+    draftEpoch: 0,
+    draftImageEpoch: 0,
+    pendingEnqueue: null,
+    queueDispatchId: null,
+    spinnerTimer: null,
+    shareSelector: null,
+    refreshOpenSessionList: undefined,
+    destroyed: false,
+    composerRevision: 0,
+    suggestionContextId: 0,
+    suggestionsReady: false,
+    startupSuggestion: null,
+    terminalSuspended: false,
+    disableRaw: null,
+    enhancedKeyboard: null,
+    inputBuffer: null,
+    escapeFlushTimer: undefined,
+    onInputData: null,
+    sessionId: null,
+    lastLineage: [],
+    nextBackgroundLineId: 1,
+    logMode: null,
+    logDiscardTarget: null,
+    exitHint: false,
+    exitHintTimer: null,
+    overlay: { kind: 'none' },
+    commandWindowPreview: null,
+    commandWindowPreviewGeneration: 0,
+    focusedCommandWindowGeneration: null,
+    commandWindowContentLines: null,
+    commandWindowContentWidth: null,
+    selectorPreviewViewport: undefined,
+    deferredCloudModelNotice: null,
+    deferredCloudCampaignId: null,
+    deferredSkillNotice: null,
+    enrichedResumeMetadataGeneration: null,
+    enrichedResumeTextGeneration: null,
+    resumeCommandLoadTimer: undefined,
+    resumeSearchEnrichmentTimer: undefined,
+    cancelSearchTextWarmup: null,
+    preloadedSessions: [],
+    explicitResumeSelectorGeneration: 0,
+    adSlot: createAdSlotState([]),
+    pendingAsk: null,
+    pendingTaskModel: null,
+    streamMachine: null,
+    skillEntries: [],
+    expanded: false,
+    committedBannerRows: null,
+    committedHistoryRows: 0,
+    committedPrefixMayReshape: false,
+    unmountTaskPreview: null,
+    unmountComputePreview: null,
+    liveContentMaxHeight: 0,
+    liveContentWidth: 0,
+    liveRegionStartRow: 0,
+    serverState: null,
+    updateAvailable: null,
+    updateStatus: 'idle',
+    updateVersion: null,
+    installDrift: null,
+    configInfo: undefined,
+    cloudLoginRequired: false,
+    revocationCleanup: null,
+    authWatcher: null,
+    releaseNotes: null,
+    partialBlocksMemo: null,
+    titleFrame: 0,
+    inflightSync: null,
+  }
 }

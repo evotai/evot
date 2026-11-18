@@ -41,7 +41,6 @@ impl TurnFactory for AgentTurnFactory {
                     extra_tools: self.extra_tools.clone(),
                     approver: self.approver.clone(),
                     scratch_dir: self.scratch_dir.clone(),
-                    consume_process_notifications: true,
                     previous_llm: self.previous_llm.clone(),
                 },
             )

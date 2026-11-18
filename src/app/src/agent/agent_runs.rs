@@ -4,8 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::agent::Agent;
-use super::dump::build_prompt_dump;
-use super::dump::resolve_dump_path;
 use super::request::expand_prompt_command;
 use super::request::PromptCommandContext;
 use super::request::QueryRequest;
@@ -13,8 +11,6 @@ use super::request::SubmitOutcome;
 use super::run::run::Run;
 use super::run::runtime;
 use super::run::runtime::TurnFactory;
-use super::tools::ToolMode;
-use super::turn_assembler::TurnBuildRequest;
 use super::turn_factory::AgentTurnFactory;
 use crate::base::error::EvotError;
 use crate::base::error::Result;
@@ -280,12 +276,6 @@ impl Agent {
                 let msg = outcome.describe();
                 Ok(Some(SubmitOutcome::Command(msg)))
             }
-            Command::Dump { target } => {
-                let msg = self
-                    .handle_dump_command(request.mode, session, target.as_deref())
-                    .await?;
-                Ok(Some(SubmitOutcome::Command(msg)))
-            }
             // Expanded into a normal prompt by `expand_prompt_command` after
             // this interception step; nothing to handle here.
             Command::ClipSession | Command::SessionSearch(_) => Ok(None),
@@ -408,66 +398,5 @@ impl Agent {
             .register(session_id, run_id, run.handle(), completed);
 
         Ok(run)
-    }
-
-    // -- fork ----------------------------------------------------------------
-
-    /// Build a structured snapshot of what evot would send to the LLM right
-    /// now (system prompt + tool definitions). Persists
-    /// to JSON and returns a human-readable status string.
-    async fn handle_dump_command(
-        self: &Arc<Self>,
-        mode: ToolMode,
-        session: &Arc<Session>,
-        target: Option<&str>,
-    ) -> Result<String> {
-        let session_id = session.session_id().await;
-        // build_turn runs the full per-turn assembly (tools, skills).
-        let llm = self.llm();
-        let turn = self
-            .assembler
-            .build_turn(
-                &llm,
-                mode,
-                Arc::clone(session),
-                &session_id,
-                TurnBuildRequest {
-                    input: Vec::new(),
-                    host_tools: None,
-                    extra_tools: Vec::new(),
-                    approver: None,
-                    consume_process_notifications: false,
-                    previous_llm: None,
-                    scratch_dir: None,
-                },
-            )
-            .await?;
-
-        let dump = build_prompt_dump(mode, &turn);
-
-        let path = resolve_dump_path(target)?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                EvotError::Agent(format!(
-                    "failed to create dump dir {}: {err}",
-                    parent.display()
-                ))
-            })?;
-        }
-        let json = serde_json::to_string_pretty(&dump)
-            .map_err(|err| EvotError::Agent(format!("failed to serialize prompt dump: {err}")))?;
-        std::fs::write(&path, json).map_err(|err| {
-            EvotError::Agent(format!("failed to write dump to {}: {err}", path.display()))
-        })?;
-
-        Ok(format!(
-            "Prompt dump saved to {}\n  system_prompt: {} tokens ({} sections)\n  tools: {} entries, {} tokens\n  total: {} tokens",
-            path.display(),
-            dump.totals.system_prompt_tokens,
-            dump.system_prompt.sections.len(),
-            dump.tools.len(),
-            dump.totals.tool_definition_tokens,
-            dump.totals.grand_total,
-        ))
     }
 }

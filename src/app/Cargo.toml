@@ -51,6 +51,7 @@ should_implement_trait = "allow"
 approx_constant = "allow"
 
 [dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }
 tokio = { workspace = true, features = ["test-util"] }
 insta = { version = "1", features = ["json", "yaml", "redactions"] }
 tower = { version = "0.5", features = ["util"] }
