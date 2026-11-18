@@ -10,6 +10,11 @@ use crate::types::*;
 /// Events emitted during LLM streaming
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
+    /// Host-only diagnostic, never part of a model message.
+    Diagnostic {
+        kind: String,
+        data: serde_json::Value,
+    },
     /// Stream started, partial assistant message
     Start,
     /// Text content delta

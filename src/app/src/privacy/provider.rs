@@ -25,6 +25,15 @@ pub fn wrap(inner: Arc<dyn StreamProvider>) -> Arc<dyn StreamProvider> {
     Arc::new(MaskingProvider {
         inner,
         masker: None,
+        diagnostics: false,
+    })
+}
+
+pub(crate) fn wrap_for_run(inner: Arc<dyn StreamProvider>) -> Arc<dyn StreamProvider> {
+    Arc::new(MaskingProvider {
+        inner,
+        masker: None,
+        diagnostics: true,
     })
 }
 
@@ -32,6 +41,7 @@ pub struct MaskingProvider {
     inner: Arc<dyn StreamProvider>,
     /// Fixed masker; `None` follows the settings file.
     masker: Option<Arc<Masker>>,
+    diagnostics: bool,
 }
 
 impl MaskingProvider {
@@ -39,6 +49,7 @@ impl MaskingProvider {
         Self {
             inner,
             masker: Some(masker),
+            diagnostics: false,
         }
     }
 
@@ -75,7 +86,22 @@ impl MaskingProvider {
                 .map(|model| model.provider().to_string());
             record.model = Some(config.model.clone());
             let kinds = record.blocked_kinds();
-            service::keep(&masker, record, report.live_findings()).await;
+            let findings = report.live_findings();
+            if self.diagnostics && !report.blocked() {
+                service::keep_audit(&masker, record).await;
+                if !findings.is_empty() {
+                    if let Ok(data) = serde_json::to_value(findings) {
+                        let _ = out
+                            .send(StreamEvent::Diagnostic {
+                                kind: super::record::CARD_KIND.into(),
+                                data,
+                            })
+                            .await;
+                    }
+                }
+            } else {
+                service::keep(&masker, record, findings).await;
+            }
             if report.blocked() {
                 return Err(ProviderError::InvalidRequest(blocked_message(
                     Target::Llm,

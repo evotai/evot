@@ -2,6 +2,8 @@
  * State types for the CLI UI layer.
  */
 
+import type { SavedPrivacyCard } from '../native/contracts/privacy.js'
+
 // ---------------------------------------------------------------------------
 // Message types
 // ---------------------------------------------------------------------------
@@ -18,6 +20,7 @@ export interface UIMessage {
   content?: UIAssistantBlock[]
   /** Persisted compaction boundary reconstructed for transcript display. */
   compaction?: UICompaction
+  privacyCard?: SavedPrivacyCard
   /** Verbose events that occurred before this message */
   verboseEvents?: VerboseEvent[]
 }

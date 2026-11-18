@@ -443,6 +443,17 @@ pub struct LiveFinding {
     pub line: Option<usize>,
 }
 
+pub(crate) const CARD_KIND: &str = "privacy_card";
+
+/// Additive stats payload. Older readers can leave unknown stats opaque.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedCard {
+    #[serde(default)]
+    pub schema_version: u32,
+    pub cwd: String,
+    pub findings: Vec<LiveFinding>,
+}
+
 impl LiveFinding {
     pub(super) fn locate(hits: &[Hit]) -> Vec<Self> {
         let mut by_tag = BTreeMap::<&str, &Hit>::new();
@@ -499,6 +510,7 @@ impl LiveNotice {
 pub fn session_tags(dir: &Path, session: &str, days: u32) -> Result<Vec<String>> {
     let today = chrono::Local::now().date_naive();
     let mut tags = BTreeSet::new();
+    let session_needle = serde_json::to_string(session)?;
     for (day, path) in day_files(dir)? {
         if (today - day).num_days() >= i64::from(days) {
             continue;
@@ -506,6 +518,7 @@ pub fn session_tags(dir: &Path, session: &str, days: u32) -> Result<Vec<String>>
         let text = std::fs::read_to_string(&path)?;
         for record in text
             .lines()
+            .filter(|line| line.contains(&session_needle))
             .filter_map(|line| serde_json::from_str::<Record>(line).ok())
             .filter(|record| record.session.as_deref() == Some(session))
         {

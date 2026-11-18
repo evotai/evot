@@ -8,7 +8,7 @@
  * This module is pure logic — no React, no stdout. Easy to test.
  */
 
-import type { PrivacyLiveFinding } from '../native/contracts/privacy.js'
+import type { PrivacyLiveFinding, SavedPrivacyCard } from '../native/contracts/privacy.js'
 import { providerFailurePresentation } from './provider-error.js'
 import { parsePrivacyStop, privacyActionLabel, privacyCard, privacyFindingRows, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
@@ -934,14 +934,20 @@ export function buildPrivacyNoticeCard(
   const { target, reason } = notice
   const findings = (notice.findings ?? []).filter(finding => fresh.has(finding.tag))
   const firstSeen = `${fresh.size} new ${fresh.size === 1 ? 'value' : 'values'}`
-  const first = findings[0]
-  const mixed = findings.some(finding => finding.action !== first?.action)
-  const text = first
-    ? privacyFindingRows(findings, cwd, mixed)
-    : [`${firstSeen} · request total: ${reason} · match locations unavailable`]
+  if (findings.length) return buildSavedPrivacyCard({ cwd, findings })
   return renderPrivacyCard({
-    title: first ? (mixed ? 'findings' : privacyActionLabel(first.action)) : PRIVACY_TARGET_LABEL[target] ?? target,
-    rows: text.map(text => ({ tone: 'hint', text })),
+    title: PRIVACY_TARGET_LABEL[target] ?? target,
+    rows: [{ tone: 'hint', text: `${firstSeen} · request total: ${reason} · match locations unavailable` }],
+  }, 'success')
+}
+
+export function buildSavedPrivacyCard({ findings, cwd }: SavedPrivacyCard): OutputLine[] {
+  const first = findings[0]
+  if (!first) return []
+  const mixed = findings.some(finding => finding.action !== first.action)
+  return renderPrivacyCard({
+    title: mixed ? 'findings' : privacyActionLabel(first.action),
+    rows: privacyFindingRows(findings, cwd, mixed).map(text => ({ tone: 'hint', text })),
   }, 'success')
 }
 
@@ -1016,6 +1022,10 @@ export function withoutRedundantErrorTail(text: string, known: string | null): s
 export function messagesToOutputLines(messages: UIMessage[], expanded: boolean = false): OutputLine[] {
   const lines: OutputLine[] = []
   for (const msg of messages) {
+    if (msg.privacyCard) {
+      lines.push(...buildSavedPrivacyCard(msg.privacyCard))
+      continue
+    }
     if (msg.compaction) {
       lines.push(...buildCompactionLines(msg.compaction, expanded))
       continue

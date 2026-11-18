@@ -181,6 +181,14 @@ pub(super) async fn stream_assistant_response(
             let mut chunk_count: u64 = 0;
             while let Some(event) = stream_rx.recv().await {
                 match &event {
+                    StreamEvent::Diagnostic { kind, data } => {
+                        let _ = event_tx
+                            .send(AgentEvent::ProviderDiagnostic {
+                                kind: kind.clone(),
+                                data: data.clone(),
+                            })
+                            .await;
+                    }
                     StreamEvent::Start => {
                         if let Ok(mut m) = metrics_handle.lock() {
                             m.ttfb_ms = call_start.elapsed().as_millis() as u64;

@@ -57,6 +57,126 @@ impl StreamProvider for RecordingProvider {
     }
 }
 
+#[test]
+fn privacy_card_is_saved_before_display_and_replays_without_another_card() -> TestResult {
+    const CHILD: &str = "EVOT_PRIVACY_REPLAY_CHILD";
+    if let Some(home) = std::env::var_os(CHILD) {
+        return tokio::runtime::Runtime::new()?.block_on(exercise_privacy_replay(home.into()));
+    }
+    let home = TempDir::new()?;
+    let output = std::process::Command::new(std::env::current_exe()?)
+        .args(["--exact", "run_user_persistence_test::privacy_card_is_saved_before_display_and_replays_without_another_card"])
+        .env_clear()
+        .env(CHILD, home.path())
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+async fn exercise_privacy_replay(home: std::path::PathBuf) -> TestResult {
+    use evot::session::conversation::RunEventPayload;
+    use evot::session::storage::fs::FsStorage;
+
+    let dir = TempDir::new()?;
+    let config = fixture_config(&dir);
+    let storage = Arc::new(FsStorage::new(dir.path().join("sessions")));
+    let agent = Agent::new_with_provider_for_test(
+        &config,
+        "/work",
+        storage.clone(),
+        MockProvider::text("ack"),
+    )?;
+    let meta = agent.create_session("test").await?;
+    let session = agent
+        .load_session(&meta.session_id)
+        .await?
+        .ok_or("missing session")?;
+    let value = ["fixture-only", "-3r8k7"].concat();
+    let SubmitOutcome::Run(mut run) = agent
+        .submit_to_session(
+            QueryRequest::text(format!("DATABEND_QUEUE_PASSWORD='{value}'")),
+            session.clone(),
+        )
+        .await?
+    else {
+        return Err("expected first run".into());
+    };
+    let mut first = None;
+    while let Some(event) = run.next().await {
+        match event.payload {
+            RunEventPayload::PrivacyCard { card } => {
+                assert!(first.is_none());
+                let persisted = session.load_all_entries().await?;
+                assert!(persisted.iter().any(|e| matches!(&e.item, TranscriptItem::Stats { kind, data } if kind == "privacy_card" && data == &card)));
+                first = Some(card);
+            }
+            RunEventPayload::AssistantCompleted { .. } => assert!(first.is_some()),
+            _ => {}
+        }
+    }
+    let card = first.ok_or("missing live privacy card")?;
+    assert_eq!(
+        card["findings"][0]["preview"],
+        "DATABEND_QUEUE_PASSWORD='[mask]'"
+    );
+    assert!(!card.to_string().contains(&value));
+    assert!(evot::privacy::live_notices(0).1.is_empty());
+    // The retained card, not the expiring audit log or the old process's
+    // in-memory tags, must suffice to suppress the repeated finding.
+    std::fs::remove_dir_all(home.join(".evotai/privacy/records"))?;
+
+    let reloaded =
+        Agent::new_with_provider_for_test(&config, "/other", storage, MockProvider::text("ack"))?;
+    let replay = reloaded
+        .sessions()
+        .resume_transcript(&meta.session_id)
+        .await?;
+    let order: Vec<_> = replay
+        .iter()
+        .filter_map(|item| match item {
+            TranscriptItem::User { .. } => Some("user"),
+            TranscriptItem::Stats { kind, data } if kind == "privacy_card" => {
+                assert_eq!(data, &card);
+                Some("card")
+            }
+            TranscriptItem::Assistant { .. } => Some("assistant"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(order, ["user", "card", "assistant"]);
+    let context = reloaded
+        .sessions()
+        .context_transcript(&meta.session_id)
+        .await?;
+    assert!(!context
+        .iter()
+        .any(|item| matches!(item, TranscriptItem::Stats { kind, .. } if kind == "privacy_card")));
+    let session = reloaded
+        .load_session(&meta.session_id)
+        .await?
+        .ok_or("missing reloaded session")?;
+    let SubmitOutcome::Run(mut next) = reloaded
+        .submit_to_session(QueryRequest::text("continue"), session)
+        .await?
+    else {
+        return Err("expected second run".into());
+    };
+    while let Some(event) = next.next().await {
+        assert!(!matches!(
+            event.payload,
+            RunEventPayload::PrivacyCard { .. }
+        ));
+    }
+    Ok(())
+}
+
 fn user_texts(messages: &[Message]) -> Vec<String> {
     messages
         .iter()
@@ -82,8 +202,7 @@ async fn admitted_inputs_survive_next_run_reload_and_compaction_snapshot() -> Te
     Ok(())
 }
 
-async fn exercise_persistence() -> TestResult {
-    let dir = TempDir::new()?;
+fn fixture_config(dir: &TempDir) -> Config {
     let mut config = Config::new(dir.path().to_path_buf());
     config.providers.insert("test".into(), ProviderProfile {
         protocol: Protocol::OpenAi,
@@ -98,6 +217,12 @@ async fn exercise_persistence() -> TestResult {
         supports_image: None,
     });
     config.llm.provider = "test".into();
+    config
+}
+
+async fn exercise_persistence() -> TestResult {
+    let dir = TempDir::new()?;
+    let config = fixture_config(&dir);
     let storage = Arc::new(MemoryStorage::new());
     let requests = Arc::new(Mutex::new(Vec::new()));
     let entered = Arc::new(Semaphore::new(0));

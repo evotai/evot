@@ -39,7 +39,10 @@ pub(super) fn build_engine(
         Some(provider) => crate::agent::models::transport::overridden(provider.clone()),
         None => crate::agent::models::transport::for_protocol(protocol),
     };
-    let provider = transport(&options.protocol);
+    let provider = crate::agent::models::transport::for_run(
+        &options.protocol,
+        options.provider_override.clone(),
+    );
     let compaction_context = options.compaction_llm.map(|previous| {
         let provider = transport(&previous.protocol);
         evot_engine::context::SummarizerContext {

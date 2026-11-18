@@ -106,6 +106,10 @@ pub enum AgentEvent {
         /// The last provider error, for display.
         error: String,
     },
+    ProviderDiagnostic {
+        kind: String,
+        data: serde_json::Value,
+    },
     LlmCallStart {
         turn: usize,
         attempt: usize,

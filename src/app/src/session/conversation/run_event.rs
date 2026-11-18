@@ -40,6 +40,9 @@ pub struct ReviewedCallPayload {
 pub enum RunEventPayload {
     RunStarted {},
     TurnStarted {},
+    PrivacyCard {
+        card: serde_json::Value,
+    },
     AssistantDelta {
         content_index: usize,
         content_type: AssistantContentType,
@@ -279,6 +282,7 @@ impl RunEventPayload {
         match self {
             Self::RunStarted { .. } => "run_started",
             Self::TurnStarted { .. } => "turn_started",
+            Self::PrivacyCard { .. } => "privacy_card",
             Self::AssistantDelta { .. } => "assistant_delta",
             Self::AssistantToolCall { .. } => "assistant_tool_call",
             Self::AssistantCompleted { .. } => "assistant_completed",

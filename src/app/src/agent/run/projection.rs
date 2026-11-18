@@ -30,6 +30,7 @@ use crate::types::UsageSummary;
 pub enum RuntimeEvent {
     Public(RunEventPayload),
     Transcript(TranscriptItem),
+    PrivacyFindings(Vec<crate::privacy::LiveFinding>),
     TurnStarted,
     TurnEnded,
     EngineCompleted {
@@ -52,6 +53,15 @@ pub enum RuntimeEvent {
 pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
     match event {
         evot_engine::AgentEvent::AgentStart => vec![],
+        evot_engine::AgentEvent::ProviderDiagnostic { kind, data } => {
+            if kind != crate::privacy::CARD_KIND {
+                return vec![];
+            }
+            match serde_json::from_value(data.clone()) {
+                Ok(findings) => vec![RuntimeEvent::PrivacyFindings(findings)],
+                Err(_) => vec![],
+            }
+        }
 
         evot_engine::AgentEvent::QuotaWait { delay_ms, error } => {
             vec![RuntimeEvent::Public(RunEventPayload::QuotaWaiting {

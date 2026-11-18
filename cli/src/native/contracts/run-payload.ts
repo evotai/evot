@@ -29,6 +29,7 @@ const compactionResult = tagged('type', {
 export const runPayloadSchemas = {
   run_started: object({}),
   turn_started: object({}),
+  privacy_card: object({ card: json }),
   assistant_delta: object({ content_index: uint, content_type: oneOf('text', 'thinking'), delta: text }),
   assistant_tool_call: object({
     content_index: uint, tool_call_id: text, tool_name: text, phase: oneOf('start', 'delta', 'end'),

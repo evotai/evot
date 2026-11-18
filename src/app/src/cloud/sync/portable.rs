@@ -68,6 +68,14 @@ fn engine_message_has_path_images(message: &Value) -> bool {
 fn portable_entry(entry: &TranscriptEntry) -> Result<TranscriptEntry> {
     let mut value = serde_json::to_value(entry)?;
     let changed = match value.get_mut("item") {
+        Some(item)
+            if item.get("type").and_then(Value::as_str) == Some("stats")
+                && item.get("kind").and_then(Value::as_str) == Some(crate::privacy::CARD_KIND) =>
+        {
+            // Preserve sequence numbers without uploading local paths or tags.
+            item["data"] = Value::Null;
+            true
+        }
         Some(item) => {
             let redacted = redact_compute(item);
             embed_item_images(item)? || redacted

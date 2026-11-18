@@ -7,6 +7,29 @@ import { blocksToLines } from '../../src/term/viewmodel/types.js'
 import stripAnsi from 'strip-ansi'
 
 describe('transcript conversion', () => {
+  test('replays saved privacy cards at their transcript position in either view', () => {
+    const card = { type: 'stats', kind: 'privacy_card', data: { schema_version: 1, cwd: '/original/workspace', findings: [
+      { tag: 'PASSWORD_fixture', kind: 'PASSWORD', rule: 'contexts.password-assignment', action: 'mask',
+        preview: 'DB_PASSWORD="[mask]"', at: 'read result', path: 'config/app.env', line: 7 },
+    ] } }
+    const messages = transcriptToMessages([
+      { type: 'user', text: 'check config' },
+      card,
+      { type: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+      { ...card, data: null }, // No machine-local payload on another host.
+      { ...card, data: { ...card.data, schema_version: 99 } },
+    ])
+    for (const expanded of [false, true]) {
+      const lines = messagesToOutputLines(messages, expanded)
+      const texts = lines.map(line => line.text)
+      const index = texts.indexOf('⊘ privacy  masked')
+      expect(index).toBeGreaterThan(texts.findIndex(text => text.includes('check config')))
+      expect(index + 1).toBeLessThan(texts.findIndex(text => text.includes('answer')))
+      expect(texts[index + 1]).toBe('  DB_PASSWORD="[mask]" · password assignment · /original/workspace/config/app.env:7')
+      expect(lines[index]?.toolCard?.tone).toBe('notice')
+      expect(texts.filter(text => text.startsWith('⊘ privacy'))).toHaveLength(1)
+    }
+  })
   test('replay accepts opaque JSON tool arguments without crashing preview reconstruction', () => {
     for (const input of [null, false, 1, 'text', []]) {
       for (const name of ['bash', 'read', 'write', 'edit']) {

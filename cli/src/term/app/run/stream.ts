@@ -1,7 +1,8 @@
 import { providerFailurePresentation } from '../../../render/provider-error.js'
 import { parsePrivacyStop, type PrivacyDetail } from '../../../render/privacy-notice.js'
 import { formatLongWaitError } from '../../../render/verbose.js'
-import { buildError, buildPrivacyCard, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../../render/output.js'
+import { readSavedPrivacyCard } from '../../../native/contracts/privacy.js'
+import { buildError, buildPrivacyCard, buildSavedPrivacyCard, buildSystem, buildVerboseEvent, buildEventCard, isVisibleEvent, withoutRedundantErrorTail, type OutputLine } from '../../../render/output.js'
 import { formatDuration } from '../../../ui/format.js'
 import { compactionToolName, recordStreamDelta, resetStreamStats, setLongWait, setRetryWait, setSpinnerPhase, type SpinnerState } from '../../widgets/spinner.js'
 import { assistantToolCalls } from './assistant-content.js'
@@ -379,6 +380,15 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     commitLines.push(...flushed.lines)
     mergeFlushExpanded(flushed)
     rerenderStatus = true
+  }
+
+  if (known?.kind === 'privacy_card') {
+    const card = readSavedPrivacyCard(known.payload.card)
+    if (card) {
+      const lines = buildSavedPrivacyCard(card)
+      commitLines.push(...lines)
+      if (expandedCommitLines) expandedCommitLines.push(...lines)
+    }
   }
 
   if (known?.kind === 'llm_call_completed') {

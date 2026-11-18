@@ -12,6 +12,19 @@ use crate::types::SessionMeta;
 use crate::types::TranscriptEntry;
 use crate::types::TranscriptItem;
 
+fn privacy_tags(item: &TranscriptItem) -> impl Iterator<Item = String> {
+    let card = match item {
+        TranscriptItem::Stats { kind, data } if kind == crate::privacy::CARD_KIND => {
+            serde_json::from_value::<crate::privacy::SavedCard>(data.clone())
+                .ok()
+                .filter(|card| card.schema_version <= 1)
+        }
+        _ => None,
+    };
+    card.into_iter()
+        .flat_map(|card| card.findings.into_iter().map(|finding| finding.tag))
+}
+
 /// Outcome of appending one engine-turn batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TurnAppend {
@@ -42,6 +55,7 @@ struct SessionState {
     /// Hash of the last persisted `LlmCallStarted` request payload (system
     /// prompt + tool schemas). Repeats are delta-stripped before storage.
     llm_payload_hash: Option<u64>,
+    privacy_tags: std::collections::HashSet<String>,
 }
 
 impl Session {
@@ -52,6 +66,7 @@ impl Session {
         engine_transcript: Vec<evot_engine::AgentMessage>,
         next_seq: u64,
         compact_seed: Option<evot_engine::CompactionState>,
+        privacy_tags: std::collections::HashSet<String>,
     ) -> Arc<Self> {
         Arc::new(Self {
             storage,
@@ -62,6 +77,7 @@ impl Session {
                 next_seq,
                 compact_seed,
                 llm_payload_hash: None,
+                privacy_tags,
             }),
         })
     }
@@ -97,7 +113,15 @@ impl Session {
             .with_provider(provider)
             .with_source(source);
         storage.save_session(meta.clone()).await?;
-        Ok(Self::init(storage, meta, Vec::new(), Vec::new(), 0, None))
+        Ok(Self::init(
+            storage,
+            meta,
+            Vec::new(),
+            Vec::new(),
+            0,
+            None,
+            Default::default(),
+        ))
     }
 
     pub async fn open(session_id: &str, storage: Arc<dyn Storage>) -> Result<Option<Arc<Self>>> {
@@ -114,6 +138,15 @@ impl Session {
         let (engine_transcript, compact_seed) =
             crate::session::conversation::context_view::resolve_engine_context_with_state(&entries);
 
+        let mut privacy_tags: std::collections::HashSet<_> =
+            entries.iter().flat_map(|e| privacy_tags(&e.item)).collect();
+        // Legacy findings (and those outside the active tail after compaction)
+        // can suppress duplicate live cards but cannot supply anything to replay.
+        if !entries.is_empty() {
+            if let Ok(prior) = crate::privacy::session_tags(session_id.to_owned(), 30).await {
+                privacy_tags.extend(prior);
+            }
+        }
         Ok(Some(Self::init(
             storage,
             meta,
@@ -121,6 +154,7 @@ impl Session {
             engine_transcript,
             next_seq,
             compact_seed,
+            privacy_tags,
         )))
     }
 
@@ -239,6 +273,11 @@ impl Session {
             state.compact_seed.clone(),
             state.next_seq,
         )
+    }
+
+    /// Tags from saved display cards, independent of audit-log retention.
+    pub(crate) async fn privacy_card_tags(&self) -> std::collections::HashSet<String> {
+        self.state.lock().await.privacy_tags.clone()
     }
 
     /// Cross-compaction seed for the engine's auto-compaction (see field doc).
@@ -398,6 +437,9 @@ impl Session {
                 let base_seq = state.next_seq;
                 state.next_seq = state.next_seq.saturating_add(items.len() as u64);
                 state.llm_payload_hash = payload_hash;
+                state
+                    .privacy_tags
+                    .extend(items.iter().flat_map(privacy_tags));
                 update_compact_seed(&mut state.compact_seed, &items);
                 match replacement.clone() {
                     Some(context) => {

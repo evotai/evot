@@ -8,6 +8,19 @@ import { assistantToolCalls, findAssistantToolCall } from '../../../src/term/app
 import type { OutputLine } from '../../../src/render/output.js'
 
 describe('term stream machine', () => {
+  test('renders a committed privacy event without sending it to client notice persistence again', () => {
+    const initial = createStreamMachineState(createInitialState('model', '/different-cwd'), createSpinnerState())
+    const update = reduceRunEvent(initial, { kind: 'privacy_card', payload: { card: {
+      schema_version: 1, cwd: '/original', findings: [
+        { tag: 'PASSWORD_fixture', kind: 'PASSWORD', action: 'mask', rule: 'contexts.password-assignment',
+          preview: 'DB_PASSWORD=[mask]', at: 'read result', path: 'db.env', line: 8 },
+      ],
+    } } }, { termRows: 24 })
+    expect(update.commitLines.map(line => line.text)).toEqual([
+      '⊘ privacy  masked', '  DB_PASSWORD=[mask] · password assignment · /original/db.env:8',
+    ])
+    expect(update.noticeLines).toEqual([])
+  })
   test('automatic compaction phases drive method-specific spinner labels', () => {
     const initial = createStreamMachineState(createInitialState('model', '/tmp'), createSpinnerState())
     const cases = [

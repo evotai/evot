@@ -236,6 +236,8 @@ async fn drive_one_turn(
         transcript_seq,
     } = turn;
 
+    let cwd = options.cwd.to_string_lossy().into_owned();
+    let mut privacy_seen = session.privacy_card_tags().await;
     let mut engine = build_engine(options, history)
         .with_prompt_queues(control.queues().steering(), control.queues().follow_up());
     let user_msg = evot_engine::AgentMessage::Llm(evot_engine::Message::User {
@@ -325,6 +327,50 @@ async fn drive_one_turn(
             }
             RuntimeEvent::Transcript(item) => {
                 turn_transcripts.push(item);
+            }
+            RuntimeEvent::PrivacyFindings(mut findings) => {
+                findings.retain(|finding| privacy_seen.insert(finding.tag.clone()));
+                if findings.is_empty() {
+                    continue;
+                }
+                let card = crate::privacy::SavedCard {
+                    schema_version: 1,
+                    cwd: cwd.clone(),
+                    findings,
+                };
+                let Ok(card) = serde_json::to_value(card) else {
+                    continue;
+                };
+                turn_transcripts.push(TranscriptItem::Stats {
+                    kind: crate::privacy::CARD_KIND.into(),
+                    data: card.clone(),
+                });
+                match flush(
+                    &session,
+                    &turn_transcripts,
+                    &mut saved_count,
+                    &mut expected_seq,
+                )
+                .await
+                {
+                    Ok((written, append)) => {
+                        context_rebased |= append.interleaved_context_items > 0;
+                        saved_count += written;
+                        expected_seq = append.next_seq;
+                    }
+                    Err(error) => {
+                        emit_persistence_error(tx, run_id, session_id, turn_count, &error);
+                        control.abort();
+                        persistence_failed = true;
+                        break;
+                    }
+                }
+                let event = RunEventContext::new(run_id, session_id, turn_count)
+                    .event(RunEventPayload::PrivacyCard { card });
+                if !consumer_closed && tx.send(event).is_err() {
+                    consumer_closed = true;
+                    control.abort();
+                }
             }
             RuntimeEvent::CompactionCompleted {
                 reason,

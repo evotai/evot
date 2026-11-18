@@ -399,6 +399,7 @@ impl TestOutput {
                 AgentEvent::ContextCompactionStarted { .. } => "CompactionStart",
                 AgentEvent::ContextCompactionPhase { .. } => "CompactionPhase",
                 AgentEvent::ContextCompactionEnd { .. } => "CompactionEnd",
+                AgentEvent::ProviderDiagnostic { .. } => "ProviderDiagnostic",
             })
             .collect()
     }

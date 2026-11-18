@@ -323,7 +323,7 @@ async fn share_pushes_full_then_incremental_and_tracks_seq() -> TestResult {
 }
 
 #[tokio::test]
-async fn shares_never_upload_compute_machine_details() -> TestResult {
+async fn shares_never_upload_compute_machine_or_privacy_card_details() -> TestResult {
     let server = MockServer::start().await;
     let state = state(&server)?;
     let storage: Arc<dyn Storage> = Arc::new(evot::session::storage::MemoryStorage::new());
@@ -352,10 +352,18 @@ async fn shares_never_upload_compute_machine_details() -> TestResult {
             }))?,
         ))
         .await?;
+    storage.append_entry(TranscriptEntry::new("s1".into(), None, 3, 0,
+        evot::types::TranscriptItem::Stats { kind: "privacy_card".into(), data: json!({
+            "schema_version": 1, "cwd": "/local/privacy-workspace", "findings": [{
+                "tag": "PASSWORD_fixture", "kind": "PASSWORD", "action": "mask", "rule": "contexts.password-assignment",
+                "preview": "PRIVATE_FIELD=[mask]", "at": "read result", "path": "private-file.env", "line": 7
+            }]
+        }) },
+    )).await?;
     Mock::given(method("PUT"))
         .and(path("/v1/sessions/s1"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "seq": 2, "visibility": "public", "public_url": "https://evot.ai/share/token"
+            "seq": 3, "visibility": "public", "public_url": "https://evot.ai/share/token"
         })))
         .expect(1)
         .mount(&server)
@@ -374,6 +382,17 @@ async fn shares_never_upload_compute_machine_details() -> TestResult {
     assert!(!body.contains("big-1"), "machine names stay local");
     assert!(!body.contains("10.0.0.9"));
     assert!(!body.contains("compute_machines"));
+    for private in [
+        "/local/privacy-workspace",
+        "PASSWORD_fixture",
+        "PRIVATE_FIELD",
+        "private-file.env",
+    ] {
+        assert!(!body.contains(private));
+    }
+    let wire: serde_json::Value = serde_json::from_str(&body)?;
+    assert_eq!(wire["entries"][2]["seq"], 3);
+    assert!(wire["entries"][2]["item"]["data"].is_null());
     assert!(
         body.contains("Base."),
         "the rest of the prompt is still shared"

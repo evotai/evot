@@ -69,6 +69,17 @@ const liveFinding = object({
   preview: optional(text), at: text, label: optional(text), path: optional(text), line: optional(uint),
 })
 
+export interface SavedPrivacyCard { schema_version?: number; cwd: string; findings: PrivacyLiveFinding[] }
+const savedPrivacyCard = object({ schema_version: optional(uint), cwd: text, findings: array(liveFinding) })
+
+export function readSavedPrivacyCard(value: unknown): SavedPrivacyCard | undefined {
+  try {
+    const card = savedPrivacyCard.read(value, '$.privacy_card')
+    if ((card.schema_version ?? 0) <= 1 && card.findings.length) return card
+  } catch { /* Older or newer clients may omit or not understand these display data. */ }
+  return undefined
+}
+
 export const privacyLive = object({
   cursor: uint,
   notices: array(object({ seq: uint, ...eventFields, tags: array(text), findings: optional(array(liveFinding)) })),

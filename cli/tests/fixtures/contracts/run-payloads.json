@@ -1,6 +1,7 @@
 [
   {"kind":"run_started","payload":{}},
   {"kind":"turn_started","payload":{}},
+  {"kind":"privacy_card","payload":{"card":{"schema_version":1,"cwd":"/work","findings":[{"tag":"PASSWORD_fixture","kind":"PASSWORD","action":"mask","rule":"contexts.password-assignment","preview":"DB_PASSWORD=[mask]","at":"user input"}]}}},
   {"kind":"assistant_delta","payload":{"content_index":0,"content_type":"text","delta":"hello"}},
   {"kind":"assistant_delta","payload":{"content_index":1,"content_type":"thinking","delta":"reason"}},
   {"kind":"assistant_tool_call","payload":{"content_index":2,"tool_call_id":"call","tool_name":"bash","phase":"start"}},

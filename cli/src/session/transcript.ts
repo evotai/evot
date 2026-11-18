@@ -6,6 +6,7 @@
 import { replayUserInput } from './user-input.js'
 import { toolArgsRecord } from './tool-args.js'
 import type { TranscriptItem } from '../native/index.js'
+import { readSavedPrivacyCard } from '../native/contracts/privacy.js'
 import type { UIAssistantBlock, UIMessage } from '../render/message-types.js'
 
 // ---------------------------------------------------------------------------
@@ -83,6 +84,9 @@ export function transcriptToMessages(items: TranscriptItem[]): UIMessage[] {
         timestamp: 0,
         content,
       })
+    } else if (t === 'stats' && item.kind === 'privacy_card') {
+      const privacyCard = readSavedPrivacyCard(item.data)
+      if (privacyCard) messages.push({ id: `transcript-privacy-${idx++}`, role: 'system', text: '', timestamp: 0, privacyCard })
     } else if (t === 'compact') {
       const details = item.details && typeof item.details === 'object' && !Array.isArray(item.details)
         ? item.details as Record<string, unknown>

@@ -336,6 +336,12 @@ pub(super) async fn keep(masker: &Masker, record: Record, findings: Vec<LiveFind
         }
         live.1.push_back(LiveNotice::of(seq, &record, findings));
     }
+    keep_audit(masker, record).await;
+}
+
+/// In-run informational cards already have a sequenced event; don't also
+/// publish them on the out-of-band notice feed.
+pub(super) async fn keep_audit(masker: &Masker, record: Record) {
     let Some(dir) = masker.records().cloned() else {
         return;
     };
