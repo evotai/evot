@@ -38,7 +38,7 @@ export interface ScrollbackController {
 /** Commits finished lines to scrollback: user turns, system notices, run footers, status lines. */
 export function createScrollbackController(st: ReplState, deps: ScrollbackDeps): ScrollbackController {
   function commitPrivacyHappenings(): void {
-    const cards = deps.privacyFeed.poll(st.sessionId).flatMap(({ notice, fresh }) => buildPrivacyNoticeCard(notice, fresh))
+    const cards = deps.privacyFeed.poll(st.sessionId).flatMap(({ notice, fresh }) => buildPrivacyNoticeCard(notice, fresh, st.appState.cwd))
     if (cards.length) commitLines(cards)
   }
 

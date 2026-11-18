@@ -33,8 +33,12 @@ export interface PrivacySummary {
   kinds: PrivacyKindStats[]
   recent: PrivacyEvent[]
 }
+export interface PrivacyLiveFinding {
+  tag: string; kind: string; rule: string; action: PrivacyAction
+  preview?: string; at: string; label?: string; path?: string; line?: number
+}
 /** One record as the running process made it; `tags` are placeholders, never values. */
-export interface PrivacyLiveNotice extends PrivacyEvent { seq: number; tags: string[] }
+export interface PrivacyLiveNotice extends PrivacyEvent { seq: number; tags: string[]; findings?: PrivacyLiveFinding[] }
 export interface PrivacyLive { cursor: number; notices: PrivacyLiveNotice[] }
 export interface PrivacyStatus { settings: PrivacySettings; summary: PrivacySummary; kinds: PrivacyKind[]; packs: PrivacyPack[] }
 
@@ -60,9 +64,14 @@ const summary = object({
   recent: array(event),
 }) as unknown as Schema<PrivacySummary>
 
+const liveFinding = object({
+  tag: text, kind: text, rule: text, action: oneOf('mask', 'warn', 'block'),
+  preview: optional(text), at: text, label: optional(text), path: optional(text), line: optional(uint),
+})
+
 export const privacyLive = object({
   cursor: uint,
-  notices: array(object({ seq: uint, ...eventFields, tags: array(text) })),
+  notices: array(object({ seq: uint, ...eventFields, tags: array(text), findings: optional(array(liveFinding)) })),
 }) as unknown as Schema<PrivacyLive>
 
 const kinds = array(object({ kind: text, category: oneOf('secret', 'custom') }))

@@ -22,6 +22,7 @@ use super::notice::unavailable_message;
 use super::policy::PrivacySettings;
 use super::policy::SETTINGS_SCHEMA_VERSION;
 use super::record;
+use super::record::LiveFinding;
 use super::record::LiveNotice;
 use super::record::Record;
 use super::record::Summary;
@@ -245,7 +246,7 @@ pub(crate) async fn scrub_delivery(
         record.values.retain(|value| seen.insert(value.tag.clone()));
     }
     if !record.values.is_empty() {
-        keep(masker, record).await;
+        keep(masker, record, Vec::new()).await;
     }
     if blocked {
         return Ok(blocked_message(Target::Delivery, &kinds));
@@ -325,7 +326,7 @@ pub fn live_notices(after: u64) -> (u64, Vec<LiveNotice>) {
 }
 
 /// Write `record` where `masker` keeps them; failing to is logged, never fatal.
-pub(super) async fn keep(masker: &Masker, record: Record) {
+pub(super) async fn keep(masker: &Masker, record: Record, findings: Vec<LiveFinding>) {
     {
         let mut live = LIVE.lock();
         live.0 += 1;
@@ -333,7 +334,7 @@ pub(super) async fn keep(masker: &Masker, record: Record) {
         if live.1.len() >= LIVE_KEPT {
             live.1.pop_front();
         }
-        live.1.push_back(LiveNotice::of(seq, &record));
+        live.1.push_back(LiveNotice::of(seq, &record, findings));
     }
     let Some(dir) = masker.records().cloned() else {
         return;
@@ -408,7 +409,7 @@ pub async fn scrub_upload_with<T: Serialize>(
     }
     let kinds = record.blocked_kinds();
     let blocked = record.blocked;
-    keep(masker, record).await;
+    keep(masker, record, Vec::new()).await;
     if blocked {
         return Err(EvotError::Privacy(blocked_message(target, &kinds)));
     }

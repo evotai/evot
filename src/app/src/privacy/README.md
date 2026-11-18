@@ -92,11 +92,12 @@ Each request/upload with a finding appends a value-free JSONL record under
 `~/.evotai/privacy/records/<day>.jsonl`: kind, rule, keyed placeholder, length,
 count and masked origin labels, with up to 16 source lines per origin when a
 text `read` result can be located. No raw value, prefix or suffix is recorded.
-`/privacy` shows recent origins and rule IDs in a report card. Routine cards
-show where the request was going, what matched in plain language (with fixed
-masked examples where useful), available source locations, and how many values
-were first seen. The occurrence counts cover the whole request, but a card only
-appears when the session sees a new tag; resume seeds tags from past records.
+`/privacy` shows request-wide origins and rule IDs in a report card. Live model
+notices carry one representative match per tag. Routine cards show only the
+session's new tags, with the action, rule, masked syntax and location tied to
+the same match. Previews show the matched field or syntax and public format
+markers, never the credential body or arbitrary surrounding text. File locations
+retain the full tool path for the live card. Resume seeds tags from past records.
 Blocked requests link each blocking rule and kind to its source and available
 line numbers, separate from findings that were only masked or warned. No
 credential value or snippet is shown.

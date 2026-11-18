@@ -10,6 +10,7 @@ use super::policy::Action;
 use super::policy::Mode;
 use super::policy::Policy;
 use super::policy::PrivacySettings;
+use super::record::LiveFinding;
 use super::record::Record;
 use super::record::Target;
 use super::request;
@@ -81,6 +82,10 @@ impl Report {
 
     pub fn record(&self, target: Target) -> Record {
         Record::new(target, &self.hits)
+    }
+
+    pub(super) fn live_findings(&self) -> Vec<LiveFinding> {
+        LiveFinding::locate(&self.hits)
     }
 }
 

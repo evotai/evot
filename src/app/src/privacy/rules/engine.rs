@@ -621,10 +621,16 @@ impl Engine {
                 };
                 let Some(m) = m else { continue };
                 if let Some(confidence) = rule.accept(text, &lower, m.start(), m.end()) {
-                    found.push(
-                        Span::new(m.start(), m.end(), &rule.kind, Finder::Rule)
-                            .rule(&rule.id, confidence),
-                    );
+                    let mut span = Span::new(m.start(), m.end(), &rule.kind, Finder::Rule)
+                        .rule(&rule.id, confidence);
+                    if let Some(full) = caps.get(0) {
+                        span.preview = super::preview::pattern(
+                            &rule.id,
+                            &text[full.start()..m.start()],
+                            m.as_str(),
+                        );
+                    }
+                    found.push(span);
                 }
             }
         }
@@ -632,8 +638,8 @@ impl Engine {
             if !(source.covers)(field.category) {
                 continue;
             }
-            if let Some(key) = source.field {
-                let key = key.to_lowercase();
+            if let Some(raw_key) = source.field {
+                let key = raw_key.to_lowercase();
                 let named = field.key.is_match(&key)
                     && !field
                         .key_unless
@@ -641,10 +647,15 @@ impl Engine {
                         .is_some_and(|re| re.is_match(&key));
                 let (a, b) = trimmed(text);
                 if named && field.accept(text, a, b) {
-                    found.push(
-                        Span::new(a, b, &field.kind, Finder::Field)
-                            .rule(&field.id, field.confidence),
-                    );
+                    let mut span = Span::new(a, b, &field.kind, Finder::Field)
+                        .rule(&field.id, field.confidence);
+                    if matches!(
+                        field.id.as_str(),
+                        "contexts.password-field" | "contexts.credential-field"
+                    ) {
+                        span.preview = super::preview::field(raw_key, &text[a..b], &field.kind);
+                    }
+                    found.push(span);
                 }
             }
             if let Some(re) = &field.text {
@@ -672,9 +683,10 @@ impl Engine {
                     if let Some(hit) = self.find_at(&decoded, &inner, depth + 1).into_iter().next()
                     {
                         let id = hit.rule.clone().unwrap_or_default();
-                        found.push(
-                            Span::new(a, b, &hit.kind, Finder::Decoded).rule(&id, hit.confidence),
-                        );
+                        let mut span =
+                            Span::new(a, b, &hit.kind, Finder::Decoded).rule(&id, hit.confidence);
+                        span.preview = Some("<encoded value> [mask]".into());
+                        found.push(span);
                     }
                 }
             }

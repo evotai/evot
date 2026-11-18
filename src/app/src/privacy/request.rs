@@ -96,6 +96,7 @@ pub(super) fn mask_config(
     });
     let mut hits = Vec::new();
     let mut hidden_labels = HashSet::new();
+    let mut preview_hidden = HashSet::new();
     let mut found = found.into_iter();
     let mut error = None;
     walk(config, &sources, &mut |text, slot, _, origin| {
@@ -115,11 +116,14 @@ pub(super) fn mask_config(
             Ok(masked) => {
                 annotate_hits(&mut hits[before..], text, origin);
                 for hit in &hits[before..] {
-                    if hit.action != Action::Mask {
-                        let value = &text[hit.start..hit.end];
-                        if !hidden_labels.contains(value) {
-                            hidden_labels.insert(value.to_string());
-                        }
+                    let value = &text[hit.start..hit.end];
+                    if hit.action != Action::Mask && !hidden_labels.contains(value) {
+                        hidden_labels.insert(value.to_string());
+                    }
+                    // No preview is this long: only hold values that could
+                    // occur in a displayed identifier or syntax fragment.
+                    if value.len() <= 160 && !preview_hidden.contains(value) {
+                        preview_hidden.insert(value.to_string());
                     }
                 }
                 if let Some(masked) = masked {
@@ -140,11 +144,19 @@ pub(super) fn mask_config(
     }
     // Labels come from the masked request. Drop labels containing a warned
     // value or a blocked value that still appears bare in the label.
-    let labels = call_labels(&config.messages, &hidden_labels);
+    let labels = call_labels(&config.messages, &hidden_labels, &preview_hidden);
     for hit in &mut hits {
+        if hit.preview.as_ref().is_some_and(|preview| {
+            preview_hidden.iter().any(|value| preview.contains(value))
+                || !known(preview).is_empty()
+                || policy.terms().is_some_and(|terms| terms.is_match(preview))
+        }) {
+            hit.preview = None;
+        }
         if let Some(origin) = &mut hit.origin {
-            if let Some(call) = &origin.call {
-                origin.label = labels.get(call).cloned();
+            if let Some(label) = origin.call.as_ref().and_then(|id| labels.get(id)) {
+                origin.label = Some(label.short.clone());
+                origin.path = label.path.clone();
             }
         }
     }
@@ -197,16 +209,31 @@ fn read_body_len(text: &str) -> Option<usize> {
 /// How many characters of a command or path the record keeps as a label.
 const LABEL_CHARS: usize = 60;
 
-/// A safe label per tool call, from its (already masked) arguments: a
-/// bash command's description, else its head; a path for file tools.
-fn call_labels(messages: &[Message], hidden: &HashSet<String>) -> HashMap<String, String> {
+struct CallLabel {
+    short: String,
+    path: Option<String>,
+}
+
+/// Read labels from already masked arguments. Keep the full path only for
+/// live file locations, without changing what the durable record stores.
+fn call_labels(
+    messages: &[Message],
+    hidden: &HashSet<String>,
+    short_values: &HashSet<String>,
+) -> HashMap<String, CallLabel> {
     let mut labels = std::collections::HashMap::new();
     for message in messages {
         let Message::Assistant { content, .. } = message else {
             continue;
         };
         for block in content {
-            let Content::ToolCall { id, arguments, .. } = block else {
+            let Content::ToolCall {
+                id,
+                name,
+                arguments,
+                ..
+            } = block
+            else {
                 continue;
             };
             let text = [
@@ -235,7 +262,27 @@ fn call_labels(messages: &[Message], hidden: &HashSet<String>) -> HashMap<String
                 if first.chars().count() > LABEL_CHARS || text.contains('\n') {
                     label.push('…');
                 }
-                labels.insert(id.clone(), label);
+                let path = if ["read", "edit", "write"]
+                    .iter()
+                    .any(|tool| name.eq_ignore_ascii_case(tool))
+                {
+                    arguments
+                        .get("path")
+                        .or_else(|| arguments.get("file_path"))
+                        .and_then(Value::as_str)
+                        .filter(|path| {
+                            !path.is_empty()
+                                && !path.contains(char::is_control)
+                                && !hidden
+                                    .iter()
+                                    .chain(short_values)
+                                    .any(|value| path.contains(value.as_str()))
+                        })
+                        .map(str::to_owned)
+                } else {
+                    None
+                };
+                labels.insert(id.clone(), CallLabel { short: label, path });
             }
         }
     }
@@ -328,6 +375,7 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
         at: at.to_string(),
         call: None,
         label: None,
+        path: None,
         read_offset: None,
     };
     f(
@@ -365,6 +413,7 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
                     at: format!("{tool_name} result"),
                     call: Some(tool_call_id.clone()),
                     label: None,
+                    path: None,
                     read_offset,
                 };
                 (content, Slot::Inbound { sensitive }, origin)
@@ -396,6 +445,7 @@ fn walk(config: &mut StreamConfig, sources: &ToolSources, f: &mut Visit<'_>) {
                         at: format!("{name} call"),
                         call: Some(id.clone()),
                         label: None,
+                        path: None,
                         read_offset: None,
                     };
                     walk_value(arguments, Slot::Model, None, &origin, f)

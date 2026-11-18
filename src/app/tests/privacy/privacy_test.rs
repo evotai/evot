@@ -1081,6 +1081,100 @@ async fn live_notices_report_each_record_as_it_is_made_without_values() -> TestR
     Ok(())
 }
 
+#[tokio::test]
+async fn live_findings_pair_actual_syntax_and_location_without_copying_input() -> TestResult {
+    let provider = MaskingProvider::with_masker(
+        Arc::new(Echo {
+            seen: Mutex::new(None),
+        }),
+        Arc::new(masker()?),
+    );
+    let auth = ["ghp_", "0123456789abcdefghijklmnopqrstuvwxyz"].concat();
+    let password = ["synth", "ET2cPassword!"].concat();
+    let assignment = ["synth", "ET3cAssignment!"].concat();
+    let custom = ["synth", "ET4cAssignment!"].concat();
+    let private_name = ["private", "ProjectName"].concat();
+    let sensitive_field = ["synth", "ET5cAssignment!"].concat();
+    let mut request = config(vec![
+        user(&format!("Earlier message contains {password} without context.\npassword={private_name}")),
+        read_call("match", json!({"path": "/workspace/service/project/settings.conf", "offset": 108})),
+        tool_result("match", &format!(
+            "Authorization:Bearer {auth}\nmysql://sample-user:{password}@example.test/db\nDB_PASSWORD='{assignment}'\nDATABEND_QUERY_PASSWORD={custom}\n{private_name}_PASSWORD={sensitive_field}"
+        )),
+    ]);
+    request.prompt_cache_key = Some("privacy-live-findings-test".into());
+    let (before, _) = evot::privacy::live_notices(0);
+    let (tx, _rx) = mpsc::channel(16);
+    provider
+        .stream_bounded(request, tx, CancellationToken::new())
+        .await?;
+    let (_, notices) = evot::privacy::live_notices(before);
+    let notice = notices
+        .iter()
+        .find(|n| n.event.session.as_deref() == Some("privacy-live-findings-test"))
+        .ok_or("missing live finding notice")?;
+    assert_eq!(notice.findings.len(), 6);
+    let sensitive = notice
+        .findings
+        .iter()
+        .find(|f| f.line == Some(112))
+        .ok_or("missing sensitive name finding")?;
+    assert!(sensitive.preview.is_none());
+    for (line, rule, preview) in [
+        (
+            108,
+            "formats.github-classic",
+            "Authorization: Bearer ghp_[mask]",
+        ),
+        (109, "contexts.url-password", "mysql://<user>:[mask]@<host>"),
+        (110, "contexts.password-assignment", "DB_PASSWORD='[mask]'"),
+        (
+            111,
+            "contexts.password-assignment",
+            "DATABEND_QUERY_PASSWORD=[mask]",
+        ),
+    ] {
+        let finding = notice
+            .findings
+            .iter()
+            .find(|f| f.line == Some(line))
+            .ok_or("missing source line")?;
+        assert_eq!(finding.rule, rule);
+        assert_eq!(finding.action, Action::Mask);
+        assert_eq!(finding.preview.as_deref(), Some(preview));
+        assert_eq!(finding.label.as_deref(), Some("project/settings.conf"));
+        assert_eq!(
+            finding.path.as_deref(),
+            Some("/workspace/service/project/settings.conf")
+        );
+        assert!(notice.tags.contains(&finding.tag));
+    }
+    let written = serde_json::to_string(notice)?;
+    for private in [
+        &auth[..],
+        &password,
+        &assignment,
+        &custom,
+        &private_name,
+        &sensitive_field,
+        "sample-user",
+        "example.test",
+        "0123456789abcdefghijklmnopqrstuvwxyz",
+    ] {
+        assert!(!written.contains(private));
+    }
+
+    // Older addon notices omit findings; their existing event and tags still decode.
+    let mut wire = serde_json::to_value(notice)?;
+    let old = wire.as_object_mut().ok_or("notice is not an object")?;
+    old.remove("findings");
+    let decoded: evot::privacy::LiveNotice = serde_json::from_value(wire)?;
+    assert!(decoded.findings.is_empty());
+    assert_eq!(decoded.event, notice.event);
+    assert_eq!(decoded.tags, notice.tags);
+    Ok(())
+}
+
 #[test]
 fn records_say_where_values_sat_and_which_rules_found_them_without_values() -> TestResult {
     let masker = masker()?;

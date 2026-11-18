@@ -6,6 +6,7 @@ mod decode;
 mod engine;
 mod load;
 mod pack;
+mod preview;
 
 pub(in crate::privacy) use engine::Engine;
 pub use engine::KindInfo;

@@ -18,55 +18,38 @@ const texts = (lines: OutputLine[]) => lines.map(line => line.text)
 
 beforeEach(() => resetIdCounter())
 
-test('routine findings identify the destination, sources and rules without implying delivery', () => {
+test('the notice shows the new authorization finding, not the old passwords in the request', () => {
   const card = buildPrivacyNoticeCard({
-    target: 'llm', model: 'example-model', provider: 'example-provider',
-    reason: 'masked PASSWORD ×19 · SECRET ×4',
-    origins: [
-      { at: 'read result', label: 'config.toml', n: 22, lines: [307, 317] },
-      { at: 'user', n: 1 },
+    target: 'llm',
+    reason: 'masked PASSWORD ×22 · SECRET ×5 · TOKEN ×1',
+    findings: [
+      { tag: 'PASSWORD_old', kind: 'PASSWORD', action: 'mask', rule: 'contexts.url-password', at: 'read result', label: 'mask.rs', line: 307 },
+      { tag: 'TOKEN_new', kind: 'TOKEN', action: 'mask', rule: 'contexts.authorization',
+        preview: 'Authorization: Bearer ghp_[mask]', at: 'read result', path: 'scripts/deploy.sh', line: 42 },
     ],
-    rules: [
-      { rule: 'contexts.url-password', values: 4 },
-      { rule: 'contexts.credential-assignment', values: 4 },
-      { rule: 'contexts.password-assignment', values: 2 },
-    ],
-  }, 1)
+  }, new Set(['TOKEN_new']), '/work/project')
   expect(texts(card)).toEqual([
-    '⊘ privacy  model request → example-model · example-provider',
-    '  masked PASSWORD ×19 · SECRET ×4 (occurrences) · 1 value first seen',
-    '  4 values · Password embedded in a URL or connection string (e.g. user:****@host)',
-    '  4 values · Credential in a key, token, or secret assignment (e.g. API_KEY=****)',
-    '  2 values · Password in a variable, config entry, or command flag (e.g. DB_PASSWORD=****)',
-    '  in: read result "config.toml" (lines 307, 317) ×22 · user ×1',
+    '⊘ privacy  masked',
+    '  Authorization: Bearer ghp_[mask] · Authorization header · /work/project/scripts/deploy.sh:42',
   ])
   expect(card[0]!.toolCard).toEqual({ state: 'success', first: true, last: false, tone: 'notice' })
   expect(card.at(-1)!.toolCard).toEqual({ state: 'success', first: false, last: true, tone: 'notice' })
 })
 
-test('routine findings name custom rules and bound the evidence rows', () => {
-  const card = buildPrivacyNoticeCard({ target: 'llm', reason: 'masked SECRET ×4', rules: [
-    { rule: 'custom.db-session', values: 1 },
-    { rule: 'contexts.curl-user', values: 1 },
-    { rule: 'contexts.password-field', values: 1 },
-    { rule: 'contexts.url-password', values: 1 },
-  ] }, 4)
-  expect(texts(card).slice(2)).toEqual([
-    '  1 value · Rule: custom.db-session',
-    '  1 value · Password supplied to curl via -u or --user (e.g. curl -u user:****)',
-    '  1 value · Password in a password field (e.g. "password": "****")',
-    '  +1 more rules matched',
+test('findings without previews do not invent details and warnings do not claim a mask', () => {
+  const card = buildPrivacyNoticeCard({ target: 'llm', reason: 'warned (not masked) SECRET ×1', findings: [
+    { tag: 'SECRET_new', kind: 'SECRET', action: 'warn', rule: 'custom.db-session', at: 'bash result', label: 'run {{SECRET_abcd2345}}' },
+  ] }, new Set(['SECRET_new']), '/work/project')
+  expect(texts(card)).toEqual([
+    '⊘ privacy  warned (not masked)',
+    '  [mask] · custom.db-session · bash result (run [mask])',
   ])
 })
 
-test('routine findings without optional details still distinguish warnings from masks', () => {
-  expect(texts(buildPrivacyNoticeCard({ target: 'share', reason: 'masked EMAIL ×2' }, 2))).toEqual([
-    '⊘ privacy  share',
-    '  masked EMAIL ×2 (occurrences) · 2 values first seen',
-  ])
-  expect(texts(buildPrivacyNoticeCard({ target: 'llm', reason: 'warned (not masked) SECRET ×1' }, 1))).toEqual([
+test('legacy notices do not attribute request-wide findings to the new value', () => {
+  expect(texts(buildPrivacyNoticeCard({ target: 'llm', reason: 'masked PASSWORD ×22 · TOKEN ×1' }, new Set(['TOKEN_new']), '/work/project'))).toEqual([
     '⊘ privacy  model request',
-    '  warned (not masked) SECRET ×1 (occurrences) · 1 value first seen',
+    '  1 new value · request total: masked PASSWORD ×22 · TOKEN ×1 · match locations unavailable',
   ])
 })
 

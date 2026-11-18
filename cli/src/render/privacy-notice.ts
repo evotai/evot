@@ -2,7 +2,8 @@
  * `src/app/src/privacy/notice.rs` and pinned by tests on both sides; this
  * module is the only place that parses it. No TUI or native runtime dependency. */
 
-import type { PrivacyOrigin, PrivacyRuleCount } from '../native/contracts/privacy.js'
+import { resolve } from 'node:path'
+import type { PrivacyLiveFinding, PrivacyOrigin, PrivacyRuleCount } from '../native/contracts/privacy.js'
 
 export type PrivacyTarget = 'request' | 'share' | 'sync' | 'task' | 'task report' | 'delivery'
 
@@ -94,28 +95,34 @@ const RULE_DESCRIPTION: ReadonlyMap<string, string> = new Map([
   ['known', 'A previously recognized protected value'],
 ])
 
-// Examples describe the shape of a match; they never come from input text.
-const RULE_EXAMPLE: ReadonlyMap<string, string> = new Map([
-  ['contexts.url-password', 'user:****@host'],
-  ['contexts.password-assignment', 'DB_PASSWORD=****'],
-  ['contexts.password-field', '"password": "****"'],
-  ['contexts.curl-user', 'curl -u user:****'],
-  ['contexts.cjk-password', '密码：****'],
-  ['contexts.credential-assignment', 'API_KEY=****'],
-  ['contexts.credential-field', '"api_key": "****"'],
-  ['contexts.authorization', 'Authorization: Bearer ****'],
+const MATCH_LABELS: ReadonlyMap<string, string> = new Map([
+  ['contexts.authorization', 'Authorization header'],
+  ['contexts.url-password', 'URL password'],
+  ['contexts.password-assignment', 'password assignment'],
+  ['contexts.password-field', 'password field'],
+  ['contexts.credential-assignment', 'credential assignment'],
+  ['contexts.credential-field', 'credential field'],
+  ['contexts.curl-user', 'curl credentials'],
+  ['contexts.cjk-password', 'inline password'],
 ])
 
-/** Plain-language clues for the whole request, not excerpts or exact field names. */
-export function privacyEvidenceRows(detail: PrivacyDetail): string[] {
-  const rules = detail.rules ?? []
-  const rows = rules.slice(0, SHOWN).map(({ rule, values }) => {
-    const description = RULE_DESCRIPTION.get(rule) ?? `Rule: ${rule}`
-    const example = RULE_EXAMPLE.get(rule)
-    return `${values} ${values === 1 ? 'value' : 'values'} · ${description}${example ? ` (e.g. ${example})` : ''}`
+export function privacyFindingRows(findings: readonly PrivacyLiveFinding[], cwd: string, mixed: boolean): string[] {
+  const hideTags = (text: string) => text.replace(/\{\{[A-Z][A-Z0-9_]*_[a-z2-7]{8}\}\}/g, '[mask]')
+  const shown = (text: string) => JSON.stringify(hideTags(text)).slice(1, -1)
+  const rows = findings.slice(0, SHOWN).map(finding => {
+    const location = finding.path
+      ? `${shown(resolve(cwd, finding.path))}${finding.line === undefined ? '' : `:${finding.line}`}`
+      : `${finding.at}${finding.label ? ` (${shown(finding.label)})` : ''}${finding.line === undefined ? '' : `, line ${finding.line}`}`
+    const pattern = MATCH_LABELS.get(finding.rule) ?? RULE_DESCRIPTION.get(finding.rule) ?? finding.rule
+    const action = mixed ? `${privacyActionLabel(finding.action)} · ` : ''
+    return `${finding.preview ?? '[mask]'} · ${action}${pattern} · ${location}`
   })
-  if (rules.length > SHOWN) rows.push(`+${rules.length - SHOWN} more rules matched`)
+  if (findings.length > SHOWN) rows.push(`+${findings.length - SHOWN} more new values`)
   return rows
+}
+
+export function privacyActionLabel(action: PrivacyLiveFinding['action']): string {
+  return action === 'warn' ? 'warned (not masked)' : action === 'mask' ? 'masked' : 'blocked'
 }
 
 /** Only lines associated with the specific rule and finding that stopped the request. */

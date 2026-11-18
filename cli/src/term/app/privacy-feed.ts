@@ -3,7 +3,7 @@ import type { PrivacyLive, PrivacyLiveNotice } from '../../native/contracts/priv
 export interface PrivacyHappening {
   notice: PrivacyLiveNotice
   /** Distinct tags first seen in this session, not occurrences in the request. */
-  fresh: number
+  fresh: ReadonlySet<string>
 }
 
 /** What privacy did during this process, as it happens, for the transcript.
@@ -40,10 +40,12 @@ export class PrivacyFeed {
       }
       let tags = this.seen.get(key)
       if (!tags) { tags = new Set(); this.seen.set(key, tags) }
-      const before = tags.size
-      for (const tag of notice.tags) tags.add(tag)
-      const fresh = tags.size - before
-      if (fresh > 0) out.push({ notice, fresh })
+      const fresh = new Set<string>()
+      for (const tag of notice.tags) {
+        if (!tags.has(tag)) fresh.add(tag)
+        tags.add(tag)
+      }
+      if (fresh.size > 0) out.push({ notice, fresh })
     }
     return out
   }

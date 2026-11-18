@@ -421,15 +421,74 @@ pub struct LiveNotice {
     #[serde(flatten)]
     pub event: Event,
     pub tags: Vec<String>,
+    /// One representative match per tag. Kept only in the live feed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<LiveFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiveFinding {
+    pub tag: String,
+    pub kind: String,
+    pub rule: String,
+    pub action: Action,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
+impl LiveFinding {
+    pub(super) fn locate(hits: &[Hit]) -> Vec<Self> {
+        let mut by_tag = BTreeMap::<&str, &Hit>::new();
+        // Prefer concrete rule evidence over a repeat of a previously known
+        // value, and a source line over a bare location for the same evidence.
+        let rank = |hit: &Hit| {
+            (
+                hit.action == Action::Block,
+                hit.by != Finder::Known,
+                hit.line.is_some(),
+            )
+        };
+        for hit in hits.iter().filter(|h| h.origin.is_some()) {
+            let best = by_tag.entry(&hit.tag).or_insert(hit);
+            if rank(hit) > rank(best) {
+                *best = hit;
+            }
+        }
+        by_tag
+            .into_values()
+            .filter_map(|hit| {
+                let origin = hit.origin.as_ref()?;
+                Some(Self {
+                    tag: hit.tag.clone(),
+                    kind: hit.kind.clone(),
+                    rule: rule_name(hit.rule.as_deref(), hit.by),
+                    action: hit.action,
+                    preview: hit.preview.clone(),
+                    at: origin.at.clone(),
+                    label: origin.label.clone(),
+                    path: origin.path.clone(),
+                    line: hit.line,
+                })
+            })
+            .collect()
+    }
 }
 
 impl LiveNotice {
-    pub(super) fn of(seq: u64, record: &Record) -> Self {
+    pub(super) fn of(seq: u64, record: &Record, findings: Vec<LiveFinding>) -> Self {
         let tags: BTreeSet<&str> = record.values.iter().map(|v| v.tag.as_str()).collect();
         Self {
             seq,
             event: Event::of(record),
             tags: tags.into_iter().map(str::to_string).collect(),
+            findings,
         }
     }
 }

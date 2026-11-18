@@ -38,7 +38,7 @@ test('a value is announced the first time it is masked, not on every request', (
   const first = feed.poll('s1')
   expect(first).toHaveLength(1)
   expect(first[0]!.notice.tags).toEqual(['SECRET_a', 'PHONE_b'])
-  expect(first[0]!.fresh).toBe(2)
+  expect(first[0]!.fresh).toEqual(new Set(['SECRET_a', 'PHONE_b']))
   // The next turn masks the same history again: silence.
   n.push(notice({ tags: ['SECRET_a', 'PHONE_b'] }))
   expect(feed.poll('s1')).toEqual([])
@@ -47,7 +47,7 @@ test('a value is announced the first time it is masked, not on every request', (
   const again = feed.poll('s1')
   expect(again).toHaveLength(1)
   expect(again[0]!.notice.reason).toBe('masked SECRET ×28 · PHONE ×1')
-  expect(again[0]!.fresh).toBe(1)
+  expect(again[0]!.fresh).toEqual(new Set(['SECRET_c']))
   // Polling twice does not replay.
   expect(feed.poll('s1')).toEqual([])
 })
@@ -64,7 +64,7 @@ test('blocked records, other sessions and session-less records are left to their
   // A forgotten session sees its values as new again.
   feed.forget('s1')
   n.push(notice({ tags: ['KEY_x'] }))
-  expect(feed.poll('s1').map(h => h.fresh)).toEqual([1])
+  expect(feed.poll('s1').map(h => [...h.fresh])).toEqual([['KEY_x']])
 })
 
 test('an addon without the live feed is silence, not a crash in the event loop', () => {
@@ -90,6 +90,11 @@ test('the addon payload decodes the record detail, and older payloads without it
   const live = decodeResult(raw, schema)
   expect(live.notices[0]!.origins).toEqual([{ at: 'Bash result', label: 'cat ~/.ssh/id_ed25519', n: 1 }])
   expect(live.notices[0]!.model).toBe('m')
+  const finding = { tag: 'TOKEN_new', kind: 'TOKEN', rule: 'contexts.authorization', action: 'mask' as const,
+    at: 'read result', label: 'config.toml', path: './config.toml', line: 108, preview: 'Authorization: Basic [mask]' }
+  const next = decodeResult(JSON.stringify({ cursor: 2, notices: [notice({ findings: [finding] })] }), schema)
+  expect(next.notices[0]!.findings).toEqual([finding])
+  expect(() => decodeResult(JSON.stringify({ cursor: 2, notices: [notice({ findings: [{ ...finding, line: '108' }] })] }), schema)).toThrow()
   // No detail at all is still a valid notice.
   expect(() => decodeResult(JSON.stringify({ cursor: 1, notices: [notice({})] }), schema)).not.toThrow()
 })
@@ -117,5 +122,5 @@ test('seeded tags from earlier records are not reported as first seen after resu
   n.push(notice({ tags: ['SECRET_a', 'SECRET_b'] }))
   expect(feed.poll('s1')).toEqual([])
   n.push(notice({ tags: ['SECRET_a', 'SECRET_c'] }))
-  expect(feed.poll('s1').map(h => h.fresh)).toEqual([1])
+  expect(feed.poll('s1').map(h => [...h.fresh])).toEqual([['SECRET_c']])
 })

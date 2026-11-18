@@ -75,7 +75,7 @@ impl MaskingProvider {
                 .map(|model| model.provider().to_string());
             record.model = Some(config.model.clone());
             let kinds = record.blocked_kinds();
-            service::keep(&masker, record).await;
+            service::keep(&masker, record, report.live_findings()).await;
             if report.blocked() {
                 return Err(ProviderError::InvalidRequest(blocked_message(
                     Target::Llm,

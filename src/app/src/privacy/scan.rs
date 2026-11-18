@@ -41,6 +41,7 @@ pub(in crate::privacy) struct Span {
     pub by: Finder,
     pub rule: Option<String>,
     pub confidence: Confidence,
+    pub preview: Option<String>,
 }
 
 impl Span {
@@ -52,6 +53,7 @@ impl Span {
             by,
             rule: None,
             confidence: Confidence::Medium,
+            preview: None,
         }
     }
 
@@ -82,6 +84,8 @@ pub(super) struct Hit {
     /// A safe label for `/privacy`: a variable's name, a file's name. Never
     /// a piece of the value.
     pub note: Option<String>,
+    /// Masked syntax with a bounded context label, never the value itself.
+    pub preview: Option<String>,
     /// Where in the request it sat; `None` for uploads.
     pub origin: Option<Origin>,
 }
@@ -98,6 +102,7 @@ pub(super) struct Origin {
     /// the label can be filled in once the request is masked.
     pub call: Option<String>,
     pub label: Option<String>,
+    pub path: Option<String>,
     pub read_offset: Option<usize>,
 }
 
@@ -167,7 +172,26 @@ pub(super) fn try_apply<E>(
     found.sort_by(|x, y| x.start.cmp(&y.start).then(y.end.cmp(&x.end)));
     let mut out = String::with_capacity(text.len());
     let (mut last, mut next) = (0, 0);
-    for span in found {
+    let mut found = found.into_iter().peekable();
+    while let Some(mut span) = found.next() {
+        // A vendor rule can own the exact same span as a context rule.
+        // Keep the rule that determined the action, but show how the value
+        // was used at this location when the context rule also matched.
+        while found
+            .peek()
+            .is_some_and(|other| other.start == span.start && other.end == span.end)
+        {
+            if let Some(other) = found.next() {
+                if other
+                    .rule
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("contexts."))
+                    && other.preview.is_some()
+                {
+                    span.preview = other.preview;
+                }
+            }
+        }
         if span.start < next {
             continue;
         }
@@ -189,6 +213,7 @@ pub(super) fn try_apply<E>(
             end: span.end,
             line: None,
             note: None,
+            preview: span.preview,
             origin: None,
         });
         if action == Action::Warn {

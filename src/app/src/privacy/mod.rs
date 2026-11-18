@@ -45,6 +45,7 @@ pub use record::summarize as summarize_records;
 pub use record::BlockedFinding;
 pub use record::Event;
 pub use record::KindStats;
+pub use record::LiveFinding;
 pub use record::LiveNotice;
 pub use record::OriginRecord;
 pub use record::Record;

@@ -8,8 +8,9 @@
  * This module is pure logic — no React, no stdout. Easy to test.
  */
 
+import type { PrivacyLiveFinding } from '../native/contracts/privacy.js'
 import { providerFailurePresentation } from './provider-error.js'
-import { parsePrivacyStop, privacyCard, privacyDestination, privacyEvidenceRows, privacyOriginsRow, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
+import { parsePrivacyStop, privacyActionLabel, privacyCard, privacyFindingRows, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from '../ui/format.js'
@@ -924,16 +925,24 @@ const PRIVACY_TARGET_LABEL: Record<string, string> = {
   llm: 'model request', share: 'share', sync: 'sync', task: 'task', task_report: 'task report', delivery: 'chat reply',
 }
 
-/** Show whole-request findings and distinguish them from newly seen values. */
-export function buildPrivacyNoticeCard(notice: PrivacyDetail & { target: string; reason: string }, fresh: number): OutputLine[] {
+/** Report what triggered this card, not the entire history scanned again. */
+export function buildPrivacyNoticeCard(
+  notice: PrivacyDetail & { target: string; reason: string; findings?: PrivacyLiveFinding[] },
+  fresh: ReadonlySet<string>,
+  cwd: string,
+): OutputLine[] {
   const { target, reason } = notice
-  const rows: PrivacyCard['rows'] = [
-    { tone: 'hint', text: `${reason} (occurrences) · ${fresh} ${fresh === 1 ? 'value' : 'values'} first seen` },
-  ]
-  for (const text of privacyEvidenceRows(notice)) rows.push({ tone: 'hint', text })
-  const origin = privacyOriginsRow(notice)
-  if (origin) rows.push({ tone: 'hint', text: origin })
-  return renderPrivacyCard({ title: `${PRIVACY_TARGET_LABEL[target] ?? target}${privacyDestination(notice)}`, rows }, 'success')
+  const findings = (notice.findings ?? []).filter(finding => fresh.has(finding.tag))
+  const firstSeen = `${fresh.size} new ${fresh.size === 1 ? 'value' : 'values'}`
+  const first = findings[0]
+  const mixed = findings.some(finding => finding.action !== first?.action)
+  const text = first
+    ? privacyFindingRows(findings, cwd, mixed)
+    : [`${firstSeen} · request total: ${reason} · match locations unavailable`]
+  return renderPrivacyCard({
+    title: first ? (mixed ? 'findings' : privacyActionLabel(first.action)) : PRIVACY_TARGET_LABEL[target] ?? target,
+    rows: text.map(text => ({ tone: 'hint', text })),
+  }, 'success')
 }
 
 /**
