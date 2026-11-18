@@ -375,9 +375,13 @@ describe('buildOutputBlocks', () => {
     // The glyph and status keep the shared scheme: the rail is the signal.
     expect(rows[1]!.spans[2]).toMatchObject({ text: '⊘', fg: 'cyan' })
     expect(rows[2]!.spans[2]).toMatchObject({ text: '  ✗', fg: 'red' })
-    const brief = buildOutputBlocks(buildPrivacyNoticeCard({ target: 'llm', reason: 'masked SECRET ×1' }), { columns: 60 })
-    expect(brief.flatMap(b => b.lines)).toHaveLength(4)
-    expect(brief.flatMap(b => b.lines).every(l => l.bg === toolCardBg && l.spans[0]?.text === '┃')).toBe(true)
+    const masked = buildPrivacyNoticeCard({ target: 'llm', reason: 'masked SECRET ×1',
+      origins: [{ at: 'read result', label: 'a/long/path/to/project/settings/config.toml', n: 1, lines: [307] }],
+    }, 1)
+    const maskedBlocks = buildOutputBlocks(masked, { columns: 60 })
+    expect(maskedBlocks.flatMap(b => b.lines).length).toBeGreaterThan(masked.length + 2)
+    expect(maskedBlocks.flatMap(b => b.lines).every(l => l.bg === toolCardBg && l.spans[0]?.text === '┃')).toBe(true)
+    expect(stripAnsi(blocksToLines(maskedBlocks).join('\n'))).toContain('(line 307)')
     // Stops and `/privacy` commands are notices as well.
     expect(buildPrivacyCard({ kind: 'blocked', target: 'request', kinds: ['API_KEY'] })[0]!.toolCard?.tone).toBe('notice')
     expect(buildPrivacyCommandCard('term x', '  term added: x')[0]!.toolCard?.tone).toBe('notice')

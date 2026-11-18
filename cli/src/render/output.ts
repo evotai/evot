@@ -9,7 +9,7 @@
  */
 
 import { providerFailurePresentation } from './provider-error.js'
-import { parsePrivacyStop, privacyCard, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
+import { parsePrivacyStop, privacyCard, privacyDestination, privacyEvidenceRows, privacyOriginsRow, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
 import { truncate, formatDuration, formatElapsed, formatWallClock, toolResultLines, formatBashCommandDisplay, EXPAND_HINT, COLLAPSE_HINT, summarizeInline } from '../ui/format.js'
@@ -924,12 +924,16 @@ const PRIVACY_TARGET_LABEL: Record<string, string> = {
   llm: 'model request', share: 'share', sync: 'sync', task: 'task', task_report: 'task report', delivery: 'chat reply',
 }
 
-/** Routine findings stay compact; the record has the full detail. */
-export function buildPrivacyNoticeCard({ target, reason }: { target: string; reason: string }): OutputLine[] {
-  return renderPrivacyCard({
-    title: PRIVACY_TARGET_LABEL[target] ?? target,
-    rows: [{ tone: 'hint', text: `${reason} · /privacy for details` }],
-  }, 'success')
+/** Show whole-request findings and distinguish them from newly seen values. */
+export function buildPrivacyNoticeCard(notice: PrivacyDetail & { target: string; reason: string }, fresh: number): OutputLine[] {
+  const { target, reason } = notice
+  const rows: PrivacyCard['rows'] = [
+    { tone: 'hint', text: `${reason} (occurrences) · ${fresh} ${fresh === 1 ? 'value' : 'values'} first seen` },
+  ]
+  for (const text of privacyEvidenceRows(notice)) rows.push({ tone: 'hint', text })
+  const origin = privacyOriginsRow(notice)
+  if (origin) rows.push({ tone: 'hint', text: origin })
+  return renderPrivacyCard({ title: `${PRIVACY_TARGET_LABEL[target] ?? target}${privacyDestination(notice)}`, rows }, 'success')
 }
 
 /**

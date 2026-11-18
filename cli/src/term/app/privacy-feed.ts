@@ -1,5 +1,11 @@
 import type { PrivacyLive, PrivacyLiveNotice } from '../../native/contracts/privacy.js'
 
+export interface PrivacyHappening {
+  notice: PrivacyLiveNotice
+  /** Distinct tags first seen in this session, not occurrences in the request. */
+  fresh: number
+}
+
 /** What privacy did during this process, as it happens, for the transcript.
  *
  * Every model request scans the whole history again. Only publish a notice
@@ -14,7 +20,7 @@ export class PrivacyFeed {
   constructor(private readonly live: (after: number) => PrivacyLive) {}
 
   /** New happenings for `session` since the last poll, oldest first. */
-  poll(session: string | null): PrivacyLiveNotice[] {
+  poll(session: string | null): PrivacyHappening[] {
     let batch: PrivacyLive
     try {
       batch = this.live(this.cursor)
@@ -22,7 +28,7 @@ export class PrivacyFeed {
       return []
     }
     this.cursor = Math.max(this.cursor, batch.cursor)
-    const out: PrivacyLiveNotice[] = []
+    const out: PrivacyHappening[] = []
     for (const notice of batch.notices) {
       // A record without a session (a legacy caller's request) belongs to no
       // open session: another TUI on the same addon must not show it as its own.
@@ -36,7 +42,8 @@ export class PrivacyFeed {
       if (!tags) { tags = new Set(); this.seen.set(key, tags) }
       const before = tags.size
       for (const tag of notice.tags) tags.add(tag)
-      if (tags.size > before) out.push(notice)
+      const fresh = tags.size - before
+      if (fresh > 0) out.push({ notice, fresh })
     }
     return out
   }

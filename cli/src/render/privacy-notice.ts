@@ -75,13 +75,48 @@ const RULE_DESCRIPTION: ReadonlyMap<string, string> = new Map([
   ['contexts.authorization', 'Credential in an Authorization header'],
   ['formats.private-key', 'Private key block'],
   ['secrets.ssh-private-key', 'SSH private key block'],
+  ['formats.openai-compatible-key', 'OpenAI-style API key'],
   ['formats.github-classic', 'GitHub personal access token'],
   ['formats.github-fine-grained', 'GitHub fine-grained personal access token'],
+  ['formats.gitlab-token', 'GitLab access token'],
+  ['formats.npm-token', 'npm access token'],
+  ['formats.vendor-key', 'Vendor API key'],
   ['formats.aws-access-key', 'AWS access key ID'],
   ['formats.jwt', 'JSON Web Token (JWT)'],
+  ['formats.slack-token', 'Slack token'],
+  ['formats.tencent-access-key', 'Tencent Cloud access key'],
+  ['formats.volcengine-access-key', 'Volcengine access key'],
+  ['formats.aliyun-access-key', 'Alibaba Cloud access key'],
+  ['formats.qianfan-key', 'Qianfan API key'],
+  ['formats.lark-token', 'Lark access token'],
+  ['formats.robot-webhook', 'Chat bot webhook URL'],
   ['term', 'A term you configured Privacy to protect'],
   ['known', 'A previously recognized protected value'],
 ])
+
+// Examples describe the shape of a match; they never come from input text.
+const RULE_EXAMPLE: ReadonlyMap<string, string> = new Map([
+  ['contexts.url-password', 'user:****@host'],
+  ['contexts.password-assignment', 'DB_PASSWORD=****'],
+  ['contexts.password-field', '"password": "****"'],
+  ['contexts.curl-user', 'curl -u user:****'],
+  ['contexts.cjk-password', '密码：****'],
+  ['contexts.credential-assignment', 'API_KEY=****'],
+  ['contexts.credential-field', '"api_key": "****"'],
+  ['contexts.authorization', 'Authorization: Bearer ****'],
+])
+
+/** Plain-language clues for the whole request, not excerpts or exact field names. */
+export function privacyEvidenceRows(detail: PrivacyDetail): string[] {
+  const rules = detail.rules ?? []
+  const rows = rules.slice(0, SHOWN).map(({ rule, values }) => {
+    const description = RULE_DESCRIPTION.get(rule) ?? `Rule: ${rule}`
+    const example = RULE_EXAMPLE.get(rule)
+    return `${values} ${values === 1 ? 'value' : 'values'} · ${description}${example ? ` (e.g. ${example})` : ''}`
+  })
+  if (rules.length > SHOWN) rows.push(`+${rules.length - SHOWN} more rules matched`)
+  return rows
+}
 
 /** Only lines associated with the specific rule and finding that stopped the request. */
 export function privacyBlockedRows(detail: PrivacyDetail | undefined): string[] {

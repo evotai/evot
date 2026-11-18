@@ -4,7 +4,7 @@ import { runShareCommand, type ShareContext } from '../../src/commands/share.js'
 import type { CloudPushResult, SessionMeta } from '../../src/native/index.js'
 import { parsePrivacyStop } from '../../src/render/privacy-notice.js'
 import { classifyProviderFailure } from '../../src/render/provider-error.js'
-import { buildEventCard, buildPrivacyCard, resetIdCounter, type OutputLine } from '../../src/render/output.js'
+import { buildEventCard, buildPrivacyCard, buildPrivacyNoticeCard, resetIdCounter, type OutputLine } from '../../src/render/output.js'
 import { formatLlmCallCompleted } from '../../src/render/verbose.js'
 import { CloudSessionSync } from '../../src/session/cloud-sessions.js'
 
@@ -17,6 +17,58 @@ const UNAVAILABLE = 'privacy masking is unavailable, so nothing was sent: privac
 const texts = (lines: OutputLine[]) => lines.map(line => line.text)
 
 beforeEach(() => resetIdCounter())
+
+test('routine findings identify the destination, sources and rules without implying delivery', () => {
+  const card = buildPrivacyNoticeCard({
+    target: 'llm', model: 'example-model', provider: 'example-provider',
+    reason: 'masked PASSWORD ×19 · SECRET ×4',
+    origins: [
+      { at: 'read result', label: 'config.toml', n: 22, lines: [307, 317] },
+      { at: 'user', n: 1 },
+    ],
+    rules: [
+      { rule: 'contexts.url-password', values: 4 },
+      { rule: 'contexts.credential-assignment', values: 4 },
+      { rule: 'contexts.password-assignment', values: 2 },
+    ],
+  }, 1)
+  expect(texts(card)).toEqual([
+    '⊘ privacy  model request → example-model · example-provider',
+    '  masked PASSWORD ×19 · SECRET ×4 (occurrences) · 1 value first seen',
+    '  4 values · Password embedded in a URL or connection string (e.g. user:****@host)',
+    '  4 values · Credential in a key, token, or secret assignment (e.g. API_KEY=****)',
+    '  2 values · Password in a variable, config entry, or command flag (e.g. DB_PASSWORD=****)',
+    '  in: read result "config.toml" (lines 307, 317) ×22 · user ×1',
+  ])
+  expect(card[0]!.toolCard).toEqual({ state: 'success', first: true, last: false, tone: 'notice' })
+  expect(card.at(-1)!.toolCard).toEqual({ state: 'success', first: false, last: true, tone: 'notice' })
+})
+
+test('routine findings name custom rules and bound the evidence rows', () => {
+  const card = buildPrivacyNoticeCard({ target: 'llm', reason: 'masked SECRET ×4', rules: [
+    { rule: 'custom.db-session', values: 1 },
+    { rule: 'contexts.curl-user', values: 1 },
+    { rule: 'contexts.password-field', values: 1 },
+    { rule: 'contexts.url-password', values: 1 },
+  ] }, 4)
+  expect(texts(card).slice(2)).toEqual([
+    '  1 value · Rule: custom.db-session',
+    '  1 value · Password supplied to curl via -u or --user (e.g. curl -u user:****)',
+    '  1 value · Password in a password field (e.g. "password": "****")',
+    '  +1 more rules matched',
+  ])
+})
+
+test('routine findings without optional details still distinguish warnings from masks', () => {
+  expect(texts(buildPrivacyNoticeCard({ target: 'share', reason: 'masked EMAIL ×2' }, 2))).toEqual([
+    '⊘ privacy  share',
+    '  masked EMAIL ×2 (occurrences) · 2 values first seen',
+  ])
+  expect(texts(buildPrivacyNoticeCard({ target: 'llm', reason: 'warned (not masked) SECRET ×1' }, 1))).toEqual([
+    '⊘ privacy  model request',
+    '  warned (not masked) SECRET ×1 (occurrences) · 1 value first seen',
+  ])
+})
 
 test('parses the native wording, wherever it sits in an error', () => {
   expect(parsePrivacyStop(`Invalid request: ${BLOCKED_LLM}`)).toEqual({ kind: 'blocked', target: 'request', kinds: ['API_KEY', 'PRIVATE_KEY'] })
