@@ -50,6 +50,7 @@ export interface RunDeps {
   readonly manualCompaction: ManualCompaction
   readonly privacyFeed: PrivacyFeed
   readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
+  readonly refreshConfigInfo: () => void
   readonly renderer: TermRenderer
   readonly rendererTrace: RendererTrace
   readonly runInteraction: RunInteraction
@@ -246,8 +247,13 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
           deps.sessionHook.runFailed(event.run_id, String(event.payload?.message ?? ''))
         }
 
+        const pendingSwitch = st.streamMachine.pendingSwitch
+        if (pendingSwitch && pendingSwitch.turn === undefined
+            && ['llm_call_started', 'run_finished', 'error'].includes(event.kind)) {
+          syncActiveModel()
+        }
         deps.runThinking.observe(event)
-        const update = reduceRunEvent(st.streamMachine!, event, {
+        const update = reduceRunEvent(st.streamMachine, event, {
           termRows: deps.renderer.termRows,
           cloudProvider: deps.cloudCtl.activeProviderIsCloud(),
           privacyDetail: () => deps.privacyFeed.lastBlocked(st.sessionId),
@@ -306,12 +312,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       }
 
       if (!ownsRun(generation)) return
-      if (st.streamMachine) {
-        const final = finishStreaming(st.streamMachine)
-        st.streamMachine = final.state
-        st.appState = final.state.appState
-        deps.scrollback.commitFlushResult(final)
-      }
+      flushStreamContent()
       // Safety net: commit only prompts the engine actually consumed. A prompt
       // queued during the final poll can still be pending when the run settles.
       deps.queueLifecycle.reconcile()
@@ -321,11 +322,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       // revoked. Its interruption notice was already committed synchronously;
       // touching shared state here could flush or clear a newer run.
       if (!ownsRun(generation)) return
-      if (st.streamMachine) {
-        const final = finishStreaming(st.streamMachine)
-        st.streamMachine = final.state
-        deps.scrollback.commitFlushResult(final)
-      }
+      flushStreamContent()
       const message = errorText(err)
       deps.suggestionContext.fail()
       deps.scrollback.commitSystem('sys-err', message, 'error')
@@ -388,20 +385,32 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.queueLifecycle.pause(interruptedStream)
     st.streamRef = null
     st.isLoading = false
-    flushStreamContent()
+    flushStreamContent(true)
     st.appState = settleRunCallModel(st.appState)
     st.streamMachine = null
     stopSpinner()
     st.runStartedAt = null
   }
 
-  /** Flush any in-progress streaming content to committed output.
-   *  Call before clearing streaming state on any abort/cancel path. */
-  function flushStreamContent() {
-    // Flush anything the stream machine accumulated
+  /** The addon owns the live selection. Call identity alone is not a selection. */
+  function syncActiveModel() {
+    deps.refreshConfigInfo()
+    st.appState = { ...st.appState, model: deps.agent.model }
+    if (st.streamMachine) {
+      st.streamMachine = {
+        ...st.streamMachine,
+        appState: { ...st.streamMachine.appState, model: st.appState.model },
+      }
+    }
+  }
+
+  /** Flush pending output before retiring the stream, including on cancellation. */
+  function flushStreamContent(interrupted = false) {
     if (!st.streamMachine) return
-    const flushed = finishStreaming(st.streamMachine, true)
+    if (st.streamMachine.pendingSwitch) syncActiveModel()
+    const flushed = finishStreaming(st.streamMachine, interrupted)
     st.streamMachine = flushed.state
+    st.appState = flushed.state.appState
     deps.scrollback.commitFlushResult(flushed)
   }
 
@@ -426,7 +435,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.queueLifecycle.pause(interruptedStream)
     st.streamRef = null
     st.isLoading = false
-    flushStreamContent()
+    flushStreamContent(true)
     st.appState = settleRunCallModel(st.appState)
     st.streamMachine = null
     stopSpinner()

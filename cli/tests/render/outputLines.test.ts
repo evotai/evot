@@ -138,7 +138,7 @@ describe('model handoff card', () => {
       result: `Model handoff: current:original → next:target\nContinue the user's request: ${call.args.handoff}`,
     })
     expect(lines.map(line => line.text)).toEqual([
-      '⇄ Switch model  original → target', '  ✓ Default model unchanged',
+      '⇄ Switch model  original → target', '  ✓ target is responding',
     ])
     expect(lines.map(line => line.toolCard)).toEqual([
       { state: 'success', first: true, last: false }, { state: 'success', first: false, last: true },

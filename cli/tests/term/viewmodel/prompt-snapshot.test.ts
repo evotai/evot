@@ -51,6 +51,16 @@ describe('prompt snapshot projection', () => {
     expect(narrow).toContain('next: shared')
   })
 
+  test('shows the selected handoff target without a next-model hint', () => {
+    const input = { ...snapshot(), columns: 140 }
+    input.session = { ...input.session, model: 'target', lastCallModel: { model: 'target', provider: 'first', thinkingLevel: 'medium' } }
+    input.config = { ...input.config!, provider: 'first', thinkingLevel: 'medium' }
+    expect(promptFromSnapshot(input)).toMatchObject({ model: 'target', provider: 'first', thinkingLevel: 'medium' })
+    const footer = footerText(input)
+    expect(footer).not.toContain('last:')
+    expect(footer).not.toContain('next:')
+  })
+
   test('qualifies same-ID handoffs and does not shadow an idle manual effort change', () => {
     const input = snapshot()
     input.session.lastCallModel = { model: 'shared', provider: 'first', thinkingLevel: 'medium' }

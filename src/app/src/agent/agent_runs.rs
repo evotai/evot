@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::agent::Agent;
+use super::models::ModelSelection;
 use super::request::expand_prompt_command;
 use super::request::PromptCommandContext;
 use super::request::QueryRequest;
@@ -182,7 +183,7 @@ impl Agent {
                 SessionSelection {
                     provider: llm.provider.clone(),
                     model: llm.model.clone(),
-                    thinking_level: Self::persisted_thinking_level_for(&llm),
+                    thinking_level: ModelSelection::persisted_thinking_level_for(&llm),
                 },
                 request.cwd.as_deref(),
             )
@@ -339,11 +340,12 @@ impl Agent {
         // fallback snapshot here for channel callers that did not pin one.
         let llm = request.llm.clone().unwrap_or_else(|| self.llm());
         session
-            .set_model_selection(llm.provider.clone(), llm.model.clone())
+            .set_run_model_selection(
+                llm.provider.clone(),
+                llm.model.clone(),
+                ModelSelection::persisted_thinking_level_for(&llm),
+            )
             .await?;
-        session
-            .set_thinking_level(Self::persisted_thinking_level_for(&llm))
-            .await;
 
         tracing::info!(
             stage = "run",
@@ -376,6 +378,7 @@ impl Agent {
             mode: request.mode,
             session_id: session_id.clone(),
             llm,
+            selection: self.selection.clone(),
             previous_llm: self.selection.previous_llm(),
             model_catalog,
             host_tools: request.host_tools.clone(),

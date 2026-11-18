@@ -76,6 +76,9 @@ pub(in crate::agent) struct Segment {
 #[async_trait]
 pub(in crate::agent) trait TurnFactory: Send + Sync + 'static {
     async fn build(&self, start: SegmentStart, allow_handoff: bool) -> Result<Segment>;
+
+    /// Publish the receiving model as the live selection before its first request.
+    async fn activate_handoff(&self, llm: &LlmConfig) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +155,12 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
         if control.is_cancelled() || (!turn.resume && turn.input.is_empty()) {
             break;
         }
-        if !turn.resume {
+        if turn.resume {
+            if let Err(error) = factory.activate_handoff(&llm).await {
+                emit_persistence_error(&tx, &run_id, &session_id, total_turns, &error);
+                break;
+            }
+        } else {
             tracker = execution_tracker(turn.options.limits.as_ref());
         }
         let outcome = drive_segment(

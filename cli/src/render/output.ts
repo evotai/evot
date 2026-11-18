@@ -1285,7 +1285,7 @@ function buildModelSwitchCard(call: UIToolCall): OutputLine[] {
     return status('✗', 'Could not switch models', 'error', modelSwitchText(call.result ?? ''))
   }
   switch (call.modelSwitchOutcome) {
-    case 'started': return status('✓', 'Default model unchanged', 'success')
+    case 'started': return status('✓', `${target} is responding`, 'success')
     case 'rejected': return status('✗', `${target} rejected the request`, 'error')
     case 'failed': return status('✗', `${target} could not respond`, 'error')
     case 'interrupted': return status('✗', 'Switch interrupted', 'error')

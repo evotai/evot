@@ -37,7 +37,7 @@ impl Agent {
         // instructions must live there or they never reach the model.
         let (system_prompt, sections) = SystemPrompt::side_session(cwd, &request.system_prompt);
         let forked = Arc::new(Self {
-            selection: ModelSelection::new(selection.snapshot()),
+            selection: Arc::new(ModelSelection::new(selection.snapshot())),
             model_catalog_config: RwLock::new(model_catalog_config.read().clone()),
             system_prompt: RwLock::new(system_prompt),
             assembler: Arc::new(assembler.fork(sections)),

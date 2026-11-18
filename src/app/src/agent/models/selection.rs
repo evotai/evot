@@ -106,6 +106,15 @@ impl ModelSelection {
         llm.thinking_level.as_str().to_string()
     }
 
+    /// Session resume restores this snapshot over configured effort, so only
+    /// retain a level the selected model actually supports.
+    pub(crate) fn persisted_thinking_level_for(llm: &LlmConfig) -> Option<String> {
+        let level = llm.thinking_level;
+        Self::supported_thinking_levels_for(llm)
+            .contains(&level)
+            .then(|| level.as_str().to_string())
+    }
+
     pub fn resolved_context_window(&self) -> u32 {
         self.llm.read().model_config.context_window()
     }
@@ -131,16 +140,25 @@ impl ModelSelection {
     /// when their provider is configured. Cloud defaults override live effort.
     pub fn select_by_spec(&self, config: &Config, spec: &str) -> Result<()> {
         let (provider, model) = config.resolve_model_spec(spec)?;
-        let mut next = config.build_llm(&provider, model)?;
         let mut current = self.llm.write();
-        if !config.cloud_thinking_levels.contains_key(&next.model) {
-            next.thinking_level = next
-                .model_config
-                .effective_thinking_level(current.thinking_level);
-        }
+        let next =
+            Self::resolve_interactive_switch(config, &provider, model, current.thinking_level)?;
         self.remember_switch(&current, &next);
         *current = next;
         Ok(())
+    }
+
+    pub(crate) fn resolve_interactive_switch(
+        config: &Config,
+        provider: &str,
+        model: Option<String>,
+        current_level: ThinkingLevel,
+    ) -> Result<LlmConfig> {
+        let mut next = config.build_llm(provider, model)?;
+        if !config.cloud_thinking_levels.contains_key(&next.model) {
+            next.thinking_level = next.model_config.effective_thinking_level(current_level);
+        }
+        Ok(next)
     }
 
     /// Select from the configured model directory, applying configured effort

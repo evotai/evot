@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::model_handoff::ModelHandoff;
+use super::models::ModelSelection;
 use super::run::runtime;
 use super::run::runtime::TurnFactory;
 use super::tools::HostTools;
@@ -19,6 +20,7 @@ pub(super) struct AgentTurnFactory {
     pub mode: ToolMode,
     pub session_id: String,
     pub llm: LlmConfig,
+    pub selection: Arc<ModelSelection>,
     /// Selection replaced by the latest model switch, for compaction.
     pub previous_llm: Option<LlmConfig>,
     pub model_catalog: Option<Arc<Config>>,
@@ -75,5 +77,17 @@ impl TurnFactory for AgentTurnFactory {
             )
             .await?;
         Ok(runtime::Segment { turn, llm, handoff })
+    }
+
+    async fn activate_handoff(&self, llm: &LlmConfig) -> Result<()> {
+        self.session
+            .set_run_model_selection(
+                llm.provider.clone(),
+                llm.model.clone(),
+                ModelSelection::persisted_thinking_level_for(llm),
+            )
+            .await?;
+        self.selection.replace(llm.clone());
+        Ok(())
     }
 }

@@ -23,7 +23,7 @@ use crate::session::SessionGates;
 // ---------------------------------------------------------------------------
 
 pub struct Agent {
-    pub(super) selection: ModelSelection,
+    pub(super) selection: Arc<ModelSelection>,
     pub(super) model_catalog_config: RwLock<Arc<Config>>,
     pub(super) system_prompt: RwLock<String>,
     pub(super) assembler: Arc<TurnAssembler>,
@@ -56,11 +56,11 @@ impl Agent {
     fn new_inner(config: &Config, cwd: String, storage: Arc<dyn Storage>) -> Result<Self> {
         let system_prompt = format!("You are a helpful assistant. Working directory: {cwd}");
         Ok(Self {
-            selection: ModelSelection::new(
+            selection: Arc::new(ModelSelection::new(
                 config
                     .active_llm()
                     .unwrap_or_else(|_| LlmConfig::unconfigured()),
-            ),
+            )),
             model_catalog_config: RwLock::new(Arc::new(config.clone())),
             system_prompt: RwLock::new(system_prompt),
             assembler: Arc::new(TurnAssembler::new(config)?),

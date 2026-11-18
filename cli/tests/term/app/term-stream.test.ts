@@ -1937,7 +1937,7 @@ describe('term stream machine', () => {
     const reply = reduceRunEvent(started.state, {
       kind: 'assistant_delta', turn: 2, payload: { content_type: 'text', content_index: 0, delta: 'Hello' },
     }, switchContext)
-    expect(reply.commitLines.map(line => line.text)).toEqual(['⇄ Switch model  original → target', '  ✓ Default model unchanged'])
+    expect(reply.commitLines.map(line => line.text)).toEqual(['⇄ Switch model  original → target', '  ✓ target is responding'])
     expect(reply.expandedCommitLines?.map(line => line.text)).toEqual(reply.commitLines.map(line => line.text))
     expect(reply.state.pendingSwitch).toBeUndefined()
     expect(finishStreaming(reply.state).lines.map(line => line.text)).toEqual(['Hello'])
@@ -1966,7 +1966,7 @@ describe('term stream machine', () => {
     const answered = reduceRunEvent(retried.state, {
       kind: 'llm_call_completed', turn: 2, payload: { turn: 2, attempt: 1, usage: { input: 5, output: 5 }, stop_reason: 'stop' },
     }, switchContext)
-    expect(answered.commitLines.map(line => line.text)).toContain('  ✓ Default model unchanged')
+    expect(answered.commitLines.map(line => line.text)).toContain('  ✓ target is responding')
     expect(receiveSwitch(acceptedSwitch(), 0, 'other').commitLines.map(line => line.text)).toContain('  ✗ Switch not confirmed')
     expect(finishStreaming(acceptedSwitch(), true).lines.map(line => line.text)).toContain('  ✗ Switch interrupted')
   })

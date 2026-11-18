@@ -99,7 +99,7 @@ Supported methods: `initialize`, `session/new`, `session/prompt`, `session/cance
 - **Small by design.** ~1k prompt tokens and four core tools: `read`, `bash`, `edit`, `write`.
 - **Less waiting.** Long-running commands continue in the background while the agent works on independent tasks.
 - **Lean context.** Automatic context compaction keeps long sessions within the model's budget while preserving recent work.
-- **Your choice of model.** Free and low-cost hosted models, or your own provider keys.
+- **Your choice of model.** Free and low-cost hosted models, or your own provider keys. Ask Evot to switch to a configured model mid-run, or choose one with `/model`. The selected model stays active for later prompts without changing your account default.
 
 ## Performance
 

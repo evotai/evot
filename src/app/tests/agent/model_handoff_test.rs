@@ -1,3 +1,5 @@
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -49,6 +51,7 @@ type Requests = Arc<Mutex<Vec<StreamConfig>>>;
 struct Recorder {
     mock: MockProvider,
     requests: Requests,
+    reject_first_target: AtomicBool,
 }
 
 #[async_trait]
@@ -60,6 +63,11 @@ impl StreamProvider for Recorder {
         cancel: CancellationToken,
     ) -> Result<StreamOutcome, ProviderError> {
         self.requests.lock().push(config.clone());
+        if config.model == NEXT && self.reject_first_target.swap(false, Ordering::Relaxed) {
+            return Err(ProviderError::InvalidRequest(
+                "target rejected the request".into(),
+            ));
+        }
         self.mock.stream(config, tx, cancel).await
     }
 }
@@ -74,6 +82,15 @@ fn fixture_with_windows(
     start_window: Option<u32>,
     target_window: Option<u32>,
 ) -> TestResult<(Arc<Agent>, Requests)> {
+    build_agent(
+        dir,
+        &model_config(dir, start_window, target_window),
+        responses,
+        false,
+    )
+}
+
+fn model_config(dir: &TempDir, start_window: Option<u32>, target_window: Option<u32>) -> Config {
     let mut config = Config::new(dir.path().to_path_buf());
     for (provider, model, protocol, context_window) in [
         ("analysis", START, Protocol::Anthropic, start_window),
@@ -93,14 +110,24 @@ fn fixture_with_windows(
         });
     }
     config.llm.provider = "analysis".into();
+    config
+}
+
+fn build_agent(
+    dir: &TempDir,
+    config: &Config,
+    responses: Vec<MockResponse>,
+    reject_first_target: bool,
+) -> TestResult<(Arc<Agent>, Requests)> {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let agent = Agent::new_with_provider_for_test(
-        &config,
+        config,
         dir.path().display().to_string(),
         Arc::new(MemoryStorage::new()),
         Recorder {
             mock: MockProvider::new(responses),
             requests: requests.clone(),
+            reject_first_target: AtomicBool::new(reject_first_target),
         },
     )?;
     Ok((agent, requests))
@@ -135,7 +162,7 @@ async fn drain(run: &mut Run) -> Vec<RunEvent> {
 }
 
 #[tokio::test]
-async fn prompt_directed_handoff_resumes_same_run_without_changing_selection() -> TestResult {
+async fn prompt_directed_handoff_resumes_same_run_and_keeps_the_new_selection() -> TestResult {
     let dir = TempDir::new()?;
     let (agent, requests) = fixture(&dir, vec![
         MockResponse::ToolCalls(vec![switch_to(TARGET)]),
@@ -205,8 +232,12 @@ async fn prompt_directed_handoff_resumes_same_run_without_changing_selection() -
         .await?
         .ok_or("missing session")?;
     assert!(session.transcript().await.iter().any(|item| matches!(item, TranscriptItem::ToolResult { tool_name, is_error: false, .. } if tool_name == "handoff_model")));
-    assert_eq!(session.meta().await.model, START);
-    assert_eq!(agent.llm().model, START);
+    let meta = session.meta().await;
+    assert_eq!(meta.model, NEXT);
+    assert_eq!(meta.provider, "implementation");
+    assert_eq!(agent.llm().model, NEXT);
+    assert_eq!(agent.llm().provider, "implementation");
+    assert!(meta.thinking_level.is_none());
     let mut next = start(
         &agent,
         QueryRequest::text("One more question").session_id(Some(run.session_id.clone())),
@@ -214,11 +245,50 @@ async fn prompt_directed_handoff_resumes_same_run_without_changing_selection() -
     .await?;
     drain(&mut next).await;
     let requests = requests.lock();
-    assert_eq!(requests[2].model, START);
+    assert_eq!(requests[2].model, NEXT);
     assert!(!requests[2]
         .tools
         .iter()
         .any(|tool| tool.name == "handoff_model"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn target_request_rejection_does_not_revert_a_committed_selection() -> TestResult {
+    let dir = TempDir::new()?;
+    let config = model_config(&dir, None, None);
+    let (agent, requests) = build_agent(
+        &dir,
+        &config,
+        vec![
+            MockResponse::ToolCalls(vec![switch_to(TARGET)]),
+            target_reply(),
+        ],
+        true,
+    )?;
+    let mut run = start(&agent, QueryRequest::text(PROMPT).allow_model_handoff()).await?;
+    let events = drain(&mut run).await;
+    assert!(events.iter().any(|event| matches!(&event.payload, RunEventPayload::Error { message } if message.contains("target rejected the request"))));
+    assert_eq!(agent.llm().model, NEXT);
+    let session = agent
+        .load_session(&run.session_id)
+        .await?
+        .ok_or("missing session")?;
+    assert_eq!(session.meta().await.model, NEXT);
+    let mut next = start(
+        &agent,
+        QueryRequest::text("Try again").session_id(Some(run.session_id.clone())),
+    )
+    .await?;
+    drain(&mut next).await;
+    assert_eq!(
+        requests
+            .lock()
+            .iter()
+            .map(|r| r.model.as_str())
+            .collect::<Vec<_>>(),
+        [START, NEXT, NEXT]
+    );
     Ok(())
 }
 
@@ -355,6 +425,7 @@ async fn rejected_target_and_mixed_batch_do_not_switch_or_execute_other_tools() 
         2
     );
     assert!(!path.exists());
+    assert_eq!(agent.llm().model, START);
     assert_eq!(
         requests
             .lock()
@@ -418,7 +489,7 @@ async fn steering_during_handoff_reaches_the_receiving_model() -> TestResult {
 }
 
 #[tokio::test]
-async fn next_prompt_compacts_before_returning_to_the_smaller_default() -> TestResult {
+async fn next_prompt_compacts_after_an_explicit_switch_to_the_smaller_model() -> TestResult {
     const SMALL_WINDOW: u32 = 65_536;
     let dir = TempDir::new()?;
     let (agent, requests) = fixture_with_windows(
@@ -437,7 +508,7 @@ async fn next_prompt_compacts_before_returning_to_the_smaller_default() -> TestR
                 },
             },
             MockResponse::Text("Summary of the detailed input".into()),
-            MockResponse::Text("Default model answered.".into()),
+            MockResponse::Text("Smaller model answered.".into()),
         ],
         Some(SMALL_WINDOW),
         Some(256_000),
@@ -475,7 +546,10 @@ async fn next_prompt_compacts_before_returning_to_the_smaller_default() -> TestR
             if model == NEXT && *tokens > SMALL_WINDOW as usize
     )));
     assert_eq!(requests.lock().len(), 5);
+    assert_eq!(agent.llm().model, NEXT);
 
+    let config = model_config(&dir, Some(SMALL_WINDOW), Some(256_000));
+    agent.set_model_by_spec(&config, &format!("analysis:{START}"))?;
     let mut next = start(
         &agent,
         QueryRequest::text("One more question").session_id(Some(handoff.session_id.clone())),
@@ -490,11 +564,11 @@ async fn next_prompt_compacts_before_returning_to_the_smaller_default() -> TestR
                 ..
             })
         })
-        .ok_or("return to default did not compact")?;
+        .ok_or("switch to the smaller model did not compact")?;
     let call = events
         .iter()
         .position(|event| matches!(event.payload, RunEventPayload::LlmCallStarted { .. }))
-        .ok_or("default model did not start")?;
+        .ok_or("smaller model did not start")?;
     assert!(compact < call);
     assert!(matches!(
         &events[call].payload,
@@ -502,7 +576,7 @@ async fn next_prompt_compacts_before_returning_to_the_smaller_default() -> TestR
             if model == START && *tokens < SMALL_WINDOW as usize
     ));
     assert!(matches!(events.last().map(|event| &event.payload),
-        Some(RunEventPayload::RunFinished { text, .. }) if text == "Default model answered."
+        Some(RunEventPayload::RunFinished { text, .. }) if text == "Smaller model answered."
     ));
     Ok(())
 }
@@ -533,6 +607,7 @@ async fn cancellation_during_handoff_does_not_start_the_target() -> TestResult {
     run.abort();
     drain(&mut run).await;
     assert_eq!(requests.lock().len(), 1);
+    assert_eq!(agent.llm().model, START);
     Ok(())
 }
 
@@ -551,5 +626,6 @@ async fn handoff_cannot_reset_a_run_budget() -> TestResult {
     let events = drain(&mut run).await;
     assert!(events.iter().any(|e| matches!(&e.payload, RunEventPayload::Error { message } if message.contains("Max turns reached"))));
     assert_eq!(requests.lock().len(), 1);
+    assert_eq!(agent.llm().model, START);
     Ok(())
 }

@@ -203,6 +203,25 @@ impl Session {
     }
 
     pub async fn set_model_selection(&self, provider: String, model: String) -> Result<()> {
+        self.update_model_selection(provider, model, |_| {}).await
+    }
+
+    pub(crate) async fn set_run_model_selection(
+        &self,
+        provider: String,
+        model: String,
+        thinking_level: Option<String>,
+    ) -> Result<()> {
+        self.update_model_selection(provider, model, |meta| meta.thinking_level = thinking_level)
+            .await
+    }
+
+    async fn update_model_selection(
+        &self,
+        provider: String,
+        model: String,
+        apply_effort: impl FnOnce(&mut SessionMeta),
+    ) -> Result<()> {
         let audit_provider = provider.clone();
         let audit_model = model.clone();
         let (changed, prev_provider, prev_model) = self
@@ -211,6 +230,7 @@ impl Session {
                 let changed = previous.0 != provider || previous.1 != model;
                 meta.provider = provider;
                 meta.model = model;
+                apply_effort(meta);
                 Ok((changed, previous.0, previous.1))
             })
             .await?;

@@ -299,7 +299,7 @@ fn model_selection_dependency_boundary() {
         );
     }
     let agent = include_str!("../../src/agent/agent.rs");
-    assert!(agent.contains("selection: ModelSelection"));
+    assert!(agent.contains("selection: Arc<ModelSelection>"));
     for source in [agent, include_str!("../../src/agent/agent_models.rs")] {
         assert!(!source.contains("llm: RwLock<LlmConfig>"));
         assert!(!source.contains("self.llm.read()"));

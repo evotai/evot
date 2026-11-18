@@ -1,7 +1,6 @@
 //! Model and thinking-level selection on the agent.
 
 use super::agent::Agent;
-use crate::agent::models::ModelSelection;
 use crate::agent::models::SelectionReload;
 use crate::base::error::Result;
 use crate::conf::Config;
@@ -100,19 +99,5 @@ impl Agent {
     /// Refresh the available handoff targets without changing the active model.
     pub fn refresh_model_catalog(&self, config: &Config) {
         *self.model_catalog_config.write() = std::sync::Arc::new(config.clone());
-    }
-
-    /// The session-facing label for the agent's current thinking level, or
-    /// `None` when the level is not a selectable tier for the active model
-    /// (e.g. a config-set level the model rejects). Resume restores this
-    /// snapshot over the config default, so gating on membership keeps the
-    /// metadata meaningful.
-    pub(super) fn persisted_thinking_level_for(llm: &LlmConfig) -> Option<String> {
-        let level = llm.thinking_level;
-        if ModelSelection::supported_thinking_levels_for(llm).contains(&level) {
-            Some(level.as_str().to_string())
-        } else {
-            None
-        }
     }
 }

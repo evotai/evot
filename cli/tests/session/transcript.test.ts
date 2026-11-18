@@ -39,7 +39,7 @@ describe('transcript conversion', () => {
     const start = { type: 'stats', kind: 'llm_call_started', data: { model: 'shared', turn: 3 } }
     const finished = { type: 'stats', kind: 'run_finished' }
     const cases = [
-      { after: [{ type: 'assistant', model: 'shared', provider: 'target', content: [{ type: 'text', text: 'continued' }] }], status: '✓ Default model unchanged' },
+      { after: [{ type: 'assistant', model: 'shared', provider: 'target', content: [{ type: 'text', text: 'continued' }] }], status: '✓ shared is responding' },
       { after: [start, { type: 'stats', kind: 'llm_call_completed', data: { turn: 3, error: 'HTTP 400: invalid_request_error', stop_reason: 'error' } }, finished], status: '✗ shared rejected the request' },
       { after: [finished], status: '✗ Switch not confirmed' },
     ]

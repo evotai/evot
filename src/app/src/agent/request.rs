@@ -32,7 +32,7 @@ pub struct QueryRequest {
     pub mode: ToolMode,
     pub source: String,
     pub llm: Option<LlmConfig>,
-    /// Whether this surface allows the model to request run-local handoffs.
+    /// Whether this surface allows prompt-directed changes to the live model.
     pub allow_model_handoff: bool,
     pub host_tools: Option<HostTools>,
     pub cwd: Option<String>,
