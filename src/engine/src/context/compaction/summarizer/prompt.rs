@@ -126,7 +126,11 @@ pub fn format_update(
     )
 }
 
-/// Build the user message for turn prefix summarization.
-pub fn format_turn_prefix(turn_prefix_text: &str) -> String {
-    format!("<conversation>\n{turn_prefix_text}\n</conversation>\n\n{TURN_PREFIX_PROMPT}")
+/// Build the user message for turn prefix summarization. `/compact`
+/// instructions apply to the split prefix as well as to the history.
+pub fn format_turn_prefix(turn_prefix_text: &str, custom_instructions: Option<&str>) -> String {
+    with_custom_instructions(
+        format!("<conversation>\n{turn_prefix_text}\n</conversation>\n\n{TURN_PREFIX_PROMPT}"),
+        custom_instructions,
+    )
 }

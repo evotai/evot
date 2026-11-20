@@ -21,8 +21,10 @@ pub mod transforms;
 pub mod trigger;
 pub mod types;
 
+pub use config::compact_summary_text;
 pub use config::truncate_summary;
 pub use config::CompactionConfig;
+pub use config::COMPACT_SUMMARY_PREFIX;
 pub use config::DEFAULT_KEEP_RECENT_TOKENS;
 pub use config::DEFAULT_POST_COMPACTION_TOKENS;
 pub use config::DEFAULT_RESERVE_TOKENS;

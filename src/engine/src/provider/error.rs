@@ -154,6 +154,21 @@ impl ProviderError {
     pub fn is_quota_limited(&self) -> bool {
         matches!(self, Self::QuotaLimited { .. })
     }
+
+    /// Structured transient failures: rate limits, overload, network faults,
+    /// cut-off streams, and provider-declared transient errors. Callers below
+    /// the agent loop's retry policy (compaction summaries) use this to retry
+    /// a one-off failure; bare [`Self::Api`] text is never guessed at here.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            Self::RateLimited { .. }
+                | Self::Network(_)
+                | Self::ProtocolIncomplete(_)
+                | Self::Overloaded(_)
+                | Self::Transient { .. }
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -293,10 +308,14 @@ const OVERFLOW_PHRASES: &[&str] = &[
     "exceeds the available context size",           // llama.cpp
     "greater than the context length",              // LM Studio
     "context window exceeds limit",                 // MiniMax
+    "context window exceeded",                      // LiteLLM ContextWindowExceededError
     "exceeded model token limit",                   // Kimi
     "too large for model with",                     // Mistral
     "model_context_window_exceeded",                // z.ai
-    "prompt too long; exceeded",                    // Ollama
+    "prompt too long",                              // z.ai ("Prompt too long"), Ollama
+    "prompt exceeds max length",                    // z.ai CN endpoint
+    "range of input length should be",              // DashScope / Qwen
+    "but the configured context size is",           // DS4 server
     "context length exceeded",                      // Generic
     "context_length_exceeded",                      // Generic (underscore variant)
     "too many tokens",                              // Generic

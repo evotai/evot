@@ -301,6 +301,19 @@ async fn execute_single_tool(
     };
 
     let (result, is_error) = match tool {
+        // Once the run is cancelled, later calls of a sequential batch must
+        // not run (or ask for approval); each still gets a result so the
+        // transcript keeps every call answered.
+        Some(_) if cancel.is_cancelled() => (
+            ToolResult {
+                content: vec![Content::Text {
+                    text: "Operation aborted".into(),
+                }],
+                details: serde_json::Value::Null,
+                retention: Retention::Normal,
+            },
+            true,
+        ),
         Some(tool) => run_tool_once(tool.as_ref(), name, args, ctx, idle_clock).await,
         None => (
             ToolResult {

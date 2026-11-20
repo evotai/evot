@@ -336,3 +336,91 @@ async fn responses_content_filter_error_event_is_a_refusal(
     assert!(!evotengine::retry::should_retry(&error));
     Ok(())
 }
+
+#[tokio::test]
+async fn responses_unfinished_tool_call_with_partial_arguments_is_incomplete() {
+    // response.completed arrives, but the call's output_item.done never did
+    // and its buffered arguments are a cut-off prefix.
+    let body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"write\",\"arguments\":\"\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"path\\\":\\\"a.rs\\\",\\\"content\\\":\\\"fn ma\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n",
+    );
+    let error = run_provider_sse(
+        &OpenAiResponsesProvider,
+        responses_config("gpt-5.5").build(),
+        body,
+        200,
+    )
+    .await
+    .err();
+    assert!(
+        matches!(
+            error,
+            Some(evotengine::provider::ProviderError::ProtocolIncomplete(ref message))
+                if message.contains("unfinished tool call")
+        ),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn responses_unfinished_tool_call_without_call_id_is_incomplete() {
+    // Complete arguments, but the call id was meant to arrive with the
+    // missing output_item.done, so there is nothing to pair a result with.
+    let body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"\",\"name\":\"bash\",\"arguments\":\"\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n",
+    );
+    let error = run_provider_sse(
+        &OpenAiResponsesProvider,
+        responses_config("gpt-5.5").build(),
+        body,
+        200,
+    )
+    .await
+    .err();
+    assert!(
+        matches!(
+            error,
+            Some(evotengine::provider::ProviderError::ProtocolIncomplete(ref message))
+                if message.contains("unfinished tool call")
+        ),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn responses_unfinished_tool_call_with_complete_arguments_is_kept(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"bash\",\"arguments\":\"\"}}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":0,\"delta\":\"{\\\"command\\\":\\\"ls\\\"}\"}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"r\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}}\n\n",
+    );
+    let (message, events) = run_provider_sse(
+        &OpenAiResponsesProvider,
+        responses_config("gpt-5.5").build(),
+        body,
+        200,
+    )
+    .await?;
+    let Message::Assistant {
+        content,
+        stop_reason,
+        ..
+    } = message
+    else {
+        return Err("expected assistant".into());
+    };
+    assert_eq!(stop_reason, StopReason::ToolUse);
+    assert!(
+        matches!(content.as_slice(), [Content::ToolCall { id, arguments, .. }]
+        if id == "call_1" && arguments == &serde_json::json!({"command": "ls"}))
+    );
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StreamEvent::ToolCallEnd { id, .. } if id == "call_1")));
+    Ok(())
+}

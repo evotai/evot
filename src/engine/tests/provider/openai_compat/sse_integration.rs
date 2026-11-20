@@ -1130,3 +1130,46 @@ async fn azure_http_400_prompt_filter_is_a_refusal() -> Result<(), Box<dyn std::
     assert!(!evotengine::retry::should_retry(&error));
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Stream completeness
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn openai_sse_eof_without_done_or_finish_reason_is_incomplete() {
+    // The connection was cut mid tool call: the arguments are a JSON prefix
+    // that repair would quietly complete into a plausible call.
+    let sse = openai_sse::body(vec![
+        r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write","arguments":"{\"path\":\"a.rs\",\"content\":\"fn ma"}}]}}]}"#.to_string(),
+    ]);
+    let error = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .err();
+    assert!(
+        matches!(
+            error,
+            Some(evotengine::provider::ProviderError::ProtocolIncomplete(_))
+        ),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn openai_sse_done_without_finish_reason_is_complete() {
+    let sse = openai_sse::body(vec![openai_sse::text_chunk("ok", None), openai_sse::done()]);
+    let (msg, _) = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200)
+        .await
+        .unwrap();
+    assert!(matches!(msg, Message::Assistant { ref content, .. }
+        if matches!(content.as_slice(), [Content::Text { text }] if text == "ok")));
+}
+
+#[tokio::test]
+async fn openai_sse_finish_reason_without_done_is_complete() {
+    let sse = openai_sse::body(vec![
+        openai_sse::text_chunk("ok", None),
+        openai_sse::finish_with_usage("stop", 5, 1),
+    ]);
+    let result = run_provider_sse(&OpenAiCompatProvider, openai_config(), &sse, 200).await;
+    assert!(result.is_ok(), "{result:?}");
+}

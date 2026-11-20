@@ -7,6 +7,9 @@ use crate::provider::system_prompt::without_dynamic_boundary;
 use crate::provider::traits::StreamConfig;
 use crate::types::*;
 
+/// Placeholder for a tool result without visible output.
+pub(crate) const NO_TOOL_OUTPUT: &str = "(no tool output)";
+
 #[derive(Default)]
 pub struct ToolCallBuffer {
     pub id: String,
@@ -146,21 +149,26 @@ pub fn build_request_body(config: &StreamConfig, compat: &OpenAiCompat) -> serde
                 // text carries a note, so the request never sends an
                 // `image_url` block a text-only endpoint would reject.
                 let attach_image = has_image && supports_image;
-                let text = content
+                let joined = content
                     .iter()
-                    .find_map(|c| match c {
-                        Content::Text { text } => Some(text.clone()),
+                    .filter_map(|c| match c {
+                        Content::Text { text } => Some(text.as_str()),
                         _ => None,
                     })
-                    .unwrap_or_else(|| {
-                        if attach_image {
-                            "Image output is attached in the next user message.".into()
-                        } else if has_image {
-                            "[Image output omitted: the current model does not support image input.]".into()
-                        } else {
-                            String::new()
-                        }
-                    });
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                // Whitespace-only output (a bare newline from bash) is
+                // rejected by some endpoints, and the rejection repeats on
+                // every later request of the session.
+                let text = if !joined.trim().is_empty() {
+                    joined
+                } else if attach_image {
+                    "Image output is attached in the next user message.".into()
+                } else if has_image {
+                    "[Image output omitted: the current model does not support image input.]".into()
+                } else {
+                    NO_TOOL_OUTPUT.into()
+                };
 
                 let mut msg_obj = serde_json::json!({
                     "role": "tool",

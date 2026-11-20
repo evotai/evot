@@ -4,6 +4,17 @@ use super::summarizer::SummarizerMode;
 
 const SUMMARY_TRUNCATION_MARKER: &str = "\n\n[… compaction summary truncated …]\n\n";
 
+/// Framing of a compaction summary placed back into model context. Without
+/// it the summary reads as a user message that starts with `## Goal`, which a
+/// model can take as a new request rather than as history.
+pub const COMPACT_SUMMARY_PREFIX: &str =
+    "The conversation history before this point was compacted into the following summary:\n\n";
+
+/// The context message text for a compaction summary.
+pub fn compact_summary_text(summary: &str) -> String {
+    format!("{COMPACT_SUMMARY_PREFIX}{summary}")
+}
+
 /// Bound a compaction summary while retaining both its overview and latest
 /// conclusion. The limit is a byte budget and the result is always valid UTF-8.
 pub fn truncate_summary(summary: &str, max_bytes: usize) -> String {

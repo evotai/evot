@@ -24,6 +24,11 @@ use crate::types::*;
 /// repeated incremental compactions do not grow without bound.
 pub const DEFAULT_SUMMARY_SOFT_CAP_TOKENS: usize = 2_000;
 
+/// Retries of a summary request after a transient provider failure.
+const SUMMARY_RETRIES: usize = 2;
+/// Linear backoff step between summary retries.
+const SUMMARY_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Generate a summary using the LLM provider.
 pub async fn summarize(
     input: SummarizerInput,
@@ -73,7 +78,8 @@ pub async fn summarize_with_observer(
     };
 
     if let Some(prefix_text) = &input.turn_prefix {
-        let prefix_prompt = prompt::format_turn_prefix(prefix_text);
+        let prefix_prompt =
+            prompt::format_turn_prefix(prefix_text, input.custom_instructions.as_deref());
         let prefix_prompt = truncate_summary(&prefix_prompt, input.request_max_bytes);
         let prefix_summary = call_provider(
             ctx,
@@ -135,7 +141,12 @@ async fn call_provider(
         api_key: ctx.api_key.clone(),
         max_tokens: Some(max_tokens),
         model_config: ctx.model_config.clone(),
-        cache_config: CacheConfig::default(),
+        // A summary request is sent once and never continued, so a cache
+        // write is paid for and never read (Anthropic bills it at 1.25x).
+        cache_config: CacheConfig {
+            enabled: false,
+            strategy: CacheStrategy::Disabled,
+        },
         prompt_cache_key: None,
         client: None,
     };
@@ -154,48 +165,65 @@ async fn call_provider(
         max_tokens,
         "compaction summary request started"
     );
-    notify_compaction_activity(observer, CompactionActivity::Waiting);
-    let mut progress = RequestProgress::new();
-    let (tx, mut rx) = mpsc::unbounded_channel::<StreamEvent>();
-    let stream = ctx.provider.stream(config, tx, cancel.clone());
-    tokio::pin!(stream);
-    let mut events_open = true;
+    let mut retries = 0;
     let result = loop {
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => {
-                // One poll lets a cooperative provider observe cancellation and
-                // clean up; a provider that ignores its token is dropped here.
-                let _ = futures::poll!(&mut stream);
-                progress.finish(stage, &ctx.model, "cancelled");
-                return Err(SummarizerError::Cancelled);
-            }
-            result = &mut stream => break result,
-            event = rx.recv(), if events_open => {
-                match event {
-                    Some(event) => progress.observe(&event, observer),
-                    None => events_open = false,
+        notify_compaction_activity(observer, CompactionActivity::Waiting);
+        let mut progress = RequestProgress::new();
+        let (tx, mut rx) = mpsc::unbounded_channel::<StreamEvent>();
+        let stream = ctx.provider.stream(config.clone(), tx, cancel.clone());
+        tokio::pin!(stream);
+        let mut events_open = true;
+        let result = loop {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {
+                    // One poll lets a cooperative provider observe cancellation and
+                    // clean up; a provider that ignores its token is dropped here.
+                    let _ = futures::poll!(&mut stream);
+                    progress.finish(stage, &ctx.model, "cancelled");
+                    return Err(SummarizerError::Cancelled);
+                }
+                result = &mut stream => break result,
+                event = rx.recv(), if events_open => {
+                    match event {
+                        Some(event) => progress.observe(&event, observer),
+                        None => events_open = false,
+                    }
                 }
             }
-        }
-    };
+        };
 
-    // Drain already-buffered events for accurate timings, without waiting for
-    // sender clones a provider may retain after returning. The final message
-    // remains authoritative; deltas are used only for activity and metrics.
-    rx.close();
-    while let Ok(event) = rx.try_recv() {
-        progress.observe(&event, observer);
-    }
-    let result = match result {
-        Ok(outcome) => {
-            progress.finish(stage, &ctx.model, "returned");
-            outcome
+        // Drain already-buffered events for accurate timings, without waiting for
+        // sender clones a provider may retain after returning. The final message
+        // remains authoritative; deltas are used only for activity and metrics.
+        rx.close();
+        while let Ok(event) = rx.try_recv() {
+            progress.observe(&event, observer);
         }
-        Err(error) => {
-            progress.finish(stage, &ctx.model, "failed");
-            tracing::warn!(stage, model = %ctx.model, %error, "compaction summary request failed");
-            return Err(SummarizerError::Failed(error.to_string()));
+        match result {
+            Ok(outcome) => {
+                progress.finish(stage, &ctx.model, "returned");
+                break outcome;
+            }
+            // A single overload or dropped connection must not cost the
+            // compaction: under the required policy the summary would be
+            // skipped, and overflow recovery would fall back to the far
+            // weaker deterministic summary.
+            Err(error) if error.is_transient() && retries < SUMMARY_RETRIES => {
+                progress.finish(stage, &ctx.model, "retrying");
+                retries += 1;
+                let delay = SUMMARY_RETRY_DELAY * retries as u32;
+                tracing::warn!(stage, model = %ctx.model, %error, retries, "compaction summary request failed; retrying");
+                tokio::select! {
+                    _ = cancel.cancelled() => return Err(SummarizerError::Cancelled),
+                    _ = tokio::time::sleep(delay) => {}
+                }
+            }
+            Err(error) => {
+                progress.finish(stage, &ctx.model, "failed");
+                tracing::warn!(stage, model = %ctx.model, %error, "compaction summary request failed");
+                return Err(SummarizerError::Failed(error.to_string()));
+            }
         }
     };
 

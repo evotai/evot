@@ -117,10 +117,12 @@ pub async fn execute_with_contexts(
     // Step 3: assemble the summary and retained tail without replay repairs.
     // These messages can be persisted in a compact snapshot. Missing-outcome
     // placeholders and failed-turn filtering belong only to the outgoing view.
+    // The context message carries the same framing as a manual `/compact`.
+    let summary_text = super::config::compact_summary_text(&result.text);
     let summary_message = AgentMessage::Llm(Message::User {
         provenance: None,
         content: vec![Content::Text {
-            text: result.text.clone(),
+            text: summary_text.clone(),
         }],
         timestamp: crate::time::now_ms(),
     });
@@ -132,7 +134,7 @@ pub async fn execute_with_contexts(
     // the next compaction can dedupe it.
     let mut state = memory::build_state(evicted, turn_prefix, prev_state);
     state.last_summary = Some(result.text.clone());
-    state.context_summary_message = Some(result.text.clone());
+    state.context_summary_message = Some(summary_text);
 
     let stats = CompactionStats {
         summary: Some(result.text),

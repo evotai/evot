@@ -83,12 +83,10 @@ impl RetryPolicy {
 /// Bare [`ProviderError::Api`] errors from paths without status/type context
 /// fall back to keyword matching as a last resort.
 pub fn should_retry(error: &ProviderError) -> bool {
+    if error.is_transient() {
+        return true;
+    }
     match error {
-        ProviderError::RateLimited { .. }
-        | ProviderError::Network(_)
-        | ProviderError::ProtocolIncomplete(_)
-        | ProviderError::Overloaded(_)
-        | ProviderError::Transient { .. } => true,
         // Protocol-declared permanent errors never enter the legacy text fallback.
         ProviderError::ModelNotFound(_) | ProviderError::InvalidRequest(_) => false,
         // A bare Api error that is really a context overflow must never retry,

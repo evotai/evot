@@ -1,5 +1,6 @@
 //! Tests for the executor module.
 
+use evotengine::context::compact_summary_text;
 use evotengine::context::compaction::config::CompactionConfig;
 use evotengine::context::compaction::executor;
 use evotengine::context::compaction::executor::ExecutionResult;
@@ -283,7 +284,7 @@ async fn executor_summarizes_the_oldest_history_instead_of_pinning_it() {
     assert!(matches!(
         outcome.messages.first(),
         Some(AgentMessage::Llm(Message::User { content, .. }))
-            if matches!(content.first(), Some(Content::Text { text }) if text == summary)
+            if matches!(content.first(), Some(Content::Text { text }) if *text == compact_summary_text(summary))
     ));
 }
 
@@ -381,7 +382,7 @@ async fn executor_bounds_summary_consistently() {
     assert!(matches!(
         outcome.messages.first(),
         Some(AgentMessage::Llm(Message::User { content, .. }))
-            if matches!(content.first(), Some(Content::Text { text }) if text == summary)
+            if matches!(content.first(), Some(Content::Text { text }) if *text == compact_summary_text(summary))
     ));
 }
 
@@ -417,7 +418,7 @@ async fn overflow_fallback_does_not_reinsert_split_turn_verbatim() {
     assert!(matches!(
         outcome.messages.first(),
         Some(AgentMessage::Llm(Message::User { content, .. }))
-            if matches!(content.first(), Some(Content::Text { text }) if text == summary)
+            if matches!(content.first(), Some(Content::Text { text }) if *text == compact_summary_text(summary))
     ));
 }
 

@@ -8,6 +8,7 @@ pub mod tokens;
 pub mod tool_availability;
 pub mod window;
 
+pub use compaction::compact_summary_text;
 pub use compaction::plan_compaction;
 pub use compaction::plan_messages;
 pub use compaction::plan_messages_from_boundary;
@@ -33,6 +34,7 @@ pub use compaction::SummarizerMode;
 pub use compaction::SummaryContexts;
 pub use compaction::TriggerDecision;
 pub use compaction::UsageSnapshot;
+pub use compaction::COMPACT_SUMMARY_PREFIX;
 pub use compaction::DEFAULT_KEEP_RECENT_TOKENS;
 pub use compaction::DEFAULT_POST_COMPACTION_TOKENS;
 pub use compaction::DEFAULT_RESERVE_TOKENS;

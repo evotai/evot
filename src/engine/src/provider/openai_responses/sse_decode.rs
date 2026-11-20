@@ -28,6 +28,8 @@ enum OutputSlot {
         name: String,
         arguments: String,
         started: bool,
+        /// Set by `response.output_item.done`.
+        finished: bool,
     },
 }
 
@@ -76,6 +78,9 @@ pub(crate) async fn decode_sse_stream(
         return Err(ProviderError::ProtocolIncomplete(
             "OpenAI Responses stream ended before a terminal response event".into(),
         ));
+    }
+    if stop_reason != StopReason::Length {
+        finish_pending_tools(&tx, &mut content, &mut slots).await?;
     }
 
     // Output stopped by the content filter is a safety refusal, not a length
@@ -218,11 +223,11 @@ async fn process_event(
             let delta = string_field(&value, "delta");
             if let Some(OutputSlot::Tool {
                 content_index,
-                item_id: _,
                 call_id,
                 name,
                 arguments,
                 started,
+                ..
             }) = slots.get_mut(&output_index)
             {
                 // A delta that opens a new object after the buffer already
@@ -356,6 +361,7 @@ async fn create_slot(
                 name,
                 arguments,
                 started,
+                finished: false,
             });
         }
         _ => {}
@@ -451,7 +457,9 @@ async fn finish_slot(
             name,
             arguments,
             started,
+            finished,
         } => {
+            *finished = true;
             assign_if_present(item, "id", item_id);
             assign_if_present(item, "call_id", call_id);
             assign_if_present(item, "name", name);
@@ -503,6 +511,81 @@ async fn finish_slot(
                 .await;
         }
     }
+}
+
+/// A function call whose `response.output_item.done` never arrived may hold
+/// cut-off or mixed-up arguments (e.g. a server that reuses `output_index`).
+/// The agent runs every call of the final message, so accept one only when its
+/// buffered arguments are already a complete JSON object and its id and name
+/// are known; never repair them.
+async fn finish_pending_tools(
+    tx: &StreamSink,
+    content: &mut [Content],
+    slots: &mut HashMap<usize, OutputSlot>,
+) -> Result<(), ProviderError> {
+    let mut pending: Vec<_> = slots
+        .iter_mut()
+        .filter_map(|(output_index, slot)| match slot {
+            OutputSlot::Tool {
+                finished: false, ..
+            } => Some((*output_index, slot)),
+            _ => None,
+        })
+        .collect();
+    pending.sort_by_key(|(output_index, _)| *output_index);
+    for (_, slot) in pending {
+        let OutputSlot::Tool {
+            content_index,
+            item_id,
+            call_id,
+            name,
+            arguments,
+            started,
+            finished,
+        } = slot
+        else {
+            continue;
+        };
+        let parsed = match serde_json::from_str::<serde_json::Value>(arguments) {
+            Ok(value) if value.is_object() && !call_id.is_empty() && !name.is_empty() => value,
+            _ => {
+                return Err(ProviderError::ProtocolIncomplete(format!(
+                    "OpenAI Responses stream completed with an unfinished tool call: {name} ({call_id})"
+                )))
+            }
+        };
+        *finished = true;
+        if !*started {
+            let _ = tx
+                .send(StreamEvent::ToolCallStart {
+                    content_index: *content_index,
+                    id: call_id.clone(),
+                    name: name.clone(),
+                })
+                .await;
+        }
+        if let Some(Content::ToolCall {
+            id,
+            name: current_name,
+            arguments: current_arguments,
+            metadata,
+        }) = content.get_mut(*content_index)
+        {
+            id.clone_from(call_id);
+            current_name.clone_from(name);
+            current_arguments.clone_from(&parsed);
+            *metadata = openai_tool_metadata(item_id);
+        }
+        let _ = tx
+            .send(StreamEvent::ToolCallEnd {
+                content_index: *content_index,
+                id: call_id.clone(),
+                name: name.clone(),
+                arguments: parsed,
+            })
+            .await;
+    }
+    Ok(())
 }
 
 fn update_usage(response: &serde_json::Value, usage: &mut Usage) {

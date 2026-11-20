@@ -617,3 +617,23 @@ fn content_filter_codes_are_refusals_and_plain_invalid_requests_are_not() {
     assert!(matches!(plain, ProviderError::InvalidRequest(_)));
     assert!(!is_refusal_message(&plain.to_string()));
 }
+
+#[test]
+fn classify_additional_provider_overflow_wording() {
+    for message in [
+        r#"{"code":"1261","message":"Prompt too long"}"#,
+        r#"{"code":"1261","message":"Prompt exceeds max length"}"#,
+        "litellm.ContextWindowExceededError: Context Window exceeded for given call.",
+        "Range of input length should be [1, 129024]",
+        "Prompt has 300000 tokens, but the configured context size is 262144 tokens",
+    ] {
+        assert!(
+            evotengine::provider::error::is_context_overflow_message(message),
+            "{message}"
+        );
+        assert!(
+            ProviderError::classify(400, message).is_context_overflow(),
+            "{message}"
+        );
+    }
+}

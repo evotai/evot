@@ -37,6 +37,10 @@ pub enum Reply {
     /// Cancel the provided token, then return an (ignored) text message.
     /// Mirrors a mid-flight cancellation observed by the caller after draining.
     Cancel,
+    /// Fail the request with a provider-declared transient error.
+    Transient(String),
+    /// Fail the request with an invalid-request error.
+    Invalid(String),
 }
 
 impl Reply {
@@ -100,6 +104,8 @@ impl StreamProvider for RecordingProvider {
                 cancel.cancel();
                 assistant_text(String::new(), StopReason::Stop, None)
             }
+            Reply::Transient(message) => return Err(ProviderError::Transient { message }),
+            Reply::Invalid(message) => return Err(ProviderError::InvalidRequest(message)),
         };
 
         let _ = tx.send(StreamEvent::Done {

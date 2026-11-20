@@ -922,3 +922,112 @@ async fn ends_turn_mixed_with_regular_tool_does_not_settle() {
     assert_eq!(output.event_count("LlmCallStart"), 2);
     output.assert_last_role("assistant");
 }
+
+// ---------------------------------------------------------------------------
+// Cancellation inside a sequential batch
+// ---------------------------------------------------------------------------
+
+/// Cancels the run when executed; records whether it ran.
+struct CancellingTool {
+    name: String,
+    cancel: Option<CancellationToken>,
+    ran: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl AgentTool for CancellingTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn label(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        "Cancelling tool"
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({})
+    }
+    async fn execute(
+        &self,
+        _params: serde_json::Value,
+        _ctx: ToolContext,
+    ) -> Result<ToolResult, ToolError> {
+        self.ran.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(cancel) = &self.cancel {
+            cancel.cancel();
+        }
+        Ok(ToolResult {
+            content: vec![Content::Text {
+                text: format!("done:{}", self.name),
+            }],
+            details: serde_json::Value::Null,
+            retention: Retention::Normal,
+        })
+    }
+}
+
+#[tokio::test]
+async fn calls_after_a_cancel_in_a_sequential_batch_are_answered_without_running() {
+    let provider = MockProvider::new(vec![
+        MockResponse::ToolCalls(vec![
+            MockToolCall {
+                name: "first".into(),
+                arguments: serde_json::json!({}),
+            },
+            MockToolCall {
+                name: "second".into(),
+                arguments: serde_json::json!({}),
+            },
+        ]),
+        MockResponse::Text("Done.".into()),
+    ]);
+    let mut config = make_config(provider);
+    config.tool_execution = ToolExecutionStrategy::Sequential;
+
+    let cancel = CancellationToken::new();
+    let first_ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let second_ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut context = AgentContext {
+        system_prompt: "test".into(),
+        messages: Vec::new(),
+        tools: vec![
+            Box::new(CancellingTool {
+                name: "first".into(),
+                cancel: Some(cancel.clone()),
+                ran: first_ran.clone(),
+            }),
+            Box::new(CancellingTool {
+                name: "second".into(),
+                cancel: None,
+                ran: second_ran.clone(),
+            }),
+        ],
+        cwd: std::path::PathBuf::new(),
+        path_guard: std::sync::Arc::new(evotengine::PathGuard::open()),
+        prompt_cache_key: None,
+    };
+
+    let prompt = AgentMessage::Llm(Message::user("Run tools"));
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let new_messages = agent_loop(vec![prompt], &mut context, &config, tx, cancel).await;
+
+    assert!(first_ran.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(!second_ran.load(std::sync::atomic::Ordering::SeqCst));
+    let results: Vec<_> = new_messages
+        .iter()
+        .filter_map(|message| match message {
+            AgentMessage::Llm(Message::ToolResult {
+                tool_name,
+                content,
+                is_error,
+                ..
+            }) => Some((tool_name.clone(), content.clone(), *is_error)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 2, "every call keeps a result");
+    assert!(matches!(&results[1], (name, content, true)
+        if name == "second"
+            && matches!(content.as_slice(), [Content::Text { text }] if text == "Operation aborted")));
+}

@@ -39,6 +39,12 @@ pub(crate) async fn decode_sse_stream(
     let mut response_id: Option<String> = None;
     let mut response_model: Option<String> = None;
     let mut incomplete_reason: Option<String> = None;
+    // A stream is complete once it sends `[DONE]` or a `finish_reason`.
+    // Some endpoints omit one of them, but a clean EOF with neither means the
+    // connection was cut: the content so far is partial, and its tool-call
+    // arguments may be truncated JSON that repair would quietly complete.
+    let mut saw_done = false;
+    let mut saw_finish = false;
 
     let _ = tx.send(StreamEvent::Start).await;
 
@@ -53,6 +59,7 @@ pub(crate) async fn decode_sse_stream(
                     None => break,
                     Some(sse) => {
                         if sse.data == "[DONE]" {
+                            saw_done = true;
                             break;
                         }
                         process_sse_chunk(
@@ -66,6 +73,7 @@ pub(crate) async fn decode_sse_stream(
                             &mut response_id,
                             &mut response_model,
                             &mut incomplete_reason,
+                            &mut saw_finish,
                         ).await?;
                     }
                 }
@@ -89,6 +97,12 @@ pub(crate) async fn decode_sse_stream(
     {
         return Err(ProviderError::Api(
             "Empty response from provider (no content, no usage)".into(),
+        ));
+    }
+
+    if !refused && !saw_done && !saw_finish {
+        return Err(ProviderError::ProtocolIncomplete(
+            "OpenAI-compatible stream ended without [DONE] or finish_reason".into(),
         ));
     }
 
@@ -142,6 +156,7 @@ async fn process_sse_chunk(
     response_id: &mut Option<String>,
     response_model: &mut Option<String>,
     incomplete_reason: &mut Option<String>,
+    saw_finish: &mut bool,
 ) -> Result<(), ProviderError> {
     let chunk: OpenAiChunk = match serde_json::from_str(&sse.data) {
         Ok(c) => c,
@@ -397,6 +412,7 @@ async fn process_sse_chunk(
 
         // Handle finish reason
         if let Some(reason) = &choice.finish_reason {
+            *saw_finish |= !reason.is_empty();
             if crate::provider::error::is_content_filter_reason(reason) {
                 // Finalized as a refusal after the stream ends.
                 *incomplete_reason = Some(reason.clone());

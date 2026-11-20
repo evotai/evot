@@ -1,8 +1,9 @@
 use crate::types::TranscriptEntry;
 use crate::types::TranscriptItem;
 
-const SUMMARY_PREFIX: &str =
-    "The conversation history before this point was compacted into the following summary:\n\n";
+/// Owned by the engine, which frames automatic compaction summaries the same
+/// way.
+const SUMMARY_PREFIX: &str = evot_engine::context::COMPACT_SUMMARY_PREFIX;
 
 /// Stem of [`SUMMARY_PREFIX`], deliberately shorter than the 40-character head
 /// budget used by session titles. Matching on the stem therefore recognizes
@@ -11,7 +12,7 @@ const SUMMARY_PREFIX: &str =
 const SUMMARY_STEM: &str = "The conversation history before this";
 
 pub fn compact_summary_text(summary: &str) -> String {
-    format!("{SUMMARY_PREFIX}{summary}")
+    evot_engine::context::compact_summary_text(summary)
 }
 
 /// Whether the text is synthetic context inserted by compaction rather than an

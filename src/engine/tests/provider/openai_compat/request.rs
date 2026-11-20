@@ -1042,3 +1042,53 @@ fn cloud_openai_grok_sends_reasoning_effort() {
     let body = build_request_body(&config, &compat);
     assert_eq!(body["reasoning_effort"], "xhigh");
 }
+
+#[test]
+fn whitespace_only_tool_output_uses_a_placeholder_and_text_blocks_are_joined() {
+    let call = |id: &str| Message::Assistant {
+        content: vec![Content::ToolCall {
+            id: id.into(),
+            name: "bash".into(),
+            arguments: serde_json::json!({"command": "true"}),
+            metadata: None,
+        }],
+        stop_reason: StopReason::ToolUse,
+        model: "test".into(),
+        provider: "test".into(),
+        usage: Usage::default(),
+        timestamp: 0,
+        error_message: None,
+        response_id: None,
+    };
+    let result = |id: &str, texts: &[&str]| Message::ToolResult {
+        tool_call_id: id.into(),
+        tool_name: "bash".into(),
+        content: texts
+            .iter()
+            .map(|text| Content::Text {
+                text: (*text).into(),
+            })
+            .collect(),
+        is_error: false,
+        timestamp: 0,
+        retention: Retention::Normal,
+    };
+    let config = StreamConfigBuilder::openai()
+        .messages(vec![
+            Message::user("go"),
+            call("call_1"),
+            result("call_1", &["\r\n"]),
+            call("call_2"),
+            result("call_2", &["stdout", "stderr"]),
+        ])
+        .build();
+    let body = build_request_body(&config, &OpenAiCompat::openai());
+    let tool_messages: Vec<_> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .collect();
+    assert_eq!(tool_messages[0]["content"], "(no tool output)");
+    assert_eq!(tool_messages[1]["content"], "stdout\nstderr");
+}

@@ -121,9 +121,23 @@ fn serialize_messages_truncates_long_tool_results() {
     let messages = vec![tool_result_msg("c1", &long_content)];
     let text = serialize::serialize_messages(&messages);
     assert!(text.contains("[Tool result]:"));
-    assert!(text.contains("more characters truncated"));
+    assert!(text.contains("characters truncated"));
     // Should be much shorter than the original
     assert!(text.len() < 3000);
+}
+
+#[test]
+fn serialize_messages_keeps_the_tail_of_long_tool_results() {
+    // Build and test failures report the root cause last.
+    let output = format!(
+        "HEAD\n{}\nerror[E0425]: cannot find value `x`",
+        "log line\n".repeat(600)
+    );
+    let messages = vec![tool_result_msg("c1", &output)];
+    let text = serialize::serialize_messages(&messages);
+    assert!(text.contains("HEAD"));
+    assert!(text.contains("error[E0425]: cannot find value `x`"));
+    assert!(text.contains("characters truncated"));
 }
 
 #[test]
@@ -140,7 +154,7 @@ fn serialize_messages_truncates_multibyte_tool_results_at_char_boundary() {
 
     // Must not panic on the non-boundary byte index.
     let text = serialize::serialize_messages(&messages);
-    assert!(text.contains("more characters truncated"));
+    assert!(text.contains("characters truncated"));
 }
 
 #[test]
@@ -729,4 +743,79 @@ fn summary_prompts_ask_for_a_short_merged_handoff() {
     }
     assert!(update.contains("merging rather than appending"));
     assert!(update.contains("must not grow with each update"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn llm_summarize_retries_a_transient_provider_failure() {
+    let (result, captured) = summarize_capturing(base_input("[User]: fix the bug"), 4096, vec![
+        Reply::Transient("upstream overloaded".into()),
+        Reply::text("## Goal\nFix the bug"),
+    ])
+    .await;
+    let output = match result {
+        Ok(output) => output,
+        Err(error) => panic!("expected summary after retry, got {error:?}"),
+    };
+    assert!(output.summary.contains("Fix the bug"));
+    assert_eq!(captured.lock().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn llm_summarize_gives_up_after_bounded_transient_retries() {
+    let (result, captured) = summarize_capturing(base_input("[User]: fix the bug"), 4096, vec![
+        Reply::Transient("one".into()),
+        Reply::Transient("two".into()),
+        Reply::Transient("three".into()),
+        Reply::text("never reached"),
+    ])
+    .await;
+    assert!(matches!(result, Err(SummarizerError::Failed(_))));
+    assert_eq!(captured.lock().len(), 3);
+}
+
+#[tokio::test]
+async fn llm_summarize_does_not_retry_an_invalid_request() {
+    let (result, captured) = summarize_capturing(base_input("[User]: fix the bug"), 4096, vec![
+        Reply::Invalid("bad request".into()),
+        Reply::text("never reached"),
+    ])
+    .await;
+    assert!(matches!(result, Err(SummarizerError::Failed(_))));
+    assert_eq!(captured.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn llm_summarize_applies_custom_instructions_to_the_turn_prefix() {
+    let mut input = base_input("[User]: big request");
+    input.turn_prefix = Some("[User]: prefix of the split turn".into());
+    input.custom_instructions = Some("KEEP THE MIGRATION PLAN".into());
+    let (result, captured) = summarize_capturing(input, 4096, vec![
+        Reply::text("main"),
+        Reply::text("prefix"),
+    ])
+    .await;
+    assert!(result.is_ok());
+    let requests = captured.lock();
+    assert_eq!(requests.len(), 2);
+    for request in requests.iter() {
+        let Some(Message::User { content, .. }) = request.messages.first() else {
+            panic!("expected summarizer user prompt");
+        };
+        assert!(content.iter().any(
+            |block| matches!(block, Content::Text { text } if text.contains("KEEP THE MIGRATION PLAN"))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn llm_summarize_requests_disable_prompt_caching() {
+    let (result, captured) =
+        summarize_capturing(base_input("[User]: fix the bug"), 4096, vec![Reply::text(
+            "done",
+        )])
+        .await;
+    assert!(result.is_ok());
+    let requests = captured.lock();
+    assert!(!requests[0].cache_config.enabled);
+    assert_eq!(requests[0].cache_config.strategy, CacheStrategy::Disabled);
 }

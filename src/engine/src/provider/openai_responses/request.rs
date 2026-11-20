@@ -231,7 +231,7 @@ fn tool_output(content: &[Content], supports_image: bool) -> serde_json::Value {
         })
         .collect::<Vec<_>>();
     if images.is_empty() {
-        return serde_json::json!(if text.is_empty() {
+        return serde_json::json!(if text.trim().is_empty() {
             "(no tool output)"
         } else {
             &text
@@ -239,7 +239,7 @@ fn tool_output(content: &[Content], supports_image: bool) -> serde_json::Value {
     }
 
     let mut output = Vec::new();
-    if !text.is_empty() {
+    if !text.trim().is_empty() {
         output.push(serde_json::json!({"type": "input_text", "text": text}));
     }
     for (data, mime_type) in images {

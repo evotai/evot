@@ -671,7 +671,10 @@ async fn controller_state_carries_across_compactions_and_seed() {
     let summary = state.last_summary.as_deref().unwrap_or_default();
     assert_eq!(summary.matches("PREVIOUS SUMMARY").count(), 1);
     assert!(!summary.contains("RESTORED SUMMARY MESSAGE"));
-    assert_eq!(state.context_summary_message.as_deref(), Some(summary));
+    assert_eq!(
+        state.context_summary_message.as_deref(),
+        Some(evotengine::context::compact_summary_text(summary).as_str())
+    );
     assert!(!messages.iter().any(
         |message| matches!(message, AgentMessage::Llm(Message::User { content, .. })
             if matches!(content.as_slice(), [Content::Text { text }] if text == "RESTORED SUMMARY MESSAGE"))

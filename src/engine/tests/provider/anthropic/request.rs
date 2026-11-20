@@ -714,10 +714,15 @@ fn test_cache_auto_places_all_breakpoints() {
     assert_eq!(last_tool["cache_control"]["type"], "ephemeral");
 
     let msgs = body["messages"].as_array().unwrap();
-    let second_to_last = &msgs[msgs.len() - 2];
-    let content = second_to_last["content"].as_array().unwrap();
-    let last_block = content.last().unwrap();
-    assert_eq!(last_block["cache_control"]["type"], "ephemeral");
+    assert_eq!(msgs.len(), 3);
+    for index in [0, 2] {
+        let content = msgs[index]["content"].as_array().unwrap();
+        assert_eq!(
+            content.last().unwrap()["cache_control"]["type"],
+            "ephemeral"
+        );
+    }
+    assert!(msgs[1]["content"][0].get("cache_control").is_none());
 }
 
 #[test]
@@ -818,9 +823,10 @@ fn test_cache_manual_system_only() {
         .get("cache_control")
         .is_none());
     let msgs = body["messages"].as_array().unwrap();
-    let second = &msgs[msgs.len() - 2];
-    let content = second["content"].as_array().unwrap();
-    assert!(content.last().unwrap().get("cache_control").is_none());
+    assert_eq!(
+        sent_cache_markers(&serde_json::Value::Array(msgs.clone())),
+        0
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1186,16 +1192,11 @@ fn test_empty_text_message_is_removed_before_cache_breakpoint() {
             .as_array()
             .is_some_and(|content| !content.is_empty())
     }));
-    let cached_content = msgs[1]["content"].as_array().unwrap();
-    assert_eq!(
-        cached_content.last().unwrap()["cache_control"]["type"],
-        "ephemeral",
-        "cache_control should land on the second-to-last remaining message"
-    );
+    assert_eq!(marked_messages(&body), vec![0, 2]);
 }
 
 #[test]
-fn test_cache_breakpoint_uses_second_to_last_after_empty_message_removal() {
+fn test_cache_breakpoint_skips_empty_user_message() {
     let config = StreamConfigBuilder::anthropic()
         .system_prompt("You are helpful.")
         .messages(vec![
@@ -1215,11 +1216,7 @@ fn test_cache_breakpoint_uses_second_to_last_after_empty_message_removal() {
     let msgs = body["messages"].as_array().unwrap();
 
     assert_eq!(msgs.len(), 3);
-    let cached_content = msgs[1]["content"].as_array().unwrap();
-    assert_eq!(
-        cached_content.last().unwrap()["cache_control"]["type"],
-        "ephemeral"
-    );
+    assert_eq!(marked_messages(&body), vec![0, 2]);
 }
 
 #[test]
@@ -1385,4 +1382,392 @@ fn messages_url_keeps_v1_only_at_path_end() {
         build_messages_url("https://example.com/v1/proxy"),
         "https://example.com/v1/proxy/v1/messages"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tool ids, tool result text, and images for text-only models
+// ---------------------------------------------------------------------------
+
+fn tool_turn(id: &str, result: Vec<Content>) -> Vec<Message> {
+    vec![
+        Message::user("run it"),
+        Message::Assistant {
+            content: vec![Content::ToolCall {
+                id: id.into(),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": "ls"}),
+                metadata: None,
+            }],
+            stop_reason: StopReason::ToolUse,
+            model: "test".into(),
+            provider: "test".into(),
+            usage: Usage::default(),
+            timestamp: 0,
+            error_message: None,
+            response_id: None,
+        },
+        Message::ToolResult {
+            tool_call_id: id.into(),
+            tool_name: "bash".into(),
+            content: result,
+            is_error: false,
+            timestamp: 0,
+            retention: Retention::Normal,
+        },
+    ]
+}
+
+#[test]
+fn foreign_tool_ids_are_normalized_consistently() {
+    // Kimi-style ids are outside Anthropic's `^[a-zA-Z0-9_-]{1,64}$`.
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .messages(tool_turn("functions.bash:0", vec![Content::Text {
+            text: "ok".into(),
+        }]))
+        .build();
+    let body = build_request_body(&config, false);
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[1]["content"][0]["id"], "functions_bash_0");
+    assert_eq!(msgs[2]["content"][0]["tool_use_id"], "functions_bash_0");
+
+    let long = "x".repeat(80);
+    assert_eq!(normalize_tool_id(&long).len(), 64);
+    assert_eq!(normalize_tool_id("toolu_01-Ab"), "toolu_01-Ab");
+}
+
+#[test]
+fn long_tool_ids_that_differ_only_at_the_end_stay_distinct() {
+    let base = format!("functions.{}", "mcp_server_tool_".repeat(4));
+    let first = format!("{base}:0");
+    let second = format!("{base}:1");
+    assert!(first.len() > 64);
+
+    let mapped_first = normalize_tool_id(&first).into_owned();
+    let mapped_second = normalize_tool_id(&second).into_owned();
+    assert_ne!(mapped_first, mapped_second);
+    for mapped in [&mapped_first, &mapped_second] {
+        assert_eq!(mapped.len(), 64);
+        assert!(mapped
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+    }
+    // Deterministic: the call and its result map to the same id.
+    assert_eq!(normalize_tool_id(&first), mapped_first.as_str());
+
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .messages(tool_turn(&second, vec![Content::Text {
+            text: "ok".into(),
+        }]))
+        .build();
+    let body = build_request_body(&config, false);
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs[1]["content"][0]["id"], mapped_second.as_str());
+    assert_eq!(msgs[2]["content"][0]["tool_use_id"], mapped_second.as_str());
+}
+
+#[test]
+fn text_tool_result_keeps_every_text_block() {
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .messages(tool_turn("call_1", vec![
+            Content::Text {
+                text: "stdout".into(),
+            },
+            Content::Text {
+                text: "stderr".into(),
+            },
+        ]))
+        .build();
+    let body = build_request_body(&config, false);
+    assert_eq!(
+        body["messages"][2]["content"][0]["content"],
+        "stdout\nstderr"
+    );
+}
+
+#[test]
+fn images_are_replaced_for_text_only_models() {
+    use evotengine::provider::ApiProtocol;
+    use evotengine::provider::ModelOverrides;
+
+    let image = Content::Image {
+        mime_type: "image/png".into(),
+        source: ImageSource::Base64 {
+            data: "aW1hZ2VkYXRh".into(),
+        },
+    };
+    let model_config = resolved_model_config(
+        ApiProtocol::AnthropicMessages,
+        "custom-proxy",
+        "text-model",
+        "https://proxy.example",
+        None,
+        Default::default(),
+        ModelOverrides {
+            supports_image: Some(false),
+            ..Default::default()
+        },
+    );
+    let mut messages = tool_turn("call_1", vec![image.clone()]);
+    messages.insert(0, Message::User {
+        provenance: None,
+        content: vec![
+            Content::Text {
+                text: "look".into(),
+            },
+            image,
+        ],
+        timestamp: 0,
+    });
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .model_config(model_config)
+        .messages(messages)
+        .build();
+    let body = build_request_body(&config, false);
+    let sent = body.to_string();
+    assert!(!sent.contains("\"type\":\"image\""), "{sent}");
+    assert!(sent.contains("does not support image input"));
+}
+
+// ---------------------------------------------------------------------------
+// Message cache breakpoints
+// ---------------------------------------------------------------------------
+
+fn marked_messages(body: &serde_json::Value) -> Vec<usize> {
+    body["messages"]
+        .as_array()
+        .map(|msgs| {
+            msgs.iter()
+                .enumerate()
+                .filter(|(_, message)| sent_cache_markers(&message["content"]) > 0)
+                .map(|(index, _)| index)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn tool_call_turn(calls: usize) -> Message {
+    Message::Assistant {
+        content: (0..calls)
+            .map(|index| Content::ToolCall {
+                id: format!("call_{index}"),
+                name: "bash".into(),
+                arguments: serde_json::json!({"command": "ls"}),
+                metadata: None,
+            })
+            .collect(),
+        stop_reason: StopReason::ToolUse,
+        model: "test".into(),
+        provider: "test".into(),
+        usage: Usage::default(),
+        timestamp: 0,
+        error_message: None,
+        response_id: None,
+    }
+}
+
+fn tool_results(calls: usize) -> Vec<Message> {
+    (0..calls)
+        .map(|index| Message::ToolResult {
+            tool_call_id: format!("call_{index}"),
+            tool_name: "bash".into(),
+            content: vec![Content::Text {
+                text: format!("output {index}"),
+            }],
+            is_error: false,
+            timestamp: 0,
+            retention: Retention::Normal,
+        })
+        .collect()
+}
+
+#[test]
+fn cache_breakpoints_cover_the_newest_input_and_the_previous_user_turn() {
+    let config = StreamConfigBuilder::anthropic()
+        .messages(tool_turn("call_1", vec![Content::Text {
+            text: "big tool output".into(),
+        }]))
+        .build();
+    let body = build_request_body(&config, false);
+    let msgs = body["messages"].as_array().unwrap();
+    // The tool result (newest input) is written to the cache for the next
+    // request; the user turn before it is the entry the previous request wrote.
+    assert_eq!(marked_messages(&body), vec![0, 2]);
+    assert_eq!(msgs[2]["content"][0]["type"], "tool_result");
+    assert_eq!(msgs[2]["content"][0]["cache_control"]["type"], "ephemeral");
+
+    // Four breakpoints in total: system, tools, and two messages.
+    let total = sent_cache_markers(&body);
+    assert!(total <= 4, "{total} breakpoints");
+}
+
+#[test]
+fn cache_breakpoints_reach_the_previous_entry_after_a_large_tool_batch() {
+    // The previous request wrote its cache at the first batch's results. The
+    // assistant turn in between holds 25 blocks, more than a lookup walks
+    // back, so a breakpoint must sit on that user message itself.
+    let mut messages = vec![Message::user("run them"), tool_call_turn(1)];
+    messages.extend(tool_results(1));
+    messages.push(tool_call_turn(25));
+    messages.extend(tool_results(25));
+    let config = StreamConfigBuilder::anthropic().messages(messages).build();
+    let body = build_request_body(&config, false);
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 5);
+    assert_eq!(msgs[3]["content"].as_array().map(Vec::len), Some(25));
+
+    assert_eq!(marked_messages(&body), vec![2, 4]);
+    let previous = msgs[2]["content"].as_array().unwrap();
+    assert_eq!(
+        previous.last().unwrap()["cache_control"]["type"],
+        "ephemeral"
+    );
+    let total = sent_cache_markers(&body);
+    assert!(total <= 4, "{total} breakpoints");
+}
+
+#[test]
+fn cache_breakpoints_never_land_on_assistant_turns() {
+    let config = StreamConfigBuilder::anthropic()
+        .messages(vec![
+            Message::user("question"),
+            Message::Assistant {
+                content: vec![
+                    Content::Text {
+                        text: "answer".into(),
+                    },
+                    Content::Thinking {
+                        thinking: String::new(),
+                        metadata: Some(ThinkingMetadata::Anthropic {
+                            signature: "sig".into(),
+                        }),
+                    },
+                ],
+                stop_reason: StopReason::Stop,
+                model: "test".into(),
+                provider: "test".into(),
+                usage: Usage::default(),
+                timestamp: 0,
+                error_message: None,
+                response_id: None,
+            },
+            Message::user("follow up"),
+        ])
+        .build();
+    let body = build_request_body(&config, false);
+    assert_eq!(marked_messages(&body), vec![0, 2]);
+    let assistant = &body["messages"][1]["content"];
+    assert_eq!(sent_cache_markers(assistant), 0);
+}
+
+fn sent_cache_markers(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Object(map) => {
+            usize::from(map.contains_key("cache_control"))
+                + map.values().map(sent_cache_markers).sum::<usize>()
+        }
+        serde_json::Value::Array(items) => items.iter().map(sent_cache_markers).sum(),
+        _ => 0,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Images in error tool results
+// ---------------------------------------------------------------------------
+
+#[test]
+fn error_tool_result_images_follow_all_tool_results_of_the_turn() {
+    let image = Content::Image {
+        mime_type: "image/png".into(),
+        source: ImageSource::Base64 {
+            data: "aW1hZ2VkYXRh".into(),
+        },
+    };
+    let call = |id: &str| Content::ToolCall {
+        id: id.into(),
+        name: "screenshot".into(),
+        arguments: serde_json::json!({}),
+        metadata: None,
+    };
+    let result = |id: &str, content: Vec<Content>, is_error: bool| Message::ToolResult {
+        tool_call_id: id.into(),
+        tool_name: "screenshot".into(),
+        content,
+        is_error,
+        timestamp: 0,
+        retention: Retention::Normal,
+    };
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .messages(vec![
+            Message::user("take screenshots"),
+            Message::Assistant {
+                content: vec![call("call_1"), call("call_2")],
+                stop_reason: StopReason::ToolUse,
+                model: "test".into(),
+                provider: "test".into(),
+                usage: Usage::default(),
+                timestamp: 0,
+                error_message: None,
+                response_id: None,
+            },
+            result(
+                "call_1",
+                vec![
+                    Content::Text {
+                        text: "render failed".into(),
+                    },
+                    image.clone(),
+                ],
+                true,
+            ),
+            result("call_2", vec![Content::Text { text: "ok".into() }], false),
+            Message::user("what happened?"),
+        ])
+        .build();
+
+    let body = build_request_body(&config, false);
+    let msgs = body["messages"].as_array().unwrap();
+    assert_eq!(
+        msgs.len(),
+        3,
+        "results, images and the next prompt share one user message"
+    );
+    let blocks = msgs[2]["content"].as_array().unwrap();
+    let types: Vec<&str> = blocks.iter().filter_map(|b| b["type"].as_str()).collect();
+    assert_eq!(types, vec![
+        "tool_result",
+        "tool_result",
+        "text",
+        "image",
+        "text"
+    ]);
+
+    assert_eq!(blocks[0]["is_error"], true);
+    assert_eq!(
+        blocks[0]["content"],
+        "render failed\n(image attached after the tool results)"
+    );
+    assert!(blocks[2]["text"].as_str().unwrap().contains("call_1"));
+    assert_eq!(blocks[4]["text"], "what happened?");
+}
+
+#[test]
+fn successful_tool_result_keeps_its_images_inline() {
+    let config = StreamConfigBuilder::anthropic()
+        .cache_disabled()
+        .messages(tool_turn("call_1", vec![Content::Image {
+            mime_type: "image/png".into(),
+            source: ImageSource::Base64 {
+                data: "aW1hZ2VkYXRh".into(),
+            },
+        }]))
+        .build();
+    let body = build_request_body(&config, false);
+    let result = &body["messages"][2]["content"][0];
+    assert_eq!(result["type"], "tool_result");
+    assert_eq!(result["content"][0]["type"], "image");
 }

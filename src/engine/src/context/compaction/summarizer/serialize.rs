@@ -232,17 +232,21 @@ fn extract_text_content(content: &[Content]) -> String {
         .join("")
 }
 
+/// Bound a tool result for the summarizer, keeping its head and tail: build
+/// and test failures usually report the root cause at the end of the output.
 fn truncate_for_summary(text: &str, max_chars: usize) -> String {
     if text.len() <= max_chars {
         return text.to_string();
     }
-    // `max_chars` is a byte budget; snap to a char boundary so multi-byte
+    // `max_chars` is a byte budget; snap to char boundaries so multi-byte
     // characters (e.g. CJK, Devanagari) are never split mid-codepoint.
-    let end = text.floor_char_boundary(max_chars);
-    let truncated_chars = text.len() - end;
+    let head_end = text.floor_char_boundary(max_chars * 2 / 5);
+    let tail_start = text.ceil_char_boundary(text.len() - (max_chars - head_end));
+    let truncated_chars = tail_start - head_end;
     format!(
-        "{}\n\n[... {} more characters truncated]",
-        &text[..end],
-        truncated_chars
+        "{}\n\n[... {} characters truncated ...]\n\n{}",
+        &text[..head_end],
+        truncated_chars,
+        &text[tail_start..]
     )
 }

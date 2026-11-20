@@ -32,8 +32,23 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
     let mut messages: Vec<serde_json::Value> = Vec::new();
     let mut historical_calls = HashSet::new();
     let mut has_historical_results = false;
+    // Images taken out of error tool results, sent after the turn's results.
+    let mut error_images: Vec<serde_json::Value> = Vec::new();
+    // Absent model metadata keeps the native Claude assumption (vision).
+    let supports_image = config
+        .model_config
+        .as_ref()
+        .is_none_or(|model| model.supports_image());
+    let history = if supports_image {
+        std::borrow::Cow::Borrowed(config.messages.as_slice())
+    } else {
+        std::borrow::Cow::Owned(without_images(&config.messages))
+    };
 
-    for msg in &config.messages {
+    for msg in history.iter() {
+        if !matches!(msg, Message::ToolResult { .. }) {
+            flush_error_images(&mut messages, &mut error_images);
+        }
         match msg {
             Message::User { content, .. } => {
                 let blocks = content_to_anthropic(content);
@@ -90,18 +105,49 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
                     ));
                     continue;
                 }
-                let result_content = if content.iter().any(|c| matches!(c, Content::Image { .. })) {
+                let has_image = content.iter().any(|c| matches!(c, Content::Image { .. }));
+                if *is_error && has_image {
+                    // Anthropic rejects an error tool_result holding anything
+                    // but text. Keep the text with a note and send the images
+                    // after all of this turn's results, which must lead the
+                    // user message.
+                    let tool_use_id = normalize_tool_id(tool_call_id);
+                    messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": error_result_text(content),
+                            "is_error": true,
+                        }],
+                    }));
+                    error_images.push(serde_json::json!({
+                        "type": "text",
+                        "text": format!(
+                            "Images from the error result of tool call {tool_use_id} ({tool_name}):"
+                        ),
+                    }));
+                    error_images.extend(content_to_anthropic_iter(
+                        content
+                            .iter()
+                            .filter(|block| matches!(block, Content::Image { .. })),
+                    ));
+                    continue;
+                }
+                let result_content = if has_image {
                     // Multi-content with images: use array format
                     serde_json::json!(content_to_anthropic(content))
                 } else {
-                    // Text-only: use string shorthand
+                    // Text-only: use string shorthand. Every text block is
+                    // kept; tools may return output in several blocks.
                     let text = content
                         .iter()
-                        .find_map(|c| match c {
-                            Content::Text { text } => Some(text.clone()),
+                        .filter_map(|c| match c {
+                            Content::Text { text } => Some(text.as_str()),
                             _ => None,
                         })
-                        .unwrap_or_default();
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     serde_json::json!(text)
                 };
 
@@ -109,7 +155,7 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
-                        "tool_use_id": tool_call_id,
+                        "tool_use_id": normalize_tool_id(tool_call_id),
                         "content": result_content,
                         "is_error": is_error,
                     }],
@@ -117,6 +163,7 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
             }
         }
     }
+    flush_error_images(&mut messages, &mut error_images);
 
     // Merge consecutive messages with the same role — Anthropic API requires
     // strict user/assistant alternation. Consecutive same-role messages can
@@ -127,10 +174,17 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
     // Prompt caching — place cache_control breakpoints based on CacheConfig.
     //
     // Anthropic caches the full prefix (tools → system → messages) up to each
-    // breakpoint. We use up to 3 breakpoints:
+    // breakpoint, and allows four. We use:
     //   1. System prompt (stable across turns)
     //   2. Last tool definition (tools rarely change)
-    //   3. Second-to-last message (conversation history grows, cache the prefix)
+    //   3. Last user message: this request's new input (usually the tool
+    //      results) is written to the cache, so the next request reads it
+    //      instead of processing it again.
+    //   4. The user message before it, which the previous request wrote.
+    //      Each request appends an assistant turn and a user turn, so this
+    //      breakpoint lands exactly on the previous request's entry. A lookup
+    //      only walks back about 20 blocks, so a breakpoint on the assistant
+    //      turn would miss that entry once a tool batch is large.
     //
     // When caching is disabled or strategy is Disabled, no markers are added.
     // -----------------------------------------------------------------------
@@ -146,24 +200,19 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
         } => (*cache_system, *cache_tools, *cache_messages),
     };
 
-    // Breakpoint 3: scan backwards from second-to-last message to find one with
-    // non-empty content to place the cache breakpoint on
-    if caching_enabled && cache_messages && messages.len() >= 2 {
-        for idx in (0..messages.len() - 1).rev() {
-            if let Some(content) = messages[idx]["content"].as_array_mut() {
-                if let Some(last_block) = content.last_mut() {
-                    let is_empty_text = last_block.get("type").and_then(|t| t.as_str())
-                        == Some("text")
-                        && last_block
-                            .get("text")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("")
-                            .is_empty();
-                    if !is_empty_text {
-                        last_block["cache_control"] = serde_json::json!({"type": "ephemeral"});
-                        break;
-                    }
-                }
+    // Breakpoints 3 and 4: the last two user messages with a cacheable block.
+    if caching_enabled && cache_messages {
+        let mut placed = 0;
+        for message in messages
+            .iter_mut()
+            .rev()
+            .filter(|message| message["role"] == "user")
+        {
+            if placed == MESSAGE_CACHE_BREAKPOINTS {
+                break;
+            }
+            if mark_cache_breakpoint(message) {
+                placed += 1;
             }
         }
     }
@@ -487,7 +536,7 @@ fn content_to_anthropic_iter<'a>(
                     };
                     serde_json::json!({
                         "type": "tool_use",
-                        "id": id,
+                        "id": normalize_tool_id(id),
                         "name": name,
                         "input": input,
                     })
@@ -521,6 +570,141 @@ fn is_malformed_tool_input(value: &serde_json::Value) -> bool {
 
 fn is_legacy_empty_response(content: &[Content]) -> bool {
     matches!(content, [Content::Text { text }] if text == "[empty response]")
+}
+
+/// Note left in an error tool result where its images were taken out.
+const ERROR_IMAGE_NOTE: &str = "(image attached after the tool results)";
+
+/// Text of an error tool result, with each run of images replaced by a note.
+fn error_result_text(content: &[Content]) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let mut after_image = false;
+    for block in content {
+        match block {
+            Content::Text { text } => {
+                parts.push(text);
+                after_image = false;
+            }
+            Content::Image { .. } if !after_image => {
+                parts.push(ERROR_IMAGE_NOTE);
+                after_image = true;
+            }
+            _ => {}
+        }
+    }
+    parts.join("\n")
+}
+
+/// Send the pending error-result images as a user message. Adjacent user
+/// messages are merged later, so they land after the turn's tool results.
+fn flush_error_images(messages: &mut Vec<serde_json::Value>, pending: &mut Vec<serde_json::Value>) {
+    if pending.is_empty() {
+        return;
+    }
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": std::mem::take(pending),
+    }));
+}
+
+/// Breakpoints placed on messages; the other two go to system and tools.
+const MESSAGE_CACHE_BREAKPOINTS: usize = 2;
+
+/// Put `cache_control` on the message's last block that can carry it.
+/// An empty text block caches nothing.
+fn mark_cache_breakpoint(message: &mut serde_json::Value) -> bool {
+    let Some(content) = message["content"].as_array_mut() else {
+        return false;
+    };
+    let Some(block) = content.iter_mut().rev().find(|block| {
+        match block.get("type").and_then(serde_json::Value::as_str) {
+            Some("text") => block
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|text| !text.is_empty()),
+            _ => true,
+        }
+    }) else {
+        return false;
+    };
+    block["cache_control"] = serde_json::json!({"type": "ephemeral"});
+    true
+}
+
+/// Anthropic requires tool ids to match `^[a-zA-Z0-9_-]{1,64}$`. Other
+/// providers emit ids outside that set (Kimi uses `functions.bash:0`), and a
+/// session switched to Claude replays them. The mapping is deterministic, so
+/// a call and its result stay paired; valid ids pass through unchanged.
+/// An id longer than the limit keeps a prefix plus a hash of the whole id,
+/// since parallel calls often differ only at the end (`...:0`, `...:1`).
+pub fn normalize_tool_id(id: &str) -> std::borrow::Cow<'_, str> {
+    const MAX_LEN: usize = 64;
+    // A `_` separator and 16 hex digits.
+    const HASH_LEN: usize = 17;
+    let valid = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+    if id.len() <= MAX_LEN && id.chars().all(valid) {
+        return std::borrow::Cow::Borrowed(id);
+    }
+    let cleaned: String = id.chars().map(|c| if valid(c) { c } else { '_' }).collect();
+    if cleaned.len() <= MAX_LEN {
+        return std::borrow::Cow::Owned(cleaned);
+    }
+    let prefix = &cleaned[..MAX_LEN - HASH_LEN];
+    std::borrow::Cow::Owned(format!("{prefix}_{:016x}", fnv1a64(id.as_bytes())))
+}
+
+/// FNV-1a: stable across builds and processes, unlike `DefaultHasher`, so a
+/// replayed id maps the same way every time and cached prefixes still match.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+/// Replace images with a note for models that do not accept image input,
+/// as the OpenAI transports already do. Sending them gets the whole request
+/// rejected by text-only Anthropic-compatible endpoints.
+fn without_images(messages: &[Message]) -> Vec<Message> {
+    const NOTE: &str = "[Image omitted: the current model does not support image input.]";
+    let strip = |content: &[Content]| -> Vec<Content> {
+        content
+            .iter()
+            .map(|block| match block {
+                Content::Image { .. } => Content::Text { text: NOTE.into() },
+                other => other.clone(),
+            })
+            .collect()
+    };
+    messages
+        .iter()
+        .map(|message| match message {
+            Message::User {
+                content,
+                timestamp,
+                provenance,
+            } => Message::User {
+                content: strip(content),
+                timestamp: *timestamp,
+                provenance: provenance.clone(),
+            },
+            Message::ToolResult {
+                tool_call_id,
+                tool_name,
+                content,
+                is_error,
+                timestamp,
+                retention,
+            } => Message::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.clone(),
+                content: strip(content),
+                is_error: *is_error,
+                timestamp: *timestamp,
+                retention: *retention,
+            },
+            other => other.clone(),
+        })
+        .collect()
 }
 
 /// Merge consecutive messages that share the same `role`.

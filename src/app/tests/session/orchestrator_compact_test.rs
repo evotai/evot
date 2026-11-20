@@ -369,7 +369,7 @@ async fn manual_compaction_uses_shared_pi_style_serialization() -> TestResult {
     assert!(prompt.contains("[Assistant tool calls]: read("));
     assert!(prompt.contains("src/gateway/retry.rs"));
     assert!(prompt.contains("[Tool result]:"));
-    assert!(prompt.contains("more characters truncated"));
+    assert!(prompt.contains("characters truncated"));
     assert!(!prompt.contains(&"x".repeat(3_000)));
     Ok(())
 }
