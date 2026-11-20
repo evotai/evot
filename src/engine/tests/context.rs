@@ -8,6 +8,8 @@ mod dsl;
 mod executor;
 #[path = "context/history.rs"]
 mod history;
+#[path = "context/image_budget.rs"]
+mod image_budget;
 #[path = "context/limits.rs"]
 mod limits;
 #[path = "context/memory.rs"]

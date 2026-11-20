@@ -223,18 +223,22 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
         .map(|m| m.max_tokens())
         .unwrap_or_else(|| config.requested_max_tokens());
 
-    // Budget thinking expands an explicit visible-output cap first; the final
-    // request remains bounded by the model's independent output limit.
-    let (requested_max_tokens, requested_thinking_budget) =
-        if thinking_level != ThinkingLevel::Off && thinking_wire.is_none() {
-            crate::provider::thinking::adjust_max_tokens_for_thinking(
-                config.max_tokens,
-                model_max,
-                thinking_level,
-            )
-        } else {
-            (config.requested_max_tokens(), 0)
-        };
+    // Every wire that sends `budget_tokens` (budget-only and the `enabled`
+    // effort wires) expands an explicit visible-output cap by the budget first,
+    // then clamps the budget to leave room for the answer, so the request
+    // never carries `budget_tokens >= max_tokens`. Only adaptive thinking has
+    // no budget. The final request stays bounded by the model's output limit.
+    let sends_budget = thinking_level != ThinkingLevel::Off
+        && !matches!(thinking_wire, Some(AnthropicThinkingWire::Adaptive));
+    let (requested_max_tokens, requested_thinking_budget) = if sends_budget {
+        crate::provider::thinking::adjust_max_tokens_for_thinking(
+            config.max_tokens,
+            model_max,
+            thinking_level,
+        )
+    } else {
+        (config.requested_max_tokens(), 0)
+    };
     let max_tokens = config.clamp_max_tokens_to_model(requested_max_tokens);
     let thinking_budget = requested_thinking_budget
         .min(max_tokens.saturating_sub(crate::provider::thinking::MIN_OUTPUT_AFTER_THINKING));
@@ -294,20 +298,25 @@ pub fn build_request_body(config: &StreamConfig, is_oauth: bool) -> serde_json::
             // Effort-based thinking: the model accepts `output_config.effort`.
             // The wire variant in the model profile fully describes the shape;
             // the request builder only assembles what the variant prescribes.
-            body["thinking"] = match wire {
-                AnthropicThinkingWire::Adaptive => serde_json::json!({
-                    "type": "adaptive",
-                    "display": "summarized",
-                }),
-                AnthropicThinkingWire::Enabled | AnthropicThinkingWire::DeepSeek => {
-                    let budget =
-                        crate::provider::thinking::anthropic_thinking_budget(thinking_level);
-                    serde_json::json!({
-                        "type": "enabled",
-                        "budget_tokens": budget,
-                    })
+            match wire {
+                AnthropicThinkingWire::Adaptive => {
+                    body["thinking"] = serde_json::json!({
+                        "type": "adaptive",
+                        "display": "summarized",
+                    });
                 }
-            };
+                AnthropicThinkingWire::Enabled | AnthropicThinkingWire::DeepSeek => {
+                    // Same rule as budget-only thinking: when the output cap
+                    // cannot fit the minimum budget plus visible output, omit
+                    // the block rather than send an invalid budget.
+                    if thinking_budget >= crate::provider::thinking::MIN_THINKING_BUDGET {
+                        body["thinking"] = serde_json::json!({
+                            "type": "enabled",
+                            "budget_tokens": thinking_budget,
+                        });
+                    }
+                }
+            }
             if let Some(effort) = crate::provider::thinking::anthropic_effort(
                 thinking_level,
                 config.model_config.as_ref(),

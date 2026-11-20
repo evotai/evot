@@ -2,6 +2,7 @@
 
 pub mod compaction;
 pub mod history;
+pub mod image_budget;
 pub mod limits;
 pub mod sanitize;
 pub mod tokens;
@@ -42,6 +43,9 @@ pub use compaction::DEFAULT_SUMMARY_MAX_BYTES;
 pub use compaction::DEFAULT_SUMMARY_RESERVE_TOKENS;
 pub use compaction::SUMMARIZER_INPUT_MAX_BYTES;
 pub use history::transform_messages_for_model;
+pub use image_budget::inline_image_bytes;
+pub use image_budget::limit_inline_images;
+pub use image_budget::DEFAULT_INLINE_IMAGE_MAX_BYTES;
 pub use limits::ExecutionLimits;
 pub use limits::ExecutionTracker;
 pub use limits::IdleClock;

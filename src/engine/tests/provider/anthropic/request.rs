@@ -408,6 +408,63 @@ fn test_gpt_5_6_anthropic_route_uses_enabled_wire_with_effort() {
 }
 
 #[test]
+fn test_enabled_wire_budget_fits_inside_small_explicit_max_tokens() {
+    // Compaction's turn-prefix summary asks for 2000 output tokens at Low.
+    // The `enabled` effort wire used to send budget_tokens 2048 with
+    // max_tokens 2000, which the gateway rejects with HTTP 400.
+    for model in [
+        "gemini-4-neon",
+        "gemini-4-carbon",
+        "glm-5.3",
+        "kimi-k3",
+        "gpt-5.6-sol",
+    ] {
+        let config = StreamConfigBuilder::anthropic()
+            .model(model)
+            .model_config(ModelConfig::anthropic(model, model))
+            .max_tokens(2000)
+            .thinking(ThinkingLevel::Low)
+            .build();
+        let body = build_request_body(&config, false);
+        let max_tokens = body["max_tokens"].as_u64().unwrap_or(0);
+        let budget = body["thinking"]["budget_tokens"].as_u64().unwrap_or(0);
+        assert_eq!(body["thinking"]["type"], "enabled", "{model}");
+        assert_eq!(budget, 2048, "{model}");
+        assert_eq!(max_tokens, 2000 + 2048, "{model}");
+        assert!(
+            budget + 1024 <= max_tokens,
+            "{model}: {budget} vs {max_tokens}"
+        );
+    }
+}
+
+#[test]
+fn test_enabled_wire_budget_never_reaches_max_tokens() {
+    for level in [
+        ThinkingLevel::Minimal,
+        ThinkingLevel::Low,
+        ThinkingLevel::Medium,
+        ThinkingLevel::High,
+        ThinkingLevel::Max,
+    ] {
+        for cap in [1, 1024, 2000, 4096, 40_000] {
+            let config = StreamConfigBuilder::anthropic()
+                .model("gemini-4-neon")
+                .model_config(ModelConfig::anthropic("gemini-4-neon", "Gemini 4 Neon"))
+                .max_tokens(cap)
+                .thinking(level)
+                .build();
+            let body = build_request_body(&config, false);
+            let max_tokens = body["max_tokens"].as_u64().unwrap_or(0);
+            if let Some(budget) = body["thinking"]["budget_tokens"].as_u64() {
+                assert!(budget >= 1024, "{level:?} cap {cap}");
+                assert!(budget + 1024 <= max_tokens, "{level:?} cap {cap}");
+            }
+        }
+    }
+}
+
+#[test]
 fn test_anthropic_request_omits_temperature() {
     let config = StreamConfigBuilder::anthropic()
         .model("claude-sonnet-4-5")

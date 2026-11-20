@@ -94,12 +94,13 @@ pub(super) async fn stream_assistant_response(
     // thinking survives only for the exact provider/model/protocol that emitted
     // it; thinking from any other model is dropped.
     let (target_provider, target_model, target_api) = target_model(config);
-    let mut llm_messages = crate::context::transform_messages_for_model(
+    let llm_messages = crate::context::transform_messages_for_model(
         llm_messages,
         &target_provider,
         &target_model,
         target_api,
     );
+    let mut llm_messages = limit_request_images(llm_messages).await;
 
     // Build tool definitions
     let tool_defs = build_tool_definitions(context, &config.model);
@@ -655,5 +656,37 @@ fn target_model(config: &AgentLoopConfig) -> (String, String, ApiProtocol) {
             config.model.clone(),
             ApiProtocol::OpenAiCompletions,
         ),
+    }
+}
+
+/// Bound the base64 bytes of inline images in one request so a long visual
+/// session does not exceed the gateway's body limit. Sizing path images reads
+/// file metadata, so it runs on the blocking pool. If that worker fails, the
+/// request goes out unchanged rather than losing its messages.
+async fn limit_request_images(messages: Vec<Message>) -> Vec<Message> {
+    let has_images = messages.iter().any(|message| match message {
+        Message::User { content, .. } | Message::ToolResult { content, .. } => content
+            .iter()
+            .any(|block| matches!(block, Content::Image { .. })),
+        Message::Assistant { .. } => false,
+    });
+    if !has_images {
+        return messages;
+    }
+    let input = messages.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::context::limit_inline_images(
+            input,
+            crate::context::DEFAULT_INLINE_IMAGE_MAX_BYTES,
+            crate::context::inline_image_bytes,
+        )
+    })
+    .await
+    {
+        Ok(limited) => limited,
+        Err(error) => {
+            tracing::warn!(%error, "image budget worker failed; sending images unchanged");
+            messages
+        }
     }
 }
