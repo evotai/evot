@@ -288,6 +288,26 @@ fn gemini_4_argon_profile_matches_models_dev_contract() {
 }
 
 #[test]
+fn gemini_4_neon_profile_adds_xhigh_and_larger_output() {
+    use evotengine::ThinkingLevel::*;
+
+    for id in ["gemini-4-neon", "google/gemini-4-neon"] {
+        let neon = ModelConfig::openai(id, "Gemini 4 Neon");
+        assert_eq!(neon.context_window(), 983_040, "{id}");
+        assert_eq!(neon.advertised_context_window(), 1_048_576, "{id}");
+        assert_eq!(neon.max_tokens(), 65_536, "{id}");
+        assert_eq!(neon.input(), [InputModality::Text, InputModality::Image]);
+        assert_eq!(neon.supported_thinking_levels(), vec![
+            Low, Medium, High, Xhigh
+        ]);
+        assert_eq!(neon.default_thinking_level(), Medium, "{id}");
+        assert!(!neon.can_disable_thinking(), "{id}");
+        assert_eq!(neon.clamp_thinking_level(Max), Xhigh, "{id}");
+        assert_eq!(neon.effective_thinking_level(Off), Low, "{id}");
+    }
+}
+
+#[test]
 fn kimi_profiles_match_catalog_contracts() {
     for id in ["k2p7", "kimi-for-coding", "kimi-for-coding-highspeed"] {
         let config = ModelConfig::anthropic(id, id);

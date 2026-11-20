@@ -31,11 +31,31 @@ const GEMINI_4_ARGON: ModelProfile = ModelProfile {
     ..BASE
 };
 
+// Gemini 4 Neon adds an `xhigh` effort tier and a 65_536 output cap on both
+// the Gemini API and Vertex (models.dev `google` / `google-vertex`
+// `reasoning_options`: effort low / medium / high / xhigh, no toggle).
+const GEMINI_4_NEON_LEVELS: &[(ThinkingLevel, Option<&str>)] = &[
+    (ThinkingLevel::Low, Some("low")),
+    (ThinkingLevel::Medium, Some("medium")),
+    (ThinkingLevel::High, Some("high")),
+    (ThinkingLevel::Xhigh, Some("xhigh")),
+];
+const GEMINI_4_NEON: ModelProfile = ModelProfile {
+    max_input_tokens: 983_040,
+    max_output_tokens: 65_536,
+    reasoning: ReasoningProfile {
+        levels: GEMINI_4_NEON_LEVELS,
+        ..GEMINI_4_REASONING
+    },
+    ..GEMINI_4_ARGON
+};
+
 #[rustfmt::skip]
 const PROFILES: &[(&str, ModelProfile)] = &[
     ("gemini-4-argon", GEMINI_4_ARGON),
     // models.dev `google`: same window, output cap and effort ladder as Argon.
     ("gemini-4-carbon", GEMINI_4_ARGON),
+    ("gemini-4-neon", GEMINI_4_NEON),
 ];
 
 pub(super) fn resolve(id: &str) -> Option<ModelProfile> {

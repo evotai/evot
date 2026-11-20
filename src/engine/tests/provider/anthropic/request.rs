@@ -365,6 +365,24 @@ fn test_gemini_4_anthropic_route_sends_effort_with_budget() {
 }
 
 #[test]
+fn test_gemini_4_neon_anthropic_route_sends_xhigh_effort() {
+    for (level, effort) in [
+        (ThinkingLevel::High, "high"),
+        (ThinkingLevel::Xhigh, "xhigh"),
+        (ThinkingLevel::Max, "xhigh"),
+    ] {
+        let config = StreamConfigBuilder::anthropic()
+            .model("gemini-4-neon")
+            .model_config(ModelConfig::anthropic("gemini-4-neon", "Gemini 4 Neon"))
+            .thinking(level)
+            .build();
+        let body = build_request_body(&config, false);
+        assert_eq!(body["thinking"]["type"], "enabled", "{level:?}");
+        assert_eq!(body["output_config"]["effort"], effort, "{level:?}");
+    }
+}
+
+#[test]
 fn test_glm_5_3_thinking_uses_enabled_wire_with_effort_and_budget() {
     let config = StreamConfigBuilder::anthropic()
         .model("glm-5.3")
