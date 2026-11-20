@@ -1238,7 +1238,10 @@ describe('term stream machine', () => {
         error: 'network error',
       },
     }, { termRows: 24 })
-    const text = update.commitLines.map(l => l.text).join('\n')
+    expect(update.commitLines).toEqual([])
+    // Held until the retry settles; the end of the run releases it.
+    const ended = reduceRunEvent(update.state, { kind: 'error', payload: { message: 'network error' } }, { termRows: 24 })
+    const text = ended.commitLines.map(l => l.text).join('\n')
     expect(text).toContain('✦ llm  retry')
     expect(text).toContain('\u21bb \u00b7 retrying in 1 second \u00b7 attempt 1/3')
     expect(text).toContain('Connection interrupted')
@@ -1321,7 +1324,11 @@ describe('term stream machine', () => {
       kind: 'llm_call_retry',
       payload: { attempt: 1, max_retries: 3, retry_delay_ms: 500, error: 'rate limited' },
     }, { termRows: 24 })
-    const text = update.commitLines.map(l => l.text).join('\n')
+    const failedAgain = reduceRunEvent(update.state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'model', turn: 1, attempt: 1, error: 'rate limited', metrics: { duration_ms: 10 } },
+    }, { termRows: 24 })
+    const text = failedAgain.commitLines.map(l => l.text).join('\n')
     expect(text).toContain('✦ llm  retry')
     expect(text).toContain('Rate limited')
   })
@@ -1341,21 +1348,27 @@ describe('term stream machine', () => {
       payload: { attempt: 1, max_retries: 10, retry_delay_ms: 2000, error: err },
     }, { termRows: 24 })
     state = first.state
-    const firstText = first.commitLines.map(l => l.text).join('\n')
-    expect(firstText).toContain('✦ llm  retry')
-    expect(firstText).toContain('Model provider overloaded')
+    // The first retry is held: one recovered blip never reaches scrollback.
+    expect(first.commitLines).toEqual([])
     expect(state.spinnerState.phase).toBe('retrying')
     expect(state.spinnerState.retryAttempt).toBe(1)
     expect(state.spinnerState.retryMaxAttempts).toBe(10)
 
-    // Attempts 2..4: nothing new reaches scrollback.
+    // Attempt 2 releases the one card; attempts 3..4 add nothing.
     for (const [attempt, delay] of [[2, 3000], [3, 9000], [4, 18000]] as const) {
       const next = reduceRunEvent(state, {
         kind: 'llm_call_retry',
         payload: { attempt, max_retries: 10, retry_delay_ms: delay, error: err },
       }, { termRows: 24 })
       state = next.state
-      expect(next.commitLines).toEqual([])
+      if (attempt === 2) {
+        const released = next.commitLines.map(l => l.text).join('\n')
+        expect(released).toContain('✦ llm  retry')
+        expect(released).toContain('Model provider overloaded')
+        expect(released).toContain('attempt 1/10')
+      } else {
+        expect(next.commitLines).toEqual([])
+      }
       expect(state.spinnerState.retryAttempt).toBe(attempt)
       expect(state.spinnerState.phase).toBe('retrying')
     }
@@ -1385,8 +1398,13 @@ describe('term stream machine', () => {
       kind: 'llm_call_retry',
       payload: { attempt: 1, max_retries: 10, retry_delay_ms: 2000, error: err },
     }, { termRows: 24 })
+    // The retry's own failure releases both held cards.
+    const failedAgain = reduceRunEvent(retry.state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'claude-opus-5', turn: 27, attempt: 1, error: err, metrics: { duration_ms: 830 } },
+    }, { termRows: 24 })
 
-    const text = [...failed.commitLines, ...retry.commitLines].map(l => l.text).join('\n')
+    const text = [...failed.commitLines, ...retry.commitLines, ...failedAgain.commitLines].map(l => l.text).join('\n')
     expect(text.split('Model provider overloaded').length - 1).toBe(1)
     // Both cards still appear; only the repeated sentence is gone.
     expect(text).toContain('✦ llm  claude-opus-5')
@@ -1418,7 +1436,11 @@ describe('term stream machine', () => {
       kind: 'llm_call_retry',
       payload: { attempt: 2, max_retries: 10, retry_delay_ms: 3000, error: err },
     }, { termRows: 24 })
-    expect(suppressed.commitLines).toEqual([])
+    // Attempt 2 only releases the held attempt-1 card; it adds none of its own.
+    const released = suppressed.commitLines.map(l => l.text).join('\n')
+    expect(released.split('✦ llm  retry').length - 1).toBe(1)
+    expect(released).toContain('attempt 1/10')
+    expect(released).not.toContain('attempt 2/10')
 
     // A genuinely new call starts at attempt 0 and earns a card again.
     state = reduceRunEvent(suppressed.state, {
@@ -1432,7 +1454,64 @@ describe('term stream machine', () => {
       kind: 'llm_call_retry',
       payload: { attempt: 1, max_retries: 10, retry_delay_ms: 2000, error: err },
     }, { termRows: 24 })
-    expect(announced.commitLines.map(l => l.text).join('\n')).toContain('✦ llm  retry')
+    expect(announced.state.deferredRetry?.commit.map(l => l.text).join('\n')).toContain('✦ llm  retry')
+  })
+
+  test('a one-off failure that the retry recovers from never reaches scrollback', () => {
+    const err = 'Network error: connection reset by peer'
+    const ctx = { termRows: 24 }
+    const steps: Array<Parameters<typeof reduceRunEvent>[1]> = [
+      { kind: 'llm_call_started', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 0 } },
+      { kind: 'assistant_delta', payload: { content_index: 0, content_type: 'text', delta: 'partial reply the user saw' } },
+      { kind: 'llm_call_completed', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 0, error: err, metrics: { duration_ms: 20100 } } },
+      { kind: 'llm_call_retry', payload: { turn: 33, attempt: 1, max_retries: 10, delay_ms: 2000, error: err } },
+      { kind: 'llm_call_started', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 1 } },
+      { kind: 'assistant_delta', payload: { content_index: 0, content_type: 'text', delta: 'final answer' } },
+      { kind: 'assistant_completed', payload: { content: [{ type: 'text', text: 'final answer' }], stop_reason: 'stop' } },
+      { kind: 'llm_call_completed', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 1, metrics: { duration_ms: 900 } } },
+      { kind: 'run_finished', payload: {} },
+    ]
+    let state = createStreamMachineState(createInitialState('claude-opus-5.5', '/tmp'), createSpinnerState())
+    const committed: string[] = []
+    const notices: string[] = []
+    const logged: string[] = []
+    for (const event of steps) {
+      const update = reduceRunEvent(state, event, ctx)
+      state = update.state
+      committed.push(...update.commitLines.map(l => stripAnsi(l.text)))
+      notices.push(...update.noticeLines.map(l => stripAnsi(l.text)))
+      logged.push(...update.writeLines.map(l => stripAnsi(l.text)))
+      // While the retry is pending, the spinner is what reports it.
+      if (event.kind === 'llm_call_retry') expect(state.spinnerState.phase).toBe('retrying')
+    }
+    const text = committed.join('\n')
+    expect(text).toContain('final answer')
+    expect(text).not.toContain('Connection interrupted')
+    expect(text).not.toContain('✦ llm  retry')
+    expect(text).not.toContain('Discarded')
+    expect(notices).toEqual([])
+    expect(state.deferredRetry).toBeNull()
+    expect(state.lastLlmErrorMessage).toBeNull()
+    // screen.log still records the blip.
+    expect(logged.join('\n')).toContain(err)
+  })
+
+  test('stopping during the retry backoff still shows the held failure', () => {
+    const err = 'Network error: connection reset by peer'
+    let state = createStreamMachineState(createInitialState('m', '/tmp'), createSpinnerState())
+    state = reduceRunEvent(state, {
+      kind: 'llm_call_completed',
+      payload: { model: 'm', turn: 1, attempt: 0, error: err, metrics: { duration_ms: 10 } },
+    }, { termRows: 24 }).state
+    state = reduceRunEvent(state, {
+      kind: 'llm_call_retry',
+      payload: { turn: 1, attempt: 1, max_retries: 10, delay_ms: 2000, error: err },
+    }, { termRows: 24 }).state
+    const flushed = finishStreaming(state, true)
+    const text = flushed.lines.map(l => stripAnsi(l.text)).join('\n')
+    expect(text).toContain('Connection interrupted')
+    expect(text).toContain('✦ llm  retry')
+    expect(flushed.state.deferredRetry).toBeNull()
   })
 
   test('a recovered call keeps reporting its own errors', () => {
@@ -1453,8 +1532,10 @@ describe('term stream machine', () => {
       kind: 'llm_call_completed',
       payload: { model: 'claude-opus-5', turn: 28, error: 'API error: HTTP 500', metrics: { duration_ms: 120 } },
     }, { termRows: 24 })
-    // A bare 500 is the gateway's own failure, and the card says so.
-    expect(failed.commitLines.map(l => l.text).join('\n')).toContain('Gateway error, not the model provider')
+    // Not retried: the next event releases it. A bare 500 is the gateway's own
+    // failure, and the card says so.
+    const ended = reduceRunEvent(failed.state, { kind: 'error', payload: { message: 'API error: HTTP 500' } }, { termRows: 24 })
+    expect(ended.commitLines.map(l => l.text).join('\n')).toContain('Gateway error, not the model provider')
   })
 
   test('overflow card preserves the diagnosis before compaction starts', () => {
@@ -1541,7 +1622,8 @@ describe('term stream machine', () => {
       kind: 'llm_call_completed',
       payload: { model: 'claude-opus-5', turn: 27, error: err, metrics: { duration_ms: 830 } },
     }, { termRows: 24 })
-    expect(failed.commitLines).toEqual([])
+    // The second failure releases the held retry card; its own `✗` stays out.
+    expect(failed.commitLines.map(l => l.text).join('\n')).not.toContain('✦ llm  claude-opus-5')
 
     const terminal = reduceRunEvent(failed.state, {
       kind: 'error',

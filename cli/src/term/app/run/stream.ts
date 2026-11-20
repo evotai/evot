@@ -1,4 +1,4 @@
-import { providerFailurePresentation } from '../../../render/provider-error.js'
+import { providerFailurePresentation, type ProviderFailureKind } from '../../../render/provider-error.js'
 import { parsePrivacyStop, type PrivacyDetail } from '../../../render/privacy-notice.js'
 import { formatLongWaitError } from '../../../render/verbose.js'
 import { readSavedPrivacyCard } from '../../../native/contracts/privacy.js'
@@ -36,6 +36,18 @@ export interface StreamMachineState {
   /** Prevent duplicate sign-in prompts when the provider error is emitted as
    *  both an LLM completion and a terminal error event. */
   sessionRevokedHandled: boolean
+  /** Cards for a failed attempt the engine is retrying, held until the next
+   *  attempt settles. See `holdsDeferredRetry`. */
+  deferredRetry: DeferredRetry | null
+}
+
+/** Scrollback for one failed-and-retried attempt: the `✗` card, the discarded
+ *  partial reply notice and the `↻` card, in emission order. */
+interface DeferredRetry {
+  commit: OutputLine[]
+  notice: OutputLine[]
+  /** The engine announced a retry; until then only that announcement holds. */
+  retrying: boolean
 }
 
 export interface StreamContext {
@@ -102,6 +114,7 @@ export function createStreamMachineState(appState: AppState, spinnerState: Spinn
     retryCardShown: false,
     lastLlmErrorMessage: null,
     sessionRevokedHandled: false,
+    deferredRetry: null,
   }
 }
 
@@ -119,6 +132,36 @@ function legacyRetry(payload: Record<string, unknown>): { attempt: number; maxRe
     return undefined
   }
   return { attempt: num('attempt') ?? 0, maxRetries: num('max_retries') ?? 0, delayMs: num('retry_delay_ms', 'delay_ms') ?? 0 }
+}
+
+const PERMANENT_FAILURES: ReadonlySet<ProviderFailureKind> = new Set<ProviderFailureKind>([
+  'authentication', 'invalid-request', 'cyber-policy', 'context-overflow', 'configuration', 'backend-version',
+  'model-not-found', 'not-found', 'privacy-blocked', 'privacy-unavailable', 'quota',
+])
+
+/**
+ * Whether `event` belongs to the retry of a held failure: the first retry
+ * announcement, the re-attempt's start, and its streamed output. A one-off
+ * blip that the next attempt recovers from is noise, so its cards stay out of
+ * scrollback (screen.log keeps them). Anything else — a second failure, a
+ * long wait, compaction, the end of the run — releases them in order.
+ */
+function holdsDeferredRetry(event: RunEvent, known: KnownRunEvent | null, retrying: boolean): boolean {
+  if (known?.kind === 'llm_call_retry') return known.payload.attempt <= 1
+  if (event.kind === 'api_retry') return legacyRetry(event.payload ?? {}).attempt <= 1
+  // A failure the engine gives up on is followed by its own error message
+  // (`assistant_completed`), not a retry; that must release it at once.
+  if (!retrying) return false
+  switch (known?.kind) {
+    case 'llm_call_started': return known.payload.attempt > 0
+    case 'assistant_delta':
+    case 'assistant_tool_call':
+    case 'assistant_completed':
+    case 'privacy_card':
+      return true
+    default:
+      return false
+  }
 }
 
 export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: StreamContext): StreamUpdate {
@@ -153,6 +196,21 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       expandedCommitLines.push(...flushed.expandedLines)
     }
   }
+
+  let deferred = prev.deferredRetry
+  if (deferred) {
+    if (known?.kind === 'llm_call_completed' && !known.payload.error) {
+      // The retry recovered. The held error is no longer news, and must not
+      // swallow a later `error` event that happens to carry the same text.
+      deferred = null
+      capturedLlmError = null
+    } else if (!holdsDeferredRetry(event, known, deferred.retrying)) {
+      commitLines.push(...deferred.commit)
+      noticeLines.push(...deferred.notice)
+      deferred = null
+    }
+  }
+  const hold = (): DeferredRetry => (deferred ??= { commit: [], notice: [], retrying: false })
 
   let switchPrefix: ReturnType<typeof settleModelSwitch> | undefined
   let rejectedSwitch = false
@@ -205,9 +263,14 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
           expandedLines: undefined,
         }
       : flushStreaming(state)
-    if (abandonsPartial) noticeLines.push(...flushed.lines)
     const activeLlmCall = event.kind === 'llm_call_started' || event.kind === 'llm_call_retry' || event.kind === 'api_retry'
     const isRetryEvent = event.kind === 'llm_call_retry' || event.kind === 'api_retry'
+    // The first retry of a call joins the held failure; once a storm has been
+    // released, later attempts report directly (and mostly stay silent).
+    const held = isRetryEvent && (deferred !== null || !prev.retryCardShown)
+    if (held) hold().retrying = true
+    const target = held ? hold() : { commit: commitLines, notice: noticeLines }
+    if (abandonsPartial) target.notice.push(...flushed.lines)
     // A bounded retry re-emits `llm_call_started` for every attempt — only a
     // long wait suppresses it. So the reset keys off `attempt`, not the event
     // kind: keying off the kind would clear the flag on attempt 2 and bring
@@ -238,7 +301,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
           : flushed.state.spinnerState,
     }
     if (startsFreshCall) state = { ...state, spinnerState: { ...state.spinnerState, recoveryStartedAt: undefined, retryError: undefined } }
-    commitLines.push(...flushed.lines)
+    target.commit.push(...flushed.lines)
     mergeFlushExpanded(flushed)
     const newEvents = state.appState.verboseEvents.slice(prev.appState.verboseEvents.length)
     for (const evt of newEvents) {
@@ -254,7 +317,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
       // retry line knows.
       routeVerbose(
         isRetryEvent ? withoutRedundantErrorTail(evt.text, capturedLlmError) : evt.text,
-        { commit: commitLines, write: writeLines },
+        { commit: target.commit, write: writeLines },
       )
     }
     if (isRetryEvent) state = { ...state, retryCardShown: true }
@@ -418,12 +481,18 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     // beside the `↻` retry card, so each attempt printed the same error twice.
     // Once a storm has announced itself, the failures are what the countdown is
     // already reporting — keep them in the verbose stream instead.
-    const failedInsideStorm = state.retryCardShown && (known.payload.error?.length ?? 0) > 0
+    const error = known.payload.error ?? ''
+    const failed = error.length > 0
+    const failedInsideStorm = state.retryCardShown && failed
+    // Only a failure the engine could retry is worth holding; a permanent one
+    // (auth, overflow, privacy, ...) is the news and reports at once.
+    const mayRetry = failed && !PERMANENT_FAILURES.has(providerFailurePresentation({ error }).kind)
     const newEvents = state.appState.verboseEvents.slice(prev.appState.verboseEvents.length)
     for (const evt of newEvents) {
       const switchRejection = state.pendingSwitch?.failure === 'rejected'
       if (revokedEvent || failedInsideStorm || switchRejection) writeLines.push(...buildVerboseEvent(evt.text))
-      else routeVerbose(evt.text, { commit: commitLines, write: writeLines })
+      // A failure is held until the next event says whether it is retried.
+      else routeVerbose(evt.text, { commit: mayRetry ? hold().commit : commitLines, write: writeLines })
     }
   }
 
@@ -531,7 +600,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
   }
 
   return {
-    state: { ...state, lastLlmErrorMessage: capturedLlmError },
+    state: { ...state, lastLlmErrorMessage: capturedLlmError, deferredRetry: deferred },
     commitLines: switchPrefix ? [...switchPrefix.lines, ...commitLines] : commitLines,
     expandedCommitLines: switchPrefix
       ? [...(switchPrefix.expandedLines ?? switchPrefix.lines), ...(expandedCommitLines ?? commitLines)]
@@ -584,13 +653,16 @@ function settleModelSwitch(state: StreamMachineState, outcome: ModelSwitchOutcom
 
 /** Final stream flush, including a switch that never reached a response. */
 export function finishStreaming(state: StreamMachineState, interrupted = false): ReturnType<typeof flushStreaming> {
-  const settled = settleModelSwitch(state, interrupted ? 'interrupted' : state.pendingSwitch?.failure ?? 'unconfirmed')
+  // A run that stops mid-retry (Esc during the backoff) still owes the user
+  // the failure it was recovering from.
+  const held = state.deferredRetry?.commit ?? []
+  const settled = settleModelSwitch({ ...state, deferredRetry: null }, interrupted ? 'interrupted' : state.pendingSwitch?.failure ?? 'unconfirmed')
   const final = flushStreaming(settled.state)
-  if (settled.lines.length === 0) return final
+  if (settled.lines.length === 0 && held.length === 0) return final
   return {
     state: final.state,
-    lines: [...settled.lines, ...final.lines],
-    expandedLines: [...(settled.expandedLines ?? settled.lines), ...(final.expandedLines ?? final.lines)],
+    lines: [...held, ...settled.lines, ...final.lines],
+    expandedLines: [...held, ...(settled.expandedLines ?? settled.lines), ...(final.expandedLines ?? final.lines)],
   }
 }
 

@@ -205,17 +205,19 @@ test('a discarded partial reply leaves a visible notice instead of vanishing', (
     kind: 'llm_call_retry',
     payload: { attempt: 1, max_retries: 3, delay_ms: 10, error: 'retryable' },
   }, { termRows: 24 })
-  const text = retrying.commitLines.map(line => line.text).join('\n')
-  expect(text).not.toContain('half an answer')
-  expect(text).toContain('Discarded an incomplete reply (36 chars) — retrying the request')
+  // Held with the first retry: a recovering attempt never reaches scrollback.
+  expect(retrying.commitLines).toEqual([])
   expect(retrying.state.appState.currentAssistantContent).toEqual([])
 
-  // Attempts that failed before streaming anything stay silent.
+  // The second retry releases the notice; that attempt streamed nothing, so
+  // it adds no notice of its own.
   const silent = reduceRunEvent(retrying.state, {
     kind: 'llm_call_retry',
     payload: { attempt: 2, max_retries: 3, delay_ms: 10, error: 'retryable' },
   }, { termRows: 24 })
-  expect(silent.commitLines.map(line => line.text).join('\n')).not.toContain('Discarded')
+  const text = silent.commitLines.map(line => line.text).join('\n')
+  expect(text).not.toContain('half an answer')
+  expect(text.split('Discarded an incomplete reply (36 chars) — retrying the request').length - 1).toBe(1)
 
   expect(discardedPartialNotice([{ type: 'text', contentIndex: 0, text: '   \n' }], 'llm_call_retry')).toEqual([])
   expect(discardedPartialNotice([

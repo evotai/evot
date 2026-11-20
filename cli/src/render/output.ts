@@ -19,7 +19,7 @@ import { stripTaskSetup } from './task-label.js'
 import { formatCompactionCompleted } from './verbose.js'
 import { earlyWakeFromResult } from './loop-early-wake.js'
 import { countPlan, formatPlanCounts, formatPlanRows, parsePlanRecord, planProgressFromResult } from './loop-plan.js'
-import type { UICompaction, UIMessage, UIToolCall } from './message-types.js'
+import type { UICompaction, UIMessage, UIToolCall, VerboseEvent } from './message-types.js'
 
 // ---------------------------------------------------------------------------
 // Tool presentation — icon + primary argument per tool, followed by a stable
@@ -1056,23 +1056,51 @@ export function messagesToOutputLines(messages: UIMessage[], expanded: boolean =
     if (msg.verboseEvents) {
       let retryCardShown = false
       let lastErrorShown: string | null = null
+      // Mirrors the live hold: a call's first failure and its first retry wait
+      // for the next attempt. Recovered, they are dropped; failed again, they
+      // show once and the rest of the storm stays collapsed.
+      let held: VerboseEvent[] = []
+      let heldRetry = false
+      const show = (evt: VerboseEvent) => {
+        if (!isVisibleEvent(evt.text)) return
+        lines.push(...buildEventCard(withoutRedundantErrorTail(evt.text, lastErrorShown)))
+        lastErrorShown = errorTailOf(evt.text) ?? lastErrorShown
+      }
+      const release = () => {
+        for (const evt of held) show(evt)
+        held = []
+        heldRetry = false
+      }
       for (const evt of msg.verboseEvents) {
+        // A re-attempt's start belongs to the storm it retries.
+        if (evt.kind === 'llm_call' && /· retry \d+/u.test(evt.text)) continue
         const isRetry = evt.kind === 'llm_retry'
         const isFailedCall = evt.kind === 'llm_completed' && /^\[LLM\]\s+✗/u.test(evt.text)
         if (isRetry || isFailedCall) {
-          if (retryCardShown) continue
-          if (isRetry) retryCardShown = true
-        } else {
-          // Anything else — a successful call, a compaction — ends the storm,
-          // so a later independent failure is announced rather than swallowed.
-          retryCardShown = false
-          lastErrorShown = null
+          if (heldRetry) {
+            release()
+            continue
+          }
+          if (retryCardShown && held.length === 0) continue
+          if (isRetry) {
+            retryCardShown = true
+            heldRetry = true
+          }
+          held.push(evt)
+          continue
         }
-        if (!isVisibleEvent(evt.text)) continue
-        const text = withoutRedundantErrorTail(evt.text, lastErrorShown)
-        lines.push(...buildEventCard(text))
-        lastErrorShown = errorTailOf(evt.text) ?? lastErrorShown
+        // Anything else — a successful call, a compaction — ends the storm,
+        // so a later independent failure is announced rather than swallowed.
+        if (heldRetry && evt.kind === 'llm_completed' && /^\[LLM\]\s+✓/u.test(evt.text)) held = []
+        release()
+        retryCardShown = false
+        lastErrorShown = null
+        show(evt)
       }
+      // Assistant messages close on the reply's completion, so a retry still
+      // held here is the attempt that produced this message's content.
+      if (heldRetry && (msg.content?.length || msg.text.trim())) held = []
+      release()
     }
 
     if (msg.content) {

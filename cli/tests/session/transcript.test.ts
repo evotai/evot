@@ -288,8 +288,35 @@ describe('transcript conversion', () => {
     }]
 
     const rendered = messagesToOutputLines(messages).map(line => line.text).join('\n')
-    expect(rendered.split('Model provider overloaded').length - 1).toBe(1)
+    // The retry recovered, so it stays out, as it did live.
+    expect(rendered).not.toContain('Model provider overloaded')
     expect(rendered.split('Gateway error, not the model provider').length - 1).toBe(1)
     expect(rendered).toContain('turn 29')
+  })
+
+  test('a one-off failure the retry recovered from is not replayed', () => {
+    // In-memory messages close on the reply, so the recovered attempt's `✓`
+    // lands on the next message; the reply itself is the evidence.
+    const err = 'Network error: connection reset by peer'
+    const events = [
+      { kind: 'llm_call' as const, text: '[LLM] ● · claude-opus-5.5 · turn 33' },
+      { kind: 'llm_completed' as const, text: `[LLM] ✗ · claude-opus-5.5 · turn 33 · 20.1s\n    error     ${err}` },
+      { kind: 'llm_retry' as const, text: `[LLM] ↻ · retrying in 2 seconds · attempt 1/10\n    error     ${err}` },
+      { kind: 'llm_call' as const, text: '[LLM] ● · claude-opus-5.5 · turn 33 · retry 1' },
+    ]
+    const recovered = messagesToOutputLines([{
+      id: 'a1', role: 'assistant' as const, text: 'final answer', timestamp: 0, verboseEvents: events,
+    }]).map(line => line.text).join('\n')
+    expect(recovered).toContain('final answer')
+    expect(recovered).not.toContain('Connection interrupted')
+    expect(recovered).not.toContain('✦ llm  retry')
+
+    // The same attempt failing again shows the pair once.
+    const failedAgain = messagesToOutputLines([{
+      id: 'a1', role: 'assistant' as const, text: '', timestamp: 0,
+      verboseEvents: [...events, { kind: 'llm_completed' as const, text: `[LLM] ✗ · claude-opus-5.5 · turn 33 · 1.0s\n    error     ${err}` }],
+    }]).map(line => line.text).join('\n')
+    expect(failedAgain.split('Connection interrupted').length - 1).toBe(1)
+    expect(failedAgain.split('✦ llm  retry').length - 1).toBe(1)
   })
 })
