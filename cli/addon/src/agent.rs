@@ -27,21 +27,24 @@ use crate::tracing::init_tracing;
 pub struct NapiAgent {
     pub(crate) agent: Arc<Agent>,
     pub(crate) env_file_path: String,
-    startup_warning: Option<String>,
 }
 
 #[napi]
 impl NapiAgent {
-    /// Load config from disk and create an agent.
+    /// Load config from disk and create an agent. An explicit `model` or
+    /// `thinking_level` that cannot be honored fails creation.
     #[napi(factory)]
-    pub async fn create(model: Option<String>, env_file: Option<String>) -> Result<Self> {
+    pub async fn create(
+        model: Option<String>,
+        thinking_level: Option<String>,
+        env_file: Option<String>,
+    ) -> Result<Self> {
         init_tracing();
 
-        // A stale `--model` (removed from the catalog, typo) must not exit the
-        // process: the fixes (/login, model picker) live behind this startup.
-        let (config, startup_warning) = evot::api::Config::load_with_env_file(env_file.as_deref())
+        let config = evot::api::Config::load_with_env_file(env_file.as_deref())
             .map_err(|e| Error::from_reason(format!("config load failed: {e}")))?
-            .with_model_or_fallback(model);
+            .with_startup_selection(model.as_deref(), thinking_level.as_deref())
+            .map_err(|e| Error::from_reason(e.to_string()))?;
 
         let env_file_path = config.env_file_path.to_string_lossy().to_string();
         let agent = evot::api::build_agent(&config)
@@ -51,14 +54,7 @@ impl NapiAgent {
         Ok(Self {
             agent,
             env_file_path,
-            startup_warning,
         })
-    }
-
-    /// Non-fatal startup diagnostic (e.g. an ignored `--model`), if any.
-    #[napi(getter)]
-    pub fn startup_warning(&self) -> Option<String> {
-        self.startup_warning.clone()
     }
 
     /// Current model name.

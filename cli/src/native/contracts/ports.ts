@@ -31,8 +31,6 @@ export interface NativeForkedAgent { query(prompt: string, contentJson?: string 
 export interface NativeAgent {
   model: string
   readonly cwd: string
-  /** Non-fatal startup diagnostic (e.g. an ignored `--model`). Older addons omit it. */
-  readonly startupWarning?: string | null
   query(prompt: string, sessionId: string | null, mode: string | null, content: string | null, hostSpecs: string | null): Promise<NativeSubmitOutcome>
   createSession(): Promise<string>
   listSessions(limit: number | null): Promise<string>
@@ -80,6 +78,7 @@ export interface NativeAgent {
   cycleThinkingLevel(): string | null
   setThinkingLevel(level: string): string | null
   restoreThinkingLevel(level: string): void
+  applyThinkingLevel(level: string): void
   pinDefaultModel(provider: string, model: string): Promise<string | null>
   setLimits(turns: number | null, tokens: number | null, duration: number | null): void
   appendSystemPrompt(extra: string): void

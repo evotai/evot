@@ -105,8 +105,8 @@ function progressRelay(onProgress?: (progress: CloudPushProgress) => void): ((ra
 export class Agent {
   private constructor(private readonly raw: NativeAgent) {}
 
-  static async create(model?: string, envFile?: string): Promise<Agent> {
-    const raw = await RawAgent.create(model ?? null, envFile ?? null)
+  static async create(model?: string, thinkingLevel?: string, envFile?: string): Promise<Agent> {
+    const raw = await RawAgent.create(model ?? null, thinkingLevel ?? null, envFile ?? null)
     return new Agent(raw)
   }
 
@@ -120,11 +120,6 @@ export class Agent {
 
   get cwd(): string {
     return this.raw.cwd
-  }
-
-  /** Non-fatal startup diagnostic, e.g. a `--model` that no longer resolves. */
-  get startupWarning(): string | null {
-    return this.raw.startupWarning ?? null
   }
 
   async query(prompt: string, sessionId?: string, toolMode?: string, contentJson?: string, hostSpecsJson?: string): Promise<QueryStream> {
@@ -418,6 +413,11 @@ export class Agent {
     this.raw.restoreThinkingLevel(level)
   }
 
+  /** Apply an explicit `--thinking-level` without persisting it; throws when unsupported. */
+  applyThinkingLevel(level: string): void {
+    this.raw.applyThinkingLevel(level)
+  }
+
   /**
    * Apply a named thinking level and persist it as the default. Returns the new
    * display label, or null when the active model does not offer that tier — the
@@ -501,16 +501,16 @@ export function version(): string {
   return rawVersion()
 }
 
-export async function startServer(port?: number, model?: string, envFile?: string): Promise<void> {
-  return rawStartServer(port ?? null, model ?? null, envFile ?? null)
+export async function startServer(opts: { port?: number; model?: string; thinkingLevel?: string; envFile?: string }): Promise<void> {
+  return rawStartServer(opts.port ?? null, opts.model ?? null, opts.thinkingLevel ?? null, opts.envFile ?? null)
 }
 
 export type AcpTools = 'full' | 'readonly' | 'none'
 export type AcpPermission = 'ask' | 'allow'
 
 /** Serve ACP v1 on stdin/stdout until stdin closes. Stdout carries protocol frames only. */
-export async function runAcp(opts: { model?: string; envFile?: string; tools: AcpTools; permission: AcpPermission; ephemeral: boolean }): Promise<void> {
-  return rawRunAcp(opts.model ?? null, opts.envFile ?? null, opts.tools, opts.permission, opts.ephemeral)
+export async function runAcp(opts: { model?: string; thinkingLevel?: string; envFile?: string; tools: AcpTools; permission: AcpPermission; ephemeral: boolean }): Promise<void> {
+  return rawRunAcp(opts.model ?? null, opts.thinkingLevel ?? null, opts.envFile ?? null, opts.tools, opts.permission, opts.ephemeral)
 }
 
 import type { ServerInfo, LoginCodeResponse, AuthPollResult, CloudUser, AuthRefreshResult, CloudNotice } from './contracts/results.js'

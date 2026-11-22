@@ -2,7 +2,10 @@ import type { Agent } from './native/index.js'
 
 export interface CliOptions {
   command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami' | 'acp'
+  /** `--model`: startup model; wins over config, cloud defaults and a resumed session. */
   model?: string
+  /** `--thinking-level`: startup effort with the same precedence as `--model`. */
+  thinkingLevel?: string
   prompt?: string
   port?: number
   resume?: string
@@ -86,6 +89,7 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
     }
     if ((arg === '-f' || arg === '--file') && argv[i + 1]) { opts.files.push(argv[++i]); continue }
     if (arg === '--model' && argv[i + 1]) { opts.model = argv[++i]; continue }
+    if (arg === '--thinking-level' && argv[i + 1]) { opts.thinkingLevel = argv[++i]; continue }
     if (arg === '--env-file' && argv[i + 1]) { opts.envFile = argv[++i]; continue }
     if (arg === '--port' && argv[i + 1]) { opts.port = parseIntArg(argv[++i], '--port'); continue }
     if ((arg === '-r' || arg === '--resume') && argv[i + 1]) { opts.resume = argv[++i]; continue }
@@ -151,7 +155,10 @@ export async function printHelp() {
   console.log('Options:')
   console.log('  -p, --prompt <text>    Run one-shot prompt')
   console.log('  -f, --file <path>      Attach file/directory context (repeatable)')
-  console.log('  --model <name>         Override the model')
+  console.log('  --model <provider:model>')
+  console.log('                         Model for this run')
+  console.log('  --thinking-level <level>')
+  console.log('                         off | minimal | low | medium | high | xhigh | max')
   console.log('  --env-file <path>      Path to evot.env file')
   console.log('  --port <number>        Dashboard port (default: 8082)')
   console.log('  -r, --resume <id>      Resume or create a session by ID')
@@ -170,6 +177,12 @@ export async function printHelp() {
   console.log('  --version, -v          Show version')
   console.log('  --update               Update evot to latest version')
   console.log('  --help, -h             Show this help')
+  console.log()
+  console.log('--model and --thinking-level are independent startup overrides. Each wins')
+  console.log('over config, cloud defaults and the saved selection of a resumed session,')
+  console.log('and neither changes saved defaults; /model and Shift+Tab still change them')
+  console.log('later. A model that does not resolve, or a level it does not support, is')
+  console.log('an error.')
 }
 
 export function applyCliOpts(agent: Agent, opts: CliOptions): void {
@@ -186,7 +199,7 @@ export function applyCliOpts(agent: Agent, opts: CliOptions): void {
 export async function createAgent(opts: CliOptions): Promise<Agent> {
   try {
     const { Agent: AgentClass } = await import('./native/index.js')
-    const agent = await AgentClass.create(opts.model, opts.envFile)
+    const agent = await AgentClass.create(opts.model, opts.thinkingLevel, opts.envFile)
     applyCliOpts(agent, opts)
     return agent
   } catch (err: any) {

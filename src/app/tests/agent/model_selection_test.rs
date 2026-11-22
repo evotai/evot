@@ -258,10 +258,42 @@ fn configured_selection_without_reasoning_rejects_effort() -> TestResult {
     let snapshot = selection.select_configured(&config, "anthropic", "deepseek-chat", None)?;
     assert!(ModelSelection::supported_thinking_levels_for(&snapshot).is_empty());
     assert_eq!(ModelSelection::display_thinking_level_for(&snapshot), "");
-    assert!(selection
-        .select_configured(&config, "anthropic", "deepseek-chat", Some("high"))
-        .is_err());
+    let Err(error) =
+        selection.select_configured(&config, "anthropic", "deepseek-chat", Some("high"))
+    else {
+        return Err("effort accepted for a model without reasoning".into());
+    };
+    assert!(error.to_string().contains("(supported: off)"), "{error}");
     assert_same_selection(&selection.snapshot(), &snapshot);
+    Ok(())
+}
+
+#[test]
+fn startup_level_names_models_without_selectable_levels() -> TestResult {
+    // An unknown model on an OpenAI-compatible endpoint reasons but has no
+    // effort wire format, so no level at all can be requested for it.
+    let mut config = config();
+    let profile = config
+        .providers
+        .get_mut("anthropic")
+        .ok_or("missing fixture provider")?;
+    profile.protocol = Protocol::OpenAi;
+    profile.models = vec!["some/model".into()];
+    profile.base_url = "http://localhost:11434/v1".into();
+    assert!(config
+        .active_llm()?
+        .model_config
+        .supported_thinking_levels()
+        .is_empty());
+    let Err(error) = config.with_startup_selection(None, Some("off")) else {
+        return Err("level accepted for a model without selectable levels".into());
+    };
+    assert!(
+        error.to_string().contains(
+            "model anthropic/some/model has no selectable thinking level; drop the thinking level"
+        ),
+        "{error}"
+    );
     Ok(())
 }
 
@@ -359,5 +391,90 @@ fn model_switch_remembers_the_replaced_selection_for_compaction() -> TestResult 
         selection.previous_llm().map(|llm| llm.model),
         Some("claude-sonnet-4-6".into())
     );
+    Ok(())
+}
+
+#[test]
+fn startup_thinking_level_wins_over_every_configured_source() -> TestResult {
+    let mut configured = config();
+    configured.llm.thinking_level = Some(ThinkingLevel::Medium);
+    configured
+        .cloud_thinking_levels
+        .insert("claude-opus-4-6".into(), ThinkingLevel::Low);
+    configured
+        .providers
+        .get_mut("anthropic")
+        .ok_or("missing fixture provider")?
+        .thinking_level = Some(ThinkingLevel::Low);
+    assert_eq!(configured.active_llm()?.thinking_level, ThinkingLevel::Low);
+
+    let pinned =
+        configured.with_startup_selection(Some("anthropic:claude-opus-4-6"), Some("max"))?;
+    let startup = pinned.startup_llm()?;
+    assert_eq!(startup.model, "claude-opus-4-6");
+    assert_eq!(startup.thinking_level, ThinkingLevel::Max);
+    // The agent starts on the pinned level; the configured default is untouched.
+    assert_eq!(
+        ModelSelection::new(startup).snapshot().thinking_level,
+        ThinkingLevel::Max
+    );
+    assert_eq!(pinned.llm.thinking_level, Some(ThinkingLevel::Medium));
+    // Omitting the flags keeps the configured precedence.
+    let plain = config().with_startup_selection(None, None)?;
+    assert_eq!(plain.startup_thinking_level, None);
+    assert_eq!(
+        plain.startup_llm()?.thinking_level,
+        plain.active_llm()?.thinking_level
+    );
+    Ok(())
+}
+
+#[test]
+fn startup_thinking_level_does_not_shadow_later_settings_edits() -> TestResult {
+    // The settings page mutates a copy of the startup config and pushes
+    // `active_llm()` into the running agent; the startup level must not win
+    // there, or the dashboard could never change the live effort.
+    let mut pinned = config().with_startup_selection(None, Some("max"))?;
+    assert_eq!(pinned.startup_llm()?.thinking_level, ThinkingLevel::Max);
+    pinned.llm.thinking_level = Some(ThinkingLevel::Low);
+    assert_eq!(pinned.active_llm()?.thinking_level, ThinkingLevel::Low);
+    Ok(())
+}
+
+#[test]
+fn startup_selection_rejects_what_it_cannot_honor() -> TestResult {
+    for (model, level, error) in [
+        (Some("gone:model"), None, "provider 'gone' not found"),
+        (None, Some("bogus"), "unknown thinking level"),
+        (
+            None,
+            Some("minimal"),
+            "thinking level 'minimal' is not supported by anthropic/claude-opus-4-6 (supported: off, low, medium, high, max)",
+        ),
+    ] {
+        let Err(actual) = config().with_startup_selection(model, level) else {
+            return Err(format!("{model:?}/{level:?} was accepted").into());
+        };
+        assert!(actual.to_string().contains(error), "{actual}");
+    }
+    let unconfigured = Config::new(PathBuf::new());
+    let Err(actual) = unconfigured.with_startup_selection(None, Some("high")) else {
+        return Err("a level without a model was accepted".into());
+    };
+    assert!(
+        actual.to_string().contains("needs a configured model"),
+        "{actual}"
+    );
+    Ok(())
+}
+
+#[test]
+fn explicit_thinking_level_is_strict_and_leaves_selection_on_error() -> TestResult {
+    let selection = ModelSelection::new(config().active_llm()?);
+    selection.apply_thinking_level("low")?;
+    assert_eq!(selection.snapshot().thinking_level, ThinkingLevel::Low);
+    assert!(selection.apply_thinking_level("minimal").is_err());
+    assert!(selection.apply_thinking_level("bogus").is_err());
+    assert_eq!(selection.snapshot().thinking_level, ThinkingLevel::Low);
     Ok(())
 }

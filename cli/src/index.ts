@@ -51,14 +51,14 @@ async function main() {
   switch (opts.command) {
     case 'serve': {
       const { startServer } = await import('./native/index.js')
-      await startServer(opts.port, opts.model, opts.envFile)
+      await startServer({ port: opts.port, model: opts.model, thinkingLevel: opts.thinkingLevel, envFile: opts.envFile })
       break
     }
 
     case 'acp': {
       // Stdout belongs to the protocol from here on; nothing else may print.
       const { runAcp } = await import('./native/index.js')
-      await runAcp({ model: opts.model, envFile: opts.envFile, tools: opts.acpTools, permission: opts.acpPermission, ephemeral: opts.ephemeral })
+      await runAcp({ model: opts.model, thinkingLevel: opts.thinkingLevel, envFile: opts.envFile, tools: opts.acpTools, permission: opts.acpPermission, ephemeral: opts.ephemeral })
       process.exit(0)
     }
 
@@ -81,6 +81,7 @@ async function main() {
         resumeSessionId: opts.resume,
         continueLatest: opts.continueLatest,
         forkFrom: opts.fork,
+        startupSelection: { model: opts.model, thinkingLevel: opts.thinkingLevel },
         serverPort: opts.port,
         envFile: opts.envFile,
       })
@@ -158,6 +159,7 @@ async function main() {
         resumeSessionId: opts.resume,
         continueLatest: opts.continueLatest,
         forkFrom: opts.fork,
+        startupSelection: { model: opts.model, thinkingLevel: opts.thinkingLevel },
         serverPort: opts.port,
         envFile: opts.envFile,
       })

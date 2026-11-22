@@ -257,6 +257,11 @@ pub struct Config {
     pub session_hook: Option<String>,
     /// The env file path actually used during config loading.
     pub env_file_path: PathBuf,
+    /// Explicit `--thinking-level`, already validated against the startup
+    /// selection. Consumed once when the agent's live selection is built;
+    /// `active_llm` ignores it so settings edits and persistence see only the
+    /// configured level.
+    pub startup_thinking_level: Option<ThinkingLevel>,
     /// Revision captured during load/save; not part of any published format.
     pub(crate) env_revision: Option<super::env_transaction::EnvRevision>,
     /// Server-pushed thinking defaults, keyed by cloud model id.
@@ -301,6 +306,7 @@ impl Config {
             skills_dirs: Vec::new(),
             session_hook: None,
             env_file_path: PathBuf::new(),
+            startup_thinking_level: None,
             env_revision: None,
             cloud_thinking_levels: HashMap::new(),
             cloud_model_tiers: HashMap::new(),
@@ -377,6 +383,16 @@ impl Config {
             // Nothing to resolve; let `build_llm` report why.
             None => self.build_llm(&self.llm.provider, self.llm.model_override.clone()),
         }
+    }
+
+    /// The selection the agent starts on: `active_llm` with the explicit
+    /// startup level applied.
+    pub fn startup_llm(&self) -> Result<LlmConfig> {
+        let mut llm = self.active_llm()?;
+        if let Some(level) = self.startup_thinking_level {
+            llm.thinking_level = level;
+        }
+        Ok(llm)
     }
 
     /// Build an LlmConfig for a given provider name and optional model override.
@@ -581,44 +597,31 @@ impl Config {
         }
     }
 
-    /// Apply `--model` CLI argument. Must be called before `validate()`.
-    pub fn with_model(mut self, model: Option<String>) -> Result<Self> {
-        let Some(value) = model else {
-            return Ok(self);
-        };
-        let (provider, model_override) = self.resolve_model_spec(&value)?;
-        self.llm.provider = provider;
-        self.llm.model_override = model_override;
-        Ok(self)
-    }
-
-    /// Apply a `--model` override without letting a stale spec block startup.
-    ///
-    /// A model that was removed from the catalog (or a typo) must not lock the
-    /// user out of the surface where the selection can be repaired (`/login`,
-    /// the model picker). When the spec does not resolve, the configured
-    /// selection is kept and the reason is returned so the caller can surface
-    /// it; the configuration itself is left untouched.
-    pub fn with_model_or_fallback(mut self, model: Option<String>) -> (Self, Option<String>) {
-        let Some(value) = model else {
-            return (self, None);
-        };
-        match self.resolve_model_spec(&value) {
-            Ok((provider, model_override)) => {
-                self.llm.provider = provider;
-                self.llm.model_override = model_override;
-                (self, None)
-            }
-            Err(error) => {
-                let fallback = match self.active_selection() {
-                    Some((_, model)) if !model.is_empty() => format!("'{model}'"),
-                    _ => "the configured model".to_string(),
-                };
-                let warning = format!("--model '{value}' ignored ({error}); using {fallback}");
-                tracing::warn!(spec = %value, %error, "model override ignored");
-                (self, Some(warning))
-            }
+    /// Apply the explicit startup selection (`--model`, `--thinking-level`).
+    /// Each is an independent override that wins over configuration and cloud
+    /// catalog defaults. Nothing falls back: an unresolvable model or a level
+    /// the selected model does not support is an error. Never persisted.
+    pub fn with_startup_selection(
+        mut self,
+        model: Option<&str>,
+        thinking_level: Option<&str>,
+    ) -> Result<Self> {
+        if let Some(spec) = model {
+            let (provider, model_override) = self.resolve_model_spec(spec)?;
+            self.llm.provider = provider;
+            self.llm.model_override = model_override;
         }
+        if let Some(name) = thinking_level {
+            let level = thinking_level_from_str(name)?;
+            let llm = self.active_llm().map_err(|error| {
+                EvotError::Conf(format!(
+                    "thinking level '{name}' needs a configured model: {error}"
+                ))
+            })?;
+            ensure_thinking_level_supported(&llm, level)?;
+            self.startup_thinking_level = Some(level);
+        }
+        Ok(self)
     }
 
     pub fn load() -> Result<Self> {
@@ -729,6 +732,32 @@ pub fn thinking_level_from_str(value: &str) -> Result<ThinkingLevel> {
             "unknown thinking level: {other} (valid: off, minimal, low, medium, high, xhigh, max)"
         ))),
     }
+}
+
+/// Reject an explicitly requested level that `llm` cannot run. Explicit
+/// requests are never clamped to a neighbouring tier.
+pub fn ensure_thinking_level_supported(llm: &LlmConfig, level: ThinkingLevel) -> Result<()> {
+    let supported = llm.model_config.supported_thinking_levels();
+    if supported.contains(&level) {
+        return Ok(());
+    }
+    if supported.is_empty() {
+        return Err(EvotError::Conf(format!(
+            "model {}/{} has no selectable thinking level; drop the thinking level",
+            llm.provider, llm.model
+        )));
+    }
+    let options = supported
+        .iter()
+        .map(|level| level.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(EvotError::Conf(format!(
+        "thinking level '{}' is not supported by {}/{} (supported: {options})",
+        level.as_str(),
+        llm.provider,
+        llm.model
+    )))
 }
 
 pub fn default_config() -> Result<Config> {

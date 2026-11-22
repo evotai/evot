@@ -130,7 +130,6 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       serverState: st.serverState,
       releaseNotes: st.releaseNotes,
       installDrift: st.installDrift,
-      startupWarning: deps.agent.startupWarning,
     })
   }
 

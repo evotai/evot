@@ -63,7 +63,7 @@ for (const protocol of ['openai', 'anthropic', 'openai_responses'] as const) {
         const fs = await import('node:fs/promises');
         const root = ${JSON.stringify(root)};
         const context = JSON.stringify([{role:'user',text:'Implement tests'},{role:'assistant',text:'Implementation is ready.'}]);
-        const agent = await NapiAgent.create(null, null);
+        const agent = await NapiAgent.create(null, null, null);
         async function ready(request) {
           const outcome = await request.outcome();
           if (outcome.status !== 'ready' || outcome.candidates[0] !== 'Run the targeted tests') {
@@ -99,7 +99,7 @@ for (const protocol of ['openai', 'anthropic', 'openai_responses'] as const) {
         if (original !== ${JSON.stringify(envText)}) throw new Error('provider configuration was rewritten');
         // An unauthenticated local endpoint is valid too.
         await fs.writeFile(root + '/evot.env', original.replace('EVOT_LLM_SMOKE_API_KEY=smoke-test-key','EVOT_LLM_SMOKE_API_KEY='));
-        const unauthenticated = await NapiAgent.create(null, null);
+        const unauthenticated = await NapiAgent.create(null, null, null);
         await ready(unauthenticated.suggestNextPrompt(context));
         const cancelled = unauthenticated.suggestNextPrompt(context);
         cancelled.abort();

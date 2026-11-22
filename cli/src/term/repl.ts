@@ -48,7 +48,7 @@ import { InputImageHistory } from './input/image-history.js'
 import { tryStartServer, registerDashboard, stopOwnedServer, ownedDashboardPort } from './app/server.js'
 import { BackgroundScheduler } from './app/background/scheduler.js'
 import { inspectConsole } from '../features/channels/console-client.js'
-import { findPreviousSession, shouldPreloadStartupSessions } from '../session/session-view.js'
+import { findPreviousSession, shouldPreloadStartupSessions, type StartupSelection } from '../session/session-view.js'
 import { ShareNotices } from '../session/share-notices.js'
 import { CloudSessionSync, cloudLabel } from '../session/cloud-sessions.js'
 import { AuthWatcher } from './app/auth/auth-watch.js'
@@ -127,6 +127,8 @@ export interface ReplOptions {
   continueLatest?: boolean
   /** Start in a fresh fork of the given session, or of the latest in cwd. */
   forkFrom?: { sessionId?: string }
+  /** `--model` / `--thinking-level`; they win over the startup session's saved selection. */
+  startupSelection?: StartupSelection
   serverPort?: number
   envFile?: string
 }
@@ -480,7 +482,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       sessionCtl.invalidateResumeSessionCache()
       if (sid === st.sessionId) void sessionCtl.refreshForkTrail(sid).then(() => renderer.requestRender())
     },
-    resumeSession: session => sessionCtl.resumeSession(session),
+    resumeSession: async session => { await sessionCtl.resumeSession(session) },
     getSessionId: () => st.sessionId,
     getCompactLines: () => compactLines,
     getConfigInfo: () => st.configInfo ?? null,
@@ -658,6 +660,18 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   setTerminalTitle('✳')
 
+  // The session the REPL starts in honors the startup overrides. When they
+  // cannot be honored (e.g. the session's model lacks the requested level),
+  // exit instead of running on a selection the user did not ask for. Other
+  // resume failures keep the REPL up, as they always did.
+  const resumeAtStartup = async (session: SessionMeta, notice?: OutputLine[]) => {
+    const outcome = await sessionCtl.resumeSession(session, notice, opts.startupSelection)
+    if (outcome !== 'selection_rejected') return
+    cleanup()
+    await sessionHook.close()
+    fastExit(1)
+  }
+
   if (opts.forkFrom) {
     const wanted = opts.forkFrom.sessionId
     const source = wanted
@@ -671,7 +685,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     } else {
       try {
         const fork = await agent.forkSession(source.session_id)
-        await sessionCtl.resumeSession(fork, forkNotice(fork, source, chalk.dim, chalk.cyan))
+        await resumeAtStartup(fork, forkNotice(fork, source, chalk.dim, chalk.cyan))
       } catch (err) {
         scrollback.commitSystem('sys-fork-err', renderErrorNotice(`Fork failed: ${errorText(err)}`))
       }
@@ -679,7 +693,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   } else if (opts.continueLatest) {
     const match = findPreviousSession(st.preloadedSessions, agent.cwd)
     if (match) {
-      await sessionCtl.resumeSession(match)
+      await resumeAtStartup(match)
     } else {
       scrollback.commitSystem('sys-continue-err', renderErrorNotice('No conversation found to continue'))
       cleanup()
@@ -691,7 +705,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       (s) => s.session_id === opts.resumeSessionId || s.session_id.startsWith(opts.resumeSessionId!)
     )
     if (match) {
-      await sessionCtl.resumeSession(match)
+      await resumeAtStartup(match)
     } else {
       scrollback.commitSystem('sys-resume-err', renderErrorNotice(`Session not found: ${opts.resumeSessionId}`))
     }

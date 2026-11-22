@@ -13,13 +13,10 @@ export async function runPrompt(opts: CliOptions) {
     process.exit(1)
   }
 
+  // An unresolvable `--model` or unsupported `--thinking-level` fails here.
+  // A resumed session runs on the live selection, so the flags win over its
+  // saved model and effort.
   const agent: Agent = await createAgent(opts)
-  // Non-interactive runs have no picker to repair a stale `--model`, and a
-  // silent swap would make scripted output lie about which model ran.
-  if (agent.startupWarning) {
-    console.error(agent.startupWarning)
-    process.exit(1)
-  }
 
   let contentJson: string | undefined
   try {

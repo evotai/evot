@@ -59,23 +59,43 @@ export function resumeModelUnavailableNote(opts: {
   return `  model '${opts.model ?? ''}' unavailable · kept ${opts.keptModel} · /model to switch`
 }
 
+/** Explicit startup overrides (`--model`, `--thinking-level`). */
+export interface StartupSelection {
+  model?: string
+  thinkingLevel?: string
+}
+
+/** The model selection a session recorded on its last run. */
+export interface SavedSelection {
+  model?: string
+  provider?: string
+  thinkingLevel?: string | null
+}
+
 /**
- * Reload a resumed session's model from current config, then reapply the
- * session's recorded thinking level over the config default (pi precedence:
- * session wins on resume). Unsupported levels keep the config-applied value.
+ * Restore a resumed session's model selection. The session's saved model is
+ * reloaded from current config, then its recorded thinking level is reapplied
+ * over the config default (session wins on resume; unsupported levels keep
+ * the config-applied value).
+ *
+ * `pinned` carries the startup overrides, which win over the saved values: a
+ * pinned model keeps the live selection, and a pinned level is applied
+ * strictly to whichever model ends up selected. Throws when the pinned level
+ * is not supported there.
  */
 export function reloadResumeModel(
   agent: {
     model: string
     reloadProvider(spec: string): boolean
     restoreThinkingLevel(level: string): void
+    applyThinkingLevel(level: string): void
   },
-  model?: string,
-  provider?: string,
-  thinkingLevel?: string | null,
+  saved: SavedSelection,
+  pinned: StartupSelection = {},
 ): string | null {
+  const { model, provider, thinkingLevel } = saved
   let note: string | null = null
-  if (model) {
+  if (model && !pinned.model) {
     const preferred = provider ? `${provider}:${model}` : model
     try {
       if (!agent.reloadProvider(preferred)) {
@@ -86,7 +106,9 @@ export function reloadResumeModel(
       note = resumeModelUnavailableNote({ provider, model, keptModel: agent.model })
     }
   }
-  if (thinkingLevel) {
+  if (pinned.thinkingLevel) {
+    agent.applyThinkingLevel(pinned.thinkingLevel)
+  } else if (thinkingLevel) {
     try {
       agent.restoreThinkingLevel(thinkingLevel)
     } catch {

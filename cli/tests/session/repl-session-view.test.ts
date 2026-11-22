@@ -79,14 +79,17 @@ describe('repl session view helpers', () => {
       restoreThinkingLevel(level: string) {
         restored.push(level)
       },
+      applyThinkingLevel(_level: string) {
+        throw new Error('unexpected explicit level')
+      },
     }
 
-    expect(reloadResumeModel(agent, 'gpt-5.5', 'openai', 'high')).toBeNull()
+    expect(reloadResumeModel(agent, { model: 'gpt-5.5', provider: 'openai', thinkingLevel: 'high' })).toBeNull()
     expect(calls).toEqual(['openai:gpt-5.5'])
     expect(restored).toEqual(['high'])
 
     // No recorded level keeps the config-applied default.
-    expect(reloadResumeModel(agent, undefined, 'openai', null)).toBeNull()
+    expect(reloadResumeModel(agent, { provider: 'openai', thinkingLevel: null })).toBeNull()
     expect(calls).toHaveLength(1)
     expect(restored).toHaveLength(1)
   })
@@ -99,9 +102,10 @@ describe('repl session view helpers', () => {
       restoreThinkingLevel(level: string) {
         restored.push(level)
       },
+      applyThinkingLevel: (_level: string): void => {},
     }
     // The thinking level is still restored onto the kept live model.
-    expect(reloadResumeModel(unavailable, 'grok-4.5', 'grok', 'low'))
+    expect(reloadResumeModel(unavailable, { model: 'grok-4.5', provider: 'grok', thinkingLevel: 'low' }))
       .toBe("  provider 'grok' unavailable · kept claude-opus-4-8 · /model to switch")
     expect(restored).toEqual(['low'])
 
@@ -109,9 +113,46 @@ describe('repl session view helpers', () => {
       model: 'claude-opus-4-8',
       reloadProvider: (_spec: string): boolean => { throw new Error('bad config') },
       restoreThinkingLevel: (_level: string): void => { throw new Error('unsupported') },
+      applyThinkingLevel: (_level: string): void => {},
     }
-    expect(reloadResumeModel(failing, 'missing-model', undefined, 'xhigh'))
+    expect(reloadResumeModel(failing, { model: 'missing-model', thinkingLevel: 'xhigh' }))
       .toBe("  model 'missing-model' unavailable · kept claude-opus-4-8 · /model to switch")
+  })
+
+  test('reloadResumeModel lets startup overrides win over the saved selection', () => {
+    const calls: string[] = []
+    const agent = {
+      model: 'claude-opus-4-8',
+      reloadProvider(spec: string) { calls.push(`reload ${spec}`); return true },
+      restoreThinkingLevel(level: string) { calls.push(`restore ${level}`) },
+      applyThinkingLevel(level: string) { calls.push(`apply ${level}`) },
+    }
+    const saved = { model: 'gpt-5.5', provider: 'openai', thinkingLevel: 'low' }
+
+    // A pinned model keeps the live selection; the saved level still applies.
+    expect(reloadResumeModel(agent, saved, { model: 'anthropic:claude-opus-4-8' })).toBeNull()
+    expect(calls).toEqual(['restore low'])
+
+    // A pinned level is applied strictly to the restored saved model.
+    calls.length = 0
+    expect(reloadResumeModel(agent, saved, { thinkingLevel: 'high' })).toBeNull()
+    expect(calls).toEqual(['reload openai:gpt-5.5', 'apply high'])
+
+    // Both pinned: the saved selection is ignored entirely.
+    calls.length = 0
+    reloadResumeModel(agent, saved, { model: 'anthropic:claude-opus-4-8', thinkingLevel: 'max' })
+    expect(calls).toEqual(['apply max'])
+  })
+
+  test('reloadResumeModel fails when a pinned level is unsupported', () => {
+    const agent = {
+      model: 'gpt-5.5',
+      reloadProvider: (_spec: string) => true,
+      restoreThinkingLevel: (_level: string): void => {},
+      applyThinkingLevel: (level: string): void => { throw new Error(`thinking level '${level}' is not supported`) },
+    }
+    expect(() => reloadResumeModel(agent, { model: 'gpt-5.5', provider: 'openai' }, { thinkingLevel: 'max' }))
+      .toThrow("thinking level 'max' is not supported")
   })
 
   test('resumeModelUnavailableNote keeps live model and points to /model', () => {

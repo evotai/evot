@@ -66,7 +66,7 @@ integration(`native ${protocol} suggestion preserves message roles and stops aft
       images: [{ id: 19, media_type: 'image/png', data: largeImage }] }))
     child = Bun.spawn([process.execPath, '--eval', `
       const { NapiAgent } = require(${JSON.stringify(process.env.EVOT_TEST_SUGGESTION_ADDON)});
-      const agent = await NapiAgent.create(null, null);
+      const agent = await NapiAgent.create(null, null, null);
       const context = JSON.stringify([{role:'user',text:'Implement the tests'},{role:'assistant',text:'Implementation is ready.'},{role:'user',text:'Add the tests'}, {role:'assistant',text:'Tests are ready.'}]);
       const request = agent.suggestNextPrompt(context);
       const progress = request.nextCandidates();

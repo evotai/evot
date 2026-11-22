@@ -85,6 +85,17 @@ impl ModelSelection {
         }
     }
 
+    /// Apply a level the user named explicitly (`--thinking-level`). Unlike
+    /// `restore_thinking_level`, an unknown or unsupported level is an error
+    /// and leaves the selection untouched.
+    pub fn apply_thinking_level(&self, name: &str) -> Result<()> {
+        let level = crate::conf::thinking_level_from_str(name)?;
+        let mut llm = self.llm.write();
+        crate::conf::ensure_thinking_level_supported(&llm, level)?;
+        llm.thinking_level = level;
+        Ok(())
+    }
+
     pub fn supported_thinking_levels(&self) -> Vec<ThinkingLevel> {
         Self::supported_thinking_levels_for(&self.llm.read())
     }
@@ -185,15 +196,7 @@ impl ModelSelection {
         let mut next = config.build_llm(provider, Some(model.to_string()))?;
         if let Some(name) = thinking_level {
             let level = crate::conf::thinking_level_from_str(name)?;
-            if !next
-                .model_config
-                .supported_thinking_levels()
-                .contains(&level)
-            {
-                return Err(EvotError::Conf(format!(
-                    "thinking level '{name}' is not supported by {provider}/{model}"
-                )));
-            }
+            crate::conf::ensure_thinking_level_supported(&next, level)?;
             next.thinking_level = level;
         }
         self.replace(next.clone());

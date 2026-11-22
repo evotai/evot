@@ -23,6 +23,12 @@ impl Agent {
         self.selection.restore_thinking_level(name);
     }
 
+    /// Apply an explicitly requested level to the live selection without
+    /// persisting it. Unknown or unsupported levels are errors.
+    pub fn apply_thinking_level(&self, name: &str) -> Result<()> {
+        self.selection.apply_thinking_level(name)
+    }
+
     /// Thinking levels the current model can cycle through, in ascending order
     /// of effort. Empty when the model does not honor a reasoning effort (e.g.
     /// an OpenAI-compatible provider without the reasoning-effort capability).

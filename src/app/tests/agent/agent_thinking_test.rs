@@ -43,6 +43,20 @@ fn anthropic_config(dir: &TempDir) -> Config {
 }
 
 #[test]
+fn agent_starts_on_the_explicit_startup_thinking_level() -> TestResult {
+    let dir = TempDir::new()?;
+    let config = anthropic_config(&dir).with_startup_selection(None, Some("low"))?;
+    let agent = Agent::new(&config, "/work")?;
+    assert_eq!(agent.llm().thinking_level, ThinkingLevel::Low);
+    // Startup-only: the same config resolves to the configured default, and a
+    // settings write that pushes `active_llm()` back into the agent takes effect.
+    assert_eq!(config.active_llm()?.thinking_level, ThinkingLevel::High);
+    agent.set_llm(config.active_llm()?);
+    assert_eq!(agent.llm().thinking_level, ThinkingLevel::High);
+    Ok(())
+}
+
+#[test]
 fn cycle_thinking_level_anthropic_walks_full_ramp_and_wraps() -> TestResult {
     let dir = TempDir::new()?;
     let agent = Agent::new(&anthropic_config(&dir), "/work")?;

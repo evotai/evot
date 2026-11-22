@@ -10,7 +10,7 @@ import type { OutputLine } from '../../render/output.js'
 import { type CloudSessionSync, cloudBadge, mergeRemoteSessions } from '../../session/cloud-sessions.js'
 import type { SessionHook } from '../../session/hook.js'
 import { formatRankedSessionItems, formatSessionItems, isInteractiveSession, shortenSessionCwd } from '../../session/resume.js'
-import { reloadResumeModel, resumeElidedLine, selectResumeMessages } from '../../session/session-view.js'
+import { reloadResumeModel, resumeElidedLine, selectResumeMessages, type StartupSelection } from '../../session/session-view.js'
 import type { SuggestionTrigger } from '../app/composer/composer-guidance.js'
 import type { PrivacyFeed } from '../app/privacy-feed.js'
 import { createModelWindow } from '../app/selector/selector-windows.js'
@@ -75,8 +75,15 @@ export interface SessionController {
   readonly openShareLinks: () => Promise<void>
   readonly refreshForkTrail: (id: string) => Promise<SessionMeta[]>
   refreshOpenModelSelector(): boolean
-  readonly resumeSession: (session: SessionMeta, notice?: OutputLine[] | undefined) => Promise<void>
+  readonly resumeSession: (session: SessionMeta, notice?: OutputLine[] | undefined, startup?: StartupSelection | undefined) => Promise<ResumeOutcome>
 }
+
+/**
+ * `resumed`: the session is live. `failed`: it is not, for a reason unrelated
+ * to the startup flags (the REPL keeps running). `selection_rejected`: the
+ * explicit startup selection cannot be applied to the resumed session.
+ */
+export type ResumeOutcome = 'resumed' | 'failed' | 'selection_rejected'
 
 /** Session navigation: resume, fork and back, the resume and model selectors, session search. */
 export function createSessionController(st: ReplState, deps: SessionDeps): SessionController {
@@ -135,10 +142,15 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
     }
   }
 
-  async function resumeSession(session: SessionMeta, notice?: OutputLine[]) {
+  /**
+   * Resume `session`. `startup` carries the `--model` / `--thinking-level`
+   * overrides, passed only for the session the REPL starts in so later
+   * `/resume` picks restore the saved selection.
+   */
+  async function resumeSession(session: SessionMeta, notice?: OutputLine[], startup?: StartupSelection): Promise<ResumeOutcome> {
     if (st.logMode) {
       deps.scrollback.commitSystem('sys-log-switch', '  Leave the log fork with /done before switching sessions; pending log prompts require confirmation.')
-      return
+      return 'failed'
     }
     deps.runCtl.abandonRun()
     deps.queueLifecycle.pause()
@@ -152,13 +164,20 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
     try {
       const cloudNotice = await pullBeforeResume(session.session_id)
       const { transcript, model, provider, thinkingLevel, cwd: sessionCwd } = await prepareResume(deps.agent, session)
-      if (revision !== st.composerRevision || st.destroyed) return
+      if (revision !== st.composerRevision || st.destroyed) return 'failed'
 
       // Restore model selection from current config, then the session's
-      // recorded thinking level (session wins over the config default).
-      // Missing saved selections keep the refreshed live model and show a
-      // recovery hint.
-      const modelRestoreNote = reloadResumeModel(deps.agent, model, provider, thinkingLevel)
+      // recorded thinking level (session wins over the config default), with
+      // startup overrides winning over both. Missing saved selections keep the
+      // refreshed live model and show a recovery hint; only an explicit
+      // startup level the resumed model cannot run is an error.
+      let modelRestoreNote: string | null
+      try {
+        modelRestoreNote = reloadResumeModel(deps.agent, { model, provider, thinkingLevel }, startup)
+      } catch (err) {
+        deps.scrollback.commitSystem('sys-resume-selection', renderErrorNotice(`Cannot resume ${session.session_id.slice(0, 8)} with the requested selection: ${errorText(err)}`))
+        return 'selection_rejected'
+      }
       st.sessionId = session.session_id
       deps.sessionHook.startSession(session.session_id, deps.agent.cwd)
       deps.sessionHook.state('idle')
@@ -192,7 +211,7 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
         ...cloudNotice,
       ])
       await refreshForkTrail(session.session_id)
-      if (revision !== st.composerRevision || st.destroyed) return
+      if (revision !== st.composerRevision || st.destroyed) return 'resumed'
       if (sessionCwd && sessionCwd !== deps.agent.cwd) {
         deps.scrollback.restoreLines([{
           id: 'sys-resume-cwd',
@@ -204,8 +223,10 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
         deps.scrollback.restoreLines([{ id: 'sys-resume-model', kind: 'system', text: chalk.dim(modelRestoreNote) }])
       }
       if (revision === st.composerRevision) deps.requestProductSuggestion('resume')
+      return 'resumed'
     } catch (err) {
       deps.scrollback.commitSystem('sys-err', `Failed to resume: ${errorText(err)}`, 'error')
+      return 'failed'
     }
   }
 

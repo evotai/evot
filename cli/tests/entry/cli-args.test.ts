@@ -76,6 +76,19 @@ describe('parseArgs', () => {
     expect(selected).toEqual([['review'], []])
   })
 
+  test('--model and --thinking-level are independent startup overrides', async () => {
+    const both = await parseArgs(['-p', 'hi', '--model', 'anthropic:claude-opus-4-8', '--thinking-level', 'high'])
+    expect(both.model).toBe('anthropic:claude-opus-4-8')
+    expect(both.thinkingLevel).toBe('high')
+
+    const levelOnly = await parseArgs(['--resume', 'sid', '--thinking-level', 'max'])
+    expect(levelOnly.model).toBeUndefined()
+    expect(levelOnly.thinkingLevel).toBe('max')
+    expect(levelOnly.resume).toBe('sid')
+
+    expect((await parseArgs([])).thinkingLevel).toBeUndefined()
+  })
+
   test('-p -f -r together', async () => {
     const opts = await parseArgs(['-p', 'review', '-f', 'src/cli.ts', '-f', 'src/prompt.ts', '-r', 'task-1'])
     expect(opts.command).toBe('prompt')
@@ -89,16 +102,23 @@ describe('argvForRestart', () => {
   test('pins the live session and drops continue/resume flags', () => {
     expect(argvForRestart([], 'sess-1')).toEqual(['--resume', 'sess-1'])
     expect(argvForRestart(['-c'], 'sess-1')).toEqual(['--resume', 'sess-1'])
-    expect(argvForRestart(['--continue', '--model', 'grok-4.6'], 'sess-1'))
-      .toEqual(['--model', 'grok-4.6', '--resume', 'sess-1'])
+    expect(argvForRestart(['--continue', '--env-file', 'evot.env'], 'sess-1'))
+      .toEqual(['--env-file', 'evot.env', '--resume', 'sess-1'])
     expect(argvForRestart(['-r', 'old', '--port', '8082'], 'sess-1'))
       .toEqual(['--port', '8082', '--resume', 'sess-1'])
     expect(argvForRestart(['--resume', 'old'], 'sess-1')).toEqual(['--resume', 'sess-1'])
   })
 
+  test('a pinned session replaces the startup selection flags', () => {
+    // The session's saved selection includes any /model or effort change made
+    // since startup; re-sending the flags would override it.
+    expect(argvForRestart(['--model', 'grok-4.6', '--thinking-level', 'high', '--port', '8082'], 'sess-1'))
+      .toEqual(['--port', '8082', '--resume', 'sess-1'])
+  })
+
   test('keeps unrelated flags and omits resume when there is no session', () => {
-    expect(argvForRestart(['--env-file', 'evot.env', '--model', 'grok-4.6'], null))
-      .toEqual(['--env-file', 'evot.env', '--model', 'grok-4.6'])
+    expect(argvForRestart(['--env-file', 'evot.env', '--model', 'grok-4.6', '--thinking-level', 'low'], null))
+      .toEqual(['--env-file', 'evot.env', '--model', 'grok-4.6', '--thinking-level', 'low'])
     expect(argvForRestart(['-c', '--env-file', 'evot.env'], null))
       .toEqual(['--env-file', 'evot.env'])
   })

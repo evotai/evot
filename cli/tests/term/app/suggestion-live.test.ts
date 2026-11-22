@@ -9,7 +9,7 @@ const addon = process.env.EVOT_TEST_SUGGESTION_ADDON
 
 test.skipIf(!enabled || !addon)('real service generalizes across workflow, conversation and draft contexts', async () => {
   const { NapiAgent } = createRequire(import.meta.url)(addon!)
-  const agent = await NapiAgent.create(null, null)
+  const agent = await NapiAgent.create(null, null, null)
   const results: { name: string; round: number; status: string; candidates: string[]; passed: boolean }[] = []
   for (let round = 1; round <= 2; round++) {
     for (const scenario of cases) {

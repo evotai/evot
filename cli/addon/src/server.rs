@@ -3,17 +3,18 @@ use napi_derive::napi;
 
 use crate::tracing::init_tracing;
 
-/// Load and validate config with optional model and port overrides.
+/// Load config with the explicit startup selection and port override. A
+/// selection that cannot be honored fails startup.
 fn load_config(
     port: Option<u16>,
     model: Option<String>,
+    thinking_level: Option<String>,
     env_file: Option<String>,
 ) -> Result<evot::api::Config> {
-    // Long-running surfaces (serve, ACP, settings server) keep starting on a
-    // stale `--model`; the reason is logged by `with_model_or_fallback`.
-    let (mut config, _ignored_model) = evot::api::Config::load_with_env_file(env_file.as_deref())
+    let mut config = evot::api::Config::load_with_env_file(env_file.as_deref())
         .map_err(|e| Error::from_reason(format!("config load failed: {e}")))?
-        .with_model_or_fallback(model);
+        .with_startup_selection(model.as_deref(), thinking_level.as_deref())
+        .map_err(|e| Error::from_reason(e.to_string()))?;
     if let Some(p) = port {
         config = config.with_port(p);
     }
@@ -30,10 +31,11 @@ pub fn version() -> String {
 pub async fn start_server(
     port: Option<u16>,
     model: Option<String>,
+    thinking_level: Option<String>,
     env_file: Option<String>,
 ) -> Result<()> {
     init_tracing();
-    let config = load_config(port, model, env_file)?;
+    let config = load_config(port, model, thinking_level, env_file)?;
     evot::api::start(config)
         .await
         .map_err(|e| Error::from_reason(format!("server error: {e}")))
@@ -47,6 +49,7 @@ pub async fn start_server(
 #[napi]
 pub async fn run_acp(
     model: Option<String>,
+    thinking_level: Option<String>,
     env_file: Option<String>,
     tools: Option<String>,
     permission: Option<String>,
@@ -57,7 +60,7 @@ pub async fn run_acp(
         .map_err(|e| Error::from_reason(e.to_string()))?;
     let ask_permission = evot::api::acp::ask_permission(permission.as_deref().unwrap_or("ask"))
         .map_err(|e| Error::from_reason(e.to_string()))?;
-    let config = load_config(None, model, env_file)?;
+    let config = load_config(None, model, thinking_level, env_file)?;
     let options = evot::api::acp::AcpOptions {
         mode,
         ask_permission,
@@ -111,7 +114,7 @@ pub async fn start_server_background(
         }
     }
     *slot = None;
-    let config = load_config(port, model, env_file)?;
+    let config = load_config(port, model, None, env_file)?;
     let host = config.server.host.clone();
     let addr = format!("{host}:{}", config.server.port);
 

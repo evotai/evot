@@ -17,7 +17,7 @@ integration('live NAPI ConfigInfo contract', () => {
       seedSmokeHome(home)
       child = Bun.spawn([process.execPath, '--eval', `
         const { NapiAgent } = await import('./src/native/binding.js');
-        const agent = await NapiAgent.create(null, null);
+        const agent = await NapiAgent.create(null, null, null);
         for (const mode of ['planning', 'planning_interactive']) {
           try {
             await agent.query('must not run', null, mode, null, null);
@@ -182,7 +182,7 @@ integration('live NAPI ConfigInfo contract', () => {
       await Bun.write(envPath, (await Bun.file(envPath).text()).replace('http://127.0.0.1:1/v1', `http://127.0.0.1:${server.port}/v1`))
       child = Bun.spawn([process.execPath, '--eval', `
         const { NapiAgent } = await import('./src/native/binding.js');
-        const agent = await NapiAgent.create(null, null);
+        const agent = await NapiAgent.create(null, null, null);
         const outcome = await agent.query('wait', null, null, null, null);
         const run = outcome.takeRun();
         const reads = Array.from({length: 32}, () => run.next());

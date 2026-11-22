@@ -57,7 +57,7 @@ integration('fork structured input and FIFO versioned follow-ups cross the real 
       if ((await agent.loadTranscript(main.session_id)).length) throw new Error('fork escaped to main');
       // A frozen old caller invokes the addon method with one argument.
       const { NapiAgent } = await import('./src/native/binding.js');
-      const raw = await NapiAgent.create(null, null);
+      const raw = await NapiAgent.create(null, null, null);
       const legacy = await raw.fork('legacy readonly').query('legacy text');
       while (await legacy.next() !== null) {}
       console.log('fork FIFO preserved');

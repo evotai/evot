@@ -196,7 +196,7 @@ describe('--fork flag', () => {
   })
 
   test('restart drops --fork and pins --resume', () => {
-    expect(argvForRestart(['--fork', 'abc', '--model', 'm'], 'sid')).toEqual(['--model', 'm', '--resume', 'sid'])
+    expect(argvForRestart(['--fork', 'abc', '--port', '9000'], 'sid')).toEqual(['--port', '9000', '--resume', 'sid'])
     expect(argvForRestart(['--fork'], 'sid')).toEqual(['--resume', 'sid'])
   })
 })

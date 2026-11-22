@@ -113,4 +113,13 @@ impl NapiAgent {
     pub fn restore_thinking_level(&self, level: String) {
         self.agent.restore_thinking_level(&level);
     }
+
+    /// Apply an explicit `--thinking-level` to the live selection without
+    /// persisting it. Errors when the active model does not support the level.
+    #[napi]
+    pub fn apply_thinking_level(&self, level: String) -> Result<()> {
+        self.agent
+            .apply_thinking_level(&level)
+            .map_err(|e| Error::from_reason(e.to_string()))
+    }
 }

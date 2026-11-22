@@ -58,7 +58,7 @@ impl Agent {
         Ok(Self {
             selection: Arc::new(ModelSelection::new(
                 config
-                    .active_llm()
+                    .startup_llm()
                     .unwrap_or_else(|_| LlmConfig::unconfigured()),
             )),
             model_catalog_config: RwLock::new(Arc::new(config.clone())),
