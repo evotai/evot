@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import { getSkillEntries, type OfficialSyncResult } from '../../commands/skill/index.js'
-import { currentModelSpec, formatModelLabel, formatModelOptionLabel, hasPremiumModel, isCloudModel, selectModelOption } from '../../features/models/options.js'
+import { currentModelSpec, formatModelLabel, formatModelOptionLabel, hasPremiumModel, isCloudModel, modelAvailabilityKey, selectModelOption } from '../../features/models/options.js'
 import type { ModelOption } from '../../native/contracts/config-info.js'
 import { type Agent, authNotices } from '../../native/index.js'
 import type { CloudSessionSync } from '../../session/cloud-sessions.js'
@@ -257,6 +257,7 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
       deps.modelAnnouncer.seed(deps.cloudModels().map(m => m.model))
       const knownCampaignIds = new Set([...st.adSlot.notices, ...st.adSlot.ads].map(c => c.id))
       const knownFingerprints = new Set([...st.adSlot.notices, ...st.adSlot.ads].map(campaignFingerprint))
+      const knownAvailability = modelAvailabilityKey(st.configInfo)
 
       const synced = await deps.cloudSync.run(force)
       if (st.destroyed || !synced) return
@@ -284,8 +285,12 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
         else showCloudCampaign(campaignId)
       }
       const refreshedOpenPicker = modelsSynced && deps.refreshOpenModelSelector()
+      // The footer marks the next model while the server reports it
+      // unavailable; redraw when that set changes, in either direction.
+      const availabilityChanged = modelAvailabilityKey(st.configInfo) !== knownAvailability
       if (
         refreshedOpenPicker
+        || availabilityChanged
         || (!deps.commandWindow.commandWindowMounted() && (addedModels.length > 0 || addedCampaigns.length > 0 || copyChanged))
       ) {
         deps.renderer.requestRender()

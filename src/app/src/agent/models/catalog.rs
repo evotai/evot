@@ -40,7 +40,8 @@ pub fn model_catalog(
                 entry["group_order"] = json!(order);
                 entry["sort_order"] =
                     json!(config.cloud_model_sorts.get(model).copied().unwrap_or(0));
-                entry["free"] = match model_meta.get(model) {
+                let meta = model_meta.get(model);
+                entry["free"] = match meta {
                     Some(meta) => json!({
                         "display_name": meta.display_name,
                         "tagline": meta.tagline,
@@ -49,6 +50,14 @@ pub fn model_catalog(
                     }),
                     None => json!({}),
                 };
+                // Server-reported and present only while the model is
+                // temporarily unavailable; clients render it, never block on it.
+                if let Some(availability) = meta.and_then(|meta| meta.availability.as_ref()) {
+                    entry["availability"] = json!({
+                        "state": availability.state,
+                        "message": availability.message,
+                    });
+                }
             }
             models.push(entry);
         }

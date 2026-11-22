@@ -12,7 +12,7 @@ import { splitPaneHints } from '../../ui/split-pane.js'
 import { CURSOR_MARKER } from '../screen/render-frame.js'
 import { confirmationHint } from './confirmation-hint.js'
 import { effortLabel } from './model-effort.js'
-import { buildSelectorHeader, buildSelectorRow, buildSessionLineRow, SESSION_ID_COLUMN, sessionLineHeight, type SelectorRowOptions } from './selector-row.js'
+import { buildRowWarning, buildSelectorHeader, buildSelectorRow, buildSessionLineRow, SESSION_ID_COLUMN, sessionLineHeight, type SelectorRowOptions } from './selector-row.js'
 import { dim, line, styledLineToAnsi, type StyledLine } from './types.js'
 import { finiteSize } from './width.js'
 
@@ -125,8 +125,9 @@ function compactCommandRegion(state: SelectorState, columns: number, budget: num
       const detail = item.effort
         ? [effortLabel(item.effort.levels[item.effort.index] ?? ''), item.detail].filter(Boolean).join(' · ')
         : item.detail
-      return styledLineToAnsi(item.header ? buildSelectorHeader(item.label, item.headerCount)
-        : buildSelectorRow({ ...item, detail }, options))
+      if (item.header) return styledLineToAnsi(buildSelectorHeader(item.label, item.headerCount))
+      const row = buildSelectorRow({ ...item, detail }, options)
+      return styledLineToAnsi({ ...row, spans: [...row.spans, ...buildRowWarning(item, row.bg)] })
     })
   if (visible.length === 0) visible.push(styledLineToAnsi(line(dim(state.emptyMessage ?? 'No matches'))))
   while (visible.length < listRows) visible.push('')

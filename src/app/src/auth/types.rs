@@ -81,6 +81,27 @@ pub struct FreeModelOption {
     /// Independent output limit; absent/zero leaves the profile's limit intact.
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Present only while the server reports the model temporarily
+    /// unavailable to this account; absent means usable. Omitted when absent
+    /// so healthy caches keep their historical shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability: Option<ModelAvailability>,
+    #[serde(flatten, default)]
+    pub extra: ExtraFields,
+}
+
+/// Why a cloud model is temporarily unavailable. The server clears it once
+/// the model recovers; the client only renders it and never blocks selection.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ModelAvailability {
+    /// `quota` (this account is over a token cap) or `upstream` (the model
+    /// is failing for everyone). Kept as text so a future state does not
+    /// fail the whole cache; clients show unknown states generically.
+    #[serde(default)]
+    pub state: String,
+    /// Server-written explanation, e.g. which cap is exhausted. May be empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub message: String,
     #[serde(flatten, default)]
     pub extra: ExtraFields,
 }

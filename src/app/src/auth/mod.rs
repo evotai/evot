@@ -25,6 +25,7 @@ pub use types::CloudProviderConfig;
 pub use types::CloudUser;
 pub use types::FreeModelOption;
 pub use types::LoginCodeResponse;
+pub use types::ModelAvailability;
 pub use types::ModelsCache;
 pub use types::ModelsResponse;
 pub use types::Notice;

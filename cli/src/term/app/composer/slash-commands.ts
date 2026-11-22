@@ -4,7 +4,7 @@ import type { OutputLine } from '../../../render/output.js'
 import type { OverlayState } from '../selector/overlay-state.js'
 import { resolveCommand } from '../../../commands/index.js'
 import { modelShareEvents } from '../../../session/share-events.js'
-import { currentModelSpec, formatModelLabel, modelOptions } from '../../../features/models/options.js'
+import { currentModelSpec, formatModelLabel, modelAvailabilityNotice, modelOptions } from '../../../features/models/options.js'
 
 export interface CommandModelClient {
   model: string
@@ -82,7 +82,7 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
         return {
           ...baseResult(ctx),
           appState,
-          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(next.model, next.provider, next.group_label)}`, shareEvents }],
+          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(next.model, next.provider, next.group_label)}${modelAvailabilityNotice(next)}`, shareEvents }],
         }
       }
       if (args) {
@@ -102,7 +102,7 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
         return {
           ...baseResult(ctx),
           appState,
-          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(model, provider, selected?.group_label)}`, shareEvents }],
+          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(model, provider, selected?.group_label)}${modelAvailabilityNotice(selected)}`, shareEvents }],
         }
       }
       // No arg — return empty result; handleSlashInput will show selector overlay

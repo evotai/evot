@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "synced_at": 457,
+  "response": {
+    "version": 12,
+    "default_model": "m-two",
+    "providers": [
+      {
+        "name": "evot-free",
+        "label": "Evot Free",
+        "sort_order": 0,
+        "protocol": "anthropic",
+        "base_url": "https://auto.evot.ai/v1/llm",
+        "api_key": "evot.fixture.key",
+        "default_model": "m-one",
+        "models": ["m-one", "m-two"]
+      }
+    ],
+    "models": [
+      {"id": "m-one", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "sort_order": 9},
+      {"id": "m-two", "protocol": "anthropic", "tier": "base", "provider": "evot-free", "sort_order": 1,
+       "availability": {"state": "quota", "message": "m-two is over its day cap (1B / 1B tokens)", "since": 77}}
+    ],
+    "notices": []
+  }
+}

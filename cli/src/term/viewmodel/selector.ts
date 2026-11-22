@@ -13,7 +13,7 @@ import { scrollPreview } from './scroll-preview.js'
 import { confirmationHint } from './confirmation-hint.js'
 import { previewGeometry } from '../../ui/preview-scroll.js'
 import { splitPaneHints } from '../../ui/split-pane.js'
-import { buildBackgroundRow, buildSelectorHeader, buildSelectorRow } from './selector-row.js'
+import { buildBackgroundRow, buildRowWarning, buildSelectorHeader, buildSelectorRow } from './selector-row.js'
 import { buildEffortCell, effortLabel, effortLevelHex, planEffortLayout } from './model-effort.js'
 import { buildBrowseSelectorLines } from './browse-selector.js'
 import { selectorColumns, selectorHints, selectorTitle, selectorSearch } from './selector-chrome.js'
@@ -194,6 +194,11 @@ function buildModelSelectorRegionLines(state: SelectorState, width: number, acti
       }
     }
   }
+  for (const ref of rowRefs) {
+    const target = pageLines[ref.at]!
+    const warning = buildRowWarning(ref.item, target.bg)
+    if (warning.length > 0) pageLines[ref.at] = { ...target, spans: [...target.spans, ...warning] }
+  }
   lines.push(...pageLines)
   for (let pad = pageLines.length; pad < pageHeight; pad++) lines.push(line(plain('')))
 
@@ -235,6 +240,7 @@ function buildModelFooter(selected: SelectorItem, active: boolean, width: number
   if (level !== undefined && selected.effort) {
     name.push(dim(HINT_SEPARATOR), { text: effortLabel(level), hex: effortLevelHex(selected.effort) })
   }
+  if (selected.warning) name.push(dim(HINT_SEPARATOR), colored(`⚠ ${selected.warning}`, 'yellow'))
   const rows: StyledLine[] = [line(...name)]
   if (!active) return rows
   const hints: Hint[] = [

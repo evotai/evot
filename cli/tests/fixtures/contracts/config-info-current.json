@@ -11,6 +11,12 @@
       "thinking_levels": ["off", "low", "medium", "high"], "thinking_level": "high",
       "free": { "display_name": "Fixture", "tagline": "Test model", "is_new": true, "tier": "base" }
     },
+    {
+      "provider": "evot-free", "protocol": "anthropic", "model": "fixture-busy", "spec": "evot-free:fixture-busy",
+      "group_label": "Free", "group_order": 0, "sort_order": 4,
+      "free": { "display_name": "Busy", "tagline": "", "is_new": false, "tier": "base" },
+      "availability": { "state": "quota", "message": "fixture-busy is over its day cap" }
+    },
     { "provider": "byok", "protocol": "openai_responses", "model": "custom", "spec": "byok:custom" }
   ],
   "thinkingLevel": "high",

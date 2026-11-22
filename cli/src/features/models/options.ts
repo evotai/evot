@@ -44,6 +44,33 @@ export function modelGroupLabel(option: ModelOption): string {
   return [option.provider, protocolLabel(option.protocol)].filter(Boolean).join(' · ')
 }
 
+/** Short status for a model the server reports temporarily unavailable, or
+ *  '' when it is usable. The server clears the report once the model recovers,
+ *  so the status disappears on the next catalog refresh. */
+export function modelAvailabilityLabel(option: ModelOption | undefined): string {
+  const state = option?.availability?.state
+  if (state === undefined) return ''
+  return state === 'quota' ? 'quota used up' : 'unavailable'
+}
+
+/** The full reason, for places with room to explain: the server's own message
+ *  when it sent one (e.g. which cap is exhausted). */
+export function modelAvailabilityReason(option: ModelOption | undefined): string {
+  if (!option?.availability) return ''
+  const message = option.availability.message?.trim()
+  if (message) return message
+  return option.availability.state === 'upstream' ? 'temporarily unavailable' : modelAvailabilityLabel(option)
+}
+
+/** Which models are reported unavailable, and why, as one comparable value.
+ *  A catalog refresh that changes only this must still redraw the footer. */
+export function modelAvailabilityKey(configInfo: ConfigInfo | undefined): string {
+  return (configInfo?.availableModels ?? [])
+    .filter(option => option.availability !== undefined)
+    .map(option => `${option.spec}=${option.availability!.state}`)
+    .join('\n')
+}
+
 /** Per-row extra after the name: tagline as `(tag)`, then NEW if the server marked it. */
 export function formatModelOptionDetail(option: ModelOption): string {
   const tag = option.free?.tagline?.trim()
@@ -52,6 +79,13 @@ export function formatModelOptionDetail(option: ModelOption): string {
     isCloudModel(option) && option.free?.is_new ? 'NEW' : '',
   ].filter(Boolean)
   return parts.join(' ')
+}
+
+/** Suffix for the `Model → …` switch line: why the chosen model may fail
+ *  right now. The switch itself is never refused. */
+export function modelAvailabilityNotice(option: ModelOption | undefined): string {
+  const reason = modelAvailabilityReason(option)
+  return reason ? ` · ⚠ ${reason}` : ''
 }
 
 /** Rank a provider: server-ordered cloud groups first, then BYOK providers. */
@@ -162,6 +196,7 @@ export function modelSelectorItems(
     // The account pin is a cloud wire id; a BYOK model with the same id is a
     // different thing and never inherits the star.
     const pinned = defaultModel !== undefined && isCloudModel(option) && option.model === defaultModel
+    const warning = modelAvailabilityLabel(option)
     items.push({
       label,
       ...(detail ? { detail } : {}),
@@ -171,6 +206,7 @@ export function modelSelectorItems(
       group,
       selected: active,
       ...(pinned ? { pinned } : {}),
+      ...(warning ? { warning } : {}),
       ...(effort ? { effort } : {}),
       searchText: `${label} ${option.model} ${option.free?.tagline ?? ''} ${detail} ${option.protocol ?? ''}`,
     })

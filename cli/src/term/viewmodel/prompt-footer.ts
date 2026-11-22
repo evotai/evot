@@ -26,6 +26,9 @@ export interface PromptFooterVM {
   thinkingLevel: string
   /** The active model's effort ladder; with it the footer draws a gauge. */
   thinkingLevels?: readonly string[]
+  /** Marker for the next prompt's model while the server reports it
+   *  temporarily unavailable; absent when usable. */
+  modelAvailability?: string
   logMode: boolean
   dashboardUrl: string | null
   cwd: string
@@ -100,7 +103,7 @@ function buildForkTrail(trail: readonly string[], columns: number): StyledLine |
  *   runtime  things evot itself is doing right now: loop wait, background
  *            shells. One hue, the brand, so they read as one family
  *   warn     what needs the user: context pressure (yellow/red), loop about to
- *            wake (yellow)
+ *            wake (yellow), the next model reported unavailable (yellow)
  *
  * Anything else would be a fourth colour competing for the eye on a line that
  * is meant to be glanced at, not read.
@@ -239,6 +242,12 @@ function buildFooterCandidate(
         groups.push(identity)
       }
       if (input.nextModel) groups.push([dim(`next: ${input.nextModel}`)])
+      // Follows whichever name the next prompt will use: `next:` when shown,
+      // otherwise the model identity.
+      const last = groups[groups.length - 1]
+      if (input.modelAvailability && groups.length > 1 && last) {
+        last.push(colored(` ⚠ ${input.modelAvailability}`, 'yellow'))
+      }
     }
     if (layout.context !== 'hidden' && contextPercent > 0) {
       const warning = contextPercent > 90 ? ' ⚠' : ''

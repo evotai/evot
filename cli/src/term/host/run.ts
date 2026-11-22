@@ -264,6 +264,12 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         deps.suggestionContext.observe(event)
         st.spinnerState = update.state.spinnerState
         if (['turn_started', 'error', 'llm_call_retry', 'quota_waiting', 'outage_waiting', 'context_compaction_started'].includes(event.kind)) deps.suggestions.cancelAutomatic()
+        // The server marks the model unavailable in its catalog; fetch it now
+        // instead of on the next poll so the footer and /model show it while
+        // this call waits. Recovery is picked up by the regular poll.
+        if ((event.kind === 'quota_waiting' || event.kind === 'outage_waiting') && deps.cloudCtl.activeProviderIsCloud()) {
+          void deps.cloudCtl.syncCloudNow(true)
+        }
         if (update.sessionRevoked) deps.cloudCtl.handleCloudSessionRevoked()
         deps.shareNotices.record(st.sessionId, update.noticeLines)
 

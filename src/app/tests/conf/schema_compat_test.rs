@@ -21,6 +21,8 @@ const CACHE_V0_MISSING_DEFAULT: &str =
     include_str!("../fixtures/schema/models-cache-v0-missing-default.json");
 const CACHE_V1_ACCOUNT_DEFAULT: &str =
     include_str!("../fixtures/schema/models-cache-v1-account-default.json");
+const CACHE_V1_AVAILABILITY: &str =
+    include_str!("../fixtures/schema/models-cache-v1-availability.json");
 const ENV_WITH_CUSTOM_PROVIDER: &str =
     include_str!("../fixtures/schema/evot-env-with-custom-provider.env");
 
@@ -116,6 +118,47 @@ fn account_default_model_survives_round_trip_and_legacy_readers() -> TestResult 
     let written: serde_json::Value =
         serde_json::to_value(auth::ModelsCache::new(501, unpinned.response))?;
     assert_eq!(written["response"]["default_model"], serde_json::json!(""));
+    Ok(())
+}
+
+/// Model availability is an optional per-model field: historical caches read
+/// as "usable", a reported state survives a current rewrite (including fields
+/// this client does not know), and strict legacy readers still load the file.
+#[test]
+fn model_availability_is_optional_and_survives_round_trip() -> TestResult {
+    let legacy: auth::ModelsCache = serde_json::from_str(CACHE_V0)?;
+    assert!(legacy
+        .response
+        .models
+        .iter()
+        .all(|m| m.availability.is_none()));
+
+    let cache: auth::ModelsCache = serde_json::from_str(CACHE_V1_AVAILABILITY)?;
+    assert!(cache.response.models[0].availability.is_none());
+    let reported = cache.response.models[1]
+        .availability
+        .as_ref()
+        .ok_or("missing availability")?;
+    assert_eq!(reported.state, "quota");
+    assert_eq!(
+        reported.message,
+        "m-two is over its day cap (1B / 1B tokens)"
+    );
+
+    let serialized = serde_json::to_string_pretty(&auth::ModelsCache::new(600, cache.response))?;
+    let old_reader: LegacyModelsCache = serde_json::from_str(&serialized)?;
+    assert_eq!(old_reader.synced_at, 600);
+    let value: serde_json::Value = serde_json::from_str(&serialized)?;
+    // A usable model keeps the historical shape: no field, not `null`.
+    assert!(value["response"]["models"][0].get("availability").is_none());
+    assert_eq!(
+        value["response"]["models"][1]["availability"],
+        serde_json::json!({
+            "state": "quota",
+            "message": "m-two is over its day cap (1B / 1B tokens)",
+            "since": 77,
+        })
+    );
     Ok(())
 }
 

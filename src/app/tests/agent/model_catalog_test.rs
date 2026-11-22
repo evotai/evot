@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use evot::agent::models::model_catalog;
 use evot::auth::FreeModelOption;
+use evot::auth::ModelAvailability;
 use evot::conf::Config;
 use evot::conf::LlmConfig;
 use evot::conf::Protocol;
@@ -117,5 +118,42 @@ fn model_catalog_fallback_keeps_live_protocol_without_cloud_presentation() -> Te
         model_catalog(&config, &current, &HashMap::new(), &groups).len(),
         1
     );
+    Ok(())
+}
+
+#[test]
+fn model_catalog_carries_server_availability_for_cloud_models_only() -> TestResult {
+    let mut config = Config::new(PathBuf::new());
+    config.providers.insert(
+        "hosted".into(),
+        profile(Protocol::OpenAi, &["busy", "fine"]),
+    );
+    config
+        .providers
+        .insert("byok".into(), profile(Protocol::OpenAi, &["busy"]));
+    let metadata = HashMap::from([("busy".into(), FreeModelOption {
+        id: "busy".into(),
+        availability: Some(ModelAvailability {
+            state: "upstream".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })]);
+    let groups = HashMap::from([("hosted".into(), ("Hosted".into(), 0))]);
+    let actual = model_catalog(&config, &LlmConfig::unconfigured(), &metadata, &groups);
+    let entry = |provider: &str, model: &str| {
+        actual
+            .iter()
+            .find(|e| e["provider"] == provider && e["model"] == model)
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        entry("hosted", "busy")["availability"],
+        json!({"state": "upstream", "message": ""})
+    );
+    assert!(entry("hosted", "fine").get("availability").is_none());
+    // A BYOK model with the same id is a different route and never inherits it.
+    assert!(entry("byok", "busy").get("availability").is_none());
     Ok(())
 }

@@ -171,6 +171,28 @@ describe('renderSelector via viewmodel', () => {
     expect(lines.join('\n')).not.toContain('enter select')
   })
 
+  test('an unavailable model carries its reason after the effort column, which does not move', () => {
+    const effort = { levels: ['low', 'high'], index: 1 }
+    const rows = (warning?: string) => {
+      const state = {
+        ...createSelectorState('Models', [
+          { label: 'Evot Premium', header: true, focusable: false, group: 'pro' },
+          { label: 'Evot Fast', detail: '(Flash)', group: 'pro', selected: true, effort, ...(warning ? { warning } : {}) },
+          { label: 'GLM 5.3', group: 'pro', effort },
+        ]),
+        presentation: 'model' as const,
+      }
+      return buildSelectorRegionLines(state, 100).map(line => stripAnsi(line).replaceAll('\x1b_pi:c\x07', ''))
+    }
+    const healthy = rows()
+    const warned = rows('unavailable')
+    const fast = warned.find(row => row.startsWith('· Evot Fast'))!
+    expect(fast).toEndWith('High  ⚠ unavailable')
+    expect(fast.indexOf('High')).toBe(healthy.find(row => row.startsWith('· Evot Fast'))!.indexOf('High'))
+    expect(warned.find(row => row.startsWith('· GLM'))).toBe(healthy.find(row => row.startsWith('· GLM')))
+    expect(warned).toContain('  Model: Evot Fast · High · ⚠ unavailable')
+  })
+
   test('model selector uses the brand palette instead of cyan and yellow', () => {
     const state = {
       ...createSelectorState('Models', [

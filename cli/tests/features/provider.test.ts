@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatModelOptionDetail, formatModelOptionLabel, formatModelLabel, hasPremiumModel, isCloudModel, modelGroupLabel, modelSelectorItems, providerDisplayName, sortModelOptionsForSelector } from '../../src/features/models/options.js'
+import { formatModelOptionDetail, formatModelOptionLabel, formatModelLabel, hasPremiumModel, isCloudModel, modelAvailabilityKey, modelAvailabilityLabel, modelAvailabilityNotice, modelAvailabilityReason, modelGroupLabel, modelSelectorItems, providerDisplayName, sortModelOptionsForSelector } from '../../src/features/models/options.js'
 
 const options = [
   { provider: 'anthropic', protocol: 'anthropic' as const, model: 'claude-opus-4-8', spec: 'anthropic:claude-opus-4-8' },
@@ -337,5 +337,53 @@ describe('hasPremiumModel', () => {
   test('missing config is not premium', () => {
     // Before the first catalog read there is no evidence of a grant.
     expect(hasPremiumModel(undefined)).toBe(false)
+  })
+})
+
+describe('model availability', () => {
+  const base = cloudOptions[2]!
+  const quota = { ...base, availability: { state: 'quota', message: 'cohere/north-mini:free is over its day cap (1B / 1B tokens)' } }
+  const upstream = { ...base, availability: { state: 'upstream' } }
+
+  test('usable models carry no marker', () => {
+    expect(modelAvailabilityLabel(base)).toBe('')
+    expect(modelAvailabilityLabel(undefined)).toBe('')
+    expect(modelAvailabilityNotice(base)).toBe('')
+  })
+
+  test('each state has a short label and a full reason', () => {
+    expect(modelAvailabilityLabel(quota)).toBe('quota used up')
+    expect(modelAvailabilityLabel(upstream)).toBe('unavailable')
+    expect(modelAvailabilityLabel({ ...base, availability: { state: 'maintenance' } })).toBe('unavailable')
+    expect(modelAvailabilityReason(quota)).toBe('cohere/north-mini:free is over its day cap (1B / 1B tokens)')
+    expect(modelAvailabilityReason(upstream)).toBe('temporarily unavailable')
+    expect(modelAvailabilityReason(base)).toBe('')
+  })
+
+  test('the picker row keeps its detail and carries the reason as a warning', () => {
+    expect(formatModelOptionDetail(quota)).toBe('(Fast and free)')
+    const row = modelSelectorItems([upstream], 'none:none').find(item => item.id === upstream.spec)
+    expect(row?.detail).toBe('(Fast and free)')
+    expect(row?.warning).toBe('unavailable')
+    expect(row?.focusable).not.toBe(false)
+    expect(row?.searchText).not.toContain('unavailable')
+    const healthy = modelSelectorItems([base], 'none:none').find(item => item.id === base.spec)
+    expect(healthy?.warning).toBeUndefined()
+  })
+
+  test('the availability key changes only when a reported state changes', () => {
+    const config = (models: typeof cloudOptions) => ({
+      provider: 'evot-free', protocol: 'anthropic' as const, envPath: '', hasApiKey: true,
+      baseUrl: null, thinkingLevel: '', availableModels: models,
+    })
+    expect(modelAvailabilityKey(undefined)).toBe('')
+    expect(modelAvailabilityKey(config([base]))).toBe('')
+    expect(modelAvailabilityKey(config([upstream]))).toBe(`${base.spec}=upstream`)
+    expect(modelAvailabilityKey(config([quota]))).not.toBe(modelAvailabilityKey(config([upstream])))
+  })
+
+  test('the switch line prefers the server reason over the marker', () => {
+    expect(modelAvailabilityNotice(quota)).toBe(' · ⚠ cohere/north-mini:free is over its day cap (1B / 1B tokens)')
+    expect(modelAvailabilityNotice(upstream)).toBe(' · ⚠ temporarily unavailable')
   })
 })

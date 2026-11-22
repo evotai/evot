@@ -127,3 +127,22 @@ describe('prompt snapshot projection', () => {
     expect(output.active).toBe(false)
   })
 })
+
+describe('prompt footer model availability', () => {
+  test('marks the next prompt\'s model while the server reports it unavailable', () => {
+    const input = snapshot()
+    expect(footerText(input)).not.toContain('⚠')
+    input.config!.availableModels[1] = { ...input.config!.availableModels[1]!, availability: { state: 'upstream' } }
+    expect(promptFromSnapshot(input).modelAvailability).toBe('unavailable')
+    expect(footerText(input)).toContain('shared')
+    expect(footerText(input)).toContain('shared • ')
+    expect(footerText(input)).toContain(' ⚠ unavailable')
+  })
+
+  test('a same-named model under another provider does not leak its state', () => {
+    const input = snapshot()
+    input.config!.availableModels[0] = { ...input.config!.availableModels[0]!, availability: { state: 'quota' } }
+    expect(promptFromSnapshot(input).modelAvailability).toBeUndefined()
+    expect(footerText(input)).not.toContain('⚠')
+  })
+})

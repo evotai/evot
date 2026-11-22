@@ -19,6 +19,16 @@ export interface ModelOption {
     is_new?: boolean
     tier?: string
   }
+  /** Present only while the server reports this cloud model temporarily
+   *  unavailable. Informational: the model stays selectable. */
+  availability?: ModelAvailability
+}
+
+/** `quota`: this account is over a token cap on the model. `upstream`: the
+ *  model is failing for everyone. Other states may appear in later servers. */
+export interface ModelAvailability {
+  state: string
+  message?: string
 }
 
 /** Published addon JSON. No version or fields are added by the decoder. */
@@ -89,6 +99,11 @@ function validateConfigInfo(value: unknown): asserts value is ConfigInfo {
       object(entry.free, `${path}.free`)
       for (const key of ['display_name', 'tagline', 'tier']) optional(entry.free, key, 'string', `${path}.free`)
       optional(entry.free, 'is_new', 'boolean', `${path}.free`)
+    }
+    if (entry.availability !== undefined) {
+      object(entry.availability, `${path}.availability`)
+      field(entry.availability.state, 'string', `${path}.availability.state`)
+      optional(entry.availability, 'message', 'string', `${path}.availability`)
     }
   })
 }

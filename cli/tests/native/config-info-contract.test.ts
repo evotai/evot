@@ -28,6 +28,8 @@ function legacyReader(json: string): void {
         // a reader that predates them sees exactly what it saw before.
         'thinking_levels', 'thinking_level',
         'free',
+        // Additive-optional: present only while a cloud model is unavailable.
+        'availability',
       ]).toContain(key)
     }
     if (model.thinking_levels !== undefined) {
@@ -118,6 +120,29 @@ describe('ConfigInfo boundary', () => {
         continue
       }
       expect(() => decodeConfigInfo(JSON.stringify(payload))).toThrow(`$.${key}`)
+    }
+  })
+})
+
+describe('ConfigInfo model availability', () => {
+  test('is optional and survives the boundary', () => {
+    const decoded = decodeConfigInfo(JSON.stringify(current))
+    expect(decoded.availableModels[0]?.availability).toBeUndefined()
+    expect(decoded.availableModels[1]?.availability).toEqual({ state: 'quota', message: 'fixture-busy is over its day cap' })
+    // A future state is carried, not rejected.
+    const future = { ...current, availableModels: [{ ...current.availableModels[0], availability: { state: 'maintenance' } }] }
+    expect(decodeConfigInfo(JSON.stringify(future)).availableModels[0]?.availability?.state).toBe('maintenance')
+  })
+
+  test('malformed availability fails with a path', () => {
+    const model = current.availableModels[0]
+    for (const [availability, path] of [
+      ['quota', '$.availableModels[0].availability'],
+      [{}, '$.availableModels[0].availability.state'],
+      [{ state: 'quota', message: 7 }, '$.availableModels[0].availability.message'],
+    ] as const) {
+      const payload = { ...current, availableModels: [{ ...model, availability }] }
+      expect(() => decodeConfigInfo(JSON.stringify(payload))).toThrow(`Invalid ConfigInfo at ${path}`)
     }
   })
 })

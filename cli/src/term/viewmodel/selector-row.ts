@@ -85,6 +85,16 @@ export function buildSelectorRow(item: SelectorItem, options: SelectorRowOptions
 }
 
 /**
+ * A row's warning, appended after everything else on the row (the model
+ * picker's effort column included), so its length never shifts the columns
+ * other rows align to.
+ */
+export function buildRowWarning(item: SelectorItem, bg?: string): StyledSpan[] {
+  if (!item.warning) return []
+  return [{ text: '  ', ...(bg ? { bg } : {}) }, { ...colored(`⚠ ${item.warning}`, 'yellow'), ...(bg ? { bg } : {}) }]
+}
+
+/**
  * One background-task row: title, a dim command column, and the status pinned
  * to the right edge. The status is laid out first and the left side truncated
  * into what remains, so a narrow terminal cuts the command, never the runtime.

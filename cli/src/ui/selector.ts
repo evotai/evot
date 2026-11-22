@@ -26,6 +26,9 @@ export interface SelectorItem {
   selected?: boolean
   /** Marks the account's saved default (the row new sessions start on). */
   pinned?: boolean
+  /** Short reason this choice may fail right now, shown as `⚠ <warning>` at
+   *  the end of the row. Never blocks selection. */
+  warning?: string
   /** Opaque identifier (e.g. full session id) — not displayed. */
   id?: string
   /** Stable identity when `id` can change underneath a refresh (e.g. the

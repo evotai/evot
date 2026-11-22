@@ -1,7 +1,7 @@
 import type { ConfigInfo } from '../../native/contracts/config-info.js'
 import type { AppState } from '../app/run/state.js'
 import type { SuggestionFeedback } from '../app/suggestion/index.js'
-import { providerDisplayName } from '../../features/models/options.js'
+import { modelAvailabilityLabel, providerDisplayName } from '../../features/models/options.js'
 import { shouldDownOpenPanel } from '../app/background/background-panel.js'
 import { isEditorEmpty, type EditorState } from '../input/editor.js'
 import type { PromptVMInput } from './prompt.js'
@@ -66,6 +66,10 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
   const qualify = providerChanged && model === session.model
   const modelLabel = qualify ? `${provider}:${model}` : model
   const nextModel = qualify ? `${selectedProvider}:${session.model}` : session.model
+  // Availability belongs to the model the next prompt will use, not to the
+  // one a finished run happened to call.
+  const selected = config?.availableModels.find(option => option.model === session.model && option.provider === selectedProvider)
+  const modelAvailability = modelAvailabilityLabel(selected)
   return {
     lines: editor.lines,
     cursorLine: editor.cursorLine,
@@ -108,5 +112,6 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     queuedCount: input.queuedCount ?? 0,
     thinkingLevel,
     ...(thinkingLevels?.length ? { thinkingLevels } : {}),
+    ...(modelAvailability ? { modelAvailability } : {}),
   }
 }

@@ -1,5 +1,5 @@
 import type { ComputeSession } from '../../features/compute/session.js'
-import { formatModelLabel, formatModelOptionLabel, selectModelOption } from '../../features/models/options.js'
+import { formatModelLabel, formatModelOptionLabel, modelAvailabilityNotice, selectModelOption } from '../../features/models/options.js'
 import type { TaskSession } from '../../features/task/session.js'
 import { TASK_RUNTIME_DEFAULT_MODEL } from '../../features/task/types.js'
 import type { Agent, SessionMeta } from '../../native/index.js'
@@ -146,7 +146,7 @@ export function createSelectorKeysController(st: ReplState, deps: SelectorKeysDe
           deps.scrollback.commitStatusLine({
             id: 'sys-model',
             kind: 'system',
-            text: `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}`,
+            text: `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}${modelAvailabilityNotice(selected)}`,
             shareEvents: modelShareEvents(provider, model, effort),
           })
         } catch (err) {
