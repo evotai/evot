@@ -1,5 +1,6 @@
 import type { ComputeSession } from '../../features/compute/session.js'
 import { HOST_TOOL_SPECS_JSON, type HostToolExtension, composeExtensions, dispatchHostToolCall } from '../../features/host-tools.js'
+import { currentModelSpec, formatModelLabel, selectModelOption } from '../../features/models/options.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import type { TaskSession } from '../../features/task/session.js'
 import { isHostToolEvent } from '../../native/contracts/query-event.js'
@@ -75,6 +76,7 @@ export interface RunController {
   interruptStream(id: string, text: string): void
   readonly ownsRun: (generation: number) => boolean
   runInteractionInput(): RunInteractionInput
+  requestModelHandoff(spec: string, effort?: string): void
   readonly runQuery: (text: string, contentJson?: string | undefined, prebuiltStream?: QueryStream | undefined, hostToolExtension?: HostToolExtension | undefined) => Promise<void>
   startSpinner(): void
   stopSpinner(): void
@@ -148,6 +150,29 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.setTerminalTitle(deps.idle.idleWaitTitle(), true)
   }
 
+  function requestModelHandoff(spec: string, effort?: string): void {
+    if (!st.isLoading || st.logMode) return
+    const stream = st.streamRef
+    if (!stream) {
+      // Starting the query is asynchronous. Bind the choice to the stream
+      // once this same run acquires it, never to a different session's run.
+      st.pendingModelHandoff = { spec, effort, submitted: false }
+      return
+    }
+    try {
+      const target = stream.requestModelHandoff(spec, effort)
+      st.pendingModelHandoff = { spec: target, effort, submitted: true }
+      const selected = selectModelOption(st.configInfo, target)
+      const label = selected ? formatModelLabel(selected.model, selected.provider, selected.group_label) : target
+      deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model queued → ${label} · next request` })
+      // Release only the wait. The existing shell/task and its output keep running.
+      deps.backgroundTerminals.reclaimTurn()
+    } catch (err) {
+      deps.scrollback.commitSystem('sys-model-err', `  Model switch failed: ${errorText(err)}`, 'error')
+    }
+    deps.renderer.requestRender()
+  }
+
   async function runQuery(
     text: string,
     contentJson?: string,
@@ -198,6 +223,11 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       }
       st.streamRef = stream
       st.sessionId = stream.sessionId ?? st.sessionId
+      const pending = st.pendingModelHandoff
+      if (pending && !pending.submitted) {
+        st.pendingModelHandoff = null
+        requestModelHandoff(pending.spec, pending.effort)
+      }
       deps.queueLifecycle.started(stream, st.sessionId ?? undefined)
       if (st.pendingEnqueue?.target === startupTarget && st.pendingEnqueue.chain === queueChain) st.pendingEnqueue.target = st.sessionId
       if (st.sessionId) {
@@ -248,7 +278,24 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         }
 
         const pendingSwitch = st.streamMachine.pendingSwitch
-        if (pendingSwitch && pendingSwitch.turn === undefined
+        const requested = st.pendingModelHandoff
+        if (requested?.submitted && (event.kind === 'llm_call_started' || event.kind === 'run_finished')) {
+          syncActiveModel()
+          const selectedSpec = currentModelSpec(st.configInfo, st.appState.model)
+          const effort = st.configInfo?.thinkingLevel
+          const callSpec = event.kind === 'llm_call_started' && `${event.payload?.provider}:${event.payload?.model}`
+          if (requested.spec === selectedSpec && (requested.effort === undefined || effort === requested.effort)
+              && (event.kind === 'run_finished' || callSpec === selectedSpec)) {
+            st.pendingModelHandoff = null
+            const selected = selectModelOption(st.configInfo, selectedSpec)
+            const label = formatModelLabel(st.appState.model, st.configInfo?.provider ?? '', selected?.group_label)
+            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}` })
+            deps.suggestions.credentialsChanged()
+          } else if (event.kind === 'run_finished') {
+            st.pendingModelHandoff = null
+            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model switch not applied → ${requested.spec}` })
+          }
+        } else if (pendingSwitch && pendingSwitch.turn === undefined
             && ['llm_call_started', 'run_finished', 'error'].includes(event.kind)) {
           syncActiveModel()
         }
@@ -342,6 +389,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         deps.idle.unfreezeTerminalTitle()
         deps.queueLifecycle.settled(st.streamRef, queueChain, completed)
         st.streamRef = null
+        st.pendingModelHandoff = null
         st.isLoading = false
         st.appState = settleRunCallModel(st.appState)
         st.streamMachine = null
@@ -383,6 +431,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
    *  snapshot of the old state (title, share badge) back over the new one. */
   function abandonRun() {
     st.pendingEnqueue = null
+    st.pendingModelHandoff = null
     if (!st.isLoading) return
     revokeRun()
     deps.manualCompaction.abort()
@@ -440,6 +489,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     interruptedStream?.abort()
     deps.queueLifecycle.pause(interruptedStream)
     st.streamRef = null
+    st.pendingModelHandoff = null
     st.isLoading = false
     flushStreamContent(true)
     st.appState = settleRunCallModel(st.appState)
@@ -454,5 +504,5 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.sessionHook.settleRun()
   }
 
-  return { abandonRun, beginRun, interruptStream, ownsRun, runInteractionInput, runQuery, startSpinner, stopSpinner }
+  return { abandonRun, beginRun, interruptStream, ownsRun, requestModelHandoff, runInteractionInput, runQuery, startSpinner, stopSpinner }
 }

@@ -1,5 +1,6 @@
 import chalk from 'chalk'
 import { resolveCommand } from '../../commands/index.js'
+import { nextModelOption } from '../../features/models/options.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { LoopSession } from '../../features/loop/session.js'
 import type { TaskSession } from '../../features/task/session.js'
@@ -134,6 +135,22 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         return
       }
       void deps.cloudCtl.syncCloudNow(true)
+      if (st.isLoading) {
+        const { args } = pendingCommand
+        if (st.logMode) {
+          deps.scrollback.commitSystem('sys-model-err', '  Model switching is not available in a running log query.')
+        } else if (!args) {
+          deps.sessionCtl.openModelSelector()
+        } else if (args === 'n') {
+          const next = nextModelOption(st.configInfo, deps.agent.model)
+          if (next) deps.runCtl.requestModelHandoff(next.spec)
+          else deps.scrollback.commitSystem('sys-m', '  Only one model available.')
+        } else {
+          deps.runCtl.requestModelHandoff(args)
+        }
+        deps.renderer.requestRender()
+        return
+      }
     }
 
     let result

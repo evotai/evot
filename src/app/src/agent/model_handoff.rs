@@ -10,13 +10,98 @@ use evot_engine::ToolResult;
 use parking_lot::Mutex;
 use serde_json::json;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
 use crate::agent::models::ModelSelection;
+use crate::base::error::EvotError;
+use crate::base::error::Result as AppResult;
 use crate::conf::Config;
 use crate::conf::LlmConfig;
 
 pub(super) const NAME: &str = "handoff_model";
 pub(super) const MAX_HANDOFFS: usize = 4;
+
+/// Manual handoffs use the same segment transition as the tool, but never
+/// depend on the outgoing model cooperating. The latest user choice wins.
+pub(super) struct UserHandoffs {
+    selection: Arc<ModelSelection>,
+    state: Mutex<HandoffState>,
+}
+
+struct HandoffState {
+    open: bool,
+    pending: Option<LlmConfig>,
+    yield_signal: CancellationToken,
+}
+
+impl UserHandoffs {
+    pub(super) fn new(selection: Arc<ModelSelection>) -> Self {
+        Self {
+            selection,
+            state: Mutex::new(HandoffState {
+                open: true,
+                pending: None,
+                yield_signal: CancellationToken::new(),
+            }),
+        }
+    }
+
+    pub(super) fn request(
+        &self,
+        config: &Config,
+        spec: &str,
+        effort: Option<&str>,
+    ) -> AppResult<String> {
+        let (provider, model) = config.resolve_model_spec(spec)?;
+        let mut target = ModelSelection::resolve_interactive_switch(
+            config,
+            &provider,
+            model,
+            self.selection.thinking_level(),
+        )?;
+        if target.api_key.trim().is_empty() {
+            return Err(EvotError::Conf(format!(
+                "No API key set for provider '{provider}'"
+            )));
+        }
+        if let Some(name) = effort {
+            let level = crate::conf::thinking_level_from_str(name)?;
+            crate::conf::ensure_thinking_level_supported(&target, level)?;
+            target.thinking_level = level;
+        }
+        let mut state = self.state.lock();
+        if !state.open {
+            return Err(EvotError::Run(
+                "This run is no longer accepting model changes".into(),
+            ));
+        }
+        let spec = format!("{}:{}", target.provider, target.model);
+        state.pending = Some(target);
+        state.yield_signal.cancel();
+        Ok(spec)
+    }
+
+    pub(super) fn signal(&self) -> CancellationToken {
+        self.state.lock().yield_signal.clone()
+    }
+
+    /// Close admission atomically when the run settles. A request accepted at
+    /// the final boundary still sets the next prompt's model, without generating
+    /// a second answer to an already-completed prompt.
+    pub(super) fn advance(&self, continuing: bool) -> Option<LlmConfig> {
+        let mut state = self.state.lock();
+        let next = state.pending.take();
+        state.open &= continuing;
+        state.yield_signal = CancellationToken::new();
+        next
+    }
+
+    pub(super) fn close(&self) {
+        let mut state = self.state.lock();
+        state.open = false;
+        state.pending = None;
+    }
+}
 
 /// One slot per engine segment. Only this tool can write it; the app runtime
 /// reads it after the completed tool exchange has been persisted.

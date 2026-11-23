@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use evot::agent::Agent;
+use evot::agent::BackgroundReason;
 use evot::agent::ExecutionLimits;
 use evot::agent::QueryRequest;
 use evot::agent::Run;
@@ -11,6 +12,7 @@ use evot::agent::SubmitOutcome;
 use evot::agent::ToolApproval;
 use evot::agent::ToolApprovalRequest;
 use evot::agent::ToolApprover;
+use evot::agent::ToolMode;
 use evot::conf::Config;
 use evot::conf::Protocol;
 use evot::conf::ProviderProfile;
@@ -485,6 +487,180 @@ async fn steering_during_handoff_reaches_the_receiving_model() -> TestResult {
     assert!(
         matches!(requests[1].messages.last(), Some(Message::User { content, .. }) if matches!(content.as_slice(), [Content::Text { text }] if text == "Keep it short."))
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn manual_handoff_uses_the_next_request_and_keeps_background_work_and_steering() -> TestResult
+{
+    let dir = TempDir::new()?;
+    let config = model_config(&dir, None, None);
+    let (agent, requests) = build_agent(
+        &dir,
+        &config,
+        vec![
+            MockResponse::ToolCalls(vec![MockToolCall {
+                name: "bash".into(),
+                arguments: json!({"command": "sleep 30", "description": "fixture wait"}),
+            }]),
+            target_reply(),
+        ],
+        false,
+    )?;
+    let mut run = start(
+        &agent,
+        QueryRequest::text("Run a shell then report its status")
+            .mode(ToolMode::Interactive)
+            .allow_model_handoff(),
+    )
+    .await?;
+    let handle = run.handle();
+    let session_id = run.session_id.clone();
+    let events = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // Sync with the actual shell registration, not just its tool-start
+        // event (which can arrive before the process exists).
+        while agent.background_processes(&session_id).is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(handle
+            .request_model_handoff(&config, TARGET, Some("bad-effort"))
+            .is_err());
+        handle.request_model_handoff(&config, TARGET, None)?;
+        handle.steer(AgentMessage::Llm(Message::user("Keep it short.")));
+        // Same non-destructive release the REPL performs after queuing /model.
+        assert_eq!(
+            agent.background_foreground_processes(&session_id, BackgroundReason::UserRequested),
+            1
+        );
+        Ok::<_, Box<dyn std::error::Error>>(drain(&mut run).await)
+    })
+    .await??;
+    let tasks = agent.background_processes(&session_id);
+    agent.stop_all_background_processes(&session_id).await;
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].status.as_str(), "running");
+    assert_eq!(agent.llm().model, NEXT);
+    assert!(handle.request_model_handoff(&config, TARGET, None).is_err());
+    let calls: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            RunEventPayload::LlmCallStarted { model, .. } => Some(model.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls, [START, NEXT]);
+    assert!(matches!(events.last().map(|event| &event.payload),
+        Some(RunEventPayload::RunFinished { text, .. }) if text == "Aquí está el resumen."));
+    let requests = requests.lock();
+    assert!(requests[1]
+        .messages
+        .iter()
+        .any(|message| matches!(message, Message::ToolResult {
+            is_error: false,
+            ..
+        })));
+    assert!(
+        matches!(requests[1].messages.last(), Some(Message::User {content, ..})
+        if matches!(content.as_slice(), [Content::Text { text }] if text == "Keep it short."))
+    );
+    Ok(())
+}
+
+struct HeldRequest {
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+    quota_limited: bool,
+    recorder: Recorder,
+}
+
+#[async_trait]
+impl StreamProvider for HeldRequest {
+    async fn stream(
+        &self,
+        config: StreamConfig,
+        tx: mpsc::UnboundedSender<StreamEvent>,
+        cancel: CancellationToken,
+    ) -> Result<StreamOutcome, ProviderError> {
+        if config.model == START {
+            self.started.notify_one();
+            self.release.notified().await;
+            assert!(!cancel.is_cancelled());
+            if self.quota_limited {
+                self.recorder.requests.lock().push(config);
+                return Err(ProviderError::QuotaLimited {
+                    message: "fixture quota".into(),
+                });
+            }
+        }
+        self.recorder.stream(config, tx, cancel).await
+    }
+}
+
+#[tokio::test]
+async fn manual_handoff_keeps_in_flight_work_and_takes_over_retries_without_duplicate_answers(
+) -> TestResult {
+    for quota_limited in [false, true] {
+        let dir = TempDir::new()?;
+        let config = model_config(&dir, None, None);
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let agent = Agent::new_with_provider_for_test(
+            &config,
+            dir.path().display().to_string(),
+            Arc::new(MemoryStorage::new()),
+            HeldRequest {
+                started: started.clone(),
+                release: release.clone(),
+                quota_limited,
+                recorder: Recorder {
+                    mock: MockProvider::text("exactly one answer"),
+                    requests: requests.clone(),
+                    reject_first_target: AtomicBool::new(false),
+                },
+            },
+        )?;
+        let mut run = start(
+            &agent,
+            QueryRequest::text("Answer once")
+                .mode(ToolMode::Interactive)
+                .allow_model_handoff(),
+        )
+        .await?;
+        let events = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            started.notified().await;
+            let handle = run.handle();
+            handle.request_model_handoff(&config, &format!("analysis:{START}"), None)?;
+            handle.request_model_handoff(&config, TARGET, None)?;
+            assert_eq!(agent.llm().model, START);
+            assert!(requests.lock().is_empty());
+            release.notify_one();
+            Ok::<_, Box<dyn std::error::Error>>(drain(&mut run).await)
+        })
+        .await??;
+        let expected = if quota_limited {
+            vec![START, NEXT]
+        } else {
+            vec![START]
+        };
+        assert_eq!(
+            requests
+                .lock()
+                .iter()
+                .map(|request| request.model.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(agent.llm().model, NEXT);
+        assert!(matches!(events.last().map(|event| &event.payload),
+            Some(RunEventPayload::RunFinished { text, .. }) if text == "exactly one answer"));
+        let session = agent
+            .sessions()
+            .find(&run.session_id)
+            .await?
+            .ok_or("missing session")?;
+        assert_eq!(session.model, NEXT);
+    }
     Ok(())
 }
 

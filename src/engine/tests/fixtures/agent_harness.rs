@@ -381,6 +381,7 @@ impl TestOutput {
             .map(|e| match e {
                 AgentEvent::AgentStart => "AgentStart",
                 AgentEvent::AgentEnd { .. } => "AgentEnd",
+                AgentEvent::SegmentYielded => "SegmentYielded",
                 AgentEvent::TurnStart => "TurnStart",
                 AgentEvent::TurnEnd { .. } => "TurnEnd",
                 AgentEvent::MessageStart { .. } => "MessageStart",

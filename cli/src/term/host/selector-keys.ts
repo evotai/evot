@@ -13,6 +13,7 @@ import type { AskController } from './ask.js'
 import type { CloudController } from './cloud.js'
 import type { CommandWindowController } from './command-window.js'
 import type { ComposerController } from './composer.js'
+import type { RunController } from './run.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SessionController } from './session.js'
 import type { ReplState } from './state.js'
@@ -36,6 +37,7 @@ export interface SelectorKeysDeps {
   readonly refreshConfigInfo: () => void
   readonly renderer: TermRenderer
   readonly resumeCache: ResumeSessionCache
+  readonly runCtl: RunController
   readonly scrollback: ScrollbackController
   readonly sessionCtl: SessionController
   readonly taskSession: TaskSession
@@ -120,6 +122,10 @@ export function createSelectorKeysController(st: ReplState, deps: SelectorKeysDe
         deps.commandWindow.nextCommandWindowGeneration()
         deps.composer.clearAll()
         deps.commandWindow.releaseCommandWindowLayout()
+        if (st.isLoading) {
+          deps.runCtl.requestModelHandoff(action.spec, action.thinkingLevel)
+          return
+        }
         try {
           deps.agent.setProvider(action.spec)
           deps.refreshConfigInfo()

@@ -10,6 +10,7 @@ export interface NativeRun {
   readonly sessionId: string
   next(): Promise<string | null>
   abort(): void
+  requestModelHandoff?(spec: string, effort: string | null): string
   steer(text: string, contentJson: string | null): string
   followUp(text: string, contentJson: string | null): string
   queuedPrompts(queue: PromptQueueKind): string
@@ -49,6 +50,11 @@ export class QueryStream {
     if (this.ended || this.aborted) return
     this.aborted = true
     this.raw.abort()
+  }
+
+  requestModelHandoff(spec: string, effort?: string): string {
+    if (!this.raw.requestModelHandoff) throw new Error('This native addon does not support live model switching')
+    return this.raw.requestModelHandoff(spec, effort ?? null)
   }
 
   steer(text: string, contentJson?: string): QueuedPrompt {

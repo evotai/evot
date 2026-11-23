@@ -172,6 +172,8 @@ impl NapiAgent {
                         inner: Mutex::new(run),
                         handle,
                         cached_session_id: sid,
+                        model_env_file: (mode == ToolMode::Interactive)
+                            .then(|| self.env_file_path.clone()),
                         abort_signal: CancellationToken::new(),
                         host_event_rx: Mutex::new(Some(host_event_rx)),
                         host_responders,

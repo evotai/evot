@@ -1946,6 +1946,44 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
+  test('/model hands off the next request while the outgoing shell keeps running', async () => {
+    const models: string[] = []
+    const firstRequest = Promise.withResolvers<void>()
+    const releaseFirst = Promise.withResolvers<void>()
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => {
+      const { model, tools } = await request.json() as { model: string; tools?: unknown[] }
+      const conversation = Boolean(tools?.length)
+      if (conversation) models.push(model)
+      const first = conversation && models.length === 1
+      if (first) {
+        firstRequest.resolve()
+        await releaseFirst.promise
+      }
+      const choice = first
+        ? { index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'handoff-bash', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'sleep 30', description: 'Long-running fixture' }) } }] }, finish_reason: 'tool_calls' }
+        : { index: 0, delta: { role: 'assistant', content: 'Switched and continued.' }, finish_reason: 'stop' }
+      return new Response(`data: ${JSON.stringify({ id: 'fixture', model, choices: [choice] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+    } })
+    let session: Session | undefined
+    try {
+      session = await startEvot(false, false, false, `http://127.0.0.1:${server.port}/v1`)
+      session.write('Start a shell and then report back\x0d')
+      await firstRequest.promise
+      session.write('/model smoke:smoke-other-model\x0d')
+      await session.waitFor('Model queued')
+      expect(models).toEqual(['smoke-model'])
+      releaseFirst.resolve()
+      await session.waitFor('Model → smoke-other-model@smoke', 10_000)
+      await session.waitFor('Switched and continued.')
+      await session.waitFor('1 background shell running')
+      expect(models).toEqual(['smoke-model', 'smoke-other-model'])
+    } finally {
+      releaseFirst.resolve()
+      if (session) await session.kill()
+      await server.stop(true)
+    }
+  }, 30_000)
+
   test('Esc stops the reply first, then confirms background stop in the footer without waking again', async () => {
     let requests = 0
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => {

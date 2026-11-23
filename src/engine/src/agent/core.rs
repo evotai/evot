@@ -30,6 +30,7 @@ pub struct Agent {
     pub(super) api_key: String,
     pub(super) thinking_level: ThinkingLevel,
     pub(super) live_thinking_level: Option<ThinkingLevelFn>,
+    pub(super) yield_before_request: CancellationToken,
     pub(super) max_tokens: Option<u32>,
     pub(super) model_config: Option<ModelConfig>,
     pub(super) messages: Vec<AgentMessage>,
@@ -98,6 +99,7 @@ impl Agent {
             api_key: String::new(),
             thinking_level: ThinkingLevel::default(),
             live_thinking_level: None,
+            yield_before_request: CancellationToken::new(),
             max_tokens: None,
             model_config: None,
             messages: Vec::new(),
@@ -158,6 +160,13 @@ impl Agent {
     /// in-flight request or any of its pinned model settings.
     pub fn with_live_thinking(mut self, level: ThinkingLevelFn) -> Self {
         self.live_thinking_level = Some(level);
+        self
+    }
+
+    /// Yield at the next provider request boundary, not by cancelling the
+    /// current request, tool batch, or background processes.
+    pub fn with_request_yield(mut self, signal: CancellationToken) -> Self {
+        self.yield_before_request = signal;
         self
     }
 

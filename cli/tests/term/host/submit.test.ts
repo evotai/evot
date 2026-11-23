@@ -130,10 +130,10 @@ test.each(['/model', '/resume', '/skill list', '/typo', '/new', '/log analyze th
 })
 
 test('a blocked command does not cancel the running turn’s suggestions', () => {
-  const h = harness('/model')
+  const h = harness('/clear')
   h.ctl.handleLoadingEnter()
   expect(h.notices[0]).toContain("Commands don't queue")
-  expect(getEditorText(h.st.editor)).toBe('/model')
+  expect(getEditorText(h.st.editor)).toBe('/clear')
   expect(h.calls).not.toContain('cancel suggestion')
 })
 

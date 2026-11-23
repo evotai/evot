@@ -96,6 +96,10 @@ impl ModelSelection {
         Ok(())
     }
 
+    pub(crate) fn thinking_level(&self) -> ThinkingLevel {
+        self.llm.read().thinking_level
+    }
+
     /// Only effort can follow the live selection, and only on the same route.
     pub(crate) fn thinking_level_for(&self, pinned: &LlmConfig) -> ThinkingLevel {
         let live = self.llm.read();

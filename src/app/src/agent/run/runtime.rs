@@ -93,12 +93,16 @@ pub(in crate::agent) struct ExecuteRunArgs {
     pub session_id: String,
     pub session: Arc<Session>,
     pub initial_input: Vec<evot_engine::Content>,
+    pub user_handoff_selection: Option<Arc<ModelSelection>>,
     pub factory: Arc<dyn TurnFactory>,
     pub on_complete: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 pub(in crate::agent) fn execute_run(args: ExecuteRunArgs) -> Run {
-    let control = RunControl::new();
+    let mut control = RunControl::new();
+    if let Some(selection) = &args.user_handoff_selection {
+        control = control.with_user_handoffs(selection.clone());
+    }
     let (tx, rx) = event_channel(control.clone());
     let run = Run::new(
         args.run_id.clone(),
@@ -122,6 +126,7 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
         initial_input,
         factory,
         on_complete,
+        user_handoff_selection: _,
     } = args;
 
     let started_at = Instant::now();
@@ -135,7 +140,8 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
 
     let mut start = SegmentStart::Prompt(initial_input);
     let mut tracker = None;
-    for index in 0..=MAX_HANDOFFS {
+    let mut tool_handoffs = 0;
+    loop {
         if control.is_cancelled() {
             break;
         }
@@ -143,7 +149,7 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
             turn,
             mut llm,
             handoff,
-        } = match factory.build(start, index < MAX_HANDOFFS).await {
+        } = match factory.build(start, tool_handoffs < MAX_HANDOFFS).await {
             Ok(segment) => segment,
             Err(error) => {
                 tracing::error!(stage = "run", status = "build_segment_failed", %run_id, %session_id, %error);
@@ -209,12 +215,31 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
         }
         compact_records.extend(outcome.compact_records);
 
-        if !outcome.completed || control.is_cancelled() {
+        if control.is_cancelled() {
             break;
         }
-        let Some(next) = handoff.and_then(|handoff| handoff.take()) else {
-            break;
+        let tool_target = handoff
+            .filter(|_| outcome.completed)
+            .and_then(|tool| tool.take());
+        let resume = outcome.yielded || tool_target.is_some();
+        let manual_target = control
+            .user_handoffs
+            .as_ref()
+            .and_then(|handoffs| handoffs.advance(resume));
+        let next = match (manual_target, tool_target) {
+            (Some(next), _) => next,
+            (None, Some(next)) => {
+                tool_handoffs += 1;
+                next
+            }
+            (None, None) => break,
         };
+        if !resume {
+            if let Err(error) = factory.activate_handoff(&next).await {
+                emit_persistence_error(&tx, &run_id, &session_id, total_turns, &error);
+            }
+            break;
+        }
         if let Some(reason) = tracker
             .as_ref()
             .and_then(|tracker| tracker.lock().check_limits())
@@ -232,6 +257,10 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
             llm: next,
             previous_llm: llm,
         }));
+    }
+
+    if let Some(handoffs) = &control.user_handoffs {
+        handoffs.close();
     }
 
     // Emit the aggregated run-finished event and a single transcript stats
@@ -288,6 +317,7 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
 
 struct SegmentOutcome {
     completed: bool,
+    yielded: bool,
     turn_count: u32,
     usage: UsageSummary,
     transcript_count: usize,
@@ -324,6 +354,9 @@ async fn drive_segment(
     if let Some(level) = live_thinking {
         engine = engine.with_live_thinking(level);
     }
+    if let Some(handoffs) = &control.user_handoffs {
+        engine = engine.with_request_yield(handoffs.signal());
+    }
     let (engine_handle, mut engine_rx) = if resume {
         engine.resume_bounded(control.segment_cancellation()).await
     } else {
@@ -357,6 +390,7 @@ async fn drive_segment(
     let mut turn_count = turn_offset;
     let mut outcome = SegmentOutcome {
         completed: false,
+        yielded: false,
         turn_count: 0,
         usage: UsageSummary::default(),
         transcript_count: 0,
@@ -561,6 +595,7 @@ async fn drive_segment(
                     }
                 }
             }
+            RuntimeEvent::SegmentYielded => outcome.yielded = true,
             RuntimeEvent::EngineCompleted {
                 last_text,
                 usage,

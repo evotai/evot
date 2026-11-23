@@ -10,12 +10,17 @@ use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::queue::RunQueues;
+use crate::agent::model_handoff::UserHandoffs;
+use crate::agent::models::ModelSelection;
+use crate::base::error::EvotError;
+use crate::conf::Config;
 
 #[derive(Clone)]
 pub struct RunControl {
     cancel: CancellationToken,
     engine: Arc<Mutex<Option<evot_engine::RunHandle>>>,
     queues: RunQueues,
+    pub(super) user_handoffs: Option<Arc<UserHandoffs>>,
 }
 
 impl RunControl {
@@ -24,7 +29,27 @@ impl RunControl {
             cancel: CancellationToken::new(),
             engine: Arc::new(Mutex::new(None)),
             queues: RunQueues::new(),
+            user_handoffs: None,
         }
+    }
+
+    pub(super) fn with_user_handoffs(mut self, selection: Arc<ModelSelection>) -> Self {
+        self.user_handoffs = Some(Arc::new(UserHandoffs::new(selection)));
+        self
+    }
+
+    /// Queue a model for this run's next request and return its resolved spec.
+    /// Does not abort the run.
+    pub fn request_model_handoff(
+        &self,
+        config: &Config,
+        spec: &str,
+        effort: Option<&str>,
+    ) -> crate::base::error::Result<String> {
+        let handoffs = self.user_handoffs.as_ref().ok_or_else(|| {
+            EvotError::Run("Model switching is not available for this run".into())
+        })?;
+        handoffs.request(config, spec, effort)
     }
 
     pub(in crate::agent) fn install_engine(&self, handle: evot_engine::RunHandle) {
@@ -48,6 +73,9 @@ impl RunControl {
 
     pub fn abort(&self) {
         self.cancel.cancel();
+        if let Some(handoffs) = &self.user_handoffs {
+            handoffs.close();
+        }
         if let Some(handle) = self.engine.lock().as_ref() {
             handle.abort();
         }

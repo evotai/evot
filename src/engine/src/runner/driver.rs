@@ -39,6 +39,7 @@ pub(crate) struct LoopProgress {
     pub(crate) turn_offset: usize,
     pub(crate) tracker: Option<SharedExecutionTracker>,
     pub(crate) live_thinking_level: Option<ThinkingLevelFn>,
+    pub(crate) yield_before_request: tokio_util::sync::CancellationToken,
     pub(crate) check_context: bool,
 }
 
@@ -193,6 +194,7 @@ async fn run_loop(
         turn_offset,
         tracker,
         live_thinking_level,
+        yield_before_request,
         check_context,
     } = progress;
     let thinking_level = || {
@@ -242,7 +244,10 @@ async fn run_loop(
     // Match pi's prompt-time compaction check: inspect the previous assistant
     // before the new explicit prompt enters context. This runs once per agent
     // prompt, not before every provider call in the tool/retry loop.
-    if (!initial_prompts.is_empty() || check_context) && !cancel.is_cancelled() {
+    if (!initial_prompts.is_empty() || check_context)
+        && !cancel.is_cancelled()
+        && !yield_before_request.is_cancelled()
+    {
         let previous_assistant = context
             .messages
             .iter()
@@ -311,6 +316,12 @@ async fn run_loop(
             break;
         }
 
+        // Any messages already drained from the host queues must be written
+        // to history before yielding so the receiving segment can replay them.
+        if !first_turn && pending.is_empty() && yield_before_request.is_cancelled() {
+            tx.send(AgentEvent::SegmentYielded).await.ok();
+            break;
+        }
         let mut steering_after_tools: Option<Vec<AgentMessage>> = None;
         let mut turn_settled = false;
 
@@ -400,9 +411,13 @@ async fn run_loop(
                 budget: budget_snapshot,
                 idle_clock: idle_clock.clone(),
                 thinking_level: &thinking_level,
+                yield_before_request: &yield_before_request,
             })
             .await;
-        let message = assistant_result.message;
+        let Some(message) = assistant_result else {
+            tx.send(AgentEvent::SegmentYielded).await.ok();
+            break;
+        };
 
         // Preserve provider text so finalization cannot erase streamed content.
         let agent_msg: AgentMessage = message.clone().into();
@@ -662,7 +677,7 @@ async fn run_loop(
         // never asks for a retry; the fresh tool results stay in context.
         // Below the line the controller only sees the usage, which re-arms
         // threshold compaction after a previous one.
-        if has_tool_calls && !cancel.is_cancelled() {
+        if has_tool_calls && !cancel.is_cancelled() && !yield_before_request.is_cancelled() {
             if super::compaction_check::tool_turn_needs_compaction_check(
                 &compaction_controller,
                 &context_tracker,
@@ -736,6 +751,9 @@ async fn run_loop(
             continue;
         }
 
+        if yield_before_request.is_cancelled() {
+            break; // No further work: keep the selection without another answer.
+        }
         let should_retry = check_compaction(
             &mut compaction_controller,
             &mut context_tracker,

@@ -1,4 +1,4 @@
-import { isRunSafeCommand, isSlashCommand } from '../../../commands/index.js'
+import { isRunSafeCommand, isSlashCommand, resolveCommand } from '../../../commands/index.js'
 
 export interface BusySubmission {
   displayText: string
@@ -13,7 +13,7 @@ export type BusySubmissionAction =
   | 'queue_compaction'
   | 'edit_queue'
   | 'show_log'
-  | 'run_readonly_command'
+  | 'run_local_command'
   | 'blocked_run_command'
   | 'steer'
   | 'none'
@@ -30,7 +30,9 @@ export function busySubmissionAction(input: BusySubmission): BusySubmissionActio
   if (input.editingQueue) return 'edit_queue'
   if (trimmed === '/log') return 'show_log'
   if (command && input.hasRun) {
-    return isRunSafeCommand(trimmed) ? 'run_readonly_command' : 'blocked_run_command'
+    const resolved = resolveCommand(trimmed)
+    return (resolved.kind === 'resolved' && resolved.name === '/model') || isRunSafeCommand(trimmed)
+      ? 'run_local_command' : 'blocked_run_command'
   }
   return (input.expandedText || input.hasImages) && input.hasRun ? 'steer' : 'none'
 }

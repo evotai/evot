@@ -45,22 +45,13 @@ fn default_convert_to_llm(messages: &[AgentMessage]) -> Vec<Message> {
         .collect()
 }
 
-pub(super) struct AssistantStreamResult {
-    pub message: Message,
-}
-
-impl AssistantStreamResult {
-    fn complete(message: Message) -> Self {
-        Self { message }
-    }
-}
-
 pub(super) struct AssistantStreamInput<'a> {
     pub turn: usize,
     pub injected_count: usize,
     pub budget: crate::context::ContextBudgetSnapshot,
     pub idle_clock: Option<crate::context::IdleClock>,
     pub thinking_level: &'a (dyn Fn() -> ThinkingLevel + Sync),
+    pub yield_before_request: &'a tokio_util::sync::CancellationToken,
 }
 
 /// Stream an assistant response from the LLM.
@@ -70,13 +61,14 @@ pub(super) async fn stream_assistant_response(
     tx: &EventSink,
     cancel: &tokio_util::sync::CancellationToken,
     input: AssistantStreamInput<'_>,
-) -> AssistantStreamResult {
+) -> Option<Message> {
     let AssistantStreamInput {
         turn,
         injected_count,
         budget,
         idle_clock,
         thinking_level: requested_thinking_level,
+        yield_before_request,
     } = input;
     // Apply context transform
     let messages = if let Some(transform) = &config.transform_context {
@@ -122,6 +114,9 @@ pub(super) async fn stream_assistant_response(
     let mut quota_probe_delay = QUOTA_PROBE_INITIAL;
     let shared_metrics = std::sync::Arc::new(std::sync::Mutex::new(LlmCallMetrics::default()));
     let result = loop {
+        if yield_before_request.is_cancelled() {
+            return None;
+        }
         let thinking_level = crate::provider::effective_thinking_level(
             requested_thinking_level(),
             config.model_config.as_ref(),
@@ -443,6 +438,7 @@ pub(super) async fn stream_assistant_response(
                 let _idle_pause = idle_clock.as_ref().map(crate::context::IdleClock::pause);
                 tokio::select! {
                     _ = cancel.cancelled() => break Err(ProviderError::Cancelled),
+                    _ = yield_before_request.cancelled() => {}
                     _ = tokio::time::sleep(delay) => {}
                 }
                 continue;
@@ -504,6 +500,7 @@ pub(super) async fn stream_assistant_response(
                 .ok();
                 tokio::select! {
                     _ = cancel.cancelled() => break Err(ProviderError::Cancelled),
+                    _ = yield_before_request.cancelled() => {}
                     _ = tokio::time::sleep(delay) => {}
                 }
                 continue;
@@ -541,6 +538,7 @@ pub(super) async fn stream_assistant_response(
                 let _idle_pause = idle_clock.as_ref().map(crate::context::IdleClock::pause);
                 tokio::select! {
                     _ = cancel.cancelled() => break Err(ProviderError::Cancelled),
+                    _ = yield_before_request.cancelled() => {}
                     _ = tokio::time::sleep(delay) => {}
                 }
                 continue;
@@ -604,11 +602,11 @@ pub(super) async fn stream_assistant_response(
             })
             .await
             .ok();
-            AssistantStreamResult::complete(outcome.into_message())
+            Some(outcome.into_message())
         }
         Err(e) => {
             if matches!(e, ProviderError::Cancelled) && cancel.is_cancelled() {
-                return AssistantStreamResult::complete(Message::Assistant {
+                return Some(Message::Assistant {
                     content: vec![],
                     stop_reason: StopReason::Aborted,
                     model: config.model.clone(),
@@ -633,7 +631,7 @@ pub(super) async fn stream_assistant_response(
             })
             .await
             .ok();
-            AssistantStreamResult::complete(Message::Assistant {
+            Some(Message::Assistant {
                 content: vec![Content::Text {
                     text: String::new(),
                 }],

@@ -176,6 +176,7 @@ impl Agent {
             turn_offset: self.turn_offset,
             tracker: self.execution_tracker.clone(),
             live_thinking_level: self.live_thinking_level.clone(),
+            yield_before_request: self.yield_before_request.clone(),
             check_context: matches!(&kind, RunKind::Continue {
                 check_context: true
             }),

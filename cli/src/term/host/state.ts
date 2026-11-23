@@ -60,6 +60,7 @@ export interface ReplState {
   // they are abortable agent streams or showing stale LLM usage.
   foregroundCommand: 'log-shot' | null
   streamRef: QueryStream | null
+  pendingModelHandoff: { spec: string; effort: string | undefined; submitted: boolean } | null
   runStartedAt: number | null
   runTurnCount: number
   queueStartupTarget: StartupQueueTarget
@@ -187,6 +188,7 @@ export function createReplState(model: string, cwd: string): ReplState {
     loginInFlight: false,
     foregroundCommand: null,
     streamRef: null,
+    pendingModelHandoff: null,
     runStartedAt: null,
     runTurnCount: 0,
     queueStartupTarget: { startup: 0 },

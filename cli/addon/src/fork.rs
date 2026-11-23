@@ -55,6 +55,7 @@ impl NapiForkedAgent {
             inner: Mutex::new(run),
             handle,
             cached_session_id: sid,
+            model_env_file: None,
             abort_signal: CancellationToken::new(),
             host_event_rx: Mutex::new(Some(host_rx)),
             host_responders: Arc::new(std::sync::Mutex::new(HashMap::new())),

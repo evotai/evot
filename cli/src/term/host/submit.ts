@@ -179,7 +179,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       return
     }
 
-    if (action === 'run_readonly_command') {
+    if (action === 'run_local_command') {
       if (historyText) deps.saveInputHistory(historyText)
       deps.clearAll()
       void deps.slashCtl.handleSlashInput(expandedText)

@@ -84,6 +84,7 @@ pub struct NapiRun {
     pub(crate) inner: Mutex<evot::api::Run>,
     pub(crate) handle: evot::api::RunControl,
     pub(crate) cached_session_id: String,
+    pub(crate) model_env_file: Option<String>,
     pub(crate) abort_signal: CancellationToken,
     pub(crate) host_event_rx: Mutex<Option<tokio_mpsc::Receiver<String>>>,
     pub(crate) host_responders: HostResponders,
@@ -164,6 +165,20 @@ impl NapiRun {
     pub fn abort(&self) {
         self.abort_signal.cancel();
         self.handle.abort();
+    }
+
+    /// Queue a user-controlled model handoff on this exact run.
+    #[napi]
+    pub fn request_model_handoff(&self, spec: String, effort: Option<String>) -> Result<String> {
+        let env_file = self
+            .model_env_file
+            .as_deref()
+            .ok_or_else(|| Error::from_reason("Model switching is not available for this run"))?;
+        let config = evot::api::Config::load_with_env_file(Some(env_file))
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+        self.handle
+            .request_model_handoff(&config, &spec, effort.as_deref())
+            .map_err(|error| Error::from_reason(error.to_string()))
     }
 
     /// List queued prompts as JSON. `queue` is `steering` or `follow_up`.

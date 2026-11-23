@@ -36,6 +36,28 @@ function harness(events: QueryEvent[] = [event('run_finished')]) {
   return { ctl: createSlashController(st, deps), st, native, fork, outcomes, targets, queries, notices, deps }
 }
 
+test('running /model opens the picker and dispatches a spec without mutating the live agent', async () => {
+  const h = harness()
+  h.st.isLoading = true
+  h.st.logMode = null
+  const actions: string[] = []
+  const source = { spec: 'one:old', provider: 'one', model: 'old' }
+  const target = { spec: 'two:new', provider: 'two', model: 'new' }
+  Object.assign(h.deps, {
+    agent: { model: 'old', configInfo: () => ({ provider: 'one', availableModels: [source, target] }) },
+    backgroundTerminals: { guardSessionSwitch: () => false },
+    sessionCtl: { openModelSelector: () => { actions.push('picker') } },
+  })
+  Object.assign(h.deps.cloudCtl, { syncCloudNow: () => {} })
+  Object.assign(h.deps.runCtl, { requestModelHandoff: (spec: string) => { actions.push(spec) } })
+  await h.ctl.handleSlashInput('/model')
+  await h.ctl.handleSlashInput('/model two:new')
+  await h.ctl.handleSlashInput('/model n')
+  expect(actions).toEqual(['picker', 'two:new', 'two:new'])
+  expect(h.deps.agent.model).toBe('old')
+  expect(h.st.sessionId).toBe('main-session')
+})
+
 test('structured log continuation keeps its exact fork target and never changes main session identity', async () => {
   const h = harness(), content = '[{"type":"image","mimeType":"image/png","source":{"type":"base64","data":"fixture"}}]'
   await h.ctl.runLogQuery(h.fork, 'log follow-up', content)

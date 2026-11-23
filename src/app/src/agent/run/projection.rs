@@ -33,6 +33,7 @@ pub enum RuntimeEvent {
     PrivacyFindings(Vec<crate::privacy::LiveFinding>),
     TurnStarted,
     TurnEnded,
+    SegmentYielded,
     EngineCompleted {
         last_text: String,
         usage: UsageSummary,
@@ -53,6 +54,7 @@ pub enum RuntimeEvent {
 pub fn map_agent_event(event: &evot_engine::AgentEvent) -> Vec<RuntimeEvent> {
     match event {
         evot_engine::AgentEvent::AgentStart => vec![],
+        evot_engine::AgentEvent::SegmentYielded => vec![RuntimeEvent::SegmentYielded],
         evot_engine::AgentEvent::ProviderDiagnostic { kind, data } => {
             if kind != crate::privacy::CARD_KIND {
                 return vec![];

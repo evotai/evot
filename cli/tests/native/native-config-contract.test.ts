@@ -41,14 +41,17 @@ integration('live NAPI ConfigInfo contract', () => {
     }
   }, 15_000)
 
-  for (const hostTool of [false, true]) test(`real native streaming decodes ${hostTool ? 'host tool round-trip' : 'text completion'} using a local provider`, async () => {
+  for (const scenario of ['text completion', 'host tool round-trip', 'live model handoff']) test(`real native streaming: ${scenario}`, async () => {
     const home = mkdtempSync(join(tmpdir(), 'evot-run-contract-'))
-    let requests = 0
+    const hostTool = scenario !== 'text completion'
+    const handoff = scenario === 'live model handoff'
+    const models: string[] = []
     const server = Bun.serve({
       hostname: '127.0.0.1', port: 0,
-      fetch: () => {
-        requests++
-        if (hostTool && requests === 1) {
+      fetch: async request => {
+        const { model } = await request.json() as { model: string }
+        models.push(model)
+        if (hostTool && models.length === 1) {
           const chunks = [
             { id: 'fixture', model: 'smoke-model', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'ask_user', arguments: '{"questions":[]}' } }] }, finish_reason: null }] },
             { id: 'fixture', model: 'smoke-model', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
@@ -77,7 +80,13 @@ integration('live NAPI ConfigInfo contract', () => {
         const stream = await agent.query('reply briefly', undefined, ${hostTool} ? 'interactive' : undefined, undefined, specs);
         for await (const event of stream) {
           console.log(JSON.stringify(event));
-          if (event.kind === 'host_tool_call') await stream.respondHostTool(JSON.stringify({ tool_call_id: event.payload.tool_call_id, content: [{ type: 'text', text: 'fixture response' }], is_error: false }));
+          if (event.kind === 'host_tool_call') {
+            if (${handoff}) {
+              const spec = stream.requestModelHandoff('smoke-other-model');
+              if (spec !== 'smoke:smoke-other-model' || agent.model !== 'smoke-model') throw new Error('invalid pending handoff');
+            }
+            await stream.respondHostTool(JSON.stringify({ tool_call_id: event.payload.tool_call_id, content: [{ type: 'text', text: 'fixture response' }], is_error: false }));
+          }
         }
       `], { cwd: join(import.meta.dir, '../..'), env: smokeEnvironment(home), stdout: 'pipe', stderr: 'pipe' })
       const processHandle = child
@@ -89,6 +98,8 @@ integration('live NAPI ConfigInfo contract', () => {
       const events = stdout.trim().split('\n').map(decodeQueryEvent)
       expect(events.some(isHostToolEvent)).toBe(hostTool)
       expect(events.some(event => event.kind === 'run_finished')).toBe(true)
+      expect(models).toEqual(hostTool ? ['smoke-model', handoff ? 'smoke-other-model' : 'smoke-model'] : ['smoke-model'])
+      expect(new Set(events.flatMap(event => isHostToolEvent(event) ? [] : [event.run_id])).size).toBe(1)
       const completed = events.find(event => event.kind === 'assistant_completed' && JSON.stringify(event.payload).includes('fixture reply'))
       expect(completed).toBeDefined()
       if (!completed || isHostToolEvent(completed)) throw new Error('missing completion')

@@ -393,6 +393,9 @@ impl Agent {
             session_id: session_id.clone(),
             session,
             initial_input: request.input,
+            user_handoff_selection: (request.mode == super::tools::ToolMode::Interactive
+                && request.allow_model_handoff)
+                .then(|| self.selection.clone()),
             factory,
             on_complete: Some(on_complete),
         });

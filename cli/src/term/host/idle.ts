@@ -66,6 +66,11 @@ export function createIdleController(st: ReplState, deps: IdleDeps): IdleControl
 
   function refreshBackgroundProcesses(): void {
     deps.backgroundTerminals.refresh()
+    // A request that was already streaming can start a blocking tool after
+    // /model was accepted. Release that wait as well, until handoff lands.
+    if (st.pendingModelHandoff?.submitted && deps.backgroundTerminals.canReclaimTurn()) {
+      deps.backgroundTerminals.reclaimTurn()
+    }
     // The native blocking-wait count is already polled here. Entering a wait
     // offers steering without a final answer; leaving it cancels only that
     // wait's automatic request, never explicit Tab assistance.

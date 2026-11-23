@@ -4,7 +4,7 @@ import type { OutputLine } from '../../../render/output.js'
 import type { OverlayState } from '../selector/overlay-state.js'
 import { resolveCommand } from '../../../commands/index.js'
 import { modelShareEvents } from '../../../session/share-events.js'
-import { currentModelSpec, formatModelLabel, modelAvailabilityNotice, modelOptions } from '../../../features/models/options.js'
+import { formatModelLabel, modelAvailabilityNotice, nextModelOption } from '../../../features/models/options.js'
 
 export interface CommandModelClient {
   model: string
@@ -68,13 +68,10 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
 
     case '/model': {
       if (args === 'n') {
-        const models = modelOptions(ctx.configInfo, ctx.agent.model)
-        if (models.length <= 1) {
+        const next = nextModelOption(ctx.configInfo, ctx.agent.model)
+        if (!next) {
           return { ...baseResult(ctx), systemLines: [{ id: 'sys-m', kind: 'system', text: '  Only one model available.' }] }
         }
-        const activeSpec = currentModelSpec(ctx.configInfo, ctx.agent.model)
-        const idx = models.findIndex(option => option.spec === activeSpec)
-        const next = models[(idx + 1) % models.length]!
         ctx.agent.setProvider(next.spec)
         const config = ctx.agent.configInfo()
         const appState = { ...ctx.appState, model: next.model }

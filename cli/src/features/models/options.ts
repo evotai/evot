@@ -130,6 +130,13 @@ export function sortModelOptionsForSelector(options: ModelOption[], activeSpec: 
     .map(entry => entry.option)
 }
 
+export function nextModelOption(configInfo: ConfigInfo | undefined, model: string): ModelOption | undefined {
+  const models = modelOptions(configInfo, model)
+  if (models.length <= 1) return undefined
+  const active = models.findIndex(option => option.spec === currentModelSpec(configInfo, model))
+  return models[(active + 1) % models.length]
+}
+
 export function currentModelSpec(configInfo: ConfigInfo | undefined, model: string): string {
   return configInfo?.provider ? `${configInfo.provider}:${model}` : model
 }

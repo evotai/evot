@@ -42,6 +42,8 @@ pub enum AgentEvent {
     AgentEnd {
         messages: Vec<AgentMessage>,
     },
+    /// The host requested a pause at a provider request boundary.
+    SegmentYielded,
     TurnStart,
     TurnEnd {
         message: AgentMessage,
