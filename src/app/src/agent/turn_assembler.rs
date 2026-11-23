@@ -355,6 +355,7 @@ impl TurnAssembler {
             input,
             provenance,
             resume,
+            live_thinking: None,
             session,
             transcript_seq,
         })

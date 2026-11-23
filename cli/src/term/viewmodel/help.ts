@@ -19,7 +19,7 @@ const KEYS: Entry[] = [
   ['Tab', 'Complete locally / send draft after the running turn'],
   ['Ctrl+N', 'Request / cycle AI input assistance'],
   ['Ctrl+Z', 'Suspend to shell; fg resumes (Unix)'],
-  ['Shift+Tab', 'Cycle thinking level'],
+  ['Shift+Tab', 'Cycle thinking level for the next model request'],
   ['Ctrl+O', 'Expand/collapse output'],
   ['Ctrl+Y', 'Copy last reply (Markdown source) to clipboard'],
   ['Ctrl+U', 'Clear line before cursor'],

@@ -171,8 +171,8 @@ impl Agent {
     // -- query ---------------------------------------------------------------
 
     pub async fn submit(self: &Arc<Self>, mut request: QueryRequest) -> Result<SubmitOutcome> {
-        // Pin the initial selection for this run. Only a handoff made within
-        // the run can replace it; other callers' selections cannot.
+        // Pin the initial route for this run; only its own handoff can replace
+        // it. An interactive caller may opt into live effort on that route.
         let llm = request.llm.clone().unwrap_or_else(|| self.llm());
         request.llm = Some(llm.clone());
         let session = self
@@ -379,6 +379,7 @@ impl Agent {
             session_id: session_id.clone(),
             llm,
             selection: self.selection.clone(),
+            live_thinking: request.live_thinking,
             previous_llm: self.selection.previous_llm(),
             model_catalog,
             host_tools: request.host_tools.clone(),

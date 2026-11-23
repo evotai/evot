@@ -203,6 +203,41 @@ async fn test_retry_on_rate_limit_uses_local_backoff_and_succeeds() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn retry_reads_and_reports_the_latest_thinking_level() {
+    use std::sync::Arc;
+
+    use crate::fixtures::recording_provider::RecordingProvider;
+    use crate::fixtures::recording_provider::Reply;
+
+    let provider = Arc::new(RecordingProvider::new(vec![
+        Reply::Transient("try again".into()),
+        Reply::text("done"),
+    ]));
+    let requests = provider.captured();
+    let level = Arc::new(parking_lot::Mutex::new(ThinkingLevel::Low));
+    let live = level.clone();
+    let mut agent = Agent::new(provider)
+        .with_model("mock")
+        .with_live_thinking(Arc::new(move || *live.lock()));
+    let (_, mut events) = agent.submit_text("hi").await;
+    let mut announced = Vec::new();
+    while let Some(event) = events.recv().await {
+        match event {
+            AgentEvent::LlmCallRetry { .. } => *level.lock() = ThinkingLevel::High,
+            AgentEvent::LlmCallStart { request, .. } => announced.push(request.thinking_level),
+            _ => {}
+        }
+    }
+    let sent: Vec<_> = requests
+        .lock()
+        .iter()
+        .map(|request| request.thinking_level)
+        .collect();
+    assert_eq!(sent, [ThinkingLevel::Low, ThinkingLevel::High]);
+    assert_eq!(announced, sent);
+}
+
 #[tokio::test]
 async fn test_quota_limit_waits_without_using_bounded_retry_budget() {
     let provider: std::sync::Arc<FailThenSucceedProvider> =

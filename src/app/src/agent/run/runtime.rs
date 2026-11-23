@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use evot_engine::context::SharedExecutionTracker;
+use evot_engine::ThinkingLevelFn;
 
 use super::control::RunControl;
 use super::engine::build_engine;
@@ -24,6 +25,7 @@ use super::projection::RuntimeEvent;
 use super::run::Run;
 use crate::agent::model_handoff::ModelHandoff;
 use crate::agent::model_handoff::MAX_HANDOFFS;
+use crate::agent::models::ModelSelection;
 use crate::base::error::Result;
 use crate::conf::LlmConfig;
 use crate::observability::ContextCompactionCompletedStats;
@@ -47,6 +49,7 @@ pub struct TurnInput {
     pub input: Vec<evot_engine::Content>,
     pub provenance: Option<evot_engine::InputProvenance>,
     pub(crate) resume: bool,
+    pub(crate) live_thinking: Option<ThinkingLevelFn>,
     pub session: Arc<Session>,
     /// Persisted transcript generation used to build `history`.
     pub transcript_seq: u64,
@@ -136,8 +139,11 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
         if control.is_cancelled() {
             break;
         }
-        let Segment { turn, llm, handoff } = match factory.build(start, index < MAX_HANDOFFS).await
-        {
+        let Segment {
+            turn,
+            mut llm,
+            handoff,
+        } = match factory.build(start, index < MAX_HANDOFFS).await {
             Ok(segment) => segment,
             Err(error) => {
                 tracing::error!(stage = "run", status = "build_segment_failed", %run_id, %session_id, %error);
@@ -163,6 +169,7 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
         } else {
             tracker = execution_tracker(turn.options.limits.as_ref());
         }
+        let live_thinking = turn.live_thinking.clone();
         let outcome = drive_segment(
             turn,
             tracker.clone(),
@@ -173,6 +180,19 @@ async fn run_loop(args: ExecuteRunArgs, tx: EventSender, control: RunControl) {
             total_turns,
         )
         .await;
+        if let Some(level) = live_thinking {
+            let level = level();
+            if level != llm.thinking_level {
+                llm.thinking_level = level;
+                session
+                    .set_run_thinking_level(
+                        &llm.provider,
+                        &llm.model,
+                        ModelSelection::persisted_thinking_level_for(&llm),
+                    )
+                    .await;
+            }
+        }
 
         total_turns = total_turns.saturating_add(outcome.turn_count);
         total_usage.input = total_usage.input.saturating_add(outcome.usage.input);
@@ -291,6 +311,7 @@ async fn drive_segment(
         input,
         provenance,
         resume,
+        live_thinking,
         session,
         transcript_seq,
     } = turn;
@@ -300,6 +321,9 @@ async fn drive_segment(
     let mut engine = build_engine(options, history)
         .with_run_progress(turn_offset as usize, tracker)
         .with_prompt_queues(control.queues().steering(), control.queues().follow_up());
+    if let Some(level) = live_thinking {
+        engine = engine.with_live_thinking(level);
+    }
     let (engine_handle, mut engine_rx) = if resume {
         engine.resume_bounded(control.segment_cancellation()).await
     } else {

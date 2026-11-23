@@ -55,11 +55,12 @@ impl AssistantStreamResult {
     }
 }
 
-pub(super) struct AssistantStreamInput {
+pub(super) struct AssistantStreamInput<'a> {
     pub turn: usize,
     pub injected_count: usize,
     pub budget: crate::context::ContextBudgetSnapshot,
     pub idle_clock: Option<crate::context::IdleClock>,
+    pub thinking_level: &'a (dyn Fn() -> ThinkingLevel + Sync),
 }
 
 /// Stream an assistant response from the LLM.
@@ -68,13 +69,14 @@ pub(super) async fn stream_assistant_response(
     config: &AgentLoopConfig,
     tx: &EventSink,
     cancel: &tokio_util::sync::CancellationToken,
-    input: AssistantStreamInput,
+    input: AssistantStreamInput<'_>,
 ) -> AssistantStreamResult {
     let AssistantStreamInput {
         turn,
         injected_count,
         budget,
         idle_clock,
+        thinking_level: requested_thinking_level,
     } = input;
     // Apply context transform
     let messages = if let Some(transform) = &config.transform_context {
@@ -114,14 +116,14 @@ pub(super) async fn stream_assistant_response(
     let retry = &config.retry_policy;
     let mut attempt = 0;
     // Set once the call enters a cancellable long-wait (quota or outage).
-    // Re-probes remain part of the same logical call: no further
-    // LlmCallStart events are emitted until the call resolves.
+    // Re-probes stay quiet unless the request's effort has changed.
     let mut long_wait_started = false;
+    let mut announced_level = None;
     let mut quota_probe_delay = QUOTA_PROBE_INITIAL;
     let shared_metrics = std::sync::Arc::new(std::sync::Mutex::new(LlmCallMetrics::default()));
     let result = loop {
         let thinking_level = crate::provider::effective_thinking_level(
-            config.thinking_level,
+            requested_thinking_level(),
             config.model_config.as_ref(),
         );
 
@@ -139,10 +141,13 @@ pub(super) async fn stream_assistant_response(
             client: None,
         };
 
-        // Emit one logical call start. Long-wait re-probes (quota/outage)
-        // remain part of this call so they do not churn observability or the
-        // TUI status line.
-        if !long_wait_started {
+        // Report an effort change even on a long-wait probe, so the eventual
+        // result is attributed to the effort actually sent to the provider.
+        if !long_wait_started || announced_level != Some(thinking_level) {
+            if long_wait_started {
+                attempt += 1;
+            }
+            announced_level = Some(thinking_level);
             let llm_stats = crate::context::compute_call_stats(&llm_messages);
             tx.send(AgentEvent::LlmCallStart {
                 turn,

@@ -2,11 +2,14 @@
 //! and session-level persistence (Session thinking_level round-trip).
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use async_trait::async_trait;
 use evot::agent::models::SelectionReload;
 use evot::agent::Agent;
 use evot::agent::QueryRequest;
 use evot::agent::SubmitOutcome;
+use evot::agent::ToolMode;
 use evot::conf::Config;
 use evot::conf::Protocol;
 use evot::conf::ProviderProfile;
@@ -17,8 +20,18 @@ use evot::session::storage::MemoryStorage;
 use evot::session::Session;
 use evot_engine::provider::CompatCaps;
 use evot_engine::provider::MockProvider;
+use evot_engine::provider::MockResponse;
+use evot_engine::provider::MockToolCall;
+use evot_engine::provider::ProviderError;
+use evot_engine::provider::StreamConfig;
+use evot_engine::provider::StreamEvent;
+use evot_engine::provider::StreamOutcome;
+use evot_engine::provider::StreamProvider;
 use evot_engine::ThinkingLevel;
 use tempfile::TempDir;
+use tokio::sync::mpsc;
+use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
@@ -698,6 +711,120 @@ async fn pinned_request_model_survives_live_model_changes() -> TestResult {
             if kind == "llm_call_started" && data["thinking_level"] == "max")));
     // The live selection remains available as the next request's default.
     assert_eq!(agent.llm().model, "claude-sonnet-4-6");
+    Ok(())
+}
+
+struct GatedProvider {
+    requests: mpsc::UnboundedSender<(String, ThinkingLevel)>,
+    release_first: Arc<Notify>,
+    first: std::sync::atomic::AtomicBool,
+    mock: MockProvider,
+}
+
+#[async_trait]
+impl StreamProvider for GatedProvider {
+    async fn stream(
+        &self,
+        config: StreamConfig,
+        tx: mpsc::UnboundedSender<StreamEvent>,
+        cancel: CancellationToken,
+    ) -> Result<StreamOutcome, ProviderError> {
+        let route = config.model_config.as_ref().map(|model| model.provider());
+        let _ = self
+            .requests
+            .send((route.unwrap_or_default().into(), config.thinking_level));
+        if self.first.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.release_first.notified().await;
+        }
+        self.mock.stream(config, tx, cancel).await
+    }
+}
+
+#[tokio::test]
+async fn thinking_level_change_applies_to_the_next_request_in_the_same_run() -> TestResult {
+    for (live_thinking, switch_provider, expected) in [
+        (true, false, ThinkingLevel::High),
+        (false, false, ThinkingLevel::Low),
+        (true, true, ThinkingLevel::Low),
+    ] {
+        let dir = TempDir::new()?;
+        std::fs::write(dir.path().join("fixture.txt"), "fixture contents")?;
+        let mut config = anthropic_config(&dir);
+        let profile = config
+            .providers
+            .get_mut("anthropic")
+            .ok_or("missing profile")?;
+        profile.thinking_level = Some(ThinkingLevel::Low);
+        let mut other = profile.clone();
+        other.thinking_level = Some(ThinkingLevel::Medium);
+        config.providers.insert("other".into(), other);
+
+        let (requests, mut received) = mpsc::unbounded_channel();
+        let release_first = Arc::new(Notify::new());
+        let agent = Agent::new_with_provider_for_test(
+            &config,
+            dir.path().display().to_string(),
+            Arc::new(MemoryStorage::new()),
+            GatedProvider {
+                requests,
+                release_first: release_first.clone(),
+                first: true.into(),
+                mock: MockProvider::new(vec![
+                    MockResponse::ToolCalls(vec![MockToolCall {
+                        name: "read".into(),
+                        arguments: serde_json::json!({"path": "fixture.txt"}),
+                    }]),
+                    MockResponse::Text("done".into()),
+                ]),
+            },
+        )?;
+        let request = QueryRequest::text("Read fixture.txt").mode(ToolMode::Interactive);
+        let request = if live_thinking {
+            request.with_live_thinking()
+        } else {
+            request.llm(agent.llm())
+        };
+        let SubmitOutcome::Run(mut run) = agent.submit(request).await? else {
+            return Err("expected a run".into());
+        };
+        let (calls, finished) = tokio::time::timeout(Duration::from_secs(5), async {
+            // The provider has accepted the first request, but cannot answer
+            // until we release it. Pressing the shortcut cannot alter it.
+            assert_eq!(
+                received.recv().await,
+                Some(("anthropic".into(), ThinkingLevel::Low))
+            );
+            if switch_provider {
+                agent.set_llm(config.build_llm("other", None)?);
+            } else {
+                assert_eq!(agent.cycle_thinking_level(), Some(ThinkingLevel::Medium));
+                assert_eq!(agent.cycle_thinking_level(), Some(ThinkingLevel::High));
+            }
+            release_first.notify_one();
+            let mut calls = Vec::new();
+            let mut finished = false;
+            while let Some(event) = run.next().await {
+                match event.payload {
+                    RunEventPayload::LlmCallStarted { thinking_level, .. } => {
+                        calls.push(thinking_level.ok_or("missing thinking level")?);
+                    }
+                    RunEventPayload::RunFinished { text, .. } => finished = text == "done",
+                    _ => {}
+                }
+            }
+            Ok::<_, Box<dyn std::error::Error>>((calls, finished))
+        })
+        .await??;
+        assert!(finished);
+        assert_eq!(received.try_recv()?, ("anthropic".into(), expected));
+        assert_eq!(calls, ["low", expected.as_str()]);
+        let meta = agent
+            .sessions()
+            .find(&run.session_id)
+            .await?
+            .ok_or("missing session")?;
+        assert_eq!(meta.thinking_level.as_deref(), Some(expected.as_str()));
+    }
     Ok(())
 }
 

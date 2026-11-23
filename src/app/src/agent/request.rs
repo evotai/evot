@@ -34,6 +34,8 @@ pub struct QueryRequest {
     pub llm: Option<LlmConfig>,
     /// Whether this surface allows prompt-directed changes to the live model.
     pub allow_model_handoff: bool,
+    /// Follow live thinking effort for the pinned model at request boundaries.
+    pub(crate) live_thinking: bool,
     pub host_tools: Option<HostTools>,
     pub cwd: Option<String>,
     /// Run-local scratch, propagated to every turn and shell subprocess.
@@ -61,6 +63,7 @@ impl QueryRequest {
             source: String::new(),
             llm: None,
             allow_model_handoff: false,
+            live_thinking: false,
             host_tools: None,
             cwd: None,
             scratch_dir: None,
@@ -90,6 +93,11 @@ impl QueryRequest {
 
     pub fn allow_model_handoff(mut self) -> Self {
         self.allow_model_handoff = true;
+        self
+    }
+
+    pub fn with_live_thinking(mut self) -> Self {
+        self.live_thinking = true;
         self
     }
 

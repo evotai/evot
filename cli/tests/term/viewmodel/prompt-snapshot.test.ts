@@ -93,14 +93,21 @@ describe('prompt snapshot projection', () => {
     expect(footer).toContain('high')
   })
 
-  test('only models with selectable effort show an off badge during a run', () => {
+  test('shows the changed effort immediately while an older request is streaming', () => {
+    const input = { ...snapshot(), columns: 140, busy: true }
+    input.session.lastCallModel = { model: 'shared', provider: 'second', thinkingLevel: 'low' }
+    expect(promptFromSnapshot(input).thinkingLevel).toBe('high')
+    expect(footerText(input)).toContain(' high')
+    input.config!.thinkingLevel = 'off'
+    expect(footerText(input)).toContain(' off')
+    expect(promptFromSnapshot({ ...input, logMode: true }).thinkingLevel).toBe('low')
+  })
+
+  test('hides effort for a different route without selectable levels', () => {
     const input = { ...snapshot(), columns: 140, busy: true }
     input.session.lastCallModel = { model: 'shared', provider: 'first', thinkingLevel: 'off' }
     expect(promptFromSnapshot(input).thinkingLevel).toBe('')
     expect(footerText(input)).not.toContain('thinking off')
-    input.session.lastCallModel = { model: 'shared', provider: 'second', thinkingLevel: 'off' }
-    expect(promptFromSnapshot(input).thinkingLevel).toBe('off')
-    expect(footerText(input)).toContain(' off')
   })
 
   test('background hint and placeholder use the same editor snapshot', () => {

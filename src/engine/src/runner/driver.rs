@@ -14,6 +14,7 @@ use super::compaction_check::CompactionCheckInput;
 use super::compaction_check::CompactionCheckPhase;
 use super::compaction_check::CompactionRequestShape;
 use super::config::AgentLoopConfig;
+use super::config::ThinkingLevelFn;
 use super::doom_loop::DoomLoopDetector;
 use super::event_sink::EventSink;
 use super::llm_call::stream_assistant_response;
@@ -37,6 +38,7 @@ use crate::types::*;
 pub(crate) struct LoopProgress {
     pub(crate) turn_offset: usize,
     pub(crate) tracker: Option<SharedExecutionTracker>,
+    pub(crate) live_thinking_level: Option<ThinkingLevelFn>,
     pub(crate) check_context: bool,
 }
 
@@ -190,8 +192,14 @@ async fn run_loop(
     let LoopProgress {
         turn_offset,
         tracker,
+        live_thinking_level,
         check_context,
     } = progress;
+    let thinking_level = || {
+        live_thinking_level
+            .as_ref()
+            .map_or(config.thinking_level, |level| level())
+    };
     let mut first_turn = true;
     let mut turn_number = turn_offset;
     let tracker = tracker.or_else(|| {
@@ -252,6 +260,7 @@ async fn run_loop(
                 CompactionCheckInput {
                     assistant_message: &previous_assistant,
                     config,
+                    thinking_level: thinking_level(),
                     request_shape: CompactionRequestShape {
                         system_prompt: &context.system_prompt,
                         tools: &tool_defs,
@@ -390,6 +399,7 @@ async fn run_loop(
                 injected_count,
                 budget: budget_snapshot,
                 idle_clock: idle_clock.clone(),
+                thinking_level: &thinking_level,
             })
             .await;
         let message = assistant_result.message;
@@ -484,6 +494,7 @@ async fn run_loop(
                     CompactionCheckInput {
                         assistant_message: &message,
                         config,
+                        thinking_level: thinking_level(),
                         request_shape: CompactionRequestShape {
                             system_prompt: &context.system_prompt,
                             tools: &tool_defs,
@@ -666,6 +677,7 @@ async fn run_loop(
                     CompactionCheckInput {
                         assistant_message: &message,
                         config,
+                        thinking_level: thinking_level(),
                         request_shape: CompactionRequestShape {
                             system_prompt: &context.system_prompt,
                             tools: &tool_defs,
@@ -731,6 +743,7 @@ async fn run_loop(
             CompactionCheckInput {
                 assistant_message: &message,
                 config,
+                thinking_level: thinking_level(),
                 request_shape: CompactionRequestShape {
                     system_prompt: &context.system_prompt,
                     tools: &tool_defs,

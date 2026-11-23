@@ -15,6 +15,8 @@ pub type ConvertToLlmFn = Box<dyn Fn(&[AgentMessage]) -> Vec<Message> + Send + S
 pub type TransformContextFn = Box<dyn Fn(Vec<AgentMessage>) -> Vec<AgentMessage> + Send + Sync>;
 /// Type alias for steering/follow-up message callbacks.
 pub type GetMessagesFn = Box<dyn Fn() -> Vec<AgentMessage> + Send + Sync>;
+/// Supplies the effort to snapshot for each new provider request.
+pub type ThinkingLevelFn = Arc<dyn Fn() -> ThinkingLevel + Send + Sync>;
 /// Called before each LLM turn. Return `false` to abort the loop.
 pub type BeforeTurnFn = Arc<dyn Fn(&[AgentMessage], usize) -> bool + Send + Sync>;
 /// Called after each LLM turn with the current messages and the turn's usage.

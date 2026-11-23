@@ -21,6 +21,7 @@ pub(super) struct AgentTurnFactory {
     pub session_id: String,
     pub llm: LlmConfig,
     pub selection: Arc<ModelSelection>,
+    pub live_thinking: bool,
     /// Selection replaced by the latest model switch, for compaction.
     pub previous_llm: Option<LlmConfig>,
     pub model_catalog: Option<Arc<Config>>,
@@ -58,7 +59,7 @@ impl TurnFactory for AgentTurnFactory {
         if let Some(tool) = &handoff {
             extra_tools.push(tool.clone());
         }
-        let turn = self
+        let mut turn = self
             .assembler
             .build_segment(
                 &llm,
@@ -76,6 +77,11 @@ impl TurnFactory for AgentTurnFactory {
                 resume,
             )
             .await?;
+        if self.live_thinking {
+            let selection = self.selection.clone();
+            let pinned = llm.clone();
+            turn.live_thinking = Some(Arc::new(move || selection.thinking_level_for(&pinned)));
+        }
         Ok(runtime::Segment { turn, llm, handoff })
     }
 

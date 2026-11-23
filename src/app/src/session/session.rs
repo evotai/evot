@@ -311,6 +311,20 @@ impl Session {
         self.meta.write().await.thinking_level = level;
     }
 
+    /// Save live effort with the run's other metadata, unless the session has
+    /// already moved to another model.
+    pub(crate) async fn set_run_thinking_level(
+        &self,
+        provider: &str,
+        model: &str,
+        level: Option<String>,
+    ) {
+        let mut meta = self.meta.write().await;
+        if meta.provider == provider && meta.model == model {
+            meta.thinking_level = level;
+        }
+    }
+
     /// Append one logical transcript batch. Sequence allocation, persistence,
     /// and publication to the in-memory context are serialized as one commit.
     pub async fn write_items(&self, items: Vec<TranscriptItem>) -> Result<()> {

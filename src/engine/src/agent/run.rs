@@ -175,6 +175,7 @@ impl Agent {
         let progress = LoopProgress {
             turn_offset: self.turn_offset,
             tracker: self.execution_tracker.clone(),
+            live_thinking_level: self.live_thinking_level.clone(),
             check_context: matches!(&kind, RunKind::Continue {
                 check_context: true
             }),

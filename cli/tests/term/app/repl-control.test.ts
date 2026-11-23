@@ -245,6 +245,13 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'ctrl', key: 'o' }, isLoading: true })).toEqual(['toggle-expanded'])
   })
 
+  test('Shift+Tab reaches the thinking shortcut while a run streams', () => {
+    const input = { ...base, event: { type: 'shift-tab' as const }, isLoading: true, hasStream: true }
+    expect(kinds(input)).toEqual(['normal-key'])
+    expect(kinds({ ...input, editor: completionEditor })).toEqual(['normal-key'])
+    expect(kinds({ ...input, overlay: selector })).toEqual(['selector-key'])
+  })
+
   test('loading movement falls through to normal key', () => {
     expect(kinds({ ...base, event: { type: 'left' }, isLoading: true })).toEqual(['normal-key'])
   })

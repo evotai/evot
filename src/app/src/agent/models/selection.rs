@@ -32,7 +32,7 @@ impl SelectionReload {
 ///
 /// Each transition holds one write lock so model metadata and thinking effort
 /// are evaluated against the same selection. Snapshots are owned copies: an
-/// admitted run or fork does not follow subsequent live changes.
+/// admitted run or fork does not follow subsequent live model changes.
 pub struct ModelSelection {
     llm: RwLock<LlmConfig>,
     /// The selection replaced by the latest provider/model switch. Compaction
@@ -94,6 +94,20 @@ impl ModelSelection {
         crate::conf::ensure_thinking_level_supported(&llm, level)?;
         llm.thinking_level = level;
         Ok(())
+    }
+
+    /// Only effort can follow the live selection, and only on the same route.
+    pub(crate) fn thinking_level_for(&self, pinned: &LlmConfig) -> ThinkingLevel {
+        let live = self.llm.read();
+        if live.provider == pinned.provider
+            && live.model == pinned.model
+            && live.protocol == pinned.protocol
+            && Self::supported_thinking_levels_for(pinned).contains(&live.thinking_level)
+        {
+            live.thinking_level
+        } else {
+            pinned.thinking_level
+        }
     }
 
     pub fn supported_thinking_levels(&self) -> Vec<ThinkingLevel> {

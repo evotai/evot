@@ -17,6 +17,7 @@ use crate::provider::ModelConfig;
 use crate::provider::StreamProvider;
 use crate::runner::AfterTurnFn;
 use crate::runner::BeforeTurnFn;
+use crate::runner::ThinkingLevelFn;
 use crate::spill::FsSpill;
 use crate::types::PathGuard;
 use crate::types::*;
@@ -28,6 +29,7 @@ pub struct Agent {
     pub(super) model: String,
     pub(super) api_key: String,
     pub(super) thinking_level: ThinkingLevel,
+    pub(super) live_thinking_level: Option<ThinkingLevelFn>,
     pub(super) max_tokens: Option<u32>,
     pub(super) model_config: Option<ModelConfig>,
     pub(super) messages: Vec<AgentMessage>,
@@ -95,6 +97,7 @@ impl Agent {
             model: String::new(),
             api_key: String::new(),
             thinking_level: ThinkingLevel::default(),
+            live_thinking_level: None,
             max_tokens: None,
             model_config: None,
             messages: Vec::new(),
@@ -148,6 +151,13 @@ impl Agent {
 
     pub fn with_thinking(mut self, level: ThinkingLevel) -> Self {
         self.thinking_level = level;
+        self
+    }
+
+    /// Resolve thinking effort at each request boundary, without changing an
+    /// in-flight request or any of its pinned model settings.
+    pub fn with_live_thinking(mut self, level: ThinkingLevelFn) -> Self {
+        self.live_thinking_level = Some(level);
         self
     }
 

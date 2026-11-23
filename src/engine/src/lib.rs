@@ -51,6 +51,7 @@ pub use runner::BeforeTurnFn;
 pub use runner::ConvertToLlmFn;
 pub use runner::DoomLoopDetector;
 pub use runner::GetMessagesFn;
+pub use runner::ThinkingLevelFn;
 pub use runner::ThinkingOnlyGuard;
 pub use runner::TransformContextFn;
 pub use time::now_ms;

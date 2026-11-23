@@ -144,9 +144,15 @@ impl NapiAgent {
                 .source("repl")
         };
 
+        let request = request.allow_model_handoff();
+        let request = if mode == ToolMode::Interactive {
+            request.with_live_thinking()
+        } else {
+            request
+        };
         let outcome = self
             .agent
-            .submit(request.allow_model_handoff())
+            .submit(request)
             .await
             .map_err(|e| Error::from_reason(format!("query failed: {e}")))?;
 

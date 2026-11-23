@@ -50,12 +50,16 @@ pub(super) struct CompactionRequestShape<'a> {
 }
 
 impl CompactionRequestShape<'_> {
-    fn summarizer_context(&self, config: &AgentLoopConfig) -> SummarizerContext {
+    fn summarizer_context(
+        &self,
+        config: &AgentLoopConfig,
+        thinking_level: ThinkingLevel,
+    ) -> SummarizerContext {
         SummarizerContext {
             provider: Arc::clone(&config.provider),
             model: config.model.clone(),
             api_key: config.api_key.clone(),
-            thinking_level: config.thinking_level,
+            thinking_level,
             system_prompt: self.system_prompt.to_string(),
             tools: self.tools.to_vec(),
             max_tokens: config.max_tokens,
@@ -83,6 +87,7 @@ pub(super) enum CompactionCheckPhase {
 pub(super) struct CompactionCheckInput<'a> {
     pub(super) assistant_message: &'a Message,
     pub(super) config: &'a AgentLoopConfig,
+    pub(super) thinking_level: ThinkingLevel,
     pub(super) request_shape: CompactionRequestShape<'a>,
     pub(super) phase: CompactionCheckPhase,
 }
@@ -104,6 +109,7 @@ pub(super) async fn check_compaction(
     let CompactionCheckInput {
         assistant_message,
         config,
+        thinking_level,
         request_shape,
         phase,
     } = input;
@@ -167,7 +173,7 @@ pub(super) async fn check_compaction(
         | CompactionCheckPhase::BeforeResume
         | CompactionCheckPhase::ToolTurn => Checkpoint::MidRun,
     };
-    let active_ctx = request_shape.summarizer_context(config);
+    let active_ctx = request_shape.summarizer_context(config, thinking_level);
     let llm_ctx = config.compaction_context.as_ref().unwrap_or(&active_ctx);
     let fallback_ctx = config
         .compaction_fallback_context

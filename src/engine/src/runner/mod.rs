@@ -13,6 +13,7 @@ pub use config::AgentLoopConfig;
 pub use config::BeforeTurnFn;
 pub use config::ConvertToLlmFn;
 pub use config::GetMessagesFn;
+pub use config::ThinkingLevelFn;
 pub use config::TransformContextFn;
 pub use doom_loop::DoomLoopDetector;
 pub use driver::agent_loop;

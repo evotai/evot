@@ -59,9 +59,13 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     ?? (!provider ? config?.availableModels.find(option => option.model === model) : undefined)
   const thinkingLevels = active?.thinking_levels
   const selectedThinkingLevel = config?.thinkingLevel ?? ''
-  const thinkingLevel = !shownCall ? selectedThinkingLevel
-    : !thinkingLevels?.length ? ''
-    : shownCall.thinkingLevel ?? (differentModel ? '' : selectedThinkingLevel)
+  // For the selected route the badge is the setting for the next request,
+  // even while an older request is streaming. A different route (or a readonly
+  // log fork) still reports the effort of the call it is showing.
+  let thinkingLevel = selectedThinkingLevel
+  if (shownCall && (differentModel || input.logMode)) {
+    thinkingLevel = thinkingLevels?.length ? shownCall.thinkingLevel ?? (differentModel ? '' : selectedThinkingLevel) : ''
+  }
   // Compare provider-qualified names only when the two providers serve the same model ID.
   const qualify = providerChanged && model === session.model
   const modelLabel = qualify ? `${provider}:${model}` : model
