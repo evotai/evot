@@ -331,10 +331,17 @@ export function formatSpinnerLine(
       const seconds = Math.max(0, Math.ceil(((state.waitRetryAt ?? now) - now) / 1000))
       const attempt = state.retryAttempt
       const max = state.retryMaxAttempts
+      const failure = state.retryError ? providerFailurePresentation({ error: state.retryError }) : undefined
+      // Keep the first connection blip quiet in the live row, too. The wait
+      // behaves like any retry, but a second failure is what earns a warning.
+      if (attempt === 1 && failure?.kind === 'connection') {
+        label = 'Waiting for model…'
+        break
+      }
       const counter = attempt !== null
         ? max !== null ? ` · attempt ${attempt}/${max}` : ` · attempt ${attempt}`
         : ''
-      const subject = state.retryError ? providerFailurePresentation({ error: state.retryError }).label : 'Retrying'
+      const subject = failure?.label ?? 'Retrying'
       label = seconds > 0
         ? `${subject}${state.retryError ? ' · retrying' : ''} in ${seconds}s${counter}`
         : `${subject}${state.retryError ? ' · retrying' : ''}…${counter}`

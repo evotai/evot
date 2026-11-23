@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
+import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -1945,6 +1947,53 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await server.stop(true)
     }
   }, 60_000)
+
+  test('connection interruption stays quiet until a second failed attempt', async () => {
+    let requests = 0
+    const secondStarted = Promise.withResolvers<void>()
+    const releaseSecond = Promise.withResolvers<void>()
+    const server = createServer(async (request, response) => {
+      let body = ''
+      request.setEncoding('utf8')
+      for await (const part of request) body += part
+      const { model, tools } = JSON.parse(body) as { model: string; tools?: unknown[] }
+      if (tools?.length && ++requests <= 2) {
+        if (requests === 2) {
+          secondStarted.resolve()
+          await releaseSecond.promise
+        }
+        response.setHeader('content-type', 'text/event-stream')
+        // End TCP without terminating the HTTP response, not a clean SSE EOF.
+        response.write(': open\n\n', () => response.destroy())
+        return
+      }
+      const chunk = { id: 'fixture', model, choices: [{ index: 0, delta: { role: 'assistant', content: 'Connection recovered.' }, finish_reason: 'stop' }] }
+      response.setHeader('content-type', 'text/event-stream')
+      response.end(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`)
+    })
+    let session: Session | undefined
+    try {
+      server.listen(0, '127.0.0.1')
+      await once(server, 'listening')
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('fixture has no TCP address')
+      session = await startEvot(false, false, false, `http://127.0.0.1:${address.port}/v1`)
+      session.write('Reply after retrying\x0d')
+      await secondStarted.promise
+      const first = stripAnsi(session.outputSince())
+      expect(first).not.toContain('Connection interrupted')
+      expect(first).not.toContain('llm  retry')
+      releaseSecond.resolve()
+      await session.waitFor('Connection interrupted')
+      await session.waitFor('Connection recovered.')
+      expect(requests).toBe(3)
+    } finally {
+      releaseSecond.resolve()
+      if (session) await session.kill()
+      server.close()
+      server.closeAllConnections()
+    }
+  }, 20_000)
 
   test('/model hands off the next request while the outgoing shell keeps running', async () => {
     const models: string[] = []

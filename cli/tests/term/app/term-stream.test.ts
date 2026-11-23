@@ -1464,11 +1464,13 @@ describe('term stream machine', () => {
       { kind: 'llm_call_started', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 0 } },
       { kind: 'assistant_delta', payload: { content_index: 0, content_type: 'text', delta: 'partial reply the user saw' } },
       { kind: 'llm_call_completed', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 0, error: err, metrics: { duration_ms: 20100 } } },
+      { kind: 'provider_diagnostic', payload: {} },
       { kind: 'llm_call_retry', payload: { turn: 33, attempt: 1, max_retries: 10, delay_ms: 2000, error: err } },
       { kind: 'llm_call_started', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 1 } },
+      { kind: 'provider_diagnostic', payload: {} },
       { kind: 'assistant_delta', payload: { content_index: 0, content_type: 'text', delta: 'final answer' } },
-      { kind: 'assistant_completed', payload: { content: [{ type: 'text', text: 'final answer' }], stop_reason: 'stop' } },
       { kind: 'llm_call_completed', payload: { model: 'claude-opus-5.5', turn: 33, attempt: 1, metrics: { duration_ms: 900 } } },
+      { kind: 'assistant_completed', payload: { content: [{ type: 'text', text: 'final answer' }], stop_reason: 'stop' } },
       { kind: 'run_finished', payload: {} },
     ]
     let state = createStreamMachineState(createInitialState('claude-opus-5.5', '/tmp'), createSpinnerState())
@@ -1496,7 +1498,7 @@ describe('term stream machine', () => {
     expect(logged.join('\n')).toContain(err)
   })
 
-  test('stopping during the retry backoff still shows the held failure', () => {
+  test('a user stop during the first connection backoff stays quiet but a broken stream shows the failure', () => {
     const err = 'Network error: connection reset by peer'
     let state = createStreamMachineState(createInitialState('m', '/tmp'), createSpinnerState())
     state = reduceRunEvent(state, {
@@ -1507,7 +1509,11 @@ describe('term stream machine', () => {
       kind: 'llm_call_retry',
       payload: { turn: 1, attempt: 1, max_retries: 10, delay_ms: 2000, error: err },
     }, { termRows: 24 }).state
-    const flushed = finishStreaming(state, true)
+    const interrupted = finishStreaming(state, true)
+    expect(interrupted.lines).toEqual([])
+    expect(interrupted.state.deferredRetry).toBeNull()
+
+    const flushed = finishStreaming(state)
     const text = flushed.lines.map(l => stripAnsi(l.text)).join('\n')
     expect(text).toContain('Connection interrupted')
     expect(text).toContain('✦ llm  retry')

@@ -140,27 +140,26 @@ const PERMANENT_FAILURES: ReadonlySet<ProviderFailureKind> = new Set<ProviderFai
 ])
 
 /**
- * Whether `event` belongs to the retry of a held failure: the first retry
- * announcement, the re-attempt's start, and its streamed output. A one-off
- * blip that the next attempt recovers from is noise, so its cards stay out of
- * scrollback (screen.log keeps them). Anything else — a second failure, a
- * long wait, compaction, the end of the run — releases them in order.
+ * Release held cards only at a request boundary that can settle the failure.
+ * For example, a diagnostic or privacy card between attempts says nothing
+ * about whether the retry recovered. Never let it leak the held warning.
  */
 function holdsDeferredRetry(event: RunEvent, known: KnownRunEvent | null, retrying: boolean): boolean {
   if (known?.kind === 'llm_call_retry') return known.payload.attempt <= 1
   if (event.kind === 'api_retry') return legacyRetry(event.payload ?? {}).attempt <= 1
-  // A failure the engine gives up on is followed by its own error message
-  // (`assistant_completed`), not a retry; that must release it at once.
-  if (!retrying) return false
   switch (known?.kind) {
     case 'llm_call_started': return known.payload.attempt > 0
-    case 'assistant_delta':
-    case 'assistant_tool_call':
-    case 'assistant_completed':
-    case 'privacy_card':
-      return true
-    default:
+    // A completed error message before any retry means the engine gave up.
+    case 'assistant_completed': return retrying
+    case 'llm_call_completed':
+    case 'quota_waiting':
+    case 'outage_waiting':
+    case 'context_compaction_started':
+    case 'run_finished':
+    case 'error':
       return false
+    default:
+      return true
   }
 }
 
@@ -653,9 +652,11 @@ function settleModelSwitch(state: StreamMachineState, outcome: ModelSwitchOutcom
 
 /** Final stream flush, including a switch that never reached a response. */
 export function finishStreaming(state: StreamMachineState, interrupted = false): ReturnType<typeof flushStreaming> {
-  // A run that stops mid-retry (Esc during the backoff) still owes the user
-  // the failure it was recovering from.
-  const held = state.deferredRetry?.commit ?? []
+  // Esc during a quiet connection retry is a user stop, not proof of an
+  // outage. An unexpected stream end still flushes unresolved errors.
+  const stoppedQuietRetry = interrupted && state.deferredRetry?.retrying
+    && providerFailurePresentation({ error: state.spinnerState.retryError }).kind === 'connection'
+  const held = stoppedQuietRetry ? [] : state.deferredRetry?.commit ?? []
   const settled = settleModelSwitch({ ...state, deferredRetry: null }, interrupted ? 'interrupted' : state.pendingSwitch?.failure ?? 'unconfirmed')
   const final = flushStreaming(settled.state)
   if (settled.lines.length === 0 && held.length === 0) return final

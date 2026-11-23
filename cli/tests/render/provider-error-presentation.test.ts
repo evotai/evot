@@ -182,7 +182,12 @@ test('provider failures describe status without telling the user to control retr
 
 test('TLS retries keep cumulative elapsed time across the long-wait transition', () => {
   let state = setRetryWait(createSpinnerState(), 2000, 1, 10, 1000, 'tls handshake eof')
-  expect(stripAnsi(formatSpinnerLine(state, 1000))).toContain('Connection interrupted · retrying in 2s')
+  const first = stripAnsi(formatSpinnerLine(state, 1000))
+  expect(first).toContain('Waiting for model…')
+  expect(first).not.toContain('Connection interrupted')
+  expect(first).not.toContain('attempt')
+  state = setRetryWait(state, 3000, 2, 10, 4000, 'tls handshake eof')
+  expect(stripAnsi(formatSpinnerLine(state, 4000))).toContain('Connection interrupted · retrying in 3s · attempt 2/10')
   state = setLongWait(state, 'outage_waiting', 60000, 121000, 'tls handshake eof')
   const text = stripAnsi(formatSpinnerLine(state, 121000, { inputTokens: 1234 }))
   expect(text).toContain('Unable to connect · retrying in 60s')
