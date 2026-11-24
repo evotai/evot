@@ -149,6 +149,9 @@ export interface ReplState {
   terminalBus: TerminalBus | null
   remoteTitle: { session: string; title: string; refreshAfter: number } | null
   remoteChild: boolean
+  /** Phone-opened window only: last time a phone followed it or it was busy. */
+  remoteWatchedAt: number
+  remoteParkTimer: ReturnType<typeof setInterval> | null
   remoteEpoch: number
   remoteAttempt: number
   remoteOpening: boolean
@@ -261,7 +264,7 @@ export function createReplState(model: string, cwd: string): ReplState {
     liveContentMaxHeight: 0,
     liveContentWidth: 0,
     liveRegionStartRow: 0,
-    terminalBus:null, remoteChild:false, remoteAttempt:0, remoteOpening:false, remoteEpoch:0, remoteListener: null,
+    terminalBus:null, remoteChild:false, remoteWatchedAt:0, remoteParkTimer:null, remoteAttempt:0, remoteOpening:false, remoteEpoch:0, remoteListener: null,
     remoteTitle: null,
     conversationTail: new ConversationTail(),
     serverState: null,

@@ -36,11 +36,15 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
   function row(meta?: SessionMeta, window?: OnlineTerminal) {
     const updatedAt = Math.max(Date.parse(meta?.updated_at ?? '') || 0, window?.updatedAt || 0)
     const unshared = !window && !!meta && occupied.has(meta.session_id)
+    // A window the phone opened runs hidden in tmux. Idle, it is nothing the user can see
+    // on the computer: list it as a saved session. Tapping it still follows that window.
+    const parked = !!window?.phoneCreated && window.phase === 'idle'
     return { session: meta?.session_id ?? window?.session ?? '',
       title: meta ? sessionLineTitle(meta) : window?.title || 'New conversation',
       workspace: meta ? basename(meta.cwd) || '/' : window?.workspace,
       updatedAt, updated: updatedAt ? new Date(updatedAt).toISOString() : '',
-      terminal: window?.terminal, phase: window?.phase, runState: window?.runState, ...(unshared ? { unshared } : {}) }
+      terminal: window?.terminal, phase: parked ? undefined : window?.phase, runState: window?.runState,
+      ...(unshared ? { unshared } : {}), ...(parked ? { parked } : {}) }
   }
   const all = liveSessions(online).map(w => {
     matched.add(w.session)

@@ -24,6 +24,7 @@ import type { ActivityController } from './activity.js'
 import { spinnerDescription } from '../widgets/spinner.js'
 import { remoteModels } from '../app/remote/models.js'
 import { assistantRow } from '../app/remote/conversation.js'
+import { PARKED_CHECK_MS, parkedExpired, tmuxAttached } from '../app/remote/parked-exit.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
 import type { ComposerController } from './composer.js'
 import type { PendingImages } from '../app/composer/pending-images.js'
@@ -56,6 +57,7 @@ export interface RemoteDeps {
   readonly submit: SubmitController
   /** One replaceable status row while /remote starts, like /share's upload row. */
   readonly replCommands: CommandOutputPort
+  readonly exitAfterCleanup: (code: number) => void
 }
 
 /** `⋯ Remote  Installing cloudflared … ███░░  6.1 / 19.0 MB · 32% · 4s`, rewritten in place. */
@@ -122,6 +124,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   }
   function snapshot(backgroundView?: string): RemoteSnapshot {
     if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
+    st.remoteWatchedAt = Date.now()
     const running = st.isLoading && !!st.streamMachine
     const q = st.overlay.kind === 'ask-user' ? st.overlay.state : null
     const ask = running && st.pendingAsk && q?.requestId ? { id: q.requestId, questions: q.questions } : null
@@ -179,6 +182,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   }
 
   function act(action: RemoteAction): void {
+    st.remoteWatchedAt = Date.now()
     const s = snapshot()
     if (s.generation !== action.generation) throw new RemoteConflict('The run changed. Refresh and try again.')
     if (action.kind === 'tool-view') {
@@ -271,11 +275,27 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           },
         },
       )
-      if (validTerminal(id) && scope && /^[0-9a-f]{24}$/.test(scope)) st.terminalBus.share(scope)
+      if (validTerminal(id) && scope && /^[0-9a-f]{24}$/.test(scope)) { st.terminalBus.share(scope); parkWhenUnwatched() }
       st.remoteEpoch = Math.floor(Math.random() * 0x100000000) * 65536
     } catch {
       /* Restricted or non-Unix hosts can still use the ordinary TUI. */
     }
+  }
+  // Only a window the phone launched: the user never sees it on the computer, so
+  // nothing else would ever close it. The tmux probe runs only once the timeout is due.
+  function parkWhenUnwatched() {
+    if (st.remoteParkTimer) return
+    st.remoteWatchedAt = Date.now()
+    st.remoteParkTimer = setInterval(() => {
+      if (st.destroyed) return
+      const now = Date.now(), idle = windowStatus().phase === 'idle' && !st.pendingQueue.entries.length
+      if (!idle) { st.remoteWatchedAt = now; return }
+      const window = { lastWatched: st.remoteWatchedAt, idle, draft: !isEditorEmpty(st.editor), attached: false }
+      if (!parkedExpired(window, now)) return
+      if (tmuxAttached()) { st.remoteWatchedAt = now; return }
+      deps.exitAfterCleanup(0)
+    }, PARKED_CHECK_MS)
+    st.remoteParkTimer.unref?.()
   }
   function close(hide = true) {
     st.remoteAttempt++
@@ -288,6 +308,8 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     else st.terminalBus?.endInvite()
   }
   function dispose() {
+    if (st.remoteParkTimer) clearInterval(st.remoteParkTimer)
+    st.remoteParkTimer = null
     close()
     st.terminalBus?.close()
     st.terminalBus = null

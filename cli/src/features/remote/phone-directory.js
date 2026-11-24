@@ -4,8 +4,11 @@ function age(time, now) {
   const mins = Math.max(0, Math.floor((now - time) / 60000));
   return mins < 1 ? 'now' : mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins/60)}h ago` : `${Math.floor(mins/1440)}d ago`;
 }
-export function windowRows(online, privateWindows, query, now = Date.now()) {
-  return [...online.map(w => ({...w, kind:'live'})), ...privateWindows.map(w => ({...w, kind:'private', title:'Older evot window'}))]
+/** A phone-opened window waiting idle in tmux is not open on the computer; only the
+ * one being viewed stays listed. Running or waiting phone windows are listed as usual. */
+export const parkedWindow = (w, viewing) => !!w.phoneCreated && w.phase === 'idle' && w.terminal !== viewing;
+export function windowRows(online, privateWindows, query, now = Date.now(), viewing = null) {
+  return [...online.filter(w => !parkedWindow(w, viewing)).map(w => ({...w, kind:'live'})), ...privateWindows.map(w => ({...w, kind:'private', title:'Older evot window'}))]
     .filter(w => !query || [w.title, w.workspace, w.session].some(s => s?.toLowerCase().includes(query)))
     .map(w => ({...w, age:age(w.updatedAt, now)}));
 }
@@ -16,7 +19,7 @@ const runStates = { 'waiting-task':'Waiting for task', 'waiting-background':'Bac
   'waiting-loop':'Loop waiting', retrying:'Retrying', compacting:'Compacting' };
 export function windowStatusLabel(r) {
   if (r.unshared) return 'Open, not shared';
-  if (!r.terminal && r.kind !== 'private') return 'Saved';
+  if (r.parked || (!r.terminal && r.kind !== 'private')) return 'Saved';
   return (r.phase === 'working' && runStates[r.runState]) || phases[r.phase] || 'Open';
 }
 export function sessionDrawer({ api, selected, choose, create, ask }) {
@@ -29,7 +32,7 @@ export function sessionDrawer({ api, selected, choose, create, ask }) {
     button.className = 'terminal-row';
     const current = live && r.terminal === selected();
     if (current) button.setAttribute('aria-current', 'page');
-    button.dataset.phase = r.unshared ? 'unshared' : r.phase ?? 'history';
+    button.dataset.phase = r.unshared ? 'unshared' : r.parked ? 'history' : r.phase ?? 'history';
     const heading = document.createElement('span'), title = document.createElement('strong'), badge = document.createElement('span'),
       body = document.createElement('span'), meta = document.createElement('small'), tail = document.createElement('span');
     heading.className = 'terminal-heading';
@@ -43,7 +46,7 @@ export function sessionDrawer({ api, selected, choose, create, ask }) {
     }
     meta.textContent = [r.workspace, r.age].filter(Boolean).join(' · ');
     tail.className = 'terminal-tail';
-    tail.textContent = r.unshared ? 'Not shared · restart evot or run /remote in that window' : statusOnly ? 'Update evot there' : current ? 'Viewing' : live ? 'Follow' : 'Resume';
+    tail.textContent = r.unshared ? 'Not shared · restart evot or run /remote in that window' : statusOnly ? 'Update evot there' : current ? 'Viewing' : live && !r.parked ? 'Follow' : 'Resume';
     body.append(meta, tail);
     button.append(heading, body);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
@@ -88,12 +91,12 @@ export function sessionDrawer({ api, selected, choose, create, ask }) {
   function paint() {
     const q = el('sessionSearch').value.trim().toLowerCase(), windows = mode === 'windows';
     const now = Date.now();
-    const rows = windows ? windowRows(data?.online ?? [], data?.privateWindows ?? [], q, now)
+    const rows = windows ? windowRows(data?.online ?? [], data?.privateWindows ?? [], q, now, selected())
       : (data?.rows ?? []).map(r => ({...r, age:age(Date.parse(r.updated), now)}));
     el('listLabel').textContent = windows ? 'Open windows' : 'All sessions';
     el('showWindows').setAttribute('aria-pressed', String(windows));
     el('showCatalog').setAttribute('aria-pressed', String(!windows));
-    el('showWindows').textContent = data ? `Open windows · ${data.online.length + data.privateWindows.length}` : 'Open windows';
+    el('showWindows').textContent = data ? `Open windows · ${data.online.filter(w => !parkedWindow(w, selected())).length + data.privateWindows.length}` : 'Open windows';
     el('terminalCount').textContent = data ? String(windows ? rows.length : data.more ? `${rows.length}+` : rows.length) : '…';
     el('moreSessions').hidden = windows || !data || !data.more;
     el('moreSessions').disabled = loadingMore; el('moreSessions').textContent = loadingMore ? 'Loading…' : 'Load more';

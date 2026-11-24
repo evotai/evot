@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { SessionMeta, SessionWithText } from '../../../src/native/index.js'
 import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import { phoneCatalog } from '../../../src/features/remote/catalog.js'
-import { windowRows } from '../../../src/features/remote/phone-directory.js'
+import { windowRows, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
@@ -13,6 +13,22 @@ test('the open windows view keeps gateway order and appends status-only windows'
   expect(rows.map((r: {session?:string}) => r.session)).toEqual(['working', 'idle', undefined])
   expect(rows[2]).toMatchObject({kind:'private', age:'now'})
   expect(rows[1]).toMatchObject({kind:'live', age:'1m ago'})
+})
+
+test('an idle window the phone opened reads as a saved session; a busy one, a local one and the viewed one stay open', () => {
+  const now = Date.UTC(2026, 8, 18), stamp = (minutes: number) => now - minutes * 60000
+  const window = (session: string, phase: SessionBadge['phase'], phoneCreated: boolean, minutes: number) =>
+    ({ session, phase, phoneCreated, terminal: crypto.randomUUID(), workspace: 'w', title: session, updatedAt: stamp(minutes) })
+  const live = [window('parked', 'idle', true, 1), window('phone-running', 'working', true, 5), window('local', 'idle', false, 9), window('viewed', 'idle', true, 2)]
+  const saved = { session_id: 'saved', cwd: '/w', updated_at: new Date(stamp(30)).toISOString(), turns: 2 } as SessionMeta
+  const page = phoneCatalog([saved], live, { limit: 10, query: '' })
+  expect(page.rows.map(r => [r.session, windowStatusLabel(r)])).toEqual([
+    ['phone-running', 'Running'], ['local', 'Open'], ['parked', 'Saved'], ['viewed', 'Saved'], ['saved', 'Saved']])
+  // Still followable: tapping a parked row attaches to its window instead of starting another.
+  expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
+  expect(page.online).toHaveLength(4)
+  expect(windowRows(page.online, [], '', now, live[3]!.terminal).map((r: { session: string }) => r.session).sort())
+    .toEqual(['local', 'phone-running', 'viewed'])
 })
 
 test('sorts saved metadata before taking the first page', async () => {

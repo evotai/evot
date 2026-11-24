@@ -19,6 +19,7 @@ import { RunOwnership } from '../../../src/term/app/run/run-ownership.js'
 import { createModelSelectionController, type ModelSelectionDeps } from '../../../src/term/host/model-selection.js'
 import { ConversationTail } from '../../../src/term/app/remote/conversation.js'
 import { getEditorText, insertText } from '../../../src/term/input/editor.js'
+import { PARKED_CHECK_MS, PARKED_EXIT_MS, parkedExpired, tmuxAttached } from '../../../src/term/app/remote/parked-exit.js'
 
 const suggested = { text: '', completing: false }
 function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => []) {
@@ -37,6 +38,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
     awaitedTaskSummary:()=>undefined, runInteractionInput:()=>({active:st.isLoading,phase:st.spinnerState.phase,owner:1,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}),
   } as unknown as ActivityDeps)
   const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions:{text:()=>suggested.text, completing:()=>suggested.completing, replacing:()=>false}, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
+    exitAfterCleanup:(code:number) => calls.push('exit:'+code),
     submit:{ submitConversationText:(text:string, steer:boolean) => calls.push(steer ? 'steer:'+text : 'send:'+text) },
     runCtl:{ runInteractionInput:()=>({active:st.isLoading,owner:1,phase:st.spinnerState.phase,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}), interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); calls.push('stop') } },
   } as unknown as RemoteDeps)
@@ -237,4 +239,56 @@ test('/remote startup is one status row rewritten in place, ending in the outcom
   expect(rows.some(r => /19\.0 \/ 19\.0 MB · 100%/.test(r))).toBe(true)
   expect(rows.at(-1)).toMatch(/✓ Remote {2}Online at evot-abc\.evot\.ai\./)
   expect(status.active).toBe(false)
+})
+
+test('a parked window exits only when idle, unwatched for 5 minutes, without a draft or an attached terminal', () => {
+  const now = 1_000_000_000, quiet = { lastWatched: now - PARKED_EXIT_MS, idle: true, draft: false, attached: false }
+  expect(parkedExpired(quiet, now)).toBe(true)
+  expect(parkedExpired({ ...quiet, lastWatched: now - PARKED_EXIT_MS + 1 }, now)).toBe(false)
+  for (const blocker of [{ idle: false }, { draft: true }, { attached: true }]) expect(parkedExpired({ ...quiet, ...blocker }, now)).toBe(false)
+  // Without a tmux pane to ask, the window counts as attached and stays.
+  expect(tmuxAttached({})).toBe(true)
+  expect(tmuxAttached({ TMUX: '/nonexistent/socket,1,0', TMUX_PANE: '%0' })).toBe(true)
+})
+
+test('only a phone-opened window arms the idle exit; following it keeps it alive and disposal disarms it', () => {
+  const home = mkdtempSync(join(tmpdir(),'evot-park-')), prev = { ...process.env }
+  const ticks: (() => void)[] = [], realSet = globalThis.setInterval, realClear = globalThis.clearInterval
+  const cleared: unknown[] = []
+  globalThis.setInterval = ((fn: () => void, ms: number) => { expect(ms).toBe(PARKED_CHECK_MS); ticks.push(fn); return { unref() {} } }) as unknown as typeof setInterval
+  globalThis.clearInterval = ((t: unknown) => { cleared.push(t) }) as typeof clearInterval
+  try {
+    process.env.EVOT_HOME = home
+    const local = harness(); local.remote.register()
+    expect(ticks).toHaveLength(0) // a window the user opened is never closed for them
+    local.remote.dispose()
+    process.env.EVOT_PHONE_TERMINAL = crypto.randomUUID(); process.env.EVOT_PHONE_SCOPE = 'a'.repeat(24)
+    delete process.env.TMUX; delete process.env.TMUX_PANE
+    const phone = harness(); phone.remote.register()
+    expect(ticks).toHaveLength(1)
+    const tick = ticks[0]!, past = Date.now() - PARKED_EXIT_MS - 1
+    phone.st.remoteWatchedAt = past; phone.run(); tick()
+    expect(phone.calls).not.toContain('exit:0') // a running turn counts as activity
+    expect(phone.st.remoteWatchedAt).toBeGreaterThan(past)
+    phone.st.isLoading = false; phone.st.streamMachine = null
+    phone.st.remoteWatchedAt = past; phone.remote.snapshot(); tick()
+    expect(phone.calls).not.toContain('exit:0') // a phone just followed it
+    phone.st.remoteWatchedAt = past; phone.st.editor = insertText(phone.st.editor, 'unsent'); tick()
+    expect(phone.calls).not.toContain('exit:0') // never discard a draft
+    phone.st.editor = createReplState('fixture','/fixture').editor
+    phone.st.remoteWatchedAt = past; tick()
+    expect(phone.calls).not.toContain('exit:0') // no tmux pane to ask: treated as attached
+    process.env.TMUX = '/fixture,1,0'; process.env.TMUX_PANE = '%0'
+    const realWhich = Bun.which, realSpawn = Bun.spawnSync
+    Object.assign(Bun, { which: () => '/fixture/tmux', spawnSync: () => ({ exitCode: 0, stdout: Buffer.from('0\n') }) })
+    try { phone.st.remoteWatchedAt = past; tick() } finally { Object.assign(Bun, { which: realWhich, spawnSync: realSpawn }) }
+    expect(phone.calls).toContain('exit:0')
+    phone.remote.dispose()
+    expect(cleared).toHaveLength(1)
+  } finally {
+    globalThis.setInterval = realSet; globalThis.clearInterval = realClear
+    for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key]
+    Object.assign(process.env, prev)
+    rmSync(privateSocketDirectory(home), {recursive:true, force:true}); rmSync(home, {recursive:true, force:true})
+  }
 })

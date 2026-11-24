@@ -432,7 +432,7 @@ async function synchronize(ready) {
       }
       if (rows && !rows.unavailable && !owner && (session || !rows.online.some(row => row.terminal === terminal))) {
         selectTarget(null, null); view = null; paired(true); notice('');
-        drawer.open('This window is no longer sharing that session. Choose a live session.');
+        drawer.open('That window has closed or stopped sharing. Tap the session to resume it.');
         return;
       }
     }
