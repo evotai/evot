@@ -21,6 +21,8 @@ const pickStart = new WeakMap();
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
+// The TUI's next-prompt suggestion, shown in the empty composer; `dismissed` is the one Backspace cleared.
+let ghost = '', dismissed = '';
 function selectTarget(id, session) {
   nav.select(id, session);
   terminal = nav.target?.terminal ?? null;
@@ -32,6 +34,7 @@ const background = backgroundPanel(() => {
 const photos = imageTray({ tray: $('attachments'), input: $('imageInput'), button: $('attach'),
   changed: () => controls(), notice: (text) => notice(text) });
 const drawer = sessionDrawer({ api, selected: () => connected ? terminal : null, choose, create: () => choose(null, null),
+  createIn: () => showFolders(), host: () => view?.place?.host,
   ask: { available: () => connected && !!view?.input && !busy, submit: (text) => { $('draft').value = text; resize(); $('compose').requestSubmit(); } } });
 function requestId() {
   const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) => n.toString(16).padStart(2, '0')).join('');
@@ -87,7 +90,6 @@ function paired(yes) {
     drawer.reset();
     background.render(null);
     $('threadTitle').textContent = 'evot remote';
-    $('session').textContent = 'Terminal session';
     $('history').replaceChildren();
     $('questions').replaceChildren();
     askId = null;
@@ -99,7 +101,6 @@ function paired(yes) {
   $('chat').hidden = $('seat').hidden = !yes || !terminal;
   $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected' : 'Not connected';
   if (yes && terminal && !view) {
-    $('session').textContent = 'Live session';
     $('statusDetail').textContent = $('nextModel').textContent = '';
     $('activity').removeAttribute('data-running');
     $('welcome').hidden = true;
@@ -109,7 +110,6 @@ function paired(yes) {
   }
   if (yes && !terminal) {
     $('threadTitle').textContent = 'Your sessions';
-    $('session').textContent = 'Choose a live or saved session';
   }
   controls();
   $('connection').removeAttribute('data-online');
@@ -119,7 +119,7 @@ function controls() {
     switchable = connected && !!(input || view?.ask) && !busy;
   drawer.lock(busy);
   $('openSessions').disabled = $('browseSessions').disabled = busy;
-  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count);
+  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count && !ghost);
   $('attach').disabled = busy || !input || photos.count >= 4;
   $('send').textContent = busy ? '…' : input === 'steer' ? '↱' : '↑';
   $('send').toggleAttribute('aria-busy', busy);
@@ -127,9 +127,8 @@ function controls() {
   $('send').ariaLabel = $('send').title = input === 'steer' ? 'Steer active run' : 'Send message';
   $('draft').placeholder = view?.ask
     ? 'Answer the question above to continue…'
-    : input === 'steer'
-    ? 'Steer the active run…'
-    : 'Ask anything about this project…';
+    : ghost || (input === 'steer' ? 'Steer the active run…' : 'Ask anything about this project…');
+  $('draft').classList.toggle('ghost', !!ghost);
   $('stop').hidden = !view?.canStop;
   $('stop').disabled = busy || !connected;
   $('models').disabled = !switchable || !view.models.options.length;
@@ -226,15 +225,15 @@ function render(s, mode) {
   $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
   $('connection').toggleAttribute('data-online', true);
   $('threadTitle').textContent = s.title || (s.sessionId ? `Session ${s.sessionId.slice(-8)}` : 'New conversation');
-  $('session').textContent = s.sessionId ? 'Session ' + s.sessionId.slice(-8) : 'New session';
   const pending = s.models.pending,
     next = pending && s.models.options.find((o) => o.spec === pending.spec);
   if ($('status').textContent !== s.status) $('status').textContent = s.status;
   $('statusDetail').textContent = s.statusDetail ?? '';
   $('nextModel').textContent = pending
-    ? `Next request → ${next?.label || pending.spec}${pending.effort ? ' · ' + pending.effort : ''}`
+    ? `next: ${next?.label || pending.spec}${pending.effort ? ' · ' + pending.effort : ''}`
     : '';
   $('activity').toggleAttribute('data-running', s.active);
+  document.querySelector('.run-line').toggleAttribute('data-active', !!s.active);
   models(s.models);
   place(s.place);
   suggestion(s.suggestion);
@@ -246,28 +245,19 @@ function render(s, mode) {
   if (follow) chat.scrollTop = chat.scrollHeight;
   jumpState();
 }
-// The TUI's next-prompt suggestion. A tap fills the draft (like → in the TUI);
-// it is never sent on its own, and is hidden while the phone has a draft.
+// The TUI's next-prompt suggestion sits in the empty composer, as in the TUI.
+// Send sends it; typing replaces it; Backspace on the empty box clears it.
 function suggestion(text) {
-  const chip = $('suggestion');
-  chip.hidden = !text || !!$('draft').value || !view?.input;
-  if (chip.textContent !== (text ?? '')) chip.textContent = text ?? '';
+  ghost = connected && view?.input === 'send' && text && text !== dismissed ? text : '';
+  controls();
 }
-$('suggestion').onclick = () => {
-  const text = $('suggestion').textContent;
-  if (!text) return;
-  $('draft').value = text; resize(); $('draft').focus();
-  $('suggestion').hidden = true;
-};
-// Where this window runs: folder, machine, branch. The folder chip opens the
-// folder sheet; a window never changes folder, a new session starts there instead.
+// Where this window runs, in the status line: folder and branch. The computer's
+// name sits at the foot of the Sessions drawer; a new folder starts from its + button.
 function place(p) {
   $('place').hidden = !p;
   if (!p) return;
   $('placeName').textContent = p.name;
-  $('placeFolder').title = `${p.path} · start a session in another folder`;
-  $('placeHost').textContent = p.host;
-  $('placeBranchChip').hidden = !p.branch;
+  $('place').title = p.path;
   $('placeBranch').textContent = p.branch ?? '';
 }
 const folderPanel = $('folderPanel');
@@ -299,7 +289,6 @@ async function startIn(folder, button) {
   try { await choose(null, null, folder.id); folderPanel.close(); }
   finally { openingFolder = null; button.disabled = false; button.firstChild.textContent = label; }
 }
-$('placeFolder').onclick = showFolders;
 $('closeFolders').onclick = () => folderPanel.close();
 folderPanel.onclick = (e) => { if (e.target === folderPanel) folderPanel.close(); };
 // A browser the computer already approved reconnects by itself: after the gateway
@@ -417,7 +406,7 @@ async function synchronize(ready) {
     void checkIdleOwner(mine);
   } catch (e) {
     if (mine !== epoch) return;
-    failures++; connected = false; etag = ''; controls();
+    failures++; connected = false; etag = ''; controls(); suggestion(null);
     if (e.status === 409 || e.status === 403) {
       // Never silently resume a copy or send a draft to a different session.
       // If the conversation moved to another shared TUI, follow that same session only.
@@ -570,8 +559,9 @@ function settleOutbox(s) {
 }
 $('compose').onsubmit = (e) => {
   e.preventDefault();
-  const text = $('draft').value, kind = view?.input;
+  const kind = view?.input, text = $('draft').value || (photos.count ? '' : ghost);
   if (!kind || (!text.trim() && !photos.count) || photos.busy || busy) return;
+  if (text === ghost) dismissed = ghost; // sent: do not offer it again
   const taken = photos.take(), n = taken.images.length;
   // The computer records the turn as text plus this label; match it to retire the pending bubble.
   const shown = [text.trim(), n ? `[${n === 1 ? 'Image' : `${n} images`} from phone]` : ''].filter(Boolean).join('\n');
@@ -621,13 +611,19 @@ $('chat').onscroll = jumpState;
 $('jump').onclick = () => {
   $('chat').scrollTop = $('chat').scrollHeight;
 };
-$('draft').oninput = () => { resize(); suggestion(view?.suggestion); };
+$('draft').oninput = resize;
 // A photo pasted into the box (desktop browsers, iPad) joins the tray instead of the text.
 $('draft').addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
   if (files.length && view?.input) { e.preventDefault(); void photos.add(files); }
 });
 $('draft').onkeydown = (e) => {
+  if ((e.key === 'Backspace' || e.key === 'Delete') && ghost && !$('draft').value) {
+    e.preventDefault();
+    dismissed = ghost;
+    suggestion(view?.suggestion);
+    return;
+  }
   if (
     e.key === 'Enter' &&
     !e.shiftKey &&

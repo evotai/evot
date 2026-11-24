@@ -23,6 +23,8 @@ export function phoneWorkspace(
   envFile?: string
 ) {
   const group = 'evot-phone-' + profileKey(home) + '-' + scope
+  const tmuxIn = (tmux: string, ...args: string[]) =>
+    Bun.spawnSync([tmux, '-L', group, '-f', '/dev/null', ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 2500 })
   let listing: Promise<{ rows: SessionMeta[]; truncated: boolean }> | undefined, freshUntil = 0, listed = 0
   // Read only as many newest sessions as the phone can show (0 = all, for lookups).
   // Task runs and empty drafts are filtered after the read, so over-read by a margin
@@ -95,10 +97,25 @@ export function phoneWorkspace(
   }
   // Deleting is the same operation as `d` in the TUI picker. A session open in
   // any window of this profile, shared or not, stays: that TUI would keep writing it.
+  // The one exception is an idle window this gateway's tmux group launched for a
+  // phone: nobody sees it on the computer, so it closes first and the delete proceeds.
   async function remove(session: string) {
-    const inventory = await bus.inventory()
+    let inventory = await bus.inventory()
     if (inventory.unavailable) throw new RemoteConflict('A terminal on the computer is not responding. Try again shortly.')
-    if (inventory.occupied.has(session)) throw new RemoteConflict('This session is open in a terminal window. Close it there first.')
+    if (inventory.occupied.has(session)) {
+      const owners = inventory.online.filter(t => t.session === session)
+      const tmux = Bun.which('tmux'), target = (t: { terminal: string }) => '=chat-' + t.terminal
+      const parked = !!tmux && owners.length > 0 && owners.every(t => t.phoneCreated && t.phase === 'idle'
+        && tmuxIn(tmux, 'has-session', '-t', target(t)).exitCode === 0)
+      // A hidden (unshared) window holds the session without a badge row, so it has no owner here and stays.
+      if (!parked) throw new RemoteConflict('This session is open in a terminal window. Close it there first.')
+      for (const t of owners) tmuxIn(tmux!, 'kill-session', '-t', target(t))
+      for (const end = Date.now() + 4000; Date.now() < end; await Bun.sleep(100)) {
+        inventory = await bus.inventory()
+        if (!inventory.occupied.has(session)) break
+      }
+      if (inventory.occupied.has(session)) throw new RemoteConflict('That window is still closing. Try again shortly.')
+    }
     const deleted = await source.deleteSession(session)
     listing = undefined; texts = undefined
     return deleted
@@ -120,7 +137,7 @@ export function phoneWorkspace(
       const inventory = await bus.inventory()
       const live = session && liveSessions(inventory.online).find(t => t.session === session)
       if (!live && session && (inventory.occupied.has(session) || inventory.unavailable))
-        throw new RemoteConflict('Cannot resume while another terminal has this session or is unavailable. Check Open windows; a hidden window must be re-enabled on the computer.')
+        throw new RemoteConflict('Cannot resume while another terminal has this session or is unavailable. If it is open on the computer, run /remote in that window.')
       return { live, online: inventory.online }
     }
     if (session) {
@@ -145,19 +162,13 @@ export function phoneWorkspace(
     // deterministic terminal to a different session on a stale history click.
     const old = online.find((t) => t.terminal === id)
     if (old && (!session || old.session === session)) return id
-    if (old) throw new RemoteConflict('The terminal changed sessions. Select it from Online.')
+    if (old) throw new RemoteConflict('That window changed sessions. Pick it again from Sessions.')
     if (!stillAuthorized()) throw new RemoteConflict('Pairing changed.')
     const binary = /^(bun|bun-debug)$/.test(basename(process.execPath))
       ? [process.execPath, Bun.main]
       : [process.execPath]
     const args = [...binary, ...(envFile ? ['--env-file', envFile] : []), ...(session ? ['--resume', session] : [])]
-    const tm = (...args: string[]) =>
-      Bun.spawnSync([tmux, '-L', group, '-f', '/dev/null', ...args], {
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        timeout: 2500,
-      })
+    const tm = (...args: string[]) => tmuxIn(tmux, ...args)
     const target = 'chat-' + id
     const exists = () => tm('has-session', '-t', '=' + target).exitCode === 0
     if (!exists()) {
@@ -193,7 +204,7 @@ export function phoneWorkspace(
       }
       await Bun.sleep(100)
     }
-    throw new RemoteConflict('The terminal is still starting or failed. Check Online before retrying.')
+    throw new RemoteConflict('The window is still starting or failed. Check Sessions before retrying.')
   }
   return { bus, list, catalog, open, remove, folders: async () => (await folders()).list }
 }

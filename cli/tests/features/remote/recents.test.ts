@@ -2,20 +2,22 @@ import { expect, test } from 'bun:test'
 import type { SessionMeta, SessionWithText } from '../../../src/native/index.js'
 import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import { phoneCatalog } from '../../../src/features/remote/catalog.js'
-import { windowRows, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
+import { directoryRows, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
-test('the open windows view keeps gateway order and appends status-only windows', () => {
+test('the one session list keeps gateway order and appends status-only windows unless searching', () => {
   const now = Date.UTC(2026, 8, 18), stamp = (minutes:number) => now - minutes * 60000
-  const online = [ {session:'working', phase:'working', updatedAt:stamp(4)}, {session:'idle', phase:'idle', updatedAt:stamp(1)} ]
-  const rows = windowRows(online, [{phase:'idle', updatedAt:now}], '', now)
-  expect(rows.map((r: {session?:string}) => r.session)).toEqual(['working', 'idle', undefined])
-  expect(rows[2]).toMatchObject({kind:'private', age:'now'})
-  expect(rows[1]).toMatchObject({kind:'live', age:'1m ago'})
+  const rows = [ {session:'working', phase:'working', updated:new Date(stamp(4)).toISOString()}, {session:'saved', updated:new Date(stamp(90)).toISOString()} ]
+  const data = { rows, privateWindows:[{phase:'idle', updatedAt:now}] }
+  const listed = directoryRows(data, '', now)
+  expect(listed.map((r: {session?:string}) => r.session)).toEqual(['working', 'saved', undefined])
+  expect(listed[0]).toMatchObject({age:'4m ago'})
+  expect(listed[2]).toMatchObject({kind:'private', title:'Older evot window', age:'now'})
+  expect(directoryRows(data, 'work', now)).toHaveLength(2)
 })
 
-test('an idle window the phone opened reads as a saved session; a busy one, a local one and the viewed one stay open', () => {
+test('an idle window the phone opened reads as a saved session; a busy one and a local one stay open', () => {
   const now = Date.UTC(2026, 8, 18), stamp = (minutes: number) => now - minutes * 60000
   const window = (session: string, phase: SessionBadge['phase'], phoneCreated: boolean, minutes: number) =>
     ({ session, phase, phoneCreated, terminal: crypto.randomUUID(), workspace: 'w', title: session, updatedAt: stamp(minutes) })
@@ -27,8 +29,6 @@ test('an idle window the phone opened reads as a saved session; a busy one, a lo
   // Still followable: tapping a parked row attaches to its window instead of starting another.
   expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
   expect(page.online).toHaveLength(4)
-  expect(windowRows(page.online, [], '', now, live[3]!.terminal).map((r: { session: string }) => r.session).sort())
-    .toEqual(['local', 'phone-running', 'viewed'])
 })
 
 test('sorts saved metadata before taking the first page', async () => {

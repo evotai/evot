@@ -92,3 +92,37 @@ test('history does not disclose or duplicate an unshared occupied session; crash
     b.close()
   }
 })
+
+test.skipIf(!Bun.which('tmux'))('deleting a session closes only an idle window this gateway launched for a phone', async () => {
+  const home = '/fixture/' + crypto.randomUUID(), scope = 'a'.repeat(24), tmux = Bun.which('tmux')!
+  const group = 'evot-phone-' + profileKey(home) + '-' + scope
+  const host = { snapshot() { throw Error('unused') }, act() {} }
+  let phase: SessionBadge['phase'] = 'idle'
+  const badge = (session: string, phoneCreated: boolean) => (): SessionBadge => ({ session, phoneCreated, phase: phoneCreated ? phase : 'idle', workspace: 'w', title: session })
+  const gateway = registerTerminal(home, host, badge('', false))
+  const local = registerTerminal(home, host, badge('local', false))
+  const stray = registerTerminal(home, host, badge('stray', true)) // phone-created, but not in this gateway's tmux group
+  const parked = registerTerminal(home, host, badge('parked', true))
+  const tm = (...args: string[]) => Bun.spawnSync([tmux, '-L', group, '-f', '/dev/null', ...args], { stdout: 'ignore', stderr: 'ignore' })
+  tm('new-session', '-d', '-s', 'chat-' + parked.id, '--', 'sleep', '60')
+  // The TUI inside the tmux session closes its socket when tmux ends it.
+  const watch = setInterval(() => { if (tm('has-session', '-t', '=chat-' + parked.id).exitCode !== 0) parked.close() }, 50)
+  const deleted: string[] = []
+  const workspace = phoneWorkspace(gateway, { listSessions: async () => [], deleteSession: async id => { deleted.push(id); return true }, listSessionsWithText: async () => [] }, home, '/fixture', scope)
+  try {
+    for (const peer of [gateway, local, stray, parked]) peer.share(scope)
+    await expect(workspace.remove('local')).rejects.toThrow('open in a terminal window')
+    await expect(workspace.remove('stray')).rejects.toThrow('open in a terminal window')
+    phase = 'working'
+    await expect(workspace.remove('parked')).rejects.toThrow('open in a terminal window')
+    expect(tm('has-session', '-t', '=chat-' + parked.id).exitCode).toBe(0)
+    phase = 'idle'
+    expect(await workspace.remove('parked')).toBe(true)
+    expect(tm('has-session', '-t', '=chat-' + parked.id).exitCode).not.toBe(0)
+    expect(deleted).toEqual(['parked'])
+  } finally {
+    clearInterval(watch)
+    tm('kill-server')
+    for (const peer of [gateway, local, stray, parked]) peer.close()
+  }
+})

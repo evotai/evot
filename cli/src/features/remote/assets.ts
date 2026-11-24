@@ -5,6 +5,7 @@ import { bundlePhone } from './browser-bundle.js' with { type: 'macro' }
 import { darkTheme } from '../../ui/theme/dark.js'
 import { lightTheme } from '../../ui/theme/light.js'
 import type { Theme } from '../../ui/theme/types.js'
+import { terminalCanvas } from '../../ui/theme/canvas.js'
 import appCss from '../../../../src/app/assets/console/ui/app.css' with { type: 'text' }
 import chatCss from '../../../../src/app/assets/console/ui/chat.css' with { type: 'text' }
 import themeCss from '../../../../src/app/assets/console/ui/theme.css' with { type: 'text' }
@@ -20,7 +21,15 @@ function palette(t: Theme) {
     --ink:${t.panelFg}; --muted:${t.panelMutedFg}; --faint:${t.selectionMutedHex};
     --raised-bg:${t.panelBg}; --fill:${t.toolCardBg}; --accent-soft:${t.selectionBgHex};`
 }
-const phonePalette = `html.remote-shell { ${palette(darkTheme())} }
+// Dark mode paints on the TUI's own terminal canvas, the same as /log shot HTML,
+// so the page matches the terminal it mirrors. Surfaces are tints of that canvas.
+const c = terminalCanvas
+const darkCanvas = `--page:${c.bg}; --bg:color-mix(in srgb,${c.fg} 5%,${c.bg}); --side-bg:color-mix(in srgb,#000 10%,${c.bg});
+    --ink:${c.fg}; --muted:${c.muted}; --faint:color-mix(in srgb,${c.muted} 70%,${c.bg});
+    --raised-bg:color-mix(in srgb,${c.fg} 9%,${c.bg}); --fill:color-mix(in srgb,${c.fg} 6%,${c.bg});
+    --accent-soft:color-mix(in srgb,var(--accent) 16%,${c.bg}); --line:color-mix(in srgb,${c.fg} 10%,transparent);
+    --btn-ink:${c.border};`
+const phonePalette = `html.remote-shell:not([data-theme="light"]) { ${palette(darkTheme())} ${darkCanvas} }
   html.remote-shell[data-theme="light"] { ${palette(lightTheme())} }`
 
 // Static build output only, never session or request data. The CSP authorizes
