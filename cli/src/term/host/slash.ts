@@ -27,6 +27,7 @@ import type { GitInfoProvider } from '../git-info.js'
 import type { CloudController } from './cloud.js'
 import type { CompactionController } from './compaction.js'
 import type { FrameController } from './frame.js'
+import type { RemoteController } from './remote.js'
 import type { RunController } from './run.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SessionController } from './session.js'
@@ -41,6 +42,7 @@ import { errorText } from '../../ui/format.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface SlashDeps {
+  readonly remoteCtl: RemoteController
   readonly agent: Agent
   readonly backgroundTerminals: BackgroundTerminals
   readonly cloudCtl: CloudController
@@ -108,6 +110,35 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     deps.suggest.requestProductSuggestion('mode_changed')
   }
 
+  // Used after either surface has admitted the transition. Do not persist an
+  // empty conversation: the query path binds the id on its first real prompt.
+  function startNewSession() {
+    st.composerRevision++
+    st.suggestionContextId++
+    deps.suggestionContext.clear()
+    deps.privacyFeed.forget(st.sessionId)
+    deps.suggestions.cancel()
+    deps.taskSession.cancelFlow()
+    deps.computeSession.cancelFlow()
+    deps.loopSession.reset()
+    deps.runCtl.abandonRun()
+    deps.queueLifecycle.pause()
+    deps.sessionHook.endSession('new_session')
+    st.queueStartupTarget = { startup: st.queueStartupTarget.startup + 1 }
+    st.sessionId = null
+    st.conversationTail.replace([])
+    st.lastLineage = []
+    setGhostHintContext({ forked: false })
+    st.appState = createInitialState(st.appState.model, deps.agent.cwd)
+    deps.gitInfo.setCwd(deps.agent.cwd)
+    deps.renderer.clearScreen()
+    deps.compactLines.length = 0
+    deps.expandedLines.length = 0
+    deps.frames.resetHistoryCache()
+    deps.scrollback.commitSystem('sys-new-session', chalk.dim('  new session'))
+    deps.renderer.requestRender()
+  }
+
   async function handleSlashInput(text: string) {
     const pendingCommand = resolveCommand(text)
     if (pendingCommand.kind === 'resolved' && ['/new', '/clear', '/resume', '/fork', '/back', '/log'].includes(pendingCommand.name) && st.logMode) {
@@ -166,6 +197,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       return
     }
     st.appState = result.appState
+    if (result.clearContext || result.newSession) deps.remoteCtl.sessionChanged()
     if (result.overlay) st.overlay = result.overlay
     if (result.clearContext) {
       st.composerRevision++
@@ -182,6 +214,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       deps.sessionHook.endSession('context_cleared')
       st.queueStartupTarget = { startup: st.queueStartupTarget.startup + 1 }
       st.sessionId = null
+      st.conversationTail.replace([])
       st.appState = { ...createInitialState(st.appState.model, deps.agent.cwd) }
       deps.gitInfo.setCwd(deps.agent.cwd)
       deps.renderer.clearScreen()
@@ -191,33 +224,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       try { st.preloadedSessions = await deps.agent.listSessions(20) } catch {}
       deps.resumeCache.replace(st.preloadedSessions)
     }
-    if (result.newSession) {
-      st.composerRevision++
-      st.suggestionContextId++
-      deps.suggestionContext.clear()
-      deps.privacyFeed.forget(st.sessionId)
-      deps.suggestions.cancel()
-      deps.taskSession.cancelFlow()
-      deps.computeSession.cancelFlow()
-      deps.loopSession.reset()
-      deps.runCtl.abandonRun()
-      deps.queueLifecycle.pause()
-      // Leave the session unbound until the first real prompt. The query path
-      // creates and returns the session id, so abandoning /new no longer leaves
-      // an empty, untitled session in persistent storage or /resume.
-      deps.sessionHook.endSession('new_session')
-      st.queueStartupTarget = { startup: st.queueStartupTarget.startup + 1 }
-      st.sessionId = null
-      st.lastLineage = []
-      setGhostHintContext({ forked: false })
-      st.appState = { ...createInitialState(st.appState.model, deps.agent.cwd) }
-      deps.gitInfo.setCwd(deps.agent.cwd)
-      deps.renderer.clearScreen()
-      deps.compactLines.length = 0
-      deps.expandedLines.length = 0
-      deps.frames.resetHistoryCache()
-      deps.scrollback.commitSystem('sys-new-session', chalk.dim('  new session'))
-    }
+    if (result.newSession) startNewSession()
     if (result.exit) { deps.exitAfterCleanup(0); return }
     if (result.restart) { deps.restartAfterCleanup(); return }
     if (result.systemLines.length > 0) deps.scrollback.commitSystemLines(result.systemLines)
@@ -237,7 +244,9 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       st.appState = { ...st.appState, model: deps.agent.model }
     }
 
-    if (name === '/task') {
+    if (name === '/remote') {
+      await deps.remoteCtl.command(args)
+    } else if (name === '/task') {
       if (args === 'cancel') {
         deps.scrollback.commitSystem('sys-task-cancel', deps.taskSession.cancelFlow()
           ? '  Task edit cancelled · nothing was saved'
@@ -472,6 +481,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
       const systemPrompt = logAnalysisPrompt(logPath)
       try {
         const forked = deps.agent.fork(systemPrompt)
+        deps.remoteCtl.sessionChanged()
         st.logMode = forked
         st.composerRevision++
         deps.suggestions.cancel()

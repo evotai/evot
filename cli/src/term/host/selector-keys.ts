@@ -1,10 +1,9 @@
 import type { ComputeSession } from '../../features/compute/session.js'
-import { formatModelLabel, formatModelOptionLabel, modelAvailabilityNotice, selectModelOption } from '../../features/models/options.js'
+import { formatModelOptionLabel, selectModelOption } from '../../features/models/options.js'
 import type { TaskSession } from '../../features/task/session.js'
 import { TASK_RUNTIME_DEFAULT_MODEL } from '../../features/task/types.js'
 import type { Agent, SessionMeta } from '../../native/index.js'
 import type { CloudSessionSync } from '../../session/cloud-sessions.js'
-import { modelShareEvents } from '../../session/share-events.js'
 import type { createQueueEdit } from '../app/queue/queue-edit.js'
 import { handleSelectorControl } from '../app/selector/selector-control.js'
 import type { ResumeSessionCache } from '../app/session/resume-cache.js'
@@ -13,7 +12,7 @@ import type { AskController } from './ask.js'
 import type { CloudController } from './cloud.js'
 import type { CommandWindowController } from './command-window.js'
 import type { ComposerController } from './composer.js'
-import type { RunController } from './run.js'
+import type { ModelSelectionController } from './model-selection.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SessionController } from './session.js'
 import type { ReplState } from './state.js'
@@ -34,10 +33,9 @@ export interface SelectorKeysDeps {
   readonly computeSession: ComputeSession
   readonly queueEdit: ReturnType<typeof createQueueEdit>
   readonly queueLifecycle: import('../app/queue/queue-lifecycle.js').QueueLifecycle
-  readonly refreshConfigInfo: () => void
+  readonly modelSelection: ModelSelectionController
   readonly renderer: TermRenderer
   readonly resumeCache: ResumeSessionCache
-  readonly runCtl: RunController
   readonly scrollback: ScrollbackController
   readonly sessionCtl: SessionController
   readonly taskSession: TaskSession
@@ -122,43 +120,7 @@ export function createSelectorKeysController(st: ReplState, deps: SelectorKeysDe
         deps.commandWindow.nextCommandWindowGeneration()
         deps.composer.clearAll()
         deps.commandWindow.releaseCommandWindowLayout()
-        if (st.isLoading) {
-          deps.runCtl.requestModelHandoff(action.spec, action.thinkingLevel)
-          return
-        }
-        try {
-          deps.agent.setProvider(action.spec)
-          deps.refreshConfigInfo()
-          // The picker commits a model and its effort as one gesture. The tier
-          // is applied after the switch, since it is the new model's ladder
-          // that decides whether the tier exists at all; a rejected tier leaves
-          // the model's own resolved level in place rather than failing the
-          // switch the user actually asked for.
-          let effort = st.configInfo?.thinkingLevel ?? ''
-          if (action.thinkingLevel !== undefined && action.thinkingLevel !== effort) {
-            const applied = deps.agent.setThinkingLevel(action.thinkingLevel)
-            if (applied !== null) {
-              deps.refreshConfigInfo()
-              effort = applied
-            }
-          }
-          const selected = selectModelOption(st.configInfo, action.spec)
-          const model = selected?.model ?? deps.agent.model
-          const provider = selected?.provider ?? st.configInfo?.provider ?? ''
-          st.appState = { ...st.appState, model }
-          const label = formatModelLabel(model, provider, selected?.group_label)
-          // Effort shares the model's status slot: they were chosen together, so
-          // reporting them apart would read as two unrelated switches.
-          deps.scrollback.commitStatusLine({
-            id: 'sys-model',
-            kind: 'system',
-            text: `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}${modelAvailabilityNotice(selected)}`,
-            shareEvents: modelShareEvents(provider, model, effort),
-          })
-        } catch (err) {
-          deps.scrollback.commitSystem('sys-model-err', renderErrorNotice(`Failed to switch model: ${errorText(err)}`))
-        }
-        deps.renderer.requestRender()
+        deps.modelSelection.select(action.spec, action.thinkingLevel)
         return
       }
       case 'rename-session': {

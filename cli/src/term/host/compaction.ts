@@ -48,6 +48,7 @@ export function createCompactionController(st: ReplState, deps: CompactionDeps):
     const messages = transcriptToMessages(transcript.filter(item => !isLegacyContextSummary(item)))
     const { shown, hidden } = selectResumeMessages(messages)
     deps.suggestionContext.replaceHistory(transcript)
+    st.conversationTail.replace(messages)
 
     st.appState = {
       ...st.appState,

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" class="remote-shell"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Chat · evot remote</title><link rel="stylesheet" href="/chat.css"><script src="/theme.js"></script>
+</head><body class="remote-page">
+<main class="conversation" id="conversation">
+  <header class="conversation-head">
+    <button id="openSessions" class="icon-button" type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-controls="sessionsDrawer" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+    <div class="identity"><h1 id="threadTitle" class="conversation-title">evot remote</h1><div class="subline"><span class="connection" id="connection">Not connected</span><span id="session" class="conversation-meta">Terminal session</span></div></div>
+    <button id="newSession" class="icon-button" type="button" aria-label="New session" title="New session" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M11 13l1-4 7-7 3 3-7 7z"/></svg></button>
+  </header>
+  <section id="pair-screen"><form id="pair" class="pair-card">
+    <div class="eyebrow">EVOT / REMOTE</div><h2>Connect to your Mac</h2><p>Approve this browser on the Mac to access sessions in this profile, including windows opened later.</p>
+    <output id="deviceStatus" aria-live="polite">Loading the connection page… If this message stays, reload the page in Safari or Chrome with JavaScript enabled.</output>
+    <strong id="approvalCode" hidden></strong><small id="approvalClock" hidden></small>
+    <button class="primary" type="submit" disabled>Loading…</button>
+  </form></section>
+  <section id="pickSession" hidden><h2>Your Mac is connected</h2><p>Choose a session to follow its Mac window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
+  <div class="chat-scroll" id="chat" hidden>
+    <div class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true">◆</div><h2>What can I help you build?</h2><p>Your terminal session, right here.</p>
+      <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain this codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run relevant tests</button></div>
+    </div><div id="history" aria-label="Recent conversation"></div><div id="outbox" aria-live="polite"></div><form id="questions" class="question-card" hidden></form>
+  </div>
+  <div class="composer-seat" id="seat" hidden>
+    <button id="jump" type="button" hidden>↓ Latest</button>
+    <button id="bgChip" class="bg-chip" aria-haspopup="dialog" hidden></button>
+    <div class="place-line" id="place" hidden><button type="button" class="place-chip" id="placeFolder" aria-haspopup="dialog" title="Start a session in another folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="placeName"></span><span class="place-caret" aria-hidden="true">▾</span></button><span class="place-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg><span id="placeHost"></span></span><span class="place-chip" id="placeBranchChip" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 7v10M18 10c0 4-12 2-12 7"/></svg><span id="placeBranch"></span></span></div>
+    <div class="run-line"><span class="activity-dot" id="activity"></span><span id="status" role="status">Connecting…</span><span id="statusDetail"></span><span id="nextModel"></span></div>
+    <form class="composer-card" id="compose"><textarea id="draft" rows="1" maxlength="8192" placeholder="Ask anything about this project…" aria-label="Message" required></textarea>
+      <div class="composer-row"><div class="composer-tools">
+        <label class="seat-picker native-picker"><span class="seat-label" id="modelLabel">Model</span><select class="seat-trigger" id="models" aria-label="Model" disabled></select></label>
+        <label class="seat-picker native-picker effort-picker" id="effortPicker" hidden><span class="seat-label" id="effortLabel">Thinking</span><select class="seat-trigger" id="effort" aria-label="Thinking level" disabled></select></label>
+      </div><div class="composer-trailing"><button id="stop" class="round-tool" type="button" aria-label="Stop generating" title="Stop generating" hidden>■</button><button id="send" class="send-btn" aria-label="Send message" title="Send message" disabled>↑</button></div></div>
+    </form>
+  </div>
+  <div id="notice" role="status" hidden></div>
+</main>
+<dialog id="folderPanel" aria-labelledby="folderTitle"><div class="drawer-head"><div><div class="eyebrow">FOLDER</div><h2 id="folderTitle">Start in another folder</h2></div><button id="closeFolders" class="icon-button" aria-label="Close" autofocus>×</button></div><p id="folderNote">This window keeps its folder. Choose one to start a new session there.</p><div id="folderList" role="list"></div><p id="folderMessage" role="status"></p></dialog>
+<dialog id="bgPanel" aria-labelledby="bgTitle"><div class="drawer-head"><div><div class="eyebrow">ACTIVITY</div><h2 id="bgTitle">Background</h2></div><button id="closeBg" class="icon-button" aria-label="Close background panel">×</button></div><p id="bgSubtitle"></p><button id="allTasks" type="button" hidden>‹ All tasks</button><div id="bgTasks"></div><pre id="bgOutput" tabindex="0" aria-label="Task output" hidden></pre></dialog>
+<dialog id="sessionsDrawer" aria-labelledby="drawerTitle"><div class="drawer-body">
+  <header class="drawer-head"><div><div class="eyebrow"><i class="brand-mark" aria-hidden="true"></i> EVOT / WORKSPACE</div><h2 id="drawerTitle">Sessions</h2></div><div class="drawer-actions"><button id="drawerNew" type="button" aria-label="New session"><span aria-hidden="true">+</span> New</button><button id="closeSessions" class="icon-button" aria-label="Close sessions" autofocus>×</button></div></header>
+  <div class="directory-filters"><div class="directory-modes" role="group" aria-label="Directory view"><button type="button" id="showCatalog" aria-pressed="true">Sessions</button><button type="button" id="showWindows" aria-pressed="false">Open on Mac</button></div>
+  <label class="session-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="sessionSearch" type="search" placeholder="Search titles, projects and transcripts" aria-label="Search sessions"></label></div>
+  <div class="session-lists">
+  <p id="selectionMessage" role="status" hidden></p>
+  <div class="list-intro"><span id="listLabel">All sessions</span><span id="terminalCount"></span></div>
+  <div id="terminals" aria-label="Directory results"></div>
+  <div id="archived" role="status"></div><button id="moreSessions" type="button" hidden>Load more</button><button id="askSearch" type="button" hidden></button><p id="directoryMessage" role="status"></p>
+  <details class="drawer-help"><summary>About sharing</summary><p>One /remote on the Mac includes existing and future windows in this profile. /remote off hides only that window; /remote shutdown in the gateway TUI disconnects the profile. Older windows may show status only until restarted with the updated CLI.</p></details></div>
+  <footer class="drawer-foot"><span id="transport"></span><button type="button" class="theme-toggle">Light mode</button></footer>
+</div></dialog>
+<!-- phone-client --></body></html>

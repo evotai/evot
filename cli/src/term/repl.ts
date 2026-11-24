@@ -52,7 +52,7 @@ import { findPreviousSession, shouldPreloadStartupSessions, type StartupSelectio
 import { ShareNotices } from '../session/share-notices.js'
 import { CloudSessionSync, cloudLabel } from '../session/cloud-sessions.js'
 import { AuthWatcher } from './app/auth/auth-watch.js'
-import { AuthIdentityTracker } from './app/auth/auth-identity.js'
+import { AuthIdentityTracker, readAuthIdentity } from './app/auth/auth-identity.js'
 import { RunInteraction } from './app/run/run-interaction.js'
 import { ManualCompaction } from './app/run/manual-compaction.js'
 import { PendingImages } from './app/composer/pending-images.js'
@@ -84,6 +84,9 @@ import {
   type ReplCommandContext,
 } from './command-handlers.js'
 
+import { createModelSelectionController, type ModelSelectionDeps } from './host/model-selection.js'
+import { createActivityController, type ActivityDeps } from './host/activity.js'
+import { createRemoteController, type RemoteDeps } from './host/remote.js'
 import { createReplState } from './host/state.js'
 import { createCommandWindowController, type CommandWindowDeps } from './host/command-window.js'
 import { createScrollbackController, type ScrollbackDeps } from './host/scrollback.js'
@@ -104,6 +107,9 @@ import { createTerminalController, type TerminalDeps } from './host/terminal.js'
 
 /** Everything the host controllers may ask of `startRepl`. */
 type ReplHost =
+  & RemoteDeps
+  & ActivityDeps
+  & ModelSelectionDeps
   & CommandWindowDeps
   & ScrollbackDeps
   & AskDeps
@@ -140,6 +146,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   // use, so a controller sees a later-declared service exactly as a closure would.
   const host: ReplHost = {
     get agent() { return agent },
+    get activity() { return activity },
+    get remoteCtl() { return remoteCtl },
+    get readAuthIdentity() { return readAuthIdentity },
+    get modelSelection() { return modelSelection },
     get clearAll() { return composer.clearAll },
     get cloudSessions() { return cloudSessions },
     get computeSession() { return computeSession },
@@ -232,6 +242,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get terminalInput() { return terminalInput },
     get terminal() { return terminal },
   }
+  const modelSelection = createModelSelectionController(st, host)
+  const activity = createActivityController(st, host)
+  const remoteCtl = createRemoteController(st, host)
   const commandWindow = createCommandWindowController(st, host)
   const scrollback = createScrollbackController(st, host)
   const asks = createAskController(st, host)
@@ -444,7 +457,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     cwd: () => agent.cwd,
     destroyed: () => st.destroyed,
   })
-  const taskIdentity = new AuthIdentityTracker(() => taskSession.resetIdentity())
+  const taskIdentity = new AuthIdentityTracker(() => { taskSession.resetIdentity(); remoteCtl.identityChanged() })
   const shareNotices = new ShareNotices((sid, notices) => agent.recordShareNotices(sid, notices))
   const cloudSessions = new CloudSessionSync({
     indexUpdated: () => st.refreshOpenSessionList?.(),
@@ -648,8 +661,10 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
 
   if (shouldPreloadStartupSessions(opts)) {
     try {
-      st.preloadedSessions = await agent.listSessions(opts.continueLatest || opts.forkFrom ? 0 : 20)
-      resumeCache.replace(st.preloadedSessions, Boolean(opts.continueLatest))
+      // --resume accepts any saved session (including prefixes), not only
+      // the twenty newest. Use the same metadata inventory as /resume.
+      st.preloadedSessions = await agent.listSessions(0)
+      resumeCache.replace(st.preloadedSessions, true)
     } catch {}
   }
 
@@ -878,11 +893,13 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   terminal.start()
   st.suggestionsReady = true
   if (st.startupSuggestion) { const trigger = st.startupSuggestion; st.startupSuggestion = null; suggest.requestProductSuggestion(trigger) }
+  remoteCtl.register()
   renderer.requestRender()
 
   function cleanup() {
     if (st.destroyed) return
     st.destroyed = true
+    remoteCtl.dispose()
     taskSession.dispose()
     computeSession.dispose()
     st.pendingEnqueue = null

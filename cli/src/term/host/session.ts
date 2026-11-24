@@ -6,7 +6,8 @@ import { carryModelEfforts, currentModelSpec, modelOptions, modelSelectorItems }
 import { refreshTaskModelWindow } from '../../features/task/model-picker.js'
 import type { TaskSession } from '../../features/task/session.js'
 import { type Agent, type QueryStream, type SessionMeta, privacySessionTags } from '../../native/index.js'
-import type { OutputLine } from '../../render/output.js'
+import { messagesToOutputLines, type OutputLine } from '../../render/output.js'
+import { transcriptToMessages } from '../../session/transcript.js'
 import { type CloudSessionSync, cloudBadge, mergeRemoteSessions } from '../../session/cloud-sessions.js'
 import type { SessionHook } from '../../session/hook.js'
 import { formatRankedSessionItems, formatSessionItems, isInteractiveSession, shortenSessionCwd } from '../../session/resume.js'
@@ -27,6 +28,7 @@ import type { FrameController } from './frame.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { RunController } from './run.js'
 import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
+import type { RemoteController } from './remote.js'
 import type { ReplState } from './state.js'
 import { setGhostHintContext } from '../input/editor.js'
 import { openWebLink } from '../open-link.js'
@@ -39,6 +41,7 @@ import { type SelectorState, selectorExpandItems } from '../../ui/selector.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface SessionDeps {
+  readonly remoteCtl: RemoteController
   readonly agent: Agent
   readonly cloudSessions: CloudSessionSync
   readonly commandWindow: CommandWindowController
@@ -152,6 +155,7 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
       deps.scrollback.commitSystem('sys-log-switch', '  Leave the log fork with /done before switching sessions; pending log prompts require confirmation.')
       return 'failed'
     }
+    deps.remoteCtl.sessionChanged()
     deps.runCtl.abandonRun()
     deps.queueLifecycle.pause()
     st.draftImageEpoch++
@@ -178,15 +182,16 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
         deps.scrollback.commitSystem('sys-resume-selection', renderErrorNotice(`Cannot resume ${session.session_id.slice(0, 8)} with the requested selection: ${errorText(err)}`))
         return 'selection_rejected'
       }
+      const messages = transcriptToMessages(transcript)
+      // Reject phone input based on the pre-resume snapshot.
+      deps.remoteCtl.sessionChanged()
+      st.conversationTail.replace(messages)
       st.sessionId = session.session_id
       deps.sessionHook.startSession(session.session_id, deps.agent.cwd)
       deps.sessionHook.state('idle')
       deps.rendererTrace.bind(session.session_id)
       deps.refreshConfigInfo()
       st.appState = { ...st.appState, sessionId: session.session_id, model: deps.agent.model, firstCallModel: undefined, lastCallModel: undefined }
-      const { messagesToOutputLines } = await import('../../render/output.js')
-      const { transcriptToMessages } = await import('../../session/transcript.js')
-      const messages = transcriptToMessages(transcript)
       deps.suggestionContext.restore(transcript)
       // The history was masked in earlier processes; its placeholders are not
       // news. Best effort: without them the first card over-reports once.

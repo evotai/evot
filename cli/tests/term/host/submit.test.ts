@@ -42,6 +42,16 @@ function harness(text = 'B') {
   return { st, native, pending, images, history, notices, calls, blocks, logQueries, queries, ctl: createSubmitController(st, deps), ready: () => { imageReady = true } }
 }
 
+test('a phone steer joins the original native queue without consuming the terminal draft', () => {
+  const h = harness('partially typed local message')
+  h.ctl.submitConversationText('phone follow-up', true)
+  expect(h.native.calls).toEqual(['steering'])
+  expect(h.pending.state.entries[0]?.snapshot.text).toBe('phone follow-up')
+  expect(getEditorText(h.st.editor)).toBe('partially typed local message')
+  expect(h.history).toEqual([])
+  expect(h.calls).toContain('reclaim')
+})
+
 test.each(['immediate', 'steering', 'follow_up'])('skill invocation is model input for %s submission', kind => {
   const h = harness('/x-review inspect changes')
   h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review', command: {} }]

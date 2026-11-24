@@ -343,6 +343,10 @@ export function sessionAge(iso: string, now = new Date()): string {
  * One-line row: full session id and the line that identifies the session,
  * the name the user chose or else the automatic title.
  */
+export function sessionLineTitle(s: Pick<SessionMeta, 'custom_title' | 'title'>): string {
+  return (s.custom_title?.trim() || sanitizeSessionTitle(s.title)).replace(/\s+/g, ' ')
+}
+
 function formatSessionLine(
   s: SessionMeta,
   text: SessionWithText | undefined,
@@ -353,8 +357,7 @@ function formatSessionLine(
 ): SelectorItem {
   const badge = sessionSourceBadge(s.source)
   const host = s.cloud?.origin_host && cloud.includes('⇣') ? ` (${s.cloud.origin_host})` : ''
-  const chosen = s.custom_title?.trim()
-  const label = (chosen || sanitizeSessionTitle(s.title)).replace(/\s+/g, ' ')
+  const label = sessionLineTitle(s)
   const marks = [`${cloud}${host}`, showSource ? badge : ''].filter(Boolean).join(' · ')
   return {
     label: `${edge}${label}`,

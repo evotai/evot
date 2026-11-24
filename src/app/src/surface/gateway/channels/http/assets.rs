@@ -72,6 +72,13 @@ pub(super) fn router() -> Router {
             )),
         ),
         (
+            "/ui/chat-markdown.js",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/assets/console/ui/chat-markdown.js"
+            )),
+        ),
+        (
             "/ui/chat-state.js",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

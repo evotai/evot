@@ -61,6 +61,8 @@ export interface StreamContext {
 
 export interface StreamUpdate {
   state: StreamMachineState
+  /** Ordered assistant messages finalized in this update, before terminal formatting. */
+  committedContent: UIAssistantBlock[][]
   commitLines: OutputLine[]
   expandedCommitLines?: OutputLine[]
   writeLines: OutputLine[]
@@ -189,7 +191,9 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     sessionRevoked = true
   }
 
-  function mergeFlushExpanded(flushed: { expandedLines?: OutputLine[] }) {
+  const committedContent: UIAssistantBlock[][] = []
+  function mergeFlushExpanded(flushed: { expandedLines?: OutputLine[]; committedContent?: UIAssistantBlock[][] }) {
+    if (flushed.committedContent) committedContent.push(...flushed.committedContent)
     if (flushed.expandedLines) {
       if (!expandedCommitLines) expandedCommitLines = []
       expandedCommitLines.push(...flushed.expandedLines)
@@ -217,6 +221,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
     const next = observeModelSwitch(prev.pendingSwitch, known)
     if (typeof next === 'string') {
       switchPrefix = settleModelSwitch(state, next)
+      committedContent.push(...switchPrefix.committedContent)
       state = switchPrefix.state
       rerenderStatus = true
       rejectedSwitch = next === 'rejected'
@@ -600,6 +605,7 @@ export function reduceRunEvent(prev: StreamMachineState, event: RunEvent, ctx: S
 
   return {
     state: { ...state, lastLlmErrorMessage: capturedLlmError, deferredRetry: deferred },
+    committedContent,
     commitLines: switchPrefix ? [...switchPrefix.lines, ...commitLines] : commitLines,
     expandedCommitLines: switchPrefix
       ? [...(switchPrefix.expandedLines ?? switchPrefix.lines), ...(expandedCommitLines ?? commitLines)]
@@ -639,12 +645,13 @@ export function discardedPartialNotice(content: UIAssistantBlock[], cause: strin
 
 function settleModelSwitch(state: StreamMachineState, outcome: ModelSwitchOutcome) {
   const pending = state.pendingSwitch
-  if (!pending) return { state, lines: [] }
+  if (!pending) return { state, lines: [], committedContent: [] }
   const content = pending.content.map(block => block.type === 'tool_call' && block.toolCall.id === pending.call.id
     ? { ...block, toolCall: { ...block.toolCall, modelSwitchOutcome: outcome } }
     : block)
   return {
     state: { ...state, pendingSwitch: undefined },
+    committedContent: [content],
     lines: assistantMessageToOutputLines(content),
     expandedLines: assistantMessageToOutputLines(content, true),
   }
@@ -662,12 +669,13 @@ export function finishStreaming(state: StreamMachineState, interrupted = false):
   if (settled.lines.length === 0 && held.length === 0) return final
   return {
     state: final.state,
+    committedContent: [...settled.committedContent, ...final.committedContent],
     lines: [...held, ...settled.lines, ...final.lines],
     expandedLines: [...held, ...(settled.expandedLines ?? settled.lines), ...(final.expandedLines ?? final.lines)],
   }
 }
 
-export function flushStreaming(state: StreamMachineState): { state: StreamMachineState; lines: OutputLine[]; expandedLines?: OutputLine[] } {
+export function flushStreaming(state: StreamMachineState): { state: StreamMachineState; committedContent: UIAssistantBlock[][]; lines: OutputLine[]; expandedLines?: OutputLine[] } {
   const content = state.appState.currentAssistantContent
   const lines = assistantMessageToOutputLines(content)
   const expandedLines = lines.length > 0
@@ -681,7 +689,7 @@ export function flushStreaming(state: StreamMachineState): { state: StreamMachin
       currentAssistantContent: [],
     },
   }
-  if (lines.length === 0) return { state: resetState, lines: [] }
+  if (lines.length === 0) return { state: resetState, committedContent: [], lines: [] }
 
-  return { state: resetState, lines, expandedLines }
+  return { state: resetState, committedContent: [content], lines, expandedLines }
 }

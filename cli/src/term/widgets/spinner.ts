@@ -284,12 +284,13 @@ export interface SpinnerFormatOptions {
   awaitedTasks?: AwaitedTasks
 }
 
-export function formatSpinnerLine(
+/** Surface-independent status and metrics. Only the terminal adds animation and key hints. */
+export function spinnerDescription(
   state: SpinnerState,
   now: number,
   stats?: SpinnerStats,
   options: SpinnerFormatOptions = {},
-): string {
+) {
   const elapsed = now - state.phaseStartedAt
   const interaction = options.interaction ?? resolveRunInteraction({
     active: state.phase !== 'awaiting_background', owner: state,
@@ -301,7 +302,6 @@ export function formatSpinnerLine(
   const awaitedTime = interaction.kind === 'waiting-task' && options.awaitedTasks?.titles.length
     ? humanDuration(options.awaitedTasks.elapsedMs) : undefined
   const slow = presentation.allowSlowWarning && isSlow(state, now)
-  const char = SPINNER_FRAMES[state.frame]!
 
   const action = state.toolName ? toolActionLabel(state.toolName) : 'Working'
   let label: string
@@ -366,11 +366,17 @@ export function formatSpinnerLine(
     ? `waiting ${humanDuration(Math.max(0, now - state.recoveryStartedAt))}` : humanDuration(elapsed))
   label = presentation.label ?? label
   const tokenSuffix = presentation.showUsage ? formatSpinnerTokenSuffix(state, now, stats) : ''
+  return { label, detail: status + tokenSuffix, slow, presentation }
+}
+
+export function formatSpinnerLine(state: SpinnerState, now: number, stats?: SpinnerStats, options: SpinnerFormatOptions = {}): string {
+  const { label, detail, slow, presentation } = spinnerDescription(state, now, stats, options)
+  const char = SPINNER_FRAMES[state.frame]!
   const interruptHint = options.hideInteractionHint ? '' : confirmationHintAnsi(presentation.hint, presentation.confirmationPending)
 
   const content = slow
-    ? `\x1b[31m${char}\x1b[0m \x1b[31m${label}\x1b[0m\x1b[2m (${status}${tokenSuffix})`
-    : `\x1b[36m${char}\x1b[0m ${glimmerText(label, state.glimmerPos)}\x1b[2m (${status}${tokenSuffix})`
+    ? `\x1b[31m${char}\x1b[0m \x1b[31m${label}\x1b[0m\x1b[2m (${detail})`
+    : `\x1b[36m${char}\x1b[0m ${glimmerText(label, state.glimmerPos)}\x1b[2m (${detail})`
   if (options.columns === undefined) return `${content}${interruptHint}\x1b[0m`
   const columns = Number.isFinite(options.columns) ? Math.max(1, Math.floor(options.columns)) : 80
   const hintWidth = visibleWidth(interruptHint)

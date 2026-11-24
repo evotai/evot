@@ -53,10 +53,40 @@ export interface SubmitController {
   handleLoadingEnter(): void
   submitDraft(): void
   enqueueDraft(): void
+  submitConversationText(text: string, steer: boolean): void
 }
 
 /** Enter on the composer: submits a draft when idle; steers, queues or blocks it while a turn runs. */
 export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitController {
+  /** Both composers use the same queue transaction. A phone prompt has its own
+   * recoverable snapshot; it never borrows or clears the terminal draft. */
+  function attachPrompt(input: Parameters<PendingQueue['accept']>[0], sequence?: number) {
+    const entry = deps.pendingQueue.accept(input, sequence)
+    try { if (st.streamRef) deps.pendingQueue.attach(st.streamRef) }
+    catch (err) {
+      if (!entry.native) deps.pendingQueue.remove(entry, entry.version)
+      throw err
+    }
+  }
+
+  function startTurn(display: string, text: string, contentJson?: string) {
+    deps.scrollback.commitUserMessage(display)
+    const extension = deps.taskSession.followUpExtension(st.sessionId) ?? deps.computeSession.followUpExtension(st.sessionId)
+    void deps.runCtl.runQuery(text, contentJson, undefined, extension)
+  }
+
+  function submitConversationText(text: string, steer: boolean) {
+    if (!steer) { startTurn(text, text); return }
+    const lines = text.split('\n')
+    attachPrompt({ target: currentQueueTarget(st), queue: 'steering', text, expandedText: text,
+      snapshot: { text, cursorLine: lines.length - 1, cursorCol: lines.at(-1)?.length ?? 0, chunks: [], images: [], undo: [], history: { index: 0, savedInput: '', length: 0 } } })
+    deps.suggestions.cancel()
+    deps.queueLifecycle.reconcile()
+    deps.queueLifecycle.dispatchNext()
+    if (st.streamRef) deps.backgroundTerminals.reclaimTurnForMessage()
+    deps.renderer.requestRender()
+  }
+
   function acceptDraft(queue: 'steering' | 'follow_up', sequence?: number): boolean {
     if (st.pendingQueue.blocked) {
       deps.scrollback.commitSystem('sys-queue-blocked', '  Queue ownership unresolved; Ctrl+G to reconcile before submitting.')
@@ -82,16 +112,10 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       for (const block of imageResult.blocks) if (block.type === 'text') block.text = promptInput(block.text, st.skillEntries) ?? block.text
     }
     const history = deps.getHistoryText()
-    const entry = deps.pendingQueue.accept({
-      target: currentQueueTarget(st), queue, text: displayText || '(image prompt)', expandedText,
-      contentJson: imageResult ? JSON.stringify(imageResult.blocks) : undefined,
-      snapshot: deps.composer.snapshot(),
-    }, sequence)
     try {
-      if (st.streamRef) deps.pendingQueue.attach(st.streamRef)
+      attachPrompt({ target: currentQueueTarget(st), queue, text: displayText || '(image prompt)', expandedText,
+        contentJson: imageResult ? JSON.stringify(imageResult.blocks) : undefined, snapshot: deps.composer.snapshot() }, sequence)
     } catch (err) {
-      // A local entry is safely removable only before native registration.
-      if (!entry.native) deps.pendingQueue.remove(entry, entry.version)
       deps.scrollback.commitSystem('sys-queue-error', `  Queue failed: ${errorText(err)}`)
       deps.renderer.requestRender()
       return false
@@ -240,20 +264,9 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       // Preserve structured content on the initial fork query as on follow-ups.
       deps.slashCtl.runLogQuery(st.logMode, imageBlocks ? '' : modelText, imageBlocks ? JSON.stringify(imageBlocks) : undefined)
     } else {
-      deps.scrollback.commitUserMessage(displayText)
-      // If the model stopped the task edit with a plain-text question,
-      // the next reply is still in that edit flow, not a normal coding
-      // turn. Keep its task tool available until confirmation/cancel.
-      const taskExtension = deps.taskSession.followUpExtension(st.sessionId)
-        ?? deps.computeSession.followUpExtension(st.sessionId)
-      if (imageBlocks) {
-        const contentJson = JSON.stringify(imageBlocks)
-        deps.runCtl.runQuery('', contentJson, undefined, taskExtension)
-      } else {
-        deps.runCtl.runQuery(modelText, undefined, undefined, taskExtension)
-      }
+      startTurn(displayText, imageBlocks ? '' : modelText, imageBlocks ? JSON.stringify(imageBlocks) : undefined)
     }
   }
 
-  return { handleLoadingEnter, submitDraft, enqueueDraft }
+  return { handleLoadingEnter, submitDraft, enqueueDraft, submitConversationText }
 }

@@ -25,6 +25,7 @@ export interface AskDeps {
 export interface AskController {
   readonly collectAskUserAnswers: (params: AskUserParams) => Promise<AskUserAnswer[] | null>
   handleAskKey(event: KeyEvent): void
+  answerRequest(id: string, answers: string[]): boolean
   readonly presentAskQuestions: (questions: AskQuestion[], resumeState?: "idle" | "working", transient?: boolean, owner?: symbol | undefined) => Promise<AskUserAnswer[] | null>
   readonly presentTaskModelPicker: (request: TaskModelPickerRequest) => Promise<TaskModelSelection | null>
   resolvePendingAsk(): void
@@ -81,12 +82,13 @@ export function createAskController(st: ReplState, deps: AskDeps): AskController
     resumeState: 'working' | 'idle' = 'working',
     transient = false,
     owner?: symbol,
+    requestId?: string,
   ): Promise<AskUserAnswer[] | null> {
     // Only one ask overlay can be active at a time; resolve any prior one as
     // cancelled before opening the next.
     resolvePendingAsk()
     deps.sessionHook.state('blocked')
-    st.overlay = { kind: 'ask-user', state: { ...createAskState(questions), transient, owner } }
+    st.overlay = { kind: 'ask-user', state: { ...createAskState(questions), transient, owner, requestId } }
     deps.freezeTerminalTitle('?')
     deps.renderer.requestRender()
     return new Promise(resolve => {
@@ -103,8 +105,33 @@ export function createAskController(st: ReplState, deps: AskDeps): AskController
         header: q.header,
         question: q.question,
         options: q.options.map(o => ({ label: o.label, description: o.description })),
-      })),
+      })), 'working', false, undefined, crypto.randomUUID(),
     )
+
+  function answerRequest(id: string, answers: string[]): boolean {
+    if (st.overlay.kind !== 'ask-user' || st.overlay.state.requestId !== id || !st.pendingAsk) return false
+    const qs = st.overlay.state.questions
+    if (qs.length !== answers.length) return false
+    submitAnswers(qs.map((q, i) => ({ header: q.header, question: q.question, answer: answers[i]! })), false)
+    return true
+  }
+
+  function submitAnswers(response: AskUserAnswer[], transient: boolean) {
+    const resolve = st.pendingAsk
+    st.pendingAsk = null
+    st.overlay = { kind: 'none' }
+    resolve?.(response)
+    deps.unfreezeTerminalTitle()
+    if (!transient) {
+      const answerLines: OutputLine[] = response.flatMap((r, i) => [
+        ...prefixedAskLines(r.question, '  • ').map((text, row) => ({ id: `sys-ask-${i}-question-${row}`, kind: 'system' as const, text })),
+        ...prefixedAskLines(r.answer, '    → ').map((text, row) => ({ id: `sys-ask-${i}-answer-${row}`, kind: 'system' as const, text })),
+      ])
+      if (!st.logMode) st.conversationTail.append('notice',answerLines.map(l=>l.text).join('\n'))
+      deps.scrollback.commitLines(answerLines)
+    }
+    deps.renderer.requestRender()
+  }
 
   function handleAskKey(event: KeyEvent) {
     if (st.overlay.kind !== 'ask-user') return
@@ -129,33 +156,15 @@ export function createAskController(st: ReplState, deps: AskDeps): AskController
         resolvePendingAsk()
         st.overlay = { kind: 'none' }
         deps.unfreezeTerminalTitle()
-        if (!transient) deps.scrollback.commitSystem('sys-ask-cancel', '  ⏺ Cancelled.')
+        if (!transient) {
+          const text = '  ⏺ Cancelled.'
+          if (!st.logMode) st.conversationTail.append('notice',text)
+          deps.scrollback.commitSystem('sys-ask-cancel',text)
+        }
         deps.renderer.requestRender()
         return
       case 'submit':
-        {
-          const response = askStateToResponse(result.state)
-          if (st.pendingAsk) {
-            st.pendingAsk(response)
-            st.pendingAsk = null
-          }
-          st.overlay = { kind: 'none' }
-          deps.unfreezeTerminalTitle()
-          const answerLines: OutputLine[] = response.flatMap((r, i) => [
-            ...prefixedAskLines(r.question, '  • ').map((text, row) => ({
-              id: `sys-ask-${i}-question-${row}`,
-              kind: 'system' as const,
-              text,
-            })),
-            ...prefixedAskLines(r.answer, '    → ').map((text, row) => ({
-              id: `sys-ask-${i}-answer-${row}`,
-              kind: 'system' as const,
-              text,
-            })),
-          ])
-          if (!transient) deps.scrollback.commitLines(answerLines)
-        }
-        deps.renderer.requestRender()
+        submitAnswers(askStateToResponse(result.state), transient)
         return
       case 'update':
         st.overlay = { kind: 'ask-user', state: result.state }
@@ -164,5 +173,5 @@ export function createAskController(st: ReplState, deps: AskDeps): AskController
     }
   }
 
-  return { collectAskUserAnswers, handleAskKey, presentAskQuestions, presentTaskModelPicker, resolvePendingAsk, resolvePendingTaskModel }
+  return { answerRequest, collectAskUserAnswers, handleAskKey, presentAskQuestions, presentTaskModelPicker, resolvePendingAsk, resolvePendingTaskModel }
 }

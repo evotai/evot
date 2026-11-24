@@ -76,7 +76,7 @@ export interface RunController {
   interruptStream(id: string, text: string): void
   readonly ownsRun: (generation: number) => boolean
   runInteractionInput(): RunInteractionInput
-  requestModelHandoff(spec: string, effort?: string): void
+  requestModelHandoff(spec: string, effort?: string): boolean
   readonly runQuery: (text: string, contentJson?: string | undefined, prebuiltStream?: QueryStream | undefined, hostToolExtension?: HostToolExtension | undefined) => Promise<void>
   startSpinner(): void
   stopSpinner(): void
@@ -150,14 +150,14 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     deps.setTerminalTitle(deps.idle.idleWaitTitle(), true)
   }
 
-  function requestModelHandoff(spec: string, effort?: string): void {
-    if (!st.isLoading || st.logMode) return
+  function requestModelHandoff(spec: string, effort?: string): boolean {
+    if (!st.isLoading || st.logMode) return false
     const stream = st.streamRef
     if (!stream) {
       // Starting the query is asynchronous. Bind the choice to the stream
       // once this same run acquires it, never to a different session's run.
       st.pendingModelHandoff = { spec, effort, submitted: false }
-      return
+      return true
     }
     try {
       const target = stream.requestModelHandoff(spec, effort)
@@ -169,8 +169,9 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       deps.backgroundTerminals.reclaimTurn()
     } catch (err) {
       deps.scrollback.commitSystem('sys-model-err', `  Model switch failed: ${errorText(err)}`, 'error')
-    }
-    deps.renderer.requestRender()
+      return false
+    } finally { deps.renderer.requestRender() }
+    return true
   }
 
   async function runQuery(
@@ -245,6 +246,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       for await (const event of stream) {
         if (st.destroyed || !ownsRun(generation)) break
         if (!st.streamMachine) break
+        if (!st.logMode) st.conversationTail.updatedAt = Date.now()
 
         if (isHostToolEvent(event)) {
           deps.suggestions.cancelAutomatic()
@@ -308,6 +310,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
 
         st.streamMachine = update.state
         st.appState = update.state.appState
+        for (const content of update.committedContent) st.conversationTail.appendAssistant(content)
         deps.suggestionContext.observe(event)
         st.spinnerState = update.state.spinnerState
         if (['turn_started', 'error', 'llm_call_retry', 'quota_waiting', 'outage_waiting', 'context_compaction_started'].includes(event.kind)) deps.suggestions.cancelAutomatic()
@@ -391,6 +394,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         st.streamRef = null
         st.pendingModelHandoff = null
         st.isLoading = false
+        st.conversationTail.outcome = completed ? 'Completed' : 'Run failed · see Mac'
         st.appState = settleRunCallModel(st.appState)
         st.streamMachine = null
         stopSpinner()
@@ -466,6 +470,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     const flushed = finishStreaming(st.streamMachine, interrupted)
     st.streamMachine = flushed.state
     st.appState = flushed.state.appState
+    if (!st.logMode) for (const content of flushed.committedContent) st.conversationTail.appendAssistant(content)
     deps.scrollback.commitFlushResult(flushed)
   }
 
@@ -498,6 +503,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     // Unconsumed work stays paused and individually recoverable with Esc.
     // The transcript has no record of a user-side interrupt, so this line is
     // captured as a client notice and survives into a shared session.
+    if (!st.logMode) st.conversationTail.outcome = 'Stopped'
     deps.committer.commitNotice([{ id, kind: 'cancelled', text }])
     deps.scrollback.commitRunFooter()
     deps.backgroundTerminals.parkUntilBackground()

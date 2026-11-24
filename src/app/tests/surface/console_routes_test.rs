@@ -820,8 +820,11 @@ async fn chat_assets_are_served() -> TestResult {
     assert!(body.contains("toolRowModel"));
     assert!(body.contains("assistant.toolFacts"));
     // Markdown links are restricted to web/mail schemes.
-    assert!(body.contains("function safeHref"));
-    assert!(body.contains("mailto:"));
+    assert!(body.contains("./chat-markdown.js"));
+    let (status, _, markdown) = get("/ui/chat-markdown.js").await?;
+    assert_eq!(status, StatusCode::OK);
+    assert!(markdown.contains("function safeHref"));
+    assert!(markdown.contains("mailto:"));
     // Mid-run Enter queues onto the active turn instead of dropping the text.
     assert!(body.contains("async function steerRun"));
     assert!(body.contains("appendPendingSteering"));

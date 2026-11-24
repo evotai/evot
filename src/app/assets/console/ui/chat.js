@@ -2,6 +2,7 @@
  * session sidebar, assistant-step blocks (thinking/text/tools), turn tails,
  * and a workspace chip that only binds a directory for new sessions.
  */
+import { renderMarkdown } from "./chat-markdown.js";
 import { streamChat } from "./chat-transport.js";
 import { requestSteering, isQueuedCommand } from "./chat-control.js";
 import { ChatState } from "./chat-state.js";
@@ -562,137 +563,6 @@ function newChat() {
 
 function escapeHtml(text) {
   return esc(String(text ?? ""));
-}
-
-/** Anchors are limited to web and mail schemes; anything else stays literal. */
-function safeHref(href) {
-  return /^(https?:\/\/|mailto:)[^\s"'<>]+$/i.test(href);
-}
-
-/**
- * Inline spans over already-escaped text. Code spans are lifted out first so
- * their contents cannot pick up emphasis or link syntax.
- */
-function renderInline(text) {
-  const codes = [];
-  let html = escapeHtml(text).replace(/`([^`]+)`/g, (_, code) => {
-    codes.push(code);
-    return "\u0000" + (codes.length - 1) + "\u0000";
-  });
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/(^|[^*\w])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-  html = html.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-  html = html.replace(
-    /\[([^\]\n]*)\]\(([^)\s]+)\)/g,
-    (whole, label, href) => (safeHref(href)
-      ? '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + (label || href) + "</a>"
-      : whole),
-  );
-  return html.replace(/\u0000(\d+)\u0000/g, (_, index) => "<code>" + codes[Number(index)] + "</code>");
-}
-
-/** Fenced code with a language tag and its own copy button. */
-function codeBlockHtml(code, lang) {
-  return '<div class="code-block">' +
-    '<div class="code-head"><span class="code-lang">' + escapeHtml(lang || "text") + "</span>" +
-    '<button class="code-copy" type="button" data-copy-code aria-label="Copy code">⧉</button></div>' +
-    "<pre><code>" + escapeHtml(code) + "</code></pre></div>";
-}
-
-/**
- * Block-level markdown: fenced code, ATX headings, quotes, rules, ordered and
- * bulleted lists, tables, and paragraphs. Streaming text arrives mid-token, so
- * an unterminated fence still renders as code rather than leaking its source.
- */
-function renderMarkdown(text) {
-  const lines = String(text ?? "").split("\n");
-  const out = [];
-  let paragraph = [];
-  let list = null;
-
-  const flushParagraph = () => {
-    if (!paragraph.length) return;
-    out.push("<p>" + renderInline(paragraph.join("\n")).replace(/\n/g, "<br>") + "</p>");
-    paragraph = [];
-  };
-  const flushList = () => {
-    if (!list) return;
-    const tag = list.ordered ? "ol" : "ul";
-    out.push("<" + tag + ">" + list.items.map((item) => "<li>" + renderInline(item) + "</li>").join("") + "</" + tag + ">");
-    list = null;
-  };
-  const flush = () => {
-    flushParagraph();
-    flushList();
-  };
-
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    const fence = /^\s*```+\s*(\S+)?\s*$/.exec(line);
-    if (fence) {
-      flush();
-      const body = [];
-      i += 1;
-      // An unclosed fence runs to the end: mid-stream text is still code.
-      for (; i < lines.length && !/^\s*```+\s*$/.test(lines[i]); i += 1) body.push(lines[i]);
-      out.push(codeBlockHtml(body.join("\n"), fence[1]));
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      flush();
-      const level = Math.min(6, heading[1].length + 1);
-      out.push("<h" + level + ">" + renderInline(heading[2]) + "</h" + level + ">");
-      continue;
-    }
-    if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) {
-      flush();
-      out.push("<hr>");
-      continue;
-    }
-    const quote = /^\s*>\s?(.*)$/.exec(line);
-    if (quote) {
-      flush();
-      out.push("<blockquote>" + renderInline(quote[1]) + "</blockquote>");
-      continue;
-    }
-    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const ordered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (bullet || ordered) {
-      flushParagraph();
-      const isOrdered = Boolean(ordered);
-      if (!list || list.ordered !== isOrdered) {
-        flushList();
-        list = { ordered: isOrdered, items: [] };
-      }
-      list.items.push((bullet || ordered)[1]);
-      continue;
-    }
-    // A pipe row followed by a delimiter row starts a table.
-    if (line.includes("|") && /^\s*\|?[\s:-]*-[\s|:-]*$/.test(lines[i + 1] || "")) {
-      flush();
-      const cells = (row) => row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((cell) => cell.trim());
-      const head = cells(line);
-      const rows = [];
-      i += 2;
-      for (; i < lines.length && lines[i].includes("|"); i += 1) rows.push(cells(lines[i]));
-      i -= 1;
-      out.push('<div class="table-wrap"><table><thead><tr>' +
-        head.map((cell) => "<th>" + renderInline(cell) + "</th>").join("") +
-        "</tr></thead><tbody>" +
-        rows.map((row) => "<tr>" + row.map((cell) => "<td>" + renderInline(cell) + "</td>").join("") + "</tr>").join("") +
-        "</tbody></table></div>");
-      continue;
-    }
-    if (line.trim() === "") {
-      flush();
-      continue;
-    }
-    flushList();
-    paragraph.push(line);
-  }
-  flush();
-  return out.join("");
 }
 
 // ---------------------------------------------------------------------------

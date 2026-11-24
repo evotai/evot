@@ -22,6 +22,7 @@ export function smokeEnvironment(
     EVOT_MOUSE: '0',
     EVOT_AUTO_DOWNLOAD: '0',
     EVOT_HOME: state,
+    EVOT_REMOTE_LOCAL_TEST: '1',
     EVOT_STORAGE_FS_ROOT_DIR: state,
   }
 }

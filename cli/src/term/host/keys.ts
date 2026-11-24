@@ -17,6 +17,7 @@ import type { AskController } from './ask.js'
 import type { CommandWindowController } from './command-window.js'
 import type { ComposerController } from './composer.js'
 import type { IdleController } from './idle.js'
+import type { RemoteController } from './remote.js'
 import type { RunController } from './run.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SelectorKeysController } from './selector-keys.js'
@@ -32,6 +33,7 @@ import { selectorClearQuery } from '../../ui/selector.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface KeysDeps {
+  readonly remoteCtl: RemoteController
   readonly asks: AskController
   readonly backgroundTerminals: BackgroundTerminals
   readonly cleanup: () => void
@@ -68,6 +70,11 @@ export interface KeysController {
 export function createKeysController(st: ReplState, deps: KeysDeps): KeysController {
   function handleKey(event: KeyEvent) {
     if (event.type === 'ctrl' && event.key === 'z') { deps.terminal.suspend(); return }
+    // The modal question owns ordinary typing, including slash commands.
+    if (event.type === 'ctrl' && event.key === 'r' && st.overlay.kind === 'ask-user' && st.overlay.state.requestId) {
+      deps.remoteCtl.command(st.remoteListener ? 'off' : '')
+      return
+    }
     const ordinary = st.overlay.kind === 'none' && !st.commandWindowPreview
     const editing = deps.queueEdit.editingEntry() !== null
     if (ordinary && !st.editor.completion) {

@@ -16,6 +16,7 @@ import {
   stopOneMessage,
 } from './background-processes.js'
 import {
+  backgroundChipLabel,
   backgroundOutputViewport,
   scrollBackgroundOutput,
   type OutputScrollKey,
@@ -270,6 +271,23 @@ export class BackgroundTerminals {
   /** Footer count: backgrounded work only. */
   runningCount(): number {
     return this.visibleSession === this.deps.sessionId() ? runningBackgroundCount(this.processes) : 0
+  }
+
+  /** Read-only projection of the very same panel. Opening a phone view never
+   * steals focus on the Mac. Read output only on explicit inspection, and only
+   * for a process owned by the visible session (never a caller-supplied path). */
+  presentation(view?:string) {
+    if (!this.visibleSession || this.visibleSession !== this.deps.sessionId()) return undefined
+    const processes=this.panelProcesses().filter(p=>isLiveStatus(p.status))
+    if (!processes.length) return undefined
+    const count=this.runningCount(), panel=createBackgroundPanelState(processes,this.awaited())
+    const list=view==='list' ? this.withActivity(panel) : panel
+    const tasks=list.items.slice(0,64).map(i=>({id:i.id!,title:i.label,detail:i.detail?.slice(0,512),status:i.status?.text,activity:i.activity?.slice(-256)}))
+    const selected=processes.find(p=>p.task_id===view)
+    const preview=selected ? createBackgroundOutputState(selected,this.readOutput(selected)).items[0]?.preview : undefined
+    const output=preview?.join('\n')
+    return {chip:count ? backgroundChipLabel(count) : '',subtitle:panel.subtitle,tasks,
+      output:selected && output ? {id:selected.task_id,text:output.length<16384 ? output : output.slice(0,1024)+'\n…\n'+output.slice(-15350)} : undefined}
   }
 
   /** The backgrounded shells of the visible session, for prompts that must

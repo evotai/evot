@@ -13,7 +13,8 @@ export function suggestionCommand(text: string, cursor: number, skills: readonly
   if (cursor < end) return null
   const command = commandInventory(skills).find(command => command.name.toLowerCase() === spelling.toLowerCase()
     || command.aliases?.includes(spelling.toLowerCase()))
-  if (!command?.usage) return null
+  // Approval codes and device IDs are local input, never model-assisted arguments.
+  if (!command?.usage || command.name === '/remote') return null
   const indent = match[1]!.length
   const local = completeSlashCommand(text.slice(indent, cursor), skills)
   if (local && local.wordStart + indent >= end && cursor === text.length) return null

@@ -86,6 +86,12 @@ function updatedAtMs(session: SessionMeta): number {
   return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms
 }
 
+export function newestSessionsFirst(sessions: SessionMeta[]): SessionMeta[] {
+  return sessions.map(session => ({ session, ms: updatedAtMs(session) }))
+    .sort((a, b) => b.ms - a.ms)
+    .map(row => row.session)
+}
+
 /**
  * Local and remote-only rows in one list, newest first, so a session that
  * just arrived from another machine sits with the other recent ones instead
@@ -97,10 +103,7 @@ export function mergeRemoteSessions(local: SessionMeta[], remote: RemoteSession[
   const known = new Set(local.map(session => session.session_id))
   const extra = remote.filter(row => !known.has(row.session_id)).map(remoteAsLocal)
   if (extra.length === 0) return local
-  return [...local, ...extra]
-    .map(session => ({ session, ms: updatedAtMs(session) }))
-    .sort((a, b) => b.ms - a.ms)
-    .map(row => row.session)
+  return newestSessionsFirst([...local, ...extra])
 }
 
 export interface CloudSessionSyncDeps {

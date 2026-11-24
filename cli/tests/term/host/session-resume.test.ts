@@ -15,6 +15,7 @@ function harness(agent: Record<string, unknown>) {
     agent,
     cloudSessions: { remoteFor: () => undefined },
     resumeCache: { metadata: [] },
+    remoteCtl: { sessionChanged: () => {} },
     runCtl: { abandonRun: () => {} },
     queueLifecycle: { pause: () => {} },
     suggestions: { cancel: () => {} },

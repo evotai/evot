@@ -5,6 +5,9 @@ import { createServer } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import {pendingDevice} from '../helpers/remote-device.js'
+import {deviceId} from '../../src/features/remote/devices.js'
+import {sharingScope} from '../../src/features/remote/transport.js'
 import { smokeEnvironment, seedSmokeHome } from '../helpers/smoke-home.js'
 import { suggestionInstructions, suggestionWorkflow } from '../helpers/suggestion-request.js'
 import { fixtureClipboard } from '../helpers/clipboard.js'
@@ -1995,6 +1998,103 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 20_000)
 
+  test('/remote answers the original run, creates an independent TUI and resumes local history with one pairing', async () => {
+    let asked = false, answered = false
+    const callModels: string[] = []
+    const advance = Promise.withResolvers<void>()
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+      const { model, tools, messages } = await request.json() as { model: string; tools?: unknown[]; messages: {role:string; content:unknown}[] }
+      if (tools?.length) callModels.push(model)
+      const second = messages.at(-1)?.role === 'user' && JSON.stringify(messages.at(-1)?.content).includes('Ask a second time')
+      const shouldAsk = !!tools?.length && (!asked || second)
+      if (shouldAsk) asked = true
+      if (messages.some(m => m.role === 'tool' && JSON.stringify(m.content).includes('Phone answer'))) answered = true
+      const choice = shouldAsk
+        ? { index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'remote-ask', type: 'function', function: { name: 'ask_user', arguments: JSON.stringify({ questions: [{header:'Name', question:second ? 'Second question?' : 'Which fixture name?', options:[]}] }) } }] }, finish_reason: 'tool_calls' }
+        : { index: 0, delta: { role: 'assistant', content: answered ? 'Continued on the original run.' : 'Fixture' }, finish_reason: 'stop' }
+      const end = `data: ${JSON.stringify({ id:'fixture', model, choices:[choice] })}\n\ndata: [DONE]\n\n`
+      const body = shouldAsk && !second ? new ReadableStream({async start(controller) {
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({id:'fixture',model,choices:[{index:0,delta:{reasoning_content:'Checking fixture scope.'}}]})}\n\n`))
+        await advance.promise; controller.enqueue(new TextEncoder().encode(end)); controller.close()
+      }}) : end
+      return new Response(body, { headers:{'content-type':'text/event-stream'} })
+    } })
+    let session: Session | undefined, group = ''
+    try {
+      const {profileKey} = await import('../../src/features/remote/discovery.js')
+      session = await startEvot(true, false, false, `http://127.0.0.1:${server.port}/v1`,home=>{group='evot-phone-'+profileKey(home)+'-'+sharingScope(home,join(home,'evot.env'),'local')})
+      session.write('/remote\r')
+      const invite = /gateway: (http:\/\/127\.0\.0\.1:\d+)/
+      const match = invite.exec(await session.waitFor(invite))!
+      const address = match[1]!, headers: Record<string,string> = {origin:address, 'Content-Type':'application/json'}
+      const post = (path:string, body:unknown) => fetch(address+path, {method:'POST', headers, body:JSON.stringify(body)})
+      const device=await pendingDevice(address); expect(await device.poll()).toEqual({pending:true})
+      session.write(`/remote approve ${device.code}\r`); await session.waitForScreen('Device approved.')
+      const token=(await device.poll()).token
+      headers.Authorization = `Bearer ${token}`
+      const state = async () => {
+        const res = await fetch(address + '/state', { headers, cache:'no-store' })
+        if (!res.ok) throw new Error(`State unavailable: ${res.status}`)
+        return await res.json() as import('../../src/features/remote/protocol.js').RemoteSnapshot
+      }
+      const initial = await state()
+      const directory = await (await fetch(address+'/sessions',{headers})).json() as {current:string;online:{terminal:string}[];history:{session:string}[]}
+      expect(directory.online.map(r=>r.terminal)).toEqual([directory.current]); expect(directory.history.map(r=>r.session)).toContain(SEEDED_SESSION_ID)
+      expect(initial.models.options.map(o => o.spec)).toContain('smoke:smoke-other-model')
+      expect((await post('/action', {kind:'select-model', spec:'smoke:smoke-other-model', generation:initial.generation, revision:initial.models.revision})).status).toBe(204)
+      await session.waitForScreen('Model → smoke-other-model@smoke')
+      expect((await state()).models.active).toBe('smoke:smoke-other-model')
+      session.write('/model smoke:smoke-model\r'); await session.waitForScreen('Model → smoke-model@smoke')
+      expect((await state()).models.active).toBe('smoke:smoke-model')
+      session.write('Ask me which fixture name to use.\r'); await session.waitForScreen('Checking fixture scope.')
+      expect(await state()).toMatchObject({status:'Thinking…',liveBlocks:[{kind:'thinking',text:'Checking fixture scope.'}]})
+      advance.resolve(); await session.waitForScreen('Which fixture name?')
+      const first = await state(), reconnected = await state()
+      expect(first.ask).not.toBeNull(); expect(reconnected).toEqual(first)
+      expect((await post('/action', {kind:'select-model', generation:first.generation, revision:first.models.revision, spec:'smoke:smoke-other-model'})).status).toBe(204)
+      expect(await state()).toMatchObject({ask:{id:first.ask!.id}, models:{active:'smoke:smoke-model',pending:{spec:'smoke:smoke-other-model'}}})
+      if (Bun.which('tmux')) {
+        const open = async (session:string|null,requestId=crypto.randomUUID()) => {
+          const res=await post('/open',{session,requestId}); if(!res.ok)throw Error(await res.text()); return (await res.json() as {terminal:string}).terminal
+        }
+        const requestId=crypto.randomUUID(), fresh=await open(null,requestId); expect(await open(null,requestId)).toBe(fresh)
+        expect(fresh).not.toBe(directory.current); headers['X-Evot-Terminal']=fresh
+        const blank=await state(); expect(blank).toMatchObject({sessionId:null,messages:[],input:'send'})
+        expect((await post('/action',{kind:'select-model',spec:'smoke:smoke-other-model',generation:blank.generation,revision:blank.models.revision})).status).toBe(204)
+        const resumed=await open(SEEDED_SESSION_ID); expect(resumed).not.toBe(fresh); expect(await open(SEEDED_SESSION_ID)).toBe(resumed)
+        headers['X-Evot-Terminal']=resumed; expect((await state()).sessionId).toBe(SEEDED_SESSION_ID)
+        headers['X-Evot-Terminal']=directory.current; expect((await state()).ask?.id).toBe(first.ask!.id)
+      }
+      const answer = {kind:'answer', id:first.ask!.id, generation:first.generation, answers:['Phone answer']}
+      expect((await post('/action', answer)).status).toBe(204)
+      expect((await post('/action', answer)).status).toBe(409)
+      await session.waitFor('Continued on the original run.'); expect(answered).toBe(true)
+      await session.waitForScreen(/Enter a coding task|⇥ next · → accept/)
+      const finishedRows = (await state()).messages
+      const steps = finishedRows.flatMap(row => row.blocks ?? [])
+      expect(steps.filter(b => b.kind === 'thinking')).toEqual([{kind:'thinking',text:'Checking fixture scope.'}])
+      expect(steps.find(b=>b.kind==='tool')).toBeUndefined()
+      expect(finishedRows.find(r=>r.role==='notice')?.text).toContain('Phone answer')
+      expect(callModels).toEqual(['smoke-model','smoke-other-model'])
+      expect(await state()).toMatchObject({sessionId:first.sessionId, generation:first.generation, ask:null, input:'send', models:{active:'smoke:smoke-other-model',pending:null}})
+      expect((await post('/action', {kind:'send', generation:first.generation, text:'Ask a second time'})).status).toBe(204)
+      await session.waitForScreen('Second question?')
+      const second = await state(); expect(second.sessionId).toBe(first.sessionId); expect(second.generation).not.toBe(first.generation)
+      expect((await post('/action', {kind:'stop', generation:first.generation})).status).toBe(409)
+      expect((await post('/action', {kind:'stop', generation:second.generation})).status).toBe(204)
+      await session.waitForScreen('Interrupted from phone.')
+      const stopped = await state(); expect(stopped).toMatchObject({status:'Stopped', input:'send', ask:null})
+      session.checkpoint(); session.write('/new\r'); await session.waitForScreen(/^\s*new session\s*$/m)
+      expect(await state()).toMatchObject({sessionId:null, messages:[], input:'send'})
+      expect((await post('/action', {kind:'send',generation:stopped.generation,text:'old draft'})).status).toBe(409)
+      session.write(`/remote revoke ${deviceId(device.key)}\r`); await session.waitForScreen('Device revoked.'); await expect(state()).rejects.toThrow('401')
+      session.write('/remote shutdown\r'); await session.waitForScreen('Remote off.'); await expect(state()).rejects.toThrow()
+    } finally {
+      advance.resolve(); if (group && Bun.which('tmux')) spawnSync('tmux',['-L',group,'kill-server'])
+      if (session) await session.kill(); await server.stop(true)
+    }
+  }, 30_000)
+
   test('/model hands off the next request while the outgoing shell keeps running', async () => {
     const models: string[] = []
     const firstRequest = Promise.withResolvers<void>()
@@ -2046,8 +2146,19 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     let session: Session | undefined
     try {
       session = await startEvot(false, false, false, `http://127.0.0.1:${server.port}/v1`)
+      session.write('/remote\r')
+      const invite=/gateway: (http:\/\/127\.0\.0\.1:\d+)/
+      const [,address]=invite.exec(await session.waitFor(invite))!
+      const device=await pendingDevice(address!); session.write(`/remote approve ${device.code}\r`); await session.waitForScreen('Device approved.')
+      const {token}=await device.poll()
+      const snapshot=async (task?:string)=>(await (await fetch(address+'/state',{headers:{authorization:'Bearer '+token,...(task?{'x-evot-background':task}:{})}})).json()) as import('../../src/features/remote/protocol.js').RemoteSnapshot
       session.write('start a background task\x0d')
       await session.waitFor('1 background shell running')
+      const active=await snapshot('list'); expect(active.background).toMatchObject({chip:'1 background shell running',subtitle:'1 active shell',tasks:[{title:'sleep 30',status:expect.stringContaining('running')}]})
+      const card=active.messages.flatMap(m=>m.blocks??[]).concat(active.liveBlocks??[]).find(b=>b.kind==='tool')
+      expect(card?.text).toContain('sleep 30'); expect(card?.text).not.toContain('\x1b')
+      const output=(await snapshot(active.background!.tasks[0]!.id)).background?.output?.text
+      expect(output).toContain('Command\nsleep 30'); expect(output).toContain('Output\n(no output yet)')
       session.checkpoint()
       session.write('\x1b')
       await session.waitFor(/esc\s+again\s+to\s+interrupt/)
@@ -2063,6 +2174,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const beforeStop = requests
       session.write('\x1b')
       await session.waitFor('Stopped 1 background terminal.')
+      const stopped=await snapshot(); expect(stopped.background).toBeUndefined(); expect(stopped.messages.some(m=>m.role==='notice' && m.text.includes('Stopped 1 background terminal.'))).toBe(true)
       await Bun.sleep(1200)
       expect(requests).toBe(beforeStop)
     } finally {

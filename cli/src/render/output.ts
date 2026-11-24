@@ -432,8 +432,8 @@ export function buildAssistantLines(
  * retaining the original signed thinking block for replay. Real text that
  * merely contains dots ("checking ... now") must still render.
  */
-function hasReasoningContent(text: string): boolean {
-  return text.replace(/[.\u2026\s]/g, '').length > 0
+export function hasReasoningContent(text: string): boolean {
+  return /[^.\u2026\s]/u.test(text)
 }
 
 /**

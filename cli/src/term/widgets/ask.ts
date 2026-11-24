@@ -28,6 +28,8 @@ export interface QuestionUIState {
 export interface AskState {
   /** Host setup prompts are transient UI, not conversation turns. */
   transient?: boolean
+  /** Only an agent's ask_user has a remotely answerable request id. */
+  requestId?: string
   owner?: symbol
   questions: AskQuestion[]
   currentTab: number

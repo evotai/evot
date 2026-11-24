@@ -1,4 +1,5 @@
 import { type OutputLine, buildPrivacyNoticeCard, buildUserMessage } from '../../render/output.js'
+import { stripVTControlCharacters } from 'node:util'
 import { buildRunFooterLine } from '../../render/run-footer.js'
 import type { RunThinking } from '../../render/run-thinking.js'
 import type { PrivacyFeed } from '../app/privacy-feed.js'
@@ -29,6 +30,7 @@ export interface ScrollbackController {
   commitRunFooter(): void
   commitStatusLine(line: OutputLine): void
   commitSystem(id: string, text: string, kind?: "user" | "assistant" | "thinking" | "tool" | "tool_result" | "verbose" | "error" | "system" | "cancelled"): void
+  commitLocalNotice(id: string, text: string): void
   commitSystemLines(outputLines: OutputLine[]): void
   commitUserMessage(text: string): void
   memoryLine(): string
@@ -47,6 +49,7 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
   }
 
   function commitUserMessage(text: string): void {
+    if (!st.logMode) st.conversationTail.append('user', text)
     deps.suggestionContext.user(text, deps.liveWorkflowRuntime())
     commitLines(buildUserMessage(text))
   }
@@ -59,11 +62,20 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
     deps.committer.system(id, text, kind)
   }
 
+  // Device IDs, QR links and approval codes belong on the local terminal,
+  // never in a shared conversation or screen.log.
+  function commitLocalNotice(id: string, text: string) {
+    deps.committer.commitUnlogged([{ id, kind: 'system', text }])
+  }
+
   function commitRunFooter() {
     if (st.runStartedAt === null) return
     const line = buildRunFooterLine(st.runStartedAt, Date.now(), st.runTurnCount, deps.runThinking.finish())
     st.runStartedAt = null
-    if (line) commitLines([line])
+    if (line) {
+      commitLines([line])
+      if (!st.logMode) st.conversationTail.append('footer', stripVTControlCharacters(line.text).trim())
+    }
     // One memory line per run in the screen log: a report of a bloated
     // process then comes with the trend and what this client retained.
     deps.screenLog.logLines([memoryLine()])
@@ -120,8 +132,9 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
 
   /** Unique id per emission: these lines are history, not collapsible status. */
   function commitBackgroundLine(slot: string, text: string): void {
+    if (!st.logMode) st.conversationTail.append('notice', stripVTControlCharacters(text))
     commitSystem(`sys-bg-${slot}-${st.nextBackgroundLineId++}`, text)
   }
 
-  return { commitBackgroundLine, commitFlushResult, commitLines, commitPrivacyHappenings, commitRevealed, commitRunFooter, commitStatusLine, commitSystem, commitSystemLines, commitUserMessage, memoryLine, restoreLines }
+  return { commitBackgroundLine, commitFlushResult, commitLines, commitPrivacyHappenings, commitRevealed, commitRunFooter, commitStatusLine, commitSystem, commitLocalNotice, commitSystemLines, commitUserMessage, memoryLine, restoreLines }
 }

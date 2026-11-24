@@ -31,7 +31,7 @@ export function busySubmissionAction(input: BusySubmission): BusySubmissionActio
   if (trimmed === '/log') return 'show_log'
   if (command && input.hasRun) {
     const resolved = resolveCommand(trimmed)
-    return (resolved.kind === 'resolved' && resolved.name === '/model') || isRunSafeCommand(trimmed)
+    return (resolved.kind === 'resolved' && (resolved.name === '/model' || resolved.name === '/remote')) || isRunSafeCommand(trimmed)
       ? 'run_local_command' : 'blocked_run_command'
   }
   return (input.expandedText || input.hasImages) && input.hasRun ? 'steer' : 'none'

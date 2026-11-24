@@ -44,6 +44,7 @@ export function buildAskRegionLines(state: AskState, columns: number): string[] 
 export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
   const result: StyledLine[] = []
   const isMulti = state.questions.length > 1
+  const remoteHint = state.requestId ? ' · ctrl+r remote' : ''
   if (isMulti) {
     const tabLine: StyledSpan[] = []
     const canGoLeft = state.currentTab > 0 || state.onSubmitTab
@@ -87,7 +88,7 @@ export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
       cancelFocused ? rowMarker(true) : plain('  '),
       cancelFocused ? bold('Cancel') : plain('Cancel'),
     ))
-    result.push(line(plain('')), line(dim('↑↓ navigate · enter select · ← back · esc cancel')))
+    result.push(line(plain('')), line(dim('↑↓ navigate · enter select · ← back · esc cancel' + remoteHint)))
     return [block(result, 1)]
   }
 
@@ -140,6 +141,6 @@ export function buildAskBlocks(state: AskState, _columns: number): ViewBlock[] {
   const hint = freeText
     ? (isMulti ? 'enter submit · ←→ switch tab · esc cancel' : 'enter submit · esc cancel')
     : (isMulti ? '↑↓ navigate · ←→ switch tab · enter select · esc cancel' : '↑↓ navigate · enter select · esc cancel')
-  result.push(line(dim(hint)))
+  result.push(line(dim(hint + remoteHint)))
   return [block(result, 1)]
 }

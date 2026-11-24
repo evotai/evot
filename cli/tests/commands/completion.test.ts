@@ -237,6 +237,8 @@ describe('sub-command completion', () => {
   test('applies to every command with literal sub-commands', () => {
     for (const [input, expected] of [
       ['/skill inst', 'install '],
+      ['/remote dev', 'devices '],
+      ['/remote rev', 'revoke '],
       ['/log sh', 'shot '],
       ['/env li', 'list '],
       ['/clip a', 'all '],

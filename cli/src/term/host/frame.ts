@@ -2,15 +2,13 @@ import { tabAction, tabActionHint } from '../app/composer/input-action.js'
 import { pendingQueueHint } from '../app/queue/queue-manage.js'
 import { currentQueueTarget, pendingEntryLabel, visiblePendingEntries } from '../app/queue/pending-queue.js'
 import type { SuggestController } from './suggest.js'
-import type { LoopSession } from '../../features/loop/session.js'
+import type { ActivityController } from './activity.js'
 import { formatLoopWaitLine } from '../../features/loop/wait-line.js'
 import type { Agent } from '../../native/index.js'
 import { assistantMessageToOutputLines } from '../../render/assistant.js'
-import type { UIAssistantBlock, UIToolCall } from '../../render/message-types.js'
+import type { UIAssistantBlock } from '../../render/message-types.js'
 import type { OutputLine } from '../../render/output.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
-import { assistantToolCalls } from '../app/run/assistant-content.js'
-import type { ManualCompaction } from '../app/run/manual-compaction.js'
 import type { RunInteraction, RunInteractionInput } from '../app/run/run-interaction.js'
 import type { PromptSuggestion, SuggestionTicker } from '../app/suggestion/index.js'
 import type { GitInfoProvider } from '../git-info.js'
@@ -23,11 +21,11 @@ import { buildAdSlotBlocks, nextAdSlotRenderDelay, tickAdSlot } from '../viewmod
 import type { HistoryRenderCache } from '../viewmodel/history-cache.js'
 import { type PromptVMInput, type ViewBlock, blocksToLines, buildOutputBlocks, formatQueuedMessageLines, updateLiveHeight } from '../viewmodel/index.js'
 import { promptFromSnapshot } from '../viewmodel/prompt-snapshot.js'
-import { type AwaitedTasks, buildRunStatusBlock } from '../viewmodel/run-status.js'
+import { buildRunStatusBlock } from '../viewmodel/run-status.js'
 import { buildShellFrame } from '../viewmodel/shell.js'
 import { attachUpdateNotice, standaloneUpdateNotice, updateNoticeSpans } from '../viewmodel/update-notice.js'
 import type { BannerCache } from '../widgets/banner-cache.js'
-import { compactionToolName, formatSpinnerLine, spinnerStatsFromLastUsage } from '../widgets/spinner.js'
+import { formatSpinnerLine } from '../widgets/spinner.js'
 import { SELECTOR_OWNER } from '../../ui/selector-identity.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
@@ -35,7 +33,7 @@ export interface FrameDeps {
   readonly adSlotWakeup: RenderWakeup
   readonly agent: Agent
   readonly appVersion: string
-  readonly awaitedTaskSummary: (calls: UIToolCall[]) => AwaitedTasks | undefined
+  readonly activity: ActivityController
   readonly backgroundTerminals: BackgroundTerminals
   readonly bannerCache: BannerCache
   readonly commandWindow: CommandWindowController
@@ -44,8 +42,6 @@ export interface FrameDeps {
   readonly expandedHistoryCache: HistoryRenderCache
   readonly expandedLines: OutputLine[]
   readonly gitInfo: GitInfoProvider
-  readonly loopSession: LoopSession
-  readonly manualCompaction: ManualCompaction
   readonly renderer: TermRenderer
   readonly runInteraction: RunInteraction
   readonly runInteractionInput: () => RunInteractionInput
@@ -261,70 +257,9 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
     // branch below builds it. A mounted command window freezes this boundary,
     // so late history/status commits cannot move its selector or composer.
     st.liveRegionStartRow = contentLines.length
-    const toolCalls = assistantToolCalls(st.streamMachine?.appState.currentAssistantContent ?? [])
-    let spinnerBlock: ViewBlock | null = null
-    // pi keeps statusContainer before editorContainer, so the active-run status
-    // remains visible even while a selector replaces the editor.
-    if (st.isLoading && st.overlay.kind !== 'ask-user') {
-      const usagePending = st.streamMachine?.activeLlmCall ?? false
-      const liveOutputTokens = usagePending && toolCalls.length === 0 ? st.spinnerState.tokenCount : 0
-      // Usage arrives only when the provider completes this call. During an
-      // active call, show only its live output estimate; retaining the previous
-      // call here would present stale cache/input values as if they were current.
-      const compactToolName = compactionToolName(st.manualCompactionPhase, st.manualCompactionActivity)
-      const spinnerForDisplay = deps.manualCompaction.active
-        ? { ...st.spinnerState, toolName: compactToolName }
-        : st.spinnerState
-      const spinnerText = formatSpinnerLine(
-        spinnerForDisplay,
-        Date.now(),
-        // Manual compaction and local commands report no per-call usage of their
-        // own; showing the previous run's tokens would misattribute them.
-        deps.manualCompaction.active || st.foregroundCommand
-          ? undefined
-          : spinnerStatsFromLastUsage(
-              st.appState.currentRunStats.lastLlmUsage,
-              liveOutputTokens,
-              usagePending,
-            ),
-        {
-          model: st.appState.lastCallModel?.model ?? st.appState.model,
-          columns: deps.renderer.termCols,
-          interaction: deps.runInteraction.snapshot(deps.runInteractionInput()),
-          awaitedTasks: deps.awaitedTaskSummary(toolCalls),
-        },
-      )
-      spinnerBlock = buildRunStatusBlock(spinnerText, deps.renderer.termCols)
-    } else if (!st.isLoading && st.overlay.kind !== 'ask-user' && deps.loopSession.waiting) {
-      // Parked between loop ticks. The wakeup card in the transcript says why;
-      // this row says until when, and that a running shell can end it early.
-      const wait = deps.loopSession.waitRemaining()
-      if (wait) {
-        const waitText = formatLoopWaitLine({
-          remainingMs: wait.remainingMs,
-          earlyWake: wait.earlyWake,
-          stopPending: deps.runInteraction.snapshot(deps.runInteractionInput()).interruptPending,
-        })
-        spinnerBlock = buildRunStatusBlock(waitText, deps.renderer.termCols)
-      }
-    } else if (st.backgroundWaitSince !== null && st.overlay.kind !== 'ask-user') {
-      //
-      // Idle, but a detached task is still running and will wake the agent when
-      // it finishes. Without a status row here the transcript looks finished, so
-      // a user watching a long build would conclude the work had stopped.
-      //
-      // Elapsed is measured from when the wait began, not from the last run, so
-      // the clock reads as the age of the wait itself.
-      const waitText = formatSpinnerLine(
-        { ...st.backgroundWaitSpinner, phaseStartedAt: st.backgroundWaitSince },
-        Date.now(),
-        // No per-call usage belongs to a wait: nothing is being spent while the
-        // agent is parked.
-        undefined,
-        { model: st.appState.model, columns: deps.renderer.termCols, interaction: deps.runInteraction.snapshot(deps.runInteractionInput()), hideInteractionHint: true },
-      )
-      spinnerBlock = buildRunStatusBlock(waitText, deps.renderer.termCols)
-    }
+    const activity = deps.activity.current()
+    let spinnerBlock = activity ? buildRunStatusBlock(activity.kind === 'loop' ? formatLoopWaitLine(activity.wait)
+      : formatSpinnerLine(activity.state, Date.now(), activity.stats, {...activity.options, columns:cols}), cols) : null
 
     // Match pi's sibling order before editorContainer: pending messages, then
     // status. The queue manager suppresses the duplicate pending-message copy

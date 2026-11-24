@@ -29,6 +29,7 @@ export interface SlashCommand {
 export const COMMANDS: SlashCommand[] = [
   { name: '/help', description: 'Show help information', usage: '/help [command]', handler: 'builtin', runSafe: true },
   { name: '/resume', aliases: ['/sessions'], description: 'Resume a session (task runs in /task)', usage: '/resume [id | <what you worked on, with an optional time range> | --all]', handler: 'builtin' },
+  { name: '/remote', description: 'Connect this Mac profile, including current and future windows', usage: '/remote [devices | approve CODE | deny CODE | revoke DEVICE | off | shutdown]', handler: 'builtin', minPrefixLength: 4 },
   { name: '/new', description: 'Start a new session', handler: 'builtin' },
   { name: '/fork', description: 'Fork this session into a new one that inherits its context', usage: '/fork [title]', handler: 'builtin' },
   { name: '/back', description: 'Return to the session this one was forked from', usage: '/back [levels]', handler: 'builtin', hintWhenForked: true },

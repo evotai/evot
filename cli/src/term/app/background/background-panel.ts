@@ -20,6 +20,7 @@ import { clipDisplayText, formatElapsed } from '../../../ui/format.js'
 import { taskCommandLabel, taskDirectory, taskTitle } from '../../../render/task-label.js'
 import type { UIToolCall } from '../../../render/message-types.js'
 
+export function backgroundChipLabel(count:number) { return `${count} background ${count === 1 ? 'shell' : 'shells'} running` }
 export const BACKGROUND_PANEL_TITLE = 'Background'
 export const BACKGROUND_OUTPUT_TITLE = 'Background output'
 

@@ -1,3 +1,6 @@
+import type { TerminalBus } from '../../features/remote/discovery.js'
+import type { SharedEnvironment } from '../../features/remote/environment.js'
+import { ConversationTail } from '../app/remote/conversation.js'
 import { createInitialState } from '../app/run/state.js'
 import { createPendingQueueState } from '../app/queue/pending-queue.js'
 import { createSpinnerState, setSpinnerPhase } from '../widgets/spinner.js'
@@ -143,6 +146,14 @@ export interface ReplState {
    * terminal selection across the whole composer, not just the caret row.
    */
   liveRegionStartRow: number
+  terminalBus: TerminalBus | null
+  remoteTitle: { session: string; title: string; refreshAfter: number } | null
+  remoteChild: boolean
+  remoteEpoch: number
+  remoteAttempt: number
+  remoteOpening: boolean
+  remoteListener: SharedEnvironment | null
+  readonly conversationTail: ConversationTail
   // Dashboard state
   serverState: ServerState | null
   // Update info
@@ -250,6 +261,9 @@ export function createReplState(model: string, cwd: string): ReplState {
     liveContentMaxHeight: 0,
     liveContentWidth: 0,
     liveRegionStartRow: 0,
+    terminalBus:null, remoteChild:false, remoteAttempt:0, remoteOpening:false, remoteEpoch:0, remoteListener: null,
+    remoteTitle: null,
+    conversationTail: new ConversationTail(),
     serverState: null,
     updateAvailable: null,
     updateStatus: 'idle',

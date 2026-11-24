@@ -11,7 +11,7 @@ import stringWidth from 'string-width'
 import { confirmationHint } from './confirmation-hint.js'
 import { line, block, plain, dim, colored, type ViewBlock, type StyledLine, type StyledSpan } from './types.js'
 import { finiteSize, spansWidth, truncateTailToWidth, truncateToWidth } from './width.js'
-import { BACKGROUND_PANEL_HINT_CHORD } from '../app/background/background-panel.js'
+import { backgroundChipLabel, BACKGROUND_PANEL_HINT_CHORD } from '../app/background/background-panel.js'
 import { FORK_GLYPH, formatForkTrail } from './fork-trail.js'
 import { GAUGE_CELL, effortCellHex, effortLabel } from './model-effort.js'
 import { getTheme } from '../../ui/theme/index.js'
@@ -141,7 +141,7 @@ function buildBackgroundChip(
 ): StyledLine | null {
   if (count <= 0) return null
   const noun = count === 1 ? 'shell' : 'shells'
-  const label = `${count} background ${noun} running`
+  const label = backgroundChipLabel(count)
   const shortLabel = `${count} ${noun} running`
   const hint = `${BACKGROUND_PANEL_HINT_CHORD} to manage`
   if (stopHint) {

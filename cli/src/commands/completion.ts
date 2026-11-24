@@ -144,6 +144,7 @@ function getSubCommandHint(cmd: string, partial: string, skills: readonly SkillE
 }
 
 const SUB_COMMANDS: Record<string, string[]> = {
+  '/remote': ['devices', 'revoke', 'approve', 'deny', 'off', 'shutdown'],
   '/clip': ['all', 'copy'],
   '/share': ['public', 'team', 'private', 'off'],
   '/help': COMMANDS.map(c => c.name.slice(1)),

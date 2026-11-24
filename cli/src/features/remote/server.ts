@@ -1,0 +1,185 @@
+import { phoneAssets, phoneScriptHash } from './assets.js'
+import { stateStream } from './state-stream.js'
+import { validTerminal } from './discovery.js'
+import { DeviceAccess } from './pairing.js'
+import type { CloudGate } from './cloud-connect.js'
+import { validKey } from './devices.js'
+import { parseRemoteAction, RemoteConflict, type RemoteHost } from './protocol.js'
+import type { PhoneWorkspace } from './workspace.js'
+
+/** Always loopback; no trust in forwarded headers. Device management has no HTTP routes. */
+export function listenRemote(
+  host: RemoteHost,
+  access: DeviceAccess,
+  options: {
+    port?: number
+    cloud?: CloudGate
+    workspace?: PhoneWorkspace
+    active?: () => boolean
+  } = {},
+) {
+  const { workspace, cloud } = options
+  let closed = false, streams = 0
+  const headers = {
+    'Cache-Control': 'no-store, no-transform',
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': `default-src 'none'; script-src 'self' ${phoneScriptHash}; connect-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+  }
+  const fail = (status: number, msg: string) => new Response(msg, { status, headers })
+  const handler = {
+    development: false,
+    maxRequestBodySize: 64 * 1024,
+    async fetch(req: Request, listener: Bun.Server<undefined>) {
+      const expected = cloud?.origin ?? `http://127.0.0.1:${listener.port}`,
+        authority = new URL(expected).host,
+        origin = req.headers.get('origin')
+      const peer = listener.requestIP(req)?.address
+      if (
+        (!cloud && peer !== '127.0.0.1') ||
+        (options.active && !options.active()) ||
+        req.headers.get('host') !== authority ||
+        (origin !== null && origin !== expected)
+      )
+        return fail(403, 'Forbidden')
+      const url = new URL(req.url),
+        path = url.pathname,
+        asset = phoneAssets.get(path)
+      if (req.method === 'GET' && asset)
+        return new Response(asset[1], { headers: { ...headers, 'Content-Type': `${asset[0]}; charset=utf-8` } })
+      const enrollment = ['/device/challenge', '/device/prove', '/device/poll'].includes(path)
+      if (!enrollment && !['/state', '/action', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
+      const auth = req.headers.get('authorization'),
+        authorized = () => !closed && (!options.active || options.active()) && access.authorized(auth)
+      const unauthorized = () => fail(401, 'Pair again on the Mac.')
+      if (!enrollment && !authorized()) return unauthorized()
+      const target = req.headers.get('x-evot-terminal')
+      if (target !== null && (!workspace || !validTerminal(target))) return fail(400, 'Invalid target terminal.')
+      const other = workspace && target && target !== workspace.bus.id ? target : null
+      const shared = () => !workspace || !!other || workspace.bus.shared
+      if ((path === '/state' || path === '/action') && !shared()) return fail(409, 'Terminal no longer shared.')
+      if (path === '/sessions' && req.method === 'GET') {
+        const page = url.searchParams.has('limit') ? {
+          limit: Math.max(1, Math.min(10000, Number(url.searchParams.get('limit')) || 40)),
+          query: (url.searchParams.get('q') ?? '').trim().slice(0, 256).toLowerCase(),
+        } : undefined
+        if (url.searchParams.has('catalog')) {
+          const catalog = await workspace?.catalog(page ?? { limit: 40, query: '' }) ?? {
+            count: 0, more: false, rows: [], online: [], privateWindows: [], unavailable: false, failed: false,
+          }
+          return authorized() ? Response.json(catalog, { headers }) : unauthorized()
+        }
+        const rows = (await workspace?.list(url.searchParams.has('online'), page)) ?? {
+          current: null,
+          online: [],
+          history: [],
+        }
+        return authorized() ? Response.json(rows, { headers }) : unauthorized()
+      }
+      if (path === '/folders' && req.method === 'GET') {
+        const rows = (await workspace?.folders()) ?? []
+        return authorized() ? Response.json({ folders: rows }, { headers }) : unauthorized()
+      }
+      if (path === '/state' && req.method === 'GET') {
+        const bg = req.headers.get('x-evot-background') ?? undefined
+        if (bg && bg !== 'list' && !validTerminal(bg)) return fail(400, 'Invalid task.')
+        if (req.headers.get('accept') === 'text/event-stream') {
+          if (streams >= 16) return fail(429, 'Too many live views.')
+          streams++
+          const body = stateStream(async () => {
+            if (!other) return host.snapshot(bg)
+            const r = await workspace!.bus.request(other, '/state', undefined, bg)
+            if (!r.ok) throw new RemoteConflict('Terminal no longer shared.')
+            return r.json() as Promise<ReturnType<typeof host.snapshot>>
+          }, () => !authorized() ? 401 : shared() ? 200 : 409, req.signal, () => { streams-- })
+          return new Response(body, { headers: { ...headers, 'Cache-Control': 'no-store, no-transform', 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no' } })
+        }
+        const response = other ? await workspace!.bus.request(other, '/state', undefined, bg) : Response.json(host.snapshot(bg))
+        const body = await response.text()
+        if (!authorized() || !shared()) return unauthorized()
+        if (!response.ok) return fail(response.status, body)
+        const etag = `"${Bun.hash(body).toString(16)}"`
+        return req.headers.get('if-none-match') === etag
+          ? new Response(null, { status: 304, headers: { ...headers, etag } })
+          : new Response(body, { headers: { ...headers, etag, 'Content-Type': 'application/json' } })
+      }
+      if (req.method !== 'POST' || path === '/state' || path === '/sessions' || path === '/folders') return fail(405, 'Method not allowed')
+      if (origin !== expected || req.headers.get('content-type')?.split(';')[0] !== 'application/json')
+        return fail(403, 'Expected a same-origin JSON request')
+      let body: unknown
+      try {
+        body = await req.json()
+      } catch {
+        return fail(400, 'Invalid JSON')
+      }
+      if (closed) return fail(410, 'Remote closed')
+      if (enrollment) {
+        if (!body || typeof body !== 'object') return fail(400, 'Invalid device request.')
+        const b = body as Record<string, unknown>
+        if (cloud && path === '/device/challenge') {
+          if (!validKey(b.key)) return fail(400, 'Invalid device key.')
+          if (!b.ticket) return Response.json({ login: cloud.login(b.key) }, { headers })
+          if (!cloud.admit(b.key, b.ticket)) return fail(403, 'Account sign-in expired. Connect again.')
+        }
+        const result =
+          path === '/device/challenge'
+            ? access.challenge(b.key)
+            : path === '/device/prove'
+            // Cloudflare adds the visitor address; the loopback gateway sees only its peer.
+            ? access.prove(b.nonce, b.signature, (cloud ? req.headers.get('cf-connecting-ip') : peer) ?? undefined)
+            : access.poll(b.receipt)
+        if (!result) return fail(403, 'Device request denied, expired or busy.')
+        return Response.json(
+          'token' in result ? { ...result, current: workspace?.bus.shared ? workspace.bus.id : null } : result,
+          { headers },
+        )
+      }
+      if (!authorized()) return unauthorized()
+      if (path === '/open') {
+        if (
+          !workspace ||
+          !body ||
+          typeof body !== 'object' ||
+          !('requestId' in body) ||
+          !validTerminal(body.requestId) ||
+          !('session' in body) ||
+          (body.session !== null && (typeof body.session !== 'string' || !body.session || body.session.length > 128)) ||
+          ('folder' in body && !(typeof body.folder === 'string' && /^[a-f0-9]{20}$/.test(body.folder)))
+        )
+          return fail(400, 'Invalid session request')
+        const terminal = await workspace.open(body.requestId, body.session, authorized, 'folder' in body ? body.folder as string : undefined)
+        return authorized() ? Response.json({ terminal }, { headers }) : unauthorized()
+      }
+      if (path === '/sessions/delete') {
+        const session = body && typeof body === 'object' && 'session' in body ? body.session : null
+        if (!workspace || typeof session !== 'string' || !session || session.length > 128) return fail(400, 'Invalid session request')
+        const deleted = await workspace.remove(session)
+        if (!authorized()) return unauthorized()
+        return deleted ? new Response(null, { status: 204, headers }) : fail(404, 'Session no longer exists in this profile.')
+      }
+      if (!shared()) return fail(409, 'Terminal no longer shared.')
+      const action = parseRemoteAction(body)
+      if (!action) return fail(400, 'Invalid action')
+      if (other) {
+        const r = await workspace!.bus.request(other, '/action', action)
+        if (!r.ok) return fail(r.status, await r.text())
+      } else host.act(action)
+      return new Response(null, { status: 204, headers })
+    },
+    error: (e: Error) =>
+      e instanceof RemoteConflict ? fail(409, e.message) : fail(500, 'Remote unavailable; check the Mac.'),
+  }
+  const server = cloud
+    ? Bun.serve({ ...handler, unix: cloud.unix })
+    : Bun.serve({ ...handler, hostname: '127.0.0.1', port: options.port ?? 0, idleTimeout: 20 })
+  return {
+    address: cloud?.origin ?? `http://127.0.0.1:${server.port}`,
+    access,
+    close() {
+      closed = true
+      access.close()
+      void server.stop(true)
+    },
+  }
+}
+export type RemoteListener = ReturnType<typeof listenRemote>
