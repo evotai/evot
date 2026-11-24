@@ -10,12 +10,12 @@
     <button id="newSession" class="icon-button" type="button" aria-label="New session" title="New session" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M11 13l1-4 7-7 3 3-7 7z"/></svg></button>
   </header>
   <section id="pair-screen"><form id="pair" class="pair-card">
-    <div class="eyebrow">EVOT / REMOTE</div><h2>Connect to your Mac</h2><p>Approve this browser on the Mac to access sessions in this profile, including windows opened later.</p>
+    <div class="eyebrow">EVOT / REMOTE</div><h2>Connect to your computer</h2><p>Approve this browser in the evot TUI to access sessions in this profile, including windows opened later.</p>
     <output id="deviceStatus" aria-live="polite">Loading the connection page… If this message stays, reload the page in Safari or Chrome with JavaScript enabled.</output>
     <strong id="approvalCode" hidden></strong><small id="approvalClock" hidden></small>
     <button class="primary" type="submit" disabled>Loading…</button>
   </form></section>
-  <section id="pickSession" hidden><h2>Your Mac is connected</h2><p>Choose a session to follow its Mac window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
+  <section id="pickSession" hidden><h2>Your computer is connected</h2><p>Choose a session to follow its terminal window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
   <div class="chat-scroll" id="chat" hidden>
     <div class="welcome" id="welcome"><div class="welcome-mark" aria-hidden="true">◆</div><h2>What can I help you build?</h2><p>Your terminal session, right here.</p>
       <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain this codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run relevant tests</button></div>
@@ -39,14 +39,14 @@
 <dialog id="bgPanel" aria-labelledby="bgTitle"><div class="drawer-head"><div><div class="eyebrow">ACTIVITY</div><h2 id="bgTitle">Background</h2></div><button id="closeBg" class="icon-button" aria-label="Close background panel">×</button></div><p id="bgSubtitle"></p><button id="allTasks" type="button" hidden>‹ All tasks</button><div id="bgTasks"></div><pre id="bgOutput" tabindex="0" aria-label="Task output" hidden></pre></dialog>
 <dialog id="sessionsDrawer" aria-labelledby="drawerTitle"><div class="drawer-body">
   <header class="drawer-head"><div><div class="eyebrow"><i class="brand-mark" aria-hidden="true"></i> EVOT / WORKSPACE</div><h2 id="drawerTitle">Sessions</h2></div><div class="drawer-actions"><button id="drawerNew" type="button" aria-label="New session"><span aria-hidden="true">+</span> New</button><button id="closeSessions" class="icon-button" aria-label="Close sessions" autofocus>×</button></div></header>
-  <div class="directory-filters"><div class="directory-modes" role="group" aria-label="Directory view"><button type="button" id="showCatalog" aria-pressed="true">Sessions</button><button type="button" id="showWindows" aria-pressed="false">Open on Mac</button></div>
+  <div class="directory-filters"><div class="directory-modes" role="group" aria-label="Directory view"><button type="button" id="showCatalog" aria-pressed="true">Sessions</button><button type="button" id="showWindows" aria-pressed="false">Open windows</button></div>
   <label class="session-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="sessionSearch" type="search" placeholder="Search titles, projects and transcripts" aria-label="Search sessions"></label></div>
   <div class="session-lists">
   <p id="selectionMessage" role="status" hidden></p>
   <div class="list-intro"><span id="listLabel">All sessions</span><span id="terminalCount"></span></div>
   <div id="terminals" aria-label="Directory results"></div>
   <div id="archived" role="status"></div><button id="moreSessions" type="button" hidden>Load more</button><button id="askSearch" type="button" hidden></button><p id="directoryMessage" role="status"></p>
-  <details class="drawer-help"><summary>About sharing</summary><p>One /remote on the Mac includes existing and future windows in this profile. /remote off hides only that window; /remote shutdown in the gateway TUI disconnects the profile. Older windows may show status only until restarted with the updated CLI.</p></details></div>
+  <details class="drawer-help"><summary>About sharing</summary><p>One /remote on the computer includes existing and future windows in this profile. /remote off hides only that window; /remote shutdown in the gateway TUI disconnects the profile. Older windows may show status only until restarted with the updated CLI.</p></details></div>
   <footer class="drawer-foot"><span id="transport"></span><button type="button" class="theme-toggle">Light mode</button></footer>
 </div></dialog>
 <!-- phone-client --></body></html>

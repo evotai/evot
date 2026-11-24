@@ -59,7 +59,7 @@ export function assistantRow(content: readonly UIAssistantBlock[], expanded = fa
 
 export class ConversationTail {
   updatedAt = Date.now()
-  outcome: 'Completed' | 'Stopped' | 'Run failed · see Mac' | null = null
+  outcome: 'Completed' | 'Stopped' | 'Run failed · see the TUI' | null = null
   offset = 0
   private rows: { compact: RemoteMessage; expanded: RemoteMessage }[] = []
   get messages() {

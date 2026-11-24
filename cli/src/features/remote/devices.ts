@@ -15,7 +15,7 @@ import { join } from 'node:path'
 export type Device = { key: string; approvedAt: number; lastSeenAt?: number; lastSeenFrom?: string }
 /** A network address as the ingress reported it; nothing else from the request. */
 export const validAddress = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-fA-F.:]{3,45}$/.test(v)
-/** A grant nobody has used for this long needs a fresh code on the Mac. */
+/** A grant nobody has used for this long needs a fresh code in the TUI. */
 export const GRANT_IDLE_TTL = 30 * 86_400_000
 export function deviceId(key: string) {
   return createHash('sha256').update(key).digest('hex').slice(0, 20)
@@ -67,7 +67,7 @@ export class DeviceStore {
     return now - (row.lastSeenAt ?? row.approvedAt) < GRANT_IDLE_TTL
   }
   /** Approved and used within the idle window. Grants older than that read as
-   * unknown devices: the Mac must approve a new code, exactly as for a new phone. */
+   * unknown devices: the TUI must approve a new code, exactly as for a new phone. */
   has(key: string, now = Date.now()) {
     const row = this.rows.find((r) => r.key === key)
     return !!row && this.current(row, now)

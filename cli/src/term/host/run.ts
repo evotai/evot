@@ -394,7 +394,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         st.streamRef = null
         st.pendingModelHandoff = null
         st.isLoading = false
-        st.conversationTail.outcome = completed ? 'Completed' : 'Run failed · see Mac'
+        st.conversationTail.outcome = completed ? 'Completed' : 'Run failed · see the TUI'
         st.appState = settleRunCallModel(st.appState)
         st.streamMachine = null
         stopSpinner()

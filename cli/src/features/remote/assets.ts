@@ -13,7 +13,7 @@ import themeJs from '../../../../src/app/assets/console/ui/theme.js' with { type
 import phoneCss from './phone.css' with { type: 'text' }
 import page from './phone.html' with { type: 'text' }
 
-// Emit plain CSS on the Mac; the phone does not need chalk, a theme request,
+// Emit plain CSS on the computer; the phone does not need chalk, a theme request,
 // or a second copy of the TUI palette. The Console keeps its own theme.
 function palette(t: Theme) {
   return `--accent:${t.brandHex}; --amber:${t.accentHex}; --green:${t.cursorHex}; --red:${t.errorHex};

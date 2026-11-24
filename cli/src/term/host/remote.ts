@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
 import { hostname } from 'node:os'
 import { renderUnicodeCompact } from 'uqr'
 import { getThemeScheme } from '../../ui/theme/index.js'
@@ -16,7 +16,9 @@ import { isSlashCommand } from '../../commands/index.js'
 import { resolveRunInteraction } from '../app/run/run-interaction.js'
 import { insertText, isEditorEmpty } from '../input/editor.js'
 import { RemoteConflict, type RemoteAction, type RemoteSnapshot } from '../../features/remote/protocol.js'
-import { errorText } from '../../ui/format.js'
+import { errorText, formatElapsed, renderBar } from '../../ui/format.js'
+import { renderCommandNotice } from '../../ui/command-notice.js'
+import { createCommandOutput, type CommandOutputPort } from '../widgets/command-output.js'
 import type { ActivityController } from './activity.js'
 import { spinnerDescription } from '../widgets/spinner.js'
 import { remoteModels } from '../app/remote/models.js'
@@ -50,6 +52,44 @@ export interface RemoteDeps {
   readonly runOwnership: RunOwnership
   readonly scrollback: ScrollbackController
   readonly submit: SubmitController
+  /** One replaceable status row while /remote starts, like /share's upload row. */
+  readonly replCommands: CommandOutputPort
+}
+
+/** `⋯ Remote  Installing cloudflared … ███░░  6.1 / 19.0 MB · 32% · 4s`, rewritten in place. */
+export function remoteStatus(port: CommandOutputPort) {
+  const line = createCommandOutput(port, 'remote').progress()
+  const started = Date.now(), mb = (n: number) => (n / 1048576).toFixed(1)
+  let text = '', bytes: { done: number; total: number } | undefined, finished = false
+  const paint = () => {
+    if (finished) return
+    const ms = Date.now() - started
+    const size = !bytes ? '' : bytes.total > 0
+      ? `  ${renderBar(bytes.done, bytes.total, 20)}  ${mb(bytes.done)} / ${mb(bytes.total)} MB · ${Math.min(100, Math.floor(bytes.done / bytes.total * 100))}%`
+      : ` · ${mb(bytes.done)} MB`
+    line.update(renderCommandNotice({ state: 'progress', label: 'Remote', message: `${text}${size}${ms >= 1000 ? ` · ${formatElapsed(ms)}` : ''}` }))
+  }
+  const timer = setInterval(paint, 1000)
+  timer.unref?.()
+  let lastBytesPaint = 0
+  return {
+    get active() { return !finished },
+    phase(next: string, progress?: { done: number; total: number }) {
+      if (finished) return
+      const now = Date.now()
+      text = next; bytes = progress
+      // Download chunks arrive far faster than a terminal needs them.
+      if (progress && progress.done < progress.total && now - lastBytesPaint < 100) return
+      lastBytesPaint = now
+      paint()
+    },
+    finish(state: 'success' | 'error' | 'info', message: string) {
+      if (finished) return
+      finished = true
+      clearInterval(timer)
+      line.finish(renderCommandNotice({ state, label: 'Remote', message }))
+    },
+  }
 }
 
 export function createRemoteController(st: ReplState, deps: RemoteDeps) {
@@ -99,7 +139,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         (activity?.kind === 'loop'
           ? `Loop · wakes in ${activity.wait.label}`
           : !input
-          ? 'Busy on the Mac'
+          ? 'Busy on the computer'
           : st.conversationTail.outcome ?? 'Ready')
     const live =
       st.streamMachine &&
@@ -145,7 +185,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         throw new RemoteConflict('Model selection changed. Pick again from the current list.')
       }
       if (!deps.modelSelection.select(action.spec, action.effort))
-        throw new RemoteConflict('Model switch failed. See the Mac for details.')
+        throw new RemoteConflict('Model switch failed. See the computer for details.')
       return
     }
     if (action.kind === 'answer' && s.ask?.id === action.id && deps.asks.answerRequest(action.id, action.answers))
@@ -156,7 +196,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       return
     }
     if ((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) {
-      if (isSlashCommand(action.text)) throw new RemoteConflict('Run slash commands on the Mac.')
+      if (isSlashCommand(action.text)) throw new RemoteConflict('Run slash commands on the computer.')
       deps.submit.submitConversationText(action.text, action.kind === 'steer')
       return
     }
@@ -164,7 +204,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   }
 
   function profile() {
-    if (!st.configInfo) throw Error('Cannot verify the current Mac profile.')
+    if (!st.configInfo) throw Error('Cannot verify the current profile.')
     const home = remoteHome(), account = deps.readAuthIdentity()
     if (account === undefined) throw Error('Cannot verify local account identity.')
     return { home, account, scope: sharingScope(home, st.configInfo.envPath || home, account ?? 'local') }
@@ -236,11 +276,12 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     st.terminalBus = null
   }
   async function command(args: string) {
+    let status: ReturnType<typeof remoteStatus> | undefined
     const notice = (text: string) => deps.scrollback.commitLocalNotice('sys-remote', `  ${text}`)
     const showInvite = (url: string, owner: boolean) => {
       url = terminalInvite(url, st.terminalBus!.id)
       const qr = renderUnicodeCompact(url, { border: 4, invert: getThemeScheme() === 'light' })
-      notice(`Remote is on for this Mac profile, including new windows. Scan to choose a session on your phone:\n${qr}\n  ${url}\n  /remote off hides one window. /remote shutdown in the gateway TUI stops the profile. Approve new devices in ${owner ? 'this' : 'the gateway’s'} Mac TUI.`)
+      notice(`Remote is on for this profile, including new windows. Scan to choose a session on your phone:\n${qr}\n  ${url}\n  /remote off hides one window. /remote shutdown in the gateway TUI stops the profile. Approve new devices in ${owner ? 'this' : 'the gateway’s'} TUI.`)
     }
     if (args === 'shutdown' && !st.remoteListener && !st.remoteOpening) {
       notice('No gateway running in this window. Use /remote shutdown in the gateway TUI, or /remote off to hide this window.')
@@ -259,7 +300,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       return
     }
     if (st.remoteChild) {
-      notice('Manage device access in the original Mac TUI.')
+      notice('Manage device access in the original TUI.')
       return
     }
     if (st.logMode) {
@@ -283,7 +324,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         if (!/^(approve|deny) \d{8}$/.test(args))
           throw Error('Usage: /remote [devices | revoke DEVICE | revoke all | approve CODE | deny CODE | off | shutdown]')
         const owner = st.remoteListener
-        if (!owner?.active() || owner.scope !== scope) throw Error('Run this in the Mac TUI displaying the matching approval code.')
+        if (!owner?.active() || owner.scope !== scope) throw Error('Run this in the TUI displaying the matching approval code.')
         const [op, code] = args.split(' ')
         notice(owner.access.decide(code!, op === 'approve') ? (op === 'approve' ? 'Device approved.' : 'Device denied.') : 'No matching pending request.')
         return
@@ -303,19 +344,21 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
             try { return profile().scope === scope } catch { return false }
           }
         st.remoteOpening = true
+        status = remoteStatus(deps.replCommands)
         try {
-          notice('Checking for the Mac gateway…')
+          status.phase('Checking for a gateway in this profile…')
           st.terminalBus.share(scope)
           const rows = await st.terminalBus.inventory()
-          if (!active()) return
+          if (!active()) { status.finish('info', 'Cancelled.'); return }
           if (rows.gateway) {
             if (!rows.profileGateway) throw Error('An older window owns the gateway. Run /remote shutdown there, then /remote in an updated TUI to enable the whole profile.')
-            if (!st.terminalBus.shared) return // hidden while discovery was in flight
+            if (!st.terminalBus.shared) { status.finish('info', 'This window stays hidden.'); return } // hidden while discovery was in flight
+            status.finish('success', 'Joined the gateway running in another window.')
             if (account) showInvite(sharedConnectInvite(home, scope, account), false)
-            else notice('Shared with the active Mac gateway. Use /remote devices here to manage approved devices.')
+            else notice('Shared with the active gateway. Use /remote devices here to manage approved devices.')
             return
           }
-          notice(account ? 'Connecting to evot Connect…' : 'Starting device approval…')
+          status.phase(account ? 'Connecting to evot Connect…' : 'Starting device approval…')
           const gateway = await openEnvironment({
             account,
             home,
@@ -339,7 +382,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
             }, home, deps.agent.cwd, scope, st.configInfo?.envPath),
             pending: (code, id) => {
               notice(
-                `Device ${id} requests history, tool output and control for this Mac profile, including future windows. Match ${code} on your device, then press Enter to approve, or run /remote deny ${code} (2 min).`,
+                `Device ${id} requests history, tool output and control for this profile, including future windows. Match ${code} on your device, then press Enter to approve, or run /remote deny ${code} (2 min).`,
               )
               // Put the approval in the composer as a draft, never submit it:
               // the user compares the code with the phone and presses Enter.
@@ -352,15 +395,26 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
                 notice('Connector stopped. Run /remote to reconnect.')
               }
             },
+            // While starting: the status row. Afterwards (connector restarts): plain notices.
+            progress: (text, bytes) => {
+              if (attempt !== st.remoteAttempt) return
+              if (status?.active) status.phase(text, bytes)
+              else notice(text)
+            },
           })
           if (!active()) {
             gateway.close()
+            status.finish('info', 'Cancelled.')
             return
           }
           st.remoteListener = gateway
           st.terminalBus.route(scope)
+          if (!gateway.cloud) status.finish('success', 'Local approval gateway is on.')
+          else if (gateway.online) status.finish('success', `Online at ${new URL(gateway.address).host}.`)
+          else status.finish('info', `Started, but ${new URL(gateway.address).host} is not answering yet. The QR code works once Cloudflare connects.`)
         } catch (e) {
           if (attempt === st.remoteAttempt) st.terminalBus?.share(null)
+          status.finish('error', errorText(e))
           throw e
         } finally {
           if (attempt === st.remoteAttempt) st.remoteOpening = false
@@ -372,9 +426,10 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       }
       const g = st.remoteListener
       if (g.cloud) showInvite(g.url, true)
-      else notice(`Mac approval gateway: ${g.address} · this profile, including new windows · local test only.`)
+      else notice(`Approval gateway: ${g.address} · this profile, including new windows · local test only.`)
     } catch (err) {
-      notice(`Remote: ${errorText(err)}`)
+      // The status row already shows a failure that happened while starting.
+      if (!status || status.active) notice(`Remote: ${errorText(err)}`)
     }
   }
   return {

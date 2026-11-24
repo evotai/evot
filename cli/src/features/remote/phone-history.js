@@ -25,7 +25,7 @@ function paintBlock(node, block, expanded) {
       .slice(-220);
     node.lastChild.textContent = block.text;
   } else if (block.kind === 'tool') {
-    // The Mac sends exactly the current compact/expanded tool card. Do not
+    // The TUI sends exactly the current compact/expanded tool card. Do not
     // parse tool names, exit codes or lifecycle states again in the browser.
     if (!node.firstChild) {
       node.className = 'tool-activity';
@@ -36,7 +36,7 @@ function paintBlock(node, block, expanded) {
     }
     const rail = node.firstChild, toggle = node.lastChild;
     node.dataset.state = block.state;
-    const label = expanded ? 'Collapse tool details on Mac' : 'Expand tool details on Mac';
+    const label = expanded ? 'Collapse tool details' : 'Expand tool details';
     toggle.ariaLabel = toggle.title = label;
     toggle.setAttribute('aria-pressed', String(expanded));
     if (node.source !== block.text || node.expanded !== expanded) {

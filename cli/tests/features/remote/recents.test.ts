@@ -6,7 +6,7 @@ import { windowRows } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
-test('the Mac windows view keeps gateway order and appends status-only windows', () => {
+test('the open windows view keeps gateway order and appends status-only windows', () => {
   const now = Date.UTC(2026, 8, 18), stamp = (minutes:number) => now - minutes * 60000
   const online = [ {session:'working', phase:'working', updatedAt:stamp(4)}, {session:'idle', phase:'idle', updatedAt:stamp(1)} ]
   const rows = windowRows(online, [{phase:'idle', updatedAt:now}], '', now)

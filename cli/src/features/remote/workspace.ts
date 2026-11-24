@@ -9,9 +9,9 @@ import { RemoteConflict } from './protocol.js'
 
 export interface WorkspaceSource {
   listSessions(limit: number): Promise<SessionMeta[]>
-  /** The same transcript text the Mac picker searches when the user types in /resume. */
+  /** The same transcript text the TUI picker searches when the user types in /resume. */
   listSessionsWithText(limit: number): Promise<SessionWithText[]>
-  /** Removes the saved session on this Mac (and its cloud copy, if any). */
+  /** Removes the saved session on this computer (and its cloud copy, if any). */
   deleteSession(sessionId: string): Promise<boolean>
 }
 export function phoneWorkspace(
@@ -79,7 +79,7 @@ export function phoneWorkspace(
     return { ...catalog, more: catalog.more || (truncated && !page.query), privateWindows, unavailable, failed }
   }
   // Folders this profile has worked in, by opaque id. The phone picks an id; only
-  // the Mac maps it back to a path, so a phone can never name an arbitrary directory.
+  // the computer maps it back to a path, so a phone can never name an arbitrary directory.
   async function folders() {
     const [history, inventory] = await Promise.all([listHistory(0), bus.inventory()])
     const known = new Map<string, { id: string; name: string; path: string; sessions: number; open: number }>()
@@ -93,12 +93,12 @@ export function phoneWorkspace(
     const paths = new Map([cwd, ...history.map(m => m.cwd)].map(path => [profileKey(path), path]))
     return { list: [...known.values()].sort((a, b) => b.open - a.open || b.sessions - a.sessions || a.name.localeCompare(b.name)), paths, inventory }
   }
-  // Deleting is the same operation as `d` in the Mac picker. A session open in
+  // Deleting is the same operation as `d` in the TUI picker. A session open in
   // any window of this profile, shared or not, stays: that TUI would keep writing it.
   async function remove(session: string) {
     const inventory = await bus.inventory()
-    if (inventory.unavailable) throw new RemoteConflict('A Mac terminal is not responding. Try again shortly.')
-    if (inventory.occupied.has(session)) throw new RemoteConflict('This session is open in a Mac window. Close it there first.')
+    if (inventory.unavailable) throw new RemoteConflict('A terminal on the computer is not responding. Try again shortly.')
+    if (inventory.occupied.has(session)) throw new RemoteConflict('This session is open in a terminal window. Close it there first.')
     const deleted = await source.deleteSession(session)
     listing = undefined; texts = undefined
     return deleted
@@ -120,7 +120,7 @@ export function phoneWorkspace(
       const inventory = await bus.inventory()
       const live = session && liveSessions(inventory.online).find(t => t.session === session)
       if (!live && session && (inventory.occupied.has(session) || inventory.unavailable))
-        throw new RemoteConflict('Cannot resume while another terminal has this session or is unavailable. Check Open on Mac; a hidden window must be re-enabled on the Mac.')
+        throw new RemoteConflict('Cannot resume while another terminal has this session or is unavailable. Check Open windows; a hidden window must be re-enabled on the computer.')
       return { live, online: inventory.online }
     }
     if (session) {
@@ -132,7 +132,7 @@ export function phoneWorkspace(
     if (existing) return existing.terminal
     if (session !== null && !saved) throw new RemoteConflict('Session no longer exists in this profile.')
     const tmux = Bun.which('tmux')
-    if (!tmux) throw new RemoteConflict('Install tmux on the Mac to open an independent TUI.')
+    if (!tmux) throw new RemoteConflict('Install tmux on the computer to open an independent TUI.')
     const digest = createHash('sha256')
       .update(JSON.stringify([group, session || requestId, ...(folder ? [folder] : [])]))
       .digest('hex')
@@ -162,7 +162,7 @@ export function phoneWorkspace(
     const exists = () => tm('has-session', '-t', '=' + target).exitCode === 0
     if (!exists()) {
       if (tm('list-sessions', '-F', '#{session_name}').stdout.toString().split('\n').filter(Boolean).length >= 16)
-        throw new RemoteConflict('16 phone terminals are already open. Close an unused terminal on the Mac.')
+        throw new RemoteConflict('16 phone terminals are already open. Close an unused terminal on the computer.')
       const launch = tm(
         'new-session',
         '-d',
@@ -177,7 +177,7 @@ export function phoneWorkspace(
         ...args
       )
       if (launch.exitCode !== 0 && !exists())
-        throw new RemoteConflict('Could not start a TUI. Check tmux and the saved working directory on the Mac.')
+        throw new RemoteConflict('Could not start a TUI. Check tmux and the saved working directory on the computer.')
     }
     const end = Date.now() + 9000
     while (Date.now() < end && stillAuthorized()) {

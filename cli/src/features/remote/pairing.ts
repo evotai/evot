@@ -61,7 +61,7 @@ export class DeviceAccess {
     }
     if (this.store.has(key, this.now())) return this.issue(key, from)
     // A reload or a second tab proving the same device key must not create
-    // another code or another Mac notification while the first is pending.
+    // another code or another TUI notification while the first is pending.
     if (this.requests.size >= 8) return null
     for (const request of this.requests.values()) {
       if (request.key !== key || request.approved) continue

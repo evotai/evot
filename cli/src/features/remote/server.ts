@@ -51,7 +51,7 @@ export function listenRemote(
       if (!enrollment && !['/state', '/action', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
       const auth = req.headers.get('authorization'),
         authorized = () => !closed && (!options.active || options.active()) && access.authorized(auth)
-      const unauthorized = () => fail(401, 'Pair again on the Mac.')
+      const unauthorized = () => fail(401, 'Pair again on the computer.')
       if (!enrollment && !authorized()) return unauthorized()
       const target = req.headers.get('x-evot-terminal')
       if (target !== null && (!workspace || !validTerminal(target))) return fail(400, 'Invalid target terminal.')
@@ -167,7 +167,7 @@ export function listenRemote(
       return new Response(null, { status: 204, headers })
     },
     error: (e: Error) =>
-      e instanceof RemoteConflict ? fail(409, e.message) : fail(500, 'Remote unavailable; check the Mac.'),
+      e instanceof RemoteConflict ? fail(409, e.message) : fail(500, 'Remote unavailable; check the computer.'),
   }
   const server = cloud
     ? Bun.serve({ ...handler, unix: cloud.unix })

@@ -1,4 +1,4 @@
-// Same-origin, paired Mac only. The gateway ranks windows and sessions before pagination.
+// Same-origin, paired computer only. The gateway ranks windows and sessions before pagination.
 function age(time, now) {
   if (!time) return '';
   const mins = Math.max(0, Math.floor((now - time) / 60000));
@@ -11,11 +11,11 @@ export function windowRows(online, privateWindows, query, now = Date.now()) {
 }
 // This is state, not an action: a window can be running even while it is
 // being viewed, and an unshared window can still be waiting for input.
-const phases = { input:'Needs input', working:'Running', busy:'Busy on Mac', idle:'Open' };
+const phases = { input:'Needs input', working:'Running', busy:'Busy', idle:'Open' };
 const runStates = { 'waiting-task':'Waiting for task', 'waiting-background':'Background task',
   'waiting-loop':'Loop waiting', retrying:'Retrying', compacting:'Compacting' };
 export function windowStatusLabel(r) {
-  if (r.unshared) return 'Open on Mac';
+  if (r.unshared) return 'Open, not shared';
   if (!r.terminal && r.kind !== 'private') return 'Saved';
   return (r.phase === 'working' && runStates[r.runState]) || phases[r.phase] || 'Open';
 }
@@ -43,14 +43,14 @@ export function sessionDrawer({ api, selected, choose, create, ask }) {
     }
     meta.textContent = [r.workspace, r.age].filter(Boolean).join(' · ');
     tail.className = 'terminal-tail';
-    tail.textContent = r.unshared ? 'Not shared · restart evot or run /remote in that window' : statusOnly ? 'Update on Mac' : current ? 'Viewing' : live ? 'Follow' : 'Resume';
+    tail.textContent = r.unshared ? 'Not shared · restart evot or run /remote in that window' : statusOnly ? 'Update evot there' : current ? 'Viewing' : live ? 'Follow' : 'Resume';
     body.append(meta, tail);
     button.append(heading, body);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     return live || statusOnly || !r.session ? button : swipeable(button, r);
   }
   // Swipe a saved row left to reveal Delete; a click on Delete asks once, then
-  // the Mac removes the session for every list. Live and status-only rows cannot be deleted here.
+  // the computer removes the session for every list. Live and status-only rows cannot be deleted here.
   let openRow = null, removing = null;
   function swipeable(button, r) {
     const wrap = document.createElement('div'), remove = document.createElement('button');
@@ -90,20 +90,20 @@ export function sessionDrawer({ api, selected, choose, create, ask }) {
     const now = Date.now();
     const rows = windows ? windowRows(data?.online ?? [], data?.privateWindows ?? [], q, now)
       : (data?.rows ?? []).map(r => ({...r, age:age(Date.parse(r.updated), now)}));
-    el('listLabel').textContent = windows ? 'Mac windows' : 'All sessions';
+    el('listLabel').textContent = windows ? 'Open windows' : 'All sessions';
     el('showWindows').setAttribute('aria-pressed', String(windows));
     el('showCatalog').setAttribute('aria-pressed', String(!windows));
-    el('showWindows').textContent = data ? `Open on Mac · ${data.online.length + data.privateWindows.length}` : 'Open on Mac';
+    el('showWindows').textContent = data ? `Open windows · ${data.online.length + data.privateWindows.length}` : 'Open windows';
     el('terminalCount').textContent = data ? String(windows ? rows.length : data.more ? `${rows.length}+` : rows.length) : '…';
     el('moreSessions').hidden = windows || !data || !data.more;
     el('moreSessions').disabled = loadingMore; el('moreSessions').textContent = loadingMore ? 'Loading…' : 'Load more';
-    // The Mac's semantic search (/sessions <request>) runs as an agent turn in the followed window.
+    // The computer's semantic search (/sessions <request>) runs as an agent turn in the followed window.
     const askable = !windows && q && ask?.available();
     el('askSearch').hidden = !askable;
     if (askable) el('askSearch').textContent = `Ask evot: /sessions ${q}`;
-    el('directoryMessage').textContent = error || (data?.unavailable ? 'A Mac terminal is not responding; saved sessions are temporarily hidden.'
+    el('directoryMessage').textContent = error || (data?.unavailable ? 'A terminal is not responding; saved sessions are temporarily hidden.'
       : data?.failed ? 'Saved sessions unavailable. Retrying…' : '');
-    el('archived').textContent = rows.length || error || data?.unavailable || data?.failed ? '' : !data ? 'Loading…' : windows ? 'No matching Mac windows.'
+    el('archived').textContent = rows.length || error || data?.unavailable || data?.failed ? '' : !data ? 'Loading…' : windows ? 'No matching windows.'
       : q ? 'No matching sessions.' : 'No sessions yet.';
     const renderKey = JSON.stringify([rows, selected(), locked]);
     if (renderKey !== painted) { painted = renderKey; el('terminals').replaceChildren(...rows.map(row)); }

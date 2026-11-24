@@ -94,7 +94,7 @@ function paired(yes) {
   $('pair-screen').hidden = yes;
   $('pickSession').hidden = !yes || !!terminal;
   $('chat').hidden = $('seat').hidden = !yes || !terminal;
-  $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected to Mac' : 'Not connected';
+  $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected' : 'Not connected';
   if (yes && terminal && !view) {
     $('session').textContent = 'Live session';
     $('statusDetail').textContent = $('nextModel').textContent = '';
@@ -284,7 +284,7 @@ async function startIn(folder, button) {
 $('placeFolder').onclick = showFolders;
 $('closeFolders').onclick = () => folderPanel.close();
 folderPanel.onclick = (e) => { if (e.target === folderPanel) folderPanel.close(); };
-// A browser the Mac already approved reconnects by itself: after the gateway
+// A browser the computer already approved reconnects by itself: after the gateway
 // restarts, the tab was suspended, or the network came back. Only an explicit
 // denial or a storage failure hands control back to the button.
 let reconnectTimer, reconnectFailures = 0;
@@ -303,7 +303,7 @@ function unpair() {
   view = null; etag = '';
   paired(false);
   $('deviceStatus').textContent = 'Your connection expired or access was revoked. Reconnect to check this browser’s approval.';
-  $('pair').querySelector('button').textContent = 'Reconnect to Mac';
+  $('pair').querySelector('button').textContent = 'Reconnect';
   reconnectFailures++;
   scheduleReconnect();
 }
@@ -334,7 +334,7 @@ function followOwner(owner, session) {
   $('connection').removeAttribute('data-online');
   controls();
 }
-// A saved conversation can later become active in a shared Mac TUI. Follow
+// A saved conversation can later become active in a shared TUI. Follow
 // only the same session. Never migrate a running action or create a terminal.
 async function checkIdleOwner(mine) {
   const session = nav.target?.session;
@@ -424,8 +424,8 @@ async function synchronize(ready) {
     $('activity').removeAttribute('data-running');
     $('statusDetail').textContent = $('nextModel').textContent = '';
     $('status').textContent = token
-      ? 'Waiting for the Mac. Reconnecting automatically…'
-      : 'Pair again on the Mac.';
+      ? 'Waiting for the computer. Reconnecting automatically…'
+      : 'Pair again on the computer.';
     if (!token) notice(e.message, true);
   } finally {
     clearTimeout(watchdog);
@@ -443,7 +443,7 @@ async function pair(auto = false) {
   button.disabled = true; form.setAttribute('aria-busy', 'true');
   $('approvalCode').hidden = $('approvalClock').hidden = true;
   button.textContent = auto ? 'Reconnecting…' : 'Connecting…';
-  $('deviceStatus').textContent = auto ? 'Reconnecting to your Mac…' : 'Contacting your Mac…';
+  $('deviceStatus').textContent = auto ? 'Reconnecting to your computer…' : 'Contacting your computer…';
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
@@ -452,10 +452,10 @@ async function pair(auto = false) {
         $('deviceStatus').textContent = 'Continue with your evot account. You’ll return here automatically.';
       } else if (step === 'verify') {
         button.textContent = 'Verifying browser…';
-        $('deviceStatus').textContent = 'Checking whether the Mac already knows this browser…';
+        $('deviceStatus').textContent = 'Checking whether the computer already knows this browser…';
       } else {
         button.textContent = 'Waiting for approval…';
-        $('deviceStatus').textContent = `In the Mac TUI that received the request, check the code, then run /remote approve ${code}.`;
+        $('deviceStatus').textContent = `In the TUI that received the request, check the code, then run /remote approve ${code}.`;
         $('approvalCode').hidden = $('approvalClock').hidden = false;
         $('approvalCode').textContent = code;
         const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s · this page updates automatically`; };
@@ -478,8 +478,8 @@ async function pair(auto = false) {
     $('deviceStatus').textContent = storage
       ? 'Browser storage is blocked. Open the invite in Safari or Chrome with site data enabled.'
       : unreachable
-        ? approvedBefore() ? 'Could not reach the Mac. Retrying automatically; check that /remote is still running.'
-          : 'Could not reach the Mac. Check that /remote is still running and try again.'
+        ? approvedBefore() ? 'Could not reach the computer. Retrying automatically; check that /remote is still running.'
+          : 'Could not reach the computer. Check that /remote is still running and try again.'
         : e.message || 'Could not connect. Try again.';
     button.textContent = unreachable && approvedBefore() ? 'Retry now' : 'Try again';
     if (unreachable) { reconnectFailures++; scheduleReconnect(); }
@@ -540,7 +540,7 @@ $('pair').onsubmit = (e) => {
   e.preventDefault();
   void pair();
 };
-// The sent text shows at once as a pending bubble; the Mac's own copy replaces
+// The sent text shows at once as a pending bubble; the TUI's own copy replaces
 // it when the next frame carries that user turn. A failure puts the draft back.
 const outbox = [];
 function settleOutbox(s) {
@@ -646,7 +646,7 @@ window.addEventListener('pageshow', event => {
 });
 paired(!!token);
 const connectButton = $('pair').querySelector('button');
-connectButton.textContent = 'Connect to Mac';
+connectButton.textContent = 'Connect';
 connectButton.disabled = false;
 if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(!returnTicket && !invitedTerminal);
 else if (token && !terminal) drawer.open();

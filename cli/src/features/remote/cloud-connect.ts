@@ -102,9 +102,7 @@ function installSecret(dir: string) {
   }
   return readSecret(path)
 }
-export async function allocateCloud(dir: string, account: string) {
-  const bin = Bun.which('cloudflared')
-  if (!bin) throw Error('Install cloudflared on the Mac first (brew install cloudflared).')
+function signedIn(account: string) {
   const [base, uid] = JSON.parse(account) as [string, string]
   if (new URL(base).protocol !== 'https:') throw Error('Connect requires an HTTPS account server.')
   const auth = JSON.parse(readFileSync(join(homedir(), '.evotai', 'auth.json'), 'utf8'))
@@ -114,13 +112,19 @@ export async function allocateCloud(dir: string, account: string) {
     typeof auth.cli_token !== 'string'
   )
     throw Error('Account changed. Run /remote again.')
+  return { base, uid, token: auth.cli_token as string }
+}
+
+export async function allocateCloud(dir: string, account: string, connector: () => Promise<string>) {
+  const { base, uid, token: cliToken } = signedIn(account)
+  const bin = await connector()
   const secret = installSecret(dir),
     env = environmentId(uid, secret)
   const res = await fetch(base + '/v1/connect/host', {
     method: 'POST',
     redirect: 'error',
     signal: AbortSignal.timeout(45000),
-    headers: { authorization: 'Bearer ' + auth.cli_token, 'content-type': 'application/json' },
+    headers: { authorization: 'Bearer ' + cliToken, 'content-type': 'application/json' },
     body: JSON.stringify({ secret, label: hostname() }),
   })
   if (!res.ok)
@@ -128,7 +132,7 @@ export async function allocateCloud(dir: string, account: string) {
       res.status === 401
         ? 'Sign in again with /login.'
         : res.status === 503
-        ? 'Managed Tunnel unavailable. Check server configuration or retry shortly.'
+        ? ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'evot Connect is unavailable. Retry shortly.'
         : `Connect registration refused (${res.status}).`,
     )
   const data = (await res.json()) as Record<string, unknown>

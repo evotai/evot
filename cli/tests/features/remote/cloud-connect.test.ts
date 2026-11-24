@@ -9,7 +9,7 @@ import { DeviceAccess } from '../../../src/features/remote/pairing.js'
 import { listenRemote } from '../../../src/features/remote/server.js'
 import { testDevice } from '../../helpers/remote-device.js'
 
-test('QR links select a Mac, never carry login credentials, and respect custom account servers', () => {
+test('QR links select a computer, never carry login credentials, and respect custom account servers', () => {
   const home = mkdtempSync(join(tmpdir(), 'evot-invite-'))
   try {
     const dir = join(home, 'remote', 'profile'), secret = randomBytes(32).toString('base64url')

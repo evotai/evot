@@ -35,7 +35,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
   const activity = createActivityController(st, {manualCompaction:{active:false},loopSession:{waiting:false},runInteraction:new RunInteraction(),
     awaitedTaskSummary:()=>undefined, runInteractionInput:()=>({active:st.isLoading,phase:st.spinnerState.phase,owner:1,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}),
   } as unknown as ActivityDeps)
-  const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, gitInfo:{getBranch:()=>'main'}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
+  const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
     submit:{ submitConversationText:(text:string, steer:boolean) => calls.push(steer ? 'steer:'+text : 'send:'+text) },
     runCtl:{ runInteractionInput:()=>({active:st.isLoading,owner:1,phase:st.spinnerState.phase,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}), interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); calls.push('stop') } },
   } as unknown as RemoteDeps)
@@ -43,7 +43,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
   return {st,remote,asks,run,calls}
 }
 
-test('three open Mac sessions retain their picker titles/order as each terminal changes state or closes', async () => {
+test('three open sessions retain their picker titles/order as each terminal changes state or closes', async () => {
   const rows = ['alpha','beta','gamma'].map((session_id,i) => ({session_id, cwd:'/fixture', title:`First ${i} … latest ${i}`, turns:1,
     custom_title:i === 1 ? ' Renamed   session ' : undefined} as SessionMeta))
   const byId = async (id: string) => rows.find(m => m.session_id === id) ?? null
@@ -106,7 +106,7 @@ test('three open Mac sessions retain their picker titles/order as each terminal 
     c.asks.resolvePendingAsk(); await answer; c.st.overlay = {kind:'none'}
     b.st.spinnerState.phase = 'retrying'; a.st.overlay = {kind:'help'}
     const after = await list()
-    expect(byTitle(after)).toEqual({'First 0 … latest 0':'Busy on Mac', 'Renamed session':'Retrying', 'First 2 … latest 2':'Running'})
+    expect(byTitle(after)).toEqual({'First 0 … latest 0':'Busy', 'Renamed session':'Retrying', 'First 2 … latest 2':'Running'})
     expect(after.rows[0]!.title).toBe('Renamed session') // latest activity among active windows
     b.remote.dispose(); a.st.overlay = {kind:'none'}; c.st.isLoading = false; c.st.backgroundWaitSince = Date.now()
     const closed = await list()
@@ -116,7 +116,7 @@ test('three open Mac sessions retain their picker titles/order as each terminal 
     await a.remote.command('off'); expect((await state(a)).status).toBe(409)
     const hidden = await list(); expect(hidden.online).toHaveLength(0)
     // Windows that stopped sharing stay listed from saved metadata, status only, ahead of plain history.
-    expect(hidden.rows.map(r=>[r.session, windowStatusLabel(r), r.unshared ?? false, r.terminal])).toEqual([['alpha','Open on Mac',true,undefined],['gamma','Open on Mac',true,undefined],['beta','Saved',false,undefined]])
+    expect(hidden.rows.map(r=>[r.session, windowStatusLabel(r), r.unshared ?? false, r.terminal])).toEqual([['alpha','Open, not shared',true,undefined],['gamma','Open, not shared',true,undefined],['beta','Saved',false,undefined]])
     const open = await fetch(address+'/open',{method:'POST',headers:{...headers,origin:address,'Content-Type':'application/json'},body:JSON.stringify({session:'gamma',requestId:crypto.randomUUID()})})
     expect(open.status).toBe(409) // hidden session cannot be resumed as a second process
     b.remote.register(); expect((await state(b)).status).toBe(200) // hidden gateway still serves new windows
@@ -207,4 +207,21 @@ test('replaying a new session replaces, rather than splices, its bounded convers
   expect(history.messages).toEqual([{role:'user',text:'new conversation'}])
   for (let i=0;i<40;i++) history.append('assistant','x'.repeat(9000))
   expect(history.messages.length).toBe(32); expect(history.messages[0]?.text.length).toBeLessThan(9000)
+})
+
+test('/remote startup is one status row rewritten in place, ending in the outcome', async () => {
+  const { remoteStatus } = await import('../../../src/term/host/remote.js')
+  const { stripVTControlCharacters } = await import('node:util')
+  const committed: string[] = [], rows: string[] = []
+  const status = remoteStatus({ commitLines: lines => committed.push(...lines.map(l => l.id)), replaceLine: (_id, text) => { rows.push(stripVTControlCharacters(text)); return true }, requestRender() {} })
+  status.phase('Installing cloudflared 2026.11.2, Cloudflare\'s tunnel connector…')
+  status.phase('Installing cloudflared 2026.11.2, Cloudflare\'s tunnel connector', { done: 19 * 1048576, total: 19 * 1048576 })
+  status.phase('Registering this computer with evot Connect…')
+  status.finish('success', 'Online at evot-abc.evot.ai.')
+  status.phase('late phase is ignored')
+  expect(committed).toHaveLength(1) // a single scrollback row
+  expect(rows.at(-2)).toContain('Registering this computer')
+  expect(rows.some(r => /19\.0 \/ 19\.0 MB · 100%/.test(r))).toBe(true)
+  expect(rows.at(-1)).toMatch(/✓ Remote {2}Online at evot-abc\.evot\.ai\./)
+  expect(status.active).toBe(false)
 })

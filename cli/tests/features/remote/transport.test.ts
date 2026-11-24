@@ -7,7 +7,7 @@ import { DeviceAccess, REQUEST_TTL } from '../../../src/features/remote/pairing.
 import { GRANT_IDLE_TTL } from '../../../src/features/remote/devices.js'
 import { testDevice } from '../../helpers/remote-device.js'
 
-test('proving a pending device in two tabs reuses one Mac prompt, deadline and decision', async () => {
+test('proving a pending device in two tabs reuses one TUI prompt, deadline and decision', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'evot-pending-'))
   try {
     let now = 0, notifications = 0

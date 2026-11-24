@@ -1,4 +1,4 @@
-// A tab reload keeps its current view; a fresh visit to the Mac opens Sessions.
+// A tab reload keeps its current view; a fresh visit to the computer opens Sessions.
 // Credentials remain in sessionStorage and are never part of a session link.
 const terminalId = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
 const pendingKey = 'evot.connect.destination';

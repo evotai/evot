@@ -5,7 +5,7 @@ import { registerTerminal, profileKey, type SessionBadge } from '../../../src/fe
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 import type { SessionMeta } from '../../../src/native/index.js'
 
-test('one live destination per session; attach without scanning history, preferring active windows then the Mac', async () => {
+test('one live destination per session; attach without scanning history, preferring active windows then the gateway', async () => {
   const home = '/fixture/' + crypto.randomUUID()
   const scope = 'fixture'
   const host = { snapshot() { throw Error('unused') }, act() {} }
@@ -65,9 +65,9 @@ test('history does not disclose or duplicate an unshared occupied session; crash
     const state = await workspace.list()
     expect(state.online.map((t) => t.session)).toEqual(['a'])
     expect(state.history.map((t) => t.session)).toEqual(['saved'])
-    // Deletion from the phone: never while any Mac window (shared or hidden) holds the session.
-    await expect(workspace.remove('b')).rejects.toThrow('open in a Mac window')
-    await expect(workspace.remove('a')).rejects.toThrow('open in a Mac window')
+    // Deletion from the phone: never while any terminal window (shared or hidden) holds the session.
+    await expect(workspace.remove('b')).rejects.toThrow('open in a terminal window')
+    await expect(workspace.remove('a')).rejects.toThrow('open in a terminal window')
     expect(deleted).toEqual([])
     expect(await workspace.remove('saved')).toBe(true)
     expect(await workspace.remove('gone')).toBe(false)
