@@ -33,6 +33,8 @@ export interface RemoteSnapshot {
   sessionId: string | null
   /** Older windows omit it. */
   place?: RemotePlace
+  /** The TUI's next-prompt suggestion (Tab/→ there); a phone taps it into its own draft. */
+  suggestion?: string
   /** Same metadata title as /sessions; older windows omit it. */
   title?: string
   generation: number

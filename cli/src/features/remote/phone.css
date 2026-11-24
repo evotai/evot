@@ -46,6 +46,9 @@ html.remote-shell[data-theme="light"] {
 .remote-page .composer-card { border-radius:22px; }
 .remote-page .composer-card textarea { font:inherit; font-size:16px; min-height:44px; max-height:20dvh; }
 @supports(field-sizing:content) { .remote-page .composer-card textarea { field-sizing:content; } }
+.suggestion-chip { display:flex; align-items:center; gap:8px; width:min(var(--composer-width),100%); min-height:36px; margin:0 0 6px; padding:6px 12px; border:1px dashed var(--line); border-radius:12px; background:transparent; color:var(--muted); font:inherit; font-size:14px; text-align:left; cursor:pointer; }
+.suggestion-chip::before { content:'↳'; color:var(--accent); flex:none; }
+.suggestion-chip[hidden] { display:none; }
 .place-line { display:flex; gap:14px; width:min(var(--composer-width),100%); padding:0 9px 4px; overflow-x:auto; scrollbar-width:none; font-size:13px; color:var(--muted); }
 .place-chip { display:inline-flex; align-items:center; gap:6px; flex:none; min-height:30px; border:0; padding:0; background:transparent; color:inherit; font:inherit; white-space:nowrap; }
 .place-chip svg { width:15px; height:15px; stroke:currentColor; stroke-width:1.7; fill:none; }

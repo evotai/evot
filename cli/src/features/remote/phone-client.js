@@ -233,6 +233,7 @@ function render(s, mode) {
   $('activity').toggleAttribute('data-running', s.active);
   models(s.models);
   place(s.place);
+  suggestion(s.suggestion);
   background.render(s.background);
   settleOutbox(s);
   $('welcome').hidden = !!renderHistory($('history'), s) || !!s.ask || s.active || outbox.length > 0;
@@ -241,6 +242,19 @@ function render(s, mode) {
   if (follow) chat.scrollTop = chat.scrollHeight;
   jumpState();
 }
+// The TUI's next-prompt suggestion. A tap fills the draft (like → in the TUI);
+// it is never sent on its own, and is hidden while the phone has a draft.
+function suggestion(text) {
+  const chip = $('suggestion');
+  chip.hidden = !text || !!$('draft').value || !view?.input;
+  if (chip.textContent !== (text ?? '')) chip.textContent = text ?? '';
+}
+$('suggestion').onclick = () => {
+  const text = $('suggestion').textContent;
+  if (!text) return;
+  $('draft').value = text; resize(); $('draft').focus();
+  $('suggestion').hidden = true;
+};
 // Where this window runs: folder, machine, branch. The folder chip opens the
 // folder sheet; a window never changes folder, a new session starts there instead.
 function place(p) {
@@ -594,7 +608,7 @@ $('chat').onscroll = jumpState;
 $('jump').onclick = () => {
   $('chat').scrollTop = $('chat').scrollHeight;
 };
-$('draft').oninput = resize;
+$('draft').oninput = () => { resize(); suggestion(view?.suggestion); };
 $('draft').onkeydown = (e) => {
   if (
     e.key === 'Enter' &&

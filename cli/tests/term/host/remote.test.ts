@@ -20,6 +20,7 @@ import { createModelSelectionController, type ModelSelectionDeps } from '../../.
 import { ConversationTail } from '../../../src/term/app/remote/conversation.js'
 import { getEditorText, insertText } from '../../../src/term/input/editor.js'
 
+const suggested = { text: '', completing: false }
 function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => []) {
   const st = createReplState('fixture','/fixture')
   const runOwnership = new RunOwnership(), calls: string[] = []
@@ -35,7 +36,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
   const activity = createActivityController(st, {manualCompaction:{active:false},loopSession:{waiting:false},runInteraction:new RunInteraction(),
     awaitedTaskSummary:()=>undefined, runInteractionInput:()=>({active:st.isLoading,phase:st.spinnerState.phase,owner:1,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}),
   } as unknown as ActivityDeps)
-  const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
+  const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions:{text:()=>suggested.text, completing:()=>suggested.completing, replacing:()=>false}, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
     submit:{ submitConversationText:(text:string, steer:boolean) => calls.push(steer ? 'steer:'+text : 'send:'+text) },
     runCtl:{ runInteractionInput:()=>({active:st.isLoading,owner:1,phase:st.spinnerState.phase,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}), interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); calls.push('stop') } },
   } as unknown as RemoteDeps)
@@ -164,8 +165,20 @@ test('actions target the observed turn, never a successor or a local setup dialo
 
 test('ordered snapshots use the TUI card, only serializing its displayed text and tone', () => {
   const {st,remote,run,calls} = harness()
+  // The TUI's next-prompt suggestion reaches the phone; a completion of the TUI's own draft does not.
+  suggested.text = 'Run the tests.'; expect(remote.snapshot().suggestion).toBe('Run the tests.')
+  suggested.completing = true; expect(remote.snapshot().suggestion).toBeUndefined()
+  suggested.text = ''; suggested.completing = false; expect(remote.snapshot().suggestion).toBeUndefined()
   remote.act({kind:'send',generation:0,text:'start'}); expect(() => remote.act({kind:'send',generation:0,text:'/clear'})).toThrow()
+  // The drawer's "Ask evot" sends a session search: an agent turn, like the TUI's. Lookups, pickers and other commands stay local.
+  remote.act({kind:'send',generation:0,text:'/sessions databend planner bug'})
+  expect(calls).toContain('send:/sessions databend planner bug')
+  for (const text of ['/sessions', '/sessions 01a20c97', '/sessions   ', '/resume planner', '/model x'])
+    expect(() => remote.act({kind:'send',generation:0,text})).toThrow()
+  calls.splice(0)
+  calls.push('send:start')
   const generation = run(); st.streamMachine!.activeLlmCall = true
+  expect(() => remote.act({kind:'steer',generation,text:'/sessions planner'})).toThrow('finish')
   st.appState.currentAssistantContent = [{type:'thinking',contentIndex:0,text:'Visible reasoning'}, {type:'text',contentIndex:1,text:'public text'},
     {type:'tool_call',contentIndex:2,toolCall:{name:'read',id:'1',args:{path:'fixture.ts',privateField:'private-arg'},progress:'reading\nfixture',result:'private-result',status:'running'}}]
   remote.act({kind:'steer',generation,text:'shorter'}); expect(calls).toEqual(['send:start','steer:shorter'])

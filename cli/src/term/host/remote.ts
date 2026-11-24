@@ -6,10 +6,11 @@ import { remoteHome, sharingScope } from '../../features/remote/transport.js'
 import { manageGrants } from '../../features/remote/grants.js'
 import { openEnvironment } from '../../features/remote/environment.js'
 import { sharedConnectInvite, terminalInvite } from '../../features/remote/cloud-connect.js'
-import { sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
+import { isSessionIdPrefix, normalizeResumeQuery, sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
 import type { Agent } from '../../native/index.js'
+import type { PromptSuggestion } from '../app/suggestion/controller.js'
 import type { CloudSessionSync } from '../../session/cloud-sessions.js'
 import type { ResumeSessionCache } from '../app/session/resume-cache.js'
 import { isSlashCommand } from '../../commands/index.js'
@@ -41,6 +42,7 @@ export interface RemoteDeps {
   readonly composer: ComposerController
   readonly activity: ActivityController
   readonly agent: Agent
+  readonly suggestions: Pick<PromptSuggestion, 'text' | 'completing' | 'replacing'>
   readonly gitInfo: { getBranch(): string | null }
   readonly cloudSessions: Pick<CloudSessionSync, 'remoteFor' | 'forget'>
   readonly resumeCache: Pick<ResumeSessionCache, 'remove'>
@@ -90,6 +92,12 @@ export function remoteStatus(port: CommandOutputPort) {
       line.finish(renderCommandNotice({ state, label: 'Remote', message }))
     },
   }
+}
+
+/** The one command a phone may run: semantic search, never an id lookup or a picker. */
+function phoneSearch(text: string) {
+  const query = /^\/sessions\s+(\S[\s\S]*)$/.exec(text.trim())?.[1]?.trim()
+  return !!query && !isSessionIdPrefix(normalizeResumeQuery(query))
 }
 
 export function createRemoteController(st: ReplState, deps: RemoteDeps) {
@@ -150,6 +158,8 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     return {
       sessionId: st.sessionId,
       title: sessionTitle(),
+      // Only a next-prompt suggestion; a completion of the TUI's own half-typed draft stays local.
+      suggestion: input === 'send' && !deps.suggestions.completing() && !deps.suggestions.replacing() ? deps.suggestions.text() || undefined : undefined,
       place: { name: basename(deps.agent.cwd) || '/', path: shortenSessionCwd(deps.agent.cwd), host: hostname().replace(/\.local$/, ''), branch: deps.gitInfo.getBranch() },
       generation: deps.runOwnership.owner + st.remoteEpoch,
       status,
@@ -196,7 +206,12 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       return
     }
     if ((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) {
-      if (isSlashCommand(action.text)) throw new RemoteConflict('Run slash commands on the computer.')
+      if (isSlashCommand(action.text) && !phoneSearch(action.text))
+        throw new RemoteConflict('Run slash commands in the TUI. From the phone only /sessions <request> is available.')
+      if (phoneSearch(action.text) && action.kind === 'steer')
+        throw new RemoteConflict('Wait for the current run to finish before searching sessions.')
+      // `/sessions <request>` is an ordinary agent turn with the session-search task, the same
+      // turn the TUI runs; the phone reads the answer in the chat and picks from its own list.
       deps.submit.submitConversationText(action.text, action.kind === 'steer')
       return
     }
