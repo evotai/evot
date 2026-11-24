@@ -4,7 +4,9 @@ import { validTerminal } from './discovery.js'
 import { DeviceAccess } from './pairing.js'
 import type { CloudGate } from './cloud-connect.js'
 import { validKey } from './devices.js'
-import { parseRemoteAction, RemoteConflict, type RemoteHost } from './protocol.js'
+import { parseRemoteAction, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
+
+export const ACTION_BODY_LIMIT = REMOTE_IMAGE_LIMITS.base64Total + 64 * 1024
 import type { PhoneWorkspace } from './workspace.js'
 
 /** Always loopback; no trust in forwarded headers. Device management has no HTTP routes. */
@@ -24,12 +26,13 @@ export function listenRemote(
     'Cache-Control': 'no-store, no-transform',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': `default-src 'none'; script-src 'self' ${phoneScriptHash}; connect-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    'Content-Security-Policy': `default-src 'none'; script-src 'self' ${phoneScriptHash}; connect-src 'self'; style-src 'self'; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
   const handler = {
     development: false,
-    maxRequestBodySize: 64 * 1024,
+    // Photos ride on /action; every other route keeps the small limit below.
+    maxRequestBodySize: ACTION_BODY_LIMIT,
     async fetch(req: Request, listener: Bun.Server<undefined>) {
       const expected = cloud?.origin ?? `http://127.0.0.1:${listener.port}`,
         authority = new URL(expected).host,
@@ -106,9 +109,14 @@ export function listenRemote(
       if (req.method !== 'POST' || path === '/state' || path === '/sessions' || path === '/folders') return fail(405, 'Method not allowed')
       if (origin !== expected || req.headers.get('content-type')?.split(';')[0] !== 'application/json')
         return fail(403, 'Expected a same-origin JSON request')
+      const limit = path === '/action' ? ACTION_BODY_LIMIT : 64 * 1024
+      if (Number(req.headers.get('content-length') ?? 0) > limit)
+        return fail(413, path === '/action' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
       let body: unknown
       try {
-        body = await req.json()
+        const raw = await req.text() // a chunked body has no length header: measure what arrived
+        if (raw.length > limit) return fail(413, path === '/action' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
+        body = JSON.parse(raw)
       } catch {
         return fail(400, 'Invalid JSON')
       }

@@ -10,9 +10,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { homedir, hostname } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { validKey } from './devices.js'
+import { machineName } from './machine-name.js'
 
 export interface CloudGate {
   origin: string
@@ -125,7 +126,7 @@ export async function allocateCloud(dir: string, account: string, connector: () 
     redirect: 'error',
     signal: AbortSignal.timeout(45000),
     headers: { authorization: 'Bearer ' + cliToken, 'content-type': 'application/json' },
-    body: JSON.stringify({ secret, label: hostname() }),
+    body: JSON.stringify({ secret, label: machineName() }),
   })
   if (!res.ok)
     throw Error(

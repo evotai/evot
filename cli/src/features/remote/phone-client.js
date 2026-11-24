@@ -2,6 +2,7 @@ import { backgroundPanel } from './phone-background.js';
 import { sessionDrawer } from './phone-directory.js';
 import { renderHistory } from './phone-history.js';
 import { navigation } from './phone-navigation.js';
+import { imageTray } from './phone-images.js';
 
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
@@ -28,6 +29,8 @@ const background = backgroundPanel(() => {
   etag = '';
   return refresh();
 });
+const photos = imageTray({ tray: $('attachments'), input: $('imageInput'), button: $('attach'),
+  changed: () => controls(), notice: (text) => notice(text) });
 const drawer = sessionDrawer({ api, selected: () => connected ? terminal : null, choose, create: () => choose(null, null),
   ask: { available: () => connected && !!view?.input && !busy, submit: (text) => { $('draft').value = text; resize(); $('compose').requestSubmit(); } } });
 function requestId() {
@@ -55,7 +58,7 @@ async function choose(id, session, folder) {
     view = null;
     paired(true);
     etag = '';
-    $('history').replaceChildren(); $('outbox').replaceChildren(); outbox.length = 0;
+    $('history').replaceChildren(); for (const item of outbox.splice(0)) item.release?.(); $('outbox').replaceChildren(); photos.clear();
     questions(null);
     $('draft').value = '';
     $('draft').rows = 1;
@@ -116,7 +119,8 @@ function controls() {
     switchable = connected && !!(input || view?.ask) && !busy;
   drawer.lock(busy);
   $('openSessions').disabled = $('browseSessions').disabled = busy;
-  $('send').disabled = busy || !input || !$('draft').value.trim();
+  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count);
+  $('attach').disabled = busy || !input || photos.count >= 4;
   $('send').textContent = busy ? '…' : input === 'steer' ? '↱' : '↑';
   $('send').toggleAttribute('aria-busy', busy);
   $('newSession').disabled = $('drawerNew').disabled = !token || busy;
@@ -560,25 +564,34 @@ const outbox = [];
 function settleOutbox(s) {
   const spoken = new Set(s.messages.filter((m) => m.role === 'user').map((m) => m.text));
   for (const item of outbox.splice(0)) {
-    if (spoken.has(item.text) || Date.now() > item.expires) item.el.remove();
+    if (spoken.has(item.text) || Date.now() > item.expires) { item.el.remove(); item.release?.(); }
     else outbox.push(item);
   }
 }
 $('compose').onsubmit = (e) => {
   e.preventDefault();
   const text = $('draft').value, kind = view?.input;
-  if (!kind || !text.trim() || busy) return;
+  if (!kind || (!text.trim() && !photos.count) || photos.busy || busy) return;
+  const taken = photos.take(), n = taken.images.length;
+  // The computer records the turn as text plus this label; match it to retire the pending bubble.
+  const shown = [text.trim(), n ? `[${n === 1 ? 'Image' : `${n} images`} from phone]` : ''].filter(Boolean).join('\n');
   const el = document.createElement('article');
   el.className = 'message message-user pending';
-  const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = text.trim();
-  const state = document.createElement('small'); state.className = 'outbox-state'; state.textContent = kind === 'steer' ? 'Steering…' : 'Sending…';
+  const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = text.trim() || (n === 1 ? 'Photo' : `${n} photos`);
+  if (n) {
+    const strip = document.createElement('div'); strip.className = 'bubble-images';
+    strip.append(...taken.urls.map((url) => Object.assign(document.createElement('img'), { src: url, alt: '' })));
+    bubble.append(strip);
+  }
+  const state = document.createElement('small'); state.className = 'outbox-state'; state.textContent = kind === 'steer' ? 'Steering…' : n ? 'Uploading…' : 'Sending…';
   el.append(bubble, state);
   $('outbox').append(el);
-  outbox.push({ text: text.trim(), el, expires: Date.now() + 30000 });
+  outbox.push({ text: shown, el, expires: Date.now() + 30000, release: taken.release });
   $('draft').value = ''; resize(); $('welcome').hidden = true;
   $('chat').scrollTop = $('chat').scrollHeight;
-  void action({ kind, text }, () => { state.textContent = kind === 'steer' ? 'Steered' : 'Sent'; }, () => {
+  void action({ kind, text: text.trim(), ...(n ? { images: taken.images } : {}) }, () => { state.textContent = kind === 'steer' ? 'Steered' : 'Sent'; }, () => {
     el.remove(); outbox.splice(outbox.findIndex((i) => i.el === el), 1);
+    taken.restore();
     if (!$('draft').value) { $('draft').value = text; resize(); }
   });
 };
@@ -609,6 +622,11 @@ $('jump').onclick = () => {
   $('chat').scrollTop = $('chat').scrollHeight;
 };
 $('draft').oninput = () => { resize(); suggestion(view?.suggestion); };
+// A photo pasted into the box (desktop browsers, iPad) joins the tray instead of the text.
+$('draft').addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+  if (files.length && view?.input) { e.preventDefault(); void photos.add(files); }
+});
 $('draft').onkeydown = (e) => {
   if (
     e.key === 'Enter' &&

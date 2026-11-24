@@ -3,7 +3,7 @@ import { readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { confirmRelay, relayPermits } from './relay-permit.js'
 import { gatewaySocket, privateSocketDirectory, reapDeadSocket } from './socket-directory.js'
-import { parseRemoteAction, RemoteConflict, type RemoteHost } from './protocol.js'
+import { parseRemoteAction, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
 export { profileKey, privateSocketDirectory, reapDeadSocket } from './socket-directory.js'
 
 export type Phase = 'working' | 'input' | 'idle' | 'busy'
@@ -48,7 +48,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
   const server = Bun.serve({
     unix: socket(id),
     development: false,
-    maxRequestBodySize: 64 * 1024,
+    maxRequestBodySize: REMOTE_IMAGE_LIMITS.base64Total + 64 * 1024, // a relayed /action can carry photos
     async fetch(req) {
       const path = new URL(req.url).pathname, requested = req.headers.get('x-evot-scope')
       if (path !== '/badge' && path !== '/state' && path !== '/action') return new Response(null, { status: 404 })

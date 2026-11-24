@@ -57,8 +57,11 @@ export interface RemoteBackground {
   tasks: { id: string; title: string; detail?: string; status?: string; activity?: string }[]
   output?: { id: string; text: string }
 }
+/** A photo from the phone, already scaled down there; the engine resizes further if needed. */
+export interface RemoteImage { mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'; data: string }
+export const REMOTE_IMAGE_LIMITS = { count: 4, base64Each: 6 * 1024 * 1024, base64Total: 14 * 1024 * 1024 }
 export type RemoteAction = { generation: number } & (
-  | { kind: 'send' | 'steer'; text: string }
+  | { kind: 'send' | 'steer'; text: string; images?: RemoteImage[] }
   | { kind: 'stop' }
   | { kind: 'tool-view'; expanded: boolean }
   | { kind: 'select-model'; spec: string; effort?: string; revision: string }
@@ -88,7 +91,14 @@ export function parseRemoteAction(value: unknown): RemoteAction | null {
   if (kind === 'select-model' && plain(spec) && plain(revision) && (effort === undefined || plain(effort))) {
     return { kind, generation, spec, effort, revision }
   }
-  if ((kind === 'send' || kind === 'steer') && plain(text)) return { kind, generation, text: text.trim() }
+  if (kind === 'send' || kind === 'steer') {
+    const images = parseImages((value as Record<string, unknown>).images)
+    if (images === null) return null
+    // A photo alone is a prompt too; text, when present, is still checked like any message.
+    if (plain(text)) return { kind, generation, text: text.trim(), ...(images.length ? { images } : {}) }
+    if (images.length && (text === undefined || text === '')) return { kind, generation, text: '', images }
+    return null
+  }
   if (
     kind === 'answer' &&
     typeof id === 'string' &&
@@ -101,4 +111,23 @@ export function parseRemoteAction(value: unknown): RemoteAction | null {
   )
     return { kind, generation, id, answers: answers.map((s) => s.trim()) }
   return null
+}
+
+const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+/** `[]` when absent, `null` when present but not acceptable. */
+function parseImages(value: unknown): RemoteImage[] | null {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > REMOTE_IMAGE_LIMITS.count) return null
+  let total = 0
+  const out: RemoteImage[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') return null
+    const { mimeType, data } = item as Record<string, unknown>
+    if (typeof mimeType !== 'string' || !IMAGE_TYPES.has(mimeType) || typeof data !== 'string' || !data
+      || data.length > REMOTE_IMAGE_LIMITS.base64Each || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return null
+    total += data.length
+    if (total > REMOTE_IMAGE_LIMITS.base64Total) return null
+    out.push({ mimeType: mimeType as RemoteImage['mimeType'], data })
+  }
+  return out
 }

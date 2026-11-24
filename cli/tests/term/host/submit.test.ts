@@ -52,6 +52,24 @@ test('a phone steer joins the original native queue without consuming the termin
   expect(h.calls).toContain('reclaim')
 })
 
+test('phone photos become the same image content blocks as a TUI paste, for a new turn and a steer', () => {
+  const h = harness('local draft')
+  const photo = { mimeType: 'image/jpeg', data: 'AAAA' }
+  h.ctl.submitConversationText('what is this?', false, [photo])
+  expect(h.queries).toHaveLength(1)
+  expect(JSON.parse(h.queries[0]!.contentJson!)).toEqual([
+    { type: 'text', text: 'what is this?' },
+    { type: 'image', mimeType: 'image/jpeg', source: { type: 'base64', data: 'AAAA' } },
+  ])
+  h.ctl.submitConversationText('', false, [photo, photo])
+  expect(h.queries[1]!.text).toBe('[2 images from phone]')
+  expect(JSON.parse(h.queries[1]!.contentJson!).map((b: { type: string }) => b.type)).toEqual(['image', 'image'])
+  h.ctl.submitConversationText('look', true, [photo])
+  expect(h.pending.state.entries.at(-1)?.snapshot.text).toBe('look\n[Image from phone]')
+  expect(JSON.parse(h.pending.state.entries.at(-1)!.contentJson!).at(-1).type).toBe('image')
+  expect(getEditorText(h.st.editor)).toBe('local draft')
+})
+
 test.each(['immediate', 'steering', 'follow_up'])('skill invocation is model input for %s submission', kind => {
   const h = harness('/x-review inspect changes')
   h.st.skillEntries = [{ name: 'x-review', dir: '/fixture/x-review', command: {} }]

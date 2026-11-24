@@ -53,7 +53,7 @@ export interface SubmitController {
   handleLoadingEnter(): void
   submitDraft(): void
   enqueueDraft(): void
-  submitConversationText(text: string, steer: boolean): void
+  submitConversationText(text: string, steer: boolean, images?: readonly { mimeType: string; data: string }[]): void
 }
 
 /** Enter on the composer: submits a draft when idle; steers, queues or blocks it while a turn runs. */
@@ -75,11 +75,18 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
     void deps.runCtl.runQuery(text, contentJson, undefined, extension)
   }
 
-  function submitConversationText(text: string, steer: boolean) {
-    if (!steer) { startTurn(text, text); return }
-    const lines = text.split('\n')
-    attachPrompt({ target: currentQueueTarget(st), queue: 'steering', text, expandedText: text,
-      snapshot: { text, cursorLine: lines.length - 1, cursorCol: lines.at(-1)?.length ?? 0, chunks: [], images: [], undo: [], history: { index: 0, savedInput: '', length: 0 } } })
+  function submitConversationText(text: string, steer: boolean, images: readonly { mimeType: string; data: string }[] = []) {
+    // Photos from the phone become the same content blocks as an image pasted in the TUI.
+    const label = images.length ? `[${images.length === 1 ? 'Image' : `${images.length} images`} from phone]` : ''
+    const display = [text, label].filter(Boolean).join('\n')
+    const contentJson = images.length ? JSON.stringify([
+      ...(text ? [{ type: 'text', text }] : []),
+      ...images.map(image => ({ type: 'image', mimeType: image.mimeType, source: { type: 'base64', data: image.data } })),
+    ]) : undefined
+    if (!steer) { startTurn(display, text || label, contentJson); return }
+    const lines = display.split('\n')
+    attachPrompt({ target: currentQueueTarget(st), queue: 'steering', text: display, expandedText: text || label, contentJson,
+      snapshot: { text: display, cursorLine: lines.length - 1, cursorCol: lines.at(-1)?.length ?? 0, chunks: [], images: [], undo: [], history: { index: 0, savedInput: '', length: 0 } } })
     deps.suggestions.cancel()
     deps.queueLifecycle.reconcile()
     deps.queueLifecycle.dispatchNext()

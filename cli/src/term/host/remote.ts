@@ -1,5 +1,4 @@
 import { basename, join } from 'node:path'
-import { hostname } from 'node:os'
 import { renderUnicodeCompact } from 'uqr'
 import { getThemeScheme } from '../../ui/theme/index.js'
 import { remoteHome, sharingScope } from '../../features/remote/transport.js'
@@ -9,6 +8,7 @@ import { sharedConnectInvite, terminalInvite } from '../../features/remote/cloud
 import { isSessionIdPrefix, normalizeResumeQuery, sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
+import { machineName } from '../../features/remote/machine-name.js'
 import type { Agent } from '../../native/index.js'
 import type { PromptSuggestion } from '../app/suggestion/controller.js'
 import type { CloudSessionSync } from '../../session/cloud-sessions.js'
@@ -160,7 +160,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       title: sessionTitle(),
       // Only a next-prompt suggestion; a completion of the TUI's own half-typed draft stays local.
       suggestion: input === 'send' && !deps.suggestions.completing() && !deps.suggestions.replacing() ? deps.suggestions.text() || undefined : undefined,
-      place: { name: basename(deps.agent.cwd) || '/', path: shortenSessionCwd(deps.agent.cwd), host: hostname().replace(/\.local$/, ''), branch: deps.gitInfo.getBranch() },
+      place: { name: basename(deps.agent.cwd) || '/', path: shortenSessionCwd(deps.agent.cwd), host: machineName(), branch: deps.gitInfo.getBranch() },
       generation: deps.runOwnership.owner + st.remoteEpoch,
       status,
       models: remoteModels(st.configInfo, st.appState.model, st.pendingModelHandoff),
@@ -210,9 +210,11 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         throw new RemoteConflict('Run slash commands in the TUI. From the phone only /sessions <request> is available.')
       if (phoneSearch(action.text) && action.kind === 'steer')
         throw new RemoteConflict('Wait for the current run to finish before searching sessions.')
+      if (phoneSearch(action.text) && action.images?.length)
+        throw new RemoteConflict('Session search takes text only. Remove the photos.')
       // `/sessions <request>` is an ordinary agent turn with the session-search task, the same
       // turn the TUI runs; the phone reads the answer in the chat and picks from its own list.
-      deps.submit.submitConversationText(action.text, action.kind === 'steer')
+      deps.submit.submitConversationText(action.text, action.kind === 'steer', action.images)
       return
     }
     throw new RemoteConflict('This action is no longer available.')
