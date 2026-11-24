@@ -60,7 +60,6 @@ html, body { height: 100%; overflow: hidden; }
 .rail-nav a:hover { background: var(--fill); color: var(--ink); text-decoration: none; }
 .rail-nav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 /* Chat's session list lives here; on other pages it only pushes Settings down. */
-.rail-slot { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; }
 .rail-settings { flex: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .rail-label {
   padding: 4px 10px;
@@ -385,7 +384,6 @@ label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 6px; }
   .sidenav { flex-flow: row wrap; align-items: center; gap: 4px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
   .rail-brand { padding: 4px 8px; }
   .rail-nav { flex-direction: row; }
-  .rail-slot { display: none; }
   .rail-settings { display: flex; align-items: center; margin: 0 0 0 auto; padding: 0; border: 0; }
   .rail-label, .rail-row > span { display: none; }
   .rail-row { padding: 0; }

@@ -339,12 +339,10 @@ fn model_selection_dependency_boundary() {
     }
     let http = [
         include_str!("../../src/surface/gateway/channels/http/server.rs"),
-        include_str!("../../src/surface/gateway/channels/http/server_chat.rs"),
         include_str!("../../src/surface/gateway/channels/http/server_settings.rs"),
     ]
     .concat();
-    let http_compact: String = http.chars().filter(|c| !c.is_whitespace()).collect();
-    assert!(http_compact.contains("self.agent.select_configured_model("));
+    // The HTTP settings surface never parses thinking levels itself.
     assert!(!http.contains("thinking_level_from_str("));
     assert!(!http.contains("thinking level '{name}' is not supported"));
     let napi = include_str!("../../../../cli/addon/src/agent.rs");

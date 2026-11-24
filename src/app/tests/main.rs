@@ -69,8 +69,6 @@ mod config_info_contract_test;
 mod config_transaction_test;
 #[path = "surface/console_routes_test.rs"]
 mod console_routes_test;
-#[path = "session/conversation_projection_test.rs"]
-mod conversation_projection_test;
 #[path = "surface/dashboard_search_test.rs"]
 mod dashboard_search_test;
 #[path = "surface/delivery_test.rs"]

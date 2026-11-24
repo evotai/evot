@@ -244,9 +244,6 @@
         <h1>Session trace</h1>
         <p class="page-meta"><span id="trace-sub"></span></p>
       </div>
-      <div class="page-actions">
-        <a class="btn small" id="back-to-chat" href="/chat">Back to chat</a>
-      </div>
     </header>
     <div class="content trace-content">
     <div class="layout">
@@ -308,10 +305,6 @@
           }
         }
       }
-      // Returning lands in Chat with this same session reopened.
-      document.getElementById("back-to-chat").href =
-        "/chat?session=" + encodeURIComponent(sessionId);
-
       // Name the session being viewed. The page is reachable directly, so the
       // id has to come from the URL rather than a list selection.
       {

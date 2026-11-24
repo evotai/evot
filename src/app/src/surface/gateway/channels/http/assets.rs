@@ -9,15 +9,6 @@ use axum::Router;
 pub(super) fn router() -> Router {
     let mut router = Router::new()
         .route(
-            "/chat",
-            get(|| async {
-                Html(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/assets/console/index.html"
-                )))
-            }),
-        )
-        .route(
             "/models",
             get(|| async {
                 Html(include_str!(concat!(
@@ -35,7 +26,7 @@ pub(super) fn router() -> Router {
                 )))
             }),
         )
-        .route("/", get(|| async { Redirect::to("/chat") }))
+        .route("/", get(|| async { Redirect::to("/models") }))
         .route(
             "/settings",
             get(|| async { Redirect::permanent("/models") }),
@@ -72,59 +63,10 @@ pub(super) fn router() -> Router {
             )),
         ),
         (
-            "/ui/chat-markdown.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-markdown.js"
-            )),
-        ),
-        (
-            "/ui/chat-state.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-state.js"
-            )),
-        ),
-        (
-            "/ui/chat-stream-state.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-stream-state.js"
-            )),
-        ),
-        (
             "/ui/theme.js",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/console/ui/theme.js"
-            )),
-        ),
-        (
-            "/ui/chat.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat.js"
-            )),
-        ),
-        (
-            "/ui/login-errors.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/login-errors.js"
-            )),
-        ),
-        (
-            "/ui/chat-control.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-control.js"
-            )),
-        ),
-        (
-            "/ui/chat-transport.js",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-transport.js"
             )),
         ),
         (
@@ -177,24 +119,10 @@ pub(super) fn router() -> Router {
             )),
         ),
         (
-            "/ui/chat-theme.css",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat-theme.css"
-            )),
-        ),
-        (
             "/ui/trace-theme.css",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/assets/console/ui/trace-theme.css"
-            )),
-        ),
-        (
-            "/ui/chat.css",
-            include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/assets/console/ui/chat.css"
             )),
         ),
     ] {

@@ -1,4 +1,8 @@
-import { renderMarkdown } from '../../../../src/app/assets/console/ui/chat-markdown.js';
+// A window from before the computer sent rendered Markdown: show its text as written.
+function plainHtml(text) {
+  const esc = String(text ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
+  return esc.split(/\n{2,}/).map(p => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
+}
 
 // Reuse the actual DOM node across deltas, completion and bounded-history shifts:
 // an expanded thinking block, text selection or focused button must not reset on poll.
@@ -54,8 +58,8 @@ function paintBlock(node, block, expanded) {
     const offsets = Array.from(node.querySelectorAll('.table-wrap'), (el) => el.scrollLeft);
     node.source = block.html ?? block.text;
     node.className = 'text-content';
-    // The computer sends the TUI's own Markdown layout; a window too old to send it gets the local renderer.
-    node.innerHTML = block.html ?? renderMarkdown(block.text);
+    // The computer sends the TUI's own Markdown layout; a window too old to send it shows plain text.
+    node.innerHTML = block.html ?? plainHtml(block.text);
     node.querySelectorAll('.table-wrap').forEach((el, i) => {
       if (offsets[i]) el.scrollLeft = offsets[i];
     });

@@ -1,5 +1,5 @@
-// Build-time allowlist, not a file server or a proxy to localhost. Both chat
-// surfaces ship the same visual components and Markdown renderer, offline.
+// Build-time allowlist, not a file server or a proxy to localhost. The page shares
+// only the product palette and base styles (app.css, theme.css/js) with the console.
 import { createHash } from 'node:crypto'
 import { bundlePhone } from './browser-bundle.js' with { type: 'macro' }
 import { darkTheme } from '../../ui/theme/dark.js'
@@ -7,9 +7,9 @@ import { lightTheme } from '../../ui/theme/light.js'
 import type { Theme } from '../../ui/theme/types.js'
 import { markdownCss } from './markdown-css.js'
 import appCss from '../../../../src/app/assets/console/ui/app.css' with { type: 'text' }
-import chatCss from '../../../../src/app/assets/console/ui/chat.css' with { type: 'text' }
+import chatCss from './chat-base.css' with { type: 'text' }
 import themeCss from '../../../../src/app/assets/console/ui/theme.css' with { type: 'text' }
-import chatTheme from '../../../../src/app/assets/console/ui/chat-theme.css' with { type: 'text' }
+import chatTheme from './chat-theme.css' with { type: 'text' }
 import themeJs from '../../../../src/app/assets/console/ui/theme.js' with { type: 'text' }
 import phoneCss from './phone.css' with { type: 'text' }
 import page from './phone.html' with { type: 'text' }

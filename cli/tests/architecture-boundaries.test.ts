@@ -47,21 +47,8 @@ describe('module dependency boundaries', () => {
   })
 
   test('Web clients are independent of DOM and UI modules', async () => {
-    for (const file of ['chat-transport', 'chat-control', 'chat-state', 'chat-stream-state', 'json-client', 'login-errors']) {
-      const text = await source(`../../src/app/assets/console/ui/${file}.js`)
-      for (const forbidden of ['document.', 'window.', 'from "./app.js"', 'from "./chat.js"']) expect(text).not.toContain(forbidden)
-    }
-  })
-
-  test('Web runtime state owns run and navigation generations, not DOM code', async () => {
-    const host = await source('../../src/app/assets/console/ui/chat.js')
-    expect(host).toContain('runtime.begin(currentSessionId)')
-    expect(host).toContain('runtime.ownsNavigation(navigation)')
-    expect(host).toContain('runtime.canRestoreSubmission(generation, input.value)')
-    expect(host).toContain('state.content.resetAssistant()')
-    for (const removed of ['let streaming =', 'let stopping =', 'let streamController =', 'state.buffers.set(']) {
-      expect(host).not.toContain(removed)
-    }
+    const text = await source('../../src/app/assets/console/ui/json-client.js')
+    for (const forbidden of ['document.', 'window.', 'from "./app.js"']) expect(text).not.toContain(forbidden)
   })
 
   test('input and command controllers do not depend on the viewmodel barrel', async () => {

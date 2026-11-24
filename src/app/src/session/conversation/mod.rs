@@ -1,4 +1,3 @@
-pub mod chat_projection;
 pub mod command_envelope;
 pub mod context_view;
 pub mod convert;

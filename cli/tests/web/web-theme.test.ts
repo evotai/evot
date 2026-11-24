@@ -4,7 +4,7 @@ import { runInNewContext } from 'node:vm'
 const url = (file: string) => new URL(`../../../src/app/assets/console/ui/${file}`, import.meta.url)
 const source = await Bun.file(url('theme.js')).text()
 const palette = await Bun.file(url('theme.css')).text()
-const chat = await Bun.file(url('chat-theme.css')).text()
+const chat = await Bun.file(new URL('../../src/features/remote/chat-theme.css', import.meta.url)).text()
 const trace = await Bun.file(url('trace-theme.css')).text()
 
 function mount(saved: string | null, legacy: string | null = null, storageAvailable = true) {
@@ -49,7 +49,7 @@ function mount(saved: string | null, legacy: string | null = null, storageAvaila
   return { root, buttons, data, beforeReady, addButton, sync: () => observe?.() }
 }
 
-test('product palette is shared; chat and trace only own component styles', () => {
+test('product palette is shared; the remote chat and trace only own component styles', () => {
   expect(palette).toContain('--page: #151517;')
   expect(palette).toContain('--bg: #232324;')
   expect(palette).toContain('--ink: #f9fafb;')

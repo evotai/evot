@@ -4,7 +4,6 @@ use axum::extract::Path;
 use axum::extract::State;
 use axum::response::Html;
 use axum::response::IntoResponse;
-use axum::response::Redirect;
 use axum::routing::get;
 use axum::Json;
 use axum::Router;
@@ -27,7 +26,6 @@ pub fn dashboard_router(agent: Arc<Agent>) -> Router {
         .route("/api/session/{id}/activity", get(api_activity))
         // Chat owns session browsing; the standalone list is gone. Old
         // bookmarks land in Chat, which resumes any session by id.
-        .route("/sessions", get(|| async { Redirect::to("/chat") }))
         .route("/sessions/{id}", get(trace_page))
         .route("/sessions/{id}/trace", get(trace_page))
         .with_state(state)

@@ -2,8 +2,7 @@
 //!
 //! The chat sidebar does client-side substring filtering and highlighting
 //! over the `search_text` field returned by `list_sessions_with_text`.
-//! These tests pin the backend contract that feeds it, plus a guard that the
-//! chat page embeds the search markup that calls `/api/sessions`.
+//! These tests pin the backend contract that feeds it.
 
 use std::sync::Arc;
 
@@ -260,41 +259,6 @@ async fn delete_session_removes_only_target() -> TestResult {
     // what lets the bulk endpoint treat a stale client list as a no-op.
     assert!(!storage.delete_session("del-b").await?);
     Ok(())
-}
-
-/// Chat owns the session sidebar and the full-text search dialog; the
-/// standalone sessions page is gone, so its affordances live here: paged
-/// recent list, armed delete, and highlighted match snippets.
-#[test]
-fn chat_page_embeds_session_navigation() {
-    let html = include_str!("../../assets/console/index.html");
-    let js = include_str!("../../assets/console/ui/chat.js");
-    let rail = include_str!("../../assets/console/ui/rail.js");
-    assert!(rail.contains("id=\"recentSessions\""));
-    assert!(html.contains("data-mode=\"chat\""));
-    assert!(html.contains("id=\"searchOverlay\""));
-    assert!(html.contains("id=\"modelSelect\""));
-    assert!(html.contains("id=\"thinkingSelect\""));
-    assert!(js.contains("/api/sessions"));
-    assert!(js.contains("search_text"));
-    assert!(js.contains("/api/sessions/delete"));
-    assert!(js.contains("snippetAround"));
-    assert!(js.contains("<mark>"));
-    // Recent pages from the server; search pays for transcript text later.
-    assert!(js.contains("loadRecentPage"));
-    // Account row + notices refresh in place after login/logout.
-    assert!(js.contains("/api/auth/session"));
-    assert!(js.contains("/api/notices"));
-    assert!(js.contains("/api/sessions?full=true"));
-    assert!(js.contains("skeletonHtml"));
-    // New never pre-creates a draft session: every New (cwd switch included)
-    // lands on the welcome hero, and the first message carries the workspace.
-    assert!(js.contains("returnToWelcome()"));
-    assert!(!js.contains("/api/chat/new"));
-    assert!(js.contains("payload.cwd = workspace.cwd"));
-    // A trace deep-dive hands the reader back to the same conversation.
-    assert!(js.contains("URLSearchParams"));
-    assert!(js.contains("target = \"_blank\""));
 }
 
 // ---------------------------------------------------------------------------

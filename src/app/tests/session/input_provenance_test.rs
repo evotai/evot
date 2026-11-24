@@ -159,8 +159,6 @@ fn explicit_user_sources_preserve_xml_code_examples_and_unknown_runtime_sources_
     assert_eq!(authored_text(&item).as_deref(), Some(text));
     let serialized = serde_json::to_value(display_parts(&item))?;
     assert_eq!(serialized.as_array().map(Vec::len), Some(1));
-    let nodes = evot::session::conversation::chat_projection::replay_nodes(&[item]);
-    assert_eq!(nodes[0].text.as_deref(), Some(text));
     Ok(())
 }
 
