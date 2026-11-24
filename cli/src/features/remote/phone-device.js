@@ -33,6 +33,7 @@ async function identity() {
 }
 const fragment = new URLSearchParams(location.hash.slice(1));
 export const returnTicket = fragment.get('ticket');
+// Codes printed by older CLIs name a window; it only means "start pairing now".
 export const invitedTerminal = fragment.get('terminal');
 if (location.hash) history.replaceState(history.state, '', location.pathname);
 // A second invite opened in the same tab can be a fragment-only navigation:

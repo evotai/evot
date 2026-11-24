@@ -1,7 +1,9 @@
 /* Share Chat's message, code and theme components; the remote shell is sized
    for hands, not a shrunken desktop sidebar. */
 /* Brand, selection, tool and panel colors are emitted from the TUI themes. */
-/* Dark surfaces come from the TUI's terminal canvas (assets.ts), as in /log shot. */
+/* Dark surfaces: the Warp theme gradient behind TUI-coloured cards (assets.ts). */
+html.remote-shell:not([data-theme="light"]),html.remote-shell:not([data-theme="light"]) body { background:var(--page-gradient) fixed var(--page); }
+html.remote-shell:not([data-theme="light"]) :is(.conversation,.conversation-head) { background:transparent; }
 html.remote-shell {
   --link:var(--accent);
   --accent-hover:color-mix(in srgb,var(--accent),var(--ink) 15%);
@@ -40,9 +42,20 @@ html.remote-shell[data-theme="light"] {
 .remote-page .message.pending { flex-direction:column; align-items:flex-end; gap:3px; }
 .remote-page .message.pending .bubble { opacity:.6; }
 .outbox-state { display:block; font-size:11px; color:var(--faint); text-align:end; }
-.swipe-row[aria-busy=true] { opacity:.6; } .send-btn[aria-busy=true] { cursor:progress; }
-.remote-page .text-content :is(h1,h2,h3,h4,h5,h6) { color:var(--amber); }
+.send-btn[aria-busy=true] { cursor:progress; }
 .remote-page .text-content :not(pre)>code { color:var(--accent); }
+/* The TUI's Markdown (markdown-css.ts colours it). Links underline so they read as tappable. */
+.remote-page .text-content a { color:var(--ansi-blue,var(--link)); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:2px; overflow-wrap:anywhere; }
+.remote-page .text-content .md-list { padding-inline-start:1.4em; margin:4px 0 9px; } .remote-page .text-content .md-list .md-list { margin:2px 0; }
+.remote-page .text-content ul.md-list { list-style-type:'- '; }
+.remote-page .text-content ol.md-list.md-depth-1 { list-style-type:lower-alpha; } .remote-page .text-content ol.md-list.md-depth-2 { list-style-type:lower-roman; }
+.remote-page .text-content .md-quote { margin:6px 0 9px; padding-inline-start:10px; border-inline-start:2px solid; }
+.remote-page .text-content .md-hr { border:0; border-top:1px solid; margin:12px 0; }
+.remote-page .text-content .md-table { border-collapse:collapse; } .remote-page .text-content .md-table :is(th,td) { border:1px solid; padding:4px 8px; text-align:left; }
+.remote-page .text-content .md-table .md-center { text-align:center; } .remote-page .text-content .md-table .md-right { text-align:right; }
+.remote-page .text-content .md-diagram { margin:6px 0 9px; overflow-x:auto; font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre; }
+.remote-page .text-content .md-math { font-family:ui-serif,Georgia,serif; } .remote-page .text-content div.md-math { margin:6px 0 9px; }
+.remote-page .text-content :is(h2,h3,h4,h5,h6,h7) { margin:12px 0 6px; font-size:1em; }
 .remote-page .send-btn { color:var(--btn-ink); }
 .remote-page #draft { caret-color:var(--green); }
 .remote-page .message-assistant :is(pre,code),.pair-card input { font-family:ui-monospace,Menlo,monospace; }
@@ -81,18 +94,42 @@ html.remote-shell[data-theme="light"] {
 .remote-page .message-footer { margin-top:-14px; }
 .reason-card { margin:7px 0 12px; padding:4px 10px; border-left:2px solid var(--line); color:var(--muted); font-size:14px; }
 .reason-card summary { cursor:pointer; padding-block:4px; font-weight:600; } .reason-tail,.reason-full { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; font-weight:400; }
+.reason-full.text-content { white-space:normal; color:var(--muted); font-size:14px; } .reason-full.text-content :is(p,ul,ol) { margin:0 0 6px; }
 .reason-tail { display:block; margin-top:3px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; } .reason-card[open] .reason-tail { display:none; }
 .terminal-notice { white-space:pre-wrap; overflow-wrap:anywhere; font:13px/1.5 ui-monospace,monospace; }
 /* Only the rail scrolls. The status and the separate detail button stay put. */
-.tool-activity { display:grid; grid-template-columns:14px minmax(0,1fr) 36px; align-items:center; column-gap:6px; margin:0; }
-.text-content + .tool-activity { margin-top:8px; } .tool-activity + .text-content { margin-top:8px; }
-.tool-activity::before { content:'○'; color:var(--amber); font:600 12px ui-monospace,monospace; text-align:center; }
-.tool-activity[data-state=success]::before { content:'✓'; color:var(--green); }
-.tool-activity[data-state=error]::before { content:'×'; color:var(--red); }
-.tool-rail { display:block; padding-block:3px; overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; white-space:pre; font:12.5px/20px ui-monospace,Menlo,monospace; color:var(--muted); scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+/* A tool card as in the TUI: the card fill, monospace rows, nothing wraps. The rows
+   scroll sideways as one block (like a patch); tall output scrolls inside the card. */
+.tool-activity { display:grid; grid-template-columns:minmax(0,1fr) 36px; align-items:start; margin:6px 0; border-radius:10px; background:var(--fill); }
+.text-content + .tool-activity { margin-top:10px; } .tool-activity + .text-content { margin-top:10px; }
+.tool-rail { display:block; max-height:50dvh; padding:6px 0 6px 10px; overflow:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; font:12.5px/19px ui-monospace,Menlo,monospace; color:var(--muted); scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.card-lines { width:max-content; min-width:100%; padding-inline-end:10px; }
+.card-row { white-space:pre; } .card-head { color:var(--ink); }
+.card-mark { color:var(--amber); } .tool-activity[data-state=success] .card-mark { color:var(--green); } .tool-activity[data-state=error] .card-mark { color:var(--red); }
+.tool-activity .tool-diff { margin:0 8px 8px; }
 .tool-rail:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
 .tool-details { width:36px; min-height:32px; border:0; border-radius:8px; background:transparent; color:var(--faint); font-size:16px; cursor:pointer; }
 .tool-details[aria-pressed=true] { color:var(--accent); }
+/* Write/Edit patch, the TUI's unified layout: gutter | code, rows tinted by side. */
+/* Lines never wrap: the patch scrolls sideways as one block, every row as wide as the
+   longest, and the line numbers stay pinned at the left edge while it scrolls. */
+.tool-diff { grid-column:1 / -1; margin:4px 0 6px; padding:4px 0; border-radius:8px; background:var(--fill); font:12px/18px ui-monospace,Menlo,monospace; color:var(--diff-context);
+  overflow-x:auto; overflow-y:hidden; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; touch-action:pan-x pan-y; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.diff-lines { display:grid; width:max-content; min-width:100%; }
+.diff-row { display:grid; grid-template-columns:max-content max-content; padding-inline-end:12px; background:var(--fill); }
+/* The gap lives inside the pinned cell, so scrolled code never shows between number and code. */
+.diff-num { position:sticky; left:0; z-index:1; padding-inline:8px; background:inherit; color:var(--diff-gutter); text-align:right; white-space:pre; user-select:none; -webkit-user-select:none; }
+.diff-num:empty { padding-inline:8px 0; }
+/* Once scrolled, a hairline marks where code slides under the numbers (set by phone-history.js). */
+.tool-diff[data-scrolled] .diff-num { box-shadow:inset -1px 0 var(--line); }
+.tool-diff:not(:has(.diff-num:not(:empty))) .diff-num { padding-inline-end:0; }
+.diff-code { white-space:pre; }
+.diff-row[data-kind=add] { background:var(--diff-add-bg); } .diff-row[data-kind=add] .diff-code { color:var(--diff-add-fg); }
+.diff-row[data-kind=remove] { background:var(--diff-remove-bg); } .diff-row[data-kind=remove] .diff-code { color:var(--diff-remove-fg); }
+.diff-row[data-kind=add] mark { background:var(--diff-add-word); color:inherit; }
+.diff-row[data-kind=remove] mark { background:var(--diff-remove-word); color:inherit; }
+.diff-row[data-kind=header] { background:var(--diff-header-bg); color:var(--diff-header-fg); }
+.diff-row[data-kind=ellipsis] { color:var(--diff-gutter); }
 .bg-chip,#jump { pointer-events:auto; } .bg-chip { flex:none; min-height:26px; border:0; background:transparent; color:var(--accent); padding:0; font:inherit; font-weight:600; cursor:pointer; }
 #bgPanel { width:min(92vw,560px); max-height:80dvh; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--side-bg); color:var(--ink); }
 #bgPanel::backdrop,#sessionsDrawer::backdrop { background:#0008; }
@@ -168,16 +205,29 @@ div.terminal-row { cursor:default; opacity:.7; }
 .terminal-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
 .terminal-row[data-phase=working] .terminal-status { color:var(--green); }
 .terminal-row:is([data-phase=input],[data-phase=busy]) .terminal-status { color:var(--amber); }
-.swipe-row { position:relative; overflow:hidden; border-radius:10px; touch-action:pan-y; }
-.swipe-row .terminal-row { position:relative; z-index:1; background:var(--side-bg); transition:transform .16s ease-out; }
-.swipe-row.open .terminal-row { transform:translateX(-96px); }
-/* Kept out of view until a swipe, so rounded row corners never show it. */
-.swipe-row:not(.open,.dragging) .swipe-delete { visibility:hidden; }
-.swipe-delete { position:absolute; inset:0 0 0 auto; width:96px; border:0; border-radius:0 10px 10px 0; background:var(--red,#d14343); color:#fff; font:inherit; font-weight:600; }
-.swipe-delete:disabled { opacity:.7; }
+.session-row { display:flex; align-items:center; border-radius:10px; }
+.session-row .terminal-row { flex:1; min-width:0; }
+.session-row[aria-busy=true] { opacity:.5; }
+.row-delete { flex:none; width:40px; height:40px; display:grid; place-items:center; border:0; border-radius:10px; background:transparent; color:var(--faint); cursor:pointer; }
+.row-delete svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.row-delete:active,.row-delete:focus-visible { color:var(--red); background:color-mix(in srgb,var(--red) 12%,transparent); }
+@media(hover:hover) { .row-delete:hover { color:var(--red); background:color-mix(in srgb,var(--red) 12%,transparent); } }
 .drawer-foot { gap:10px; padding:6px 6px 0; font-size:12px; color:var(--muted); }
 #drawerHost { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #transport { color:var(--amber); } #transport:empty { display:none; }
 .drawer-foot .theme-toggle { min-height:40px; padding:0 4px; border:0; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
 @media(prefers-reduced-motion:no-preference) { #sessionsDrawer[open] { animation:drawer-in .16s ease-out; } @keyframes drawer-in { from {transform:translateX(-20px);opacity:.6;} } }
 @media(max-height:480px) { .remote-page .composer-seat { padding-block:0 4px; } .remote-page .conversation-head { min-height:40px; padding-block:2px; } }
+
+/* Loading: a spinner while pairing or opening a session, placeholder rows while the list loads. */
+.spinner { width:26px; height:26px; border-radius:50%; border:2.5px solid var(--line); border-top-color:var(--accent); animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .spinner { animation-duration:2.4s; } }
+.pair-spinner { display:none; margin:0 auto 6px; }
+.pair-card:is([aria-busy=true],:has(button.primary:disabled)) .pair-spinner { display:block; }
+.pair-card:is([aria-busy=true],:has(button.primary:disabled)) { text-align:center; }
+.chat-loading { display:grid; justify-items:center; gap:12px; padding-top:28vh; color:var(--muted); font-size:14px; }
+.skeleton-row { gap:7px; cursor:default; }
+.skeleton-row i { display:block; height:11px; border-radius:6px; background:color-mix(in srgb,var(--ink) 11%,transparent); }
+.skeleton-row i + i { height:9px; opacity:.7; }
+@media(prefers-reduced-motion:no-preference) { .skeleton-row i { animation:pulse 1.2s ease-in-out infinite; } }

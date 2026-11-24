@@ -26,7 +26,6 @@ import {
 } from '../session/assistant-markdown.js'
 import { buildAssistantLines, type OutputLine } from '../render/output.js'
 import { buildOutputBlocks } from './viewmodel/output.js'
-import { terminalCanvas } from '../ui/theme/canvas.js'
 import { blocksToLines } from './viewmodel/types.js'
 
 /** Default terminal width used for wrap/table layout in shots. */
@@ -36,10 +35,10 @@ export const SHOT_COLUMNS = 100
  * Terminal canvas colours sampled from the live TUI (slate pane, not pure black).
  * Theme text colours still come from the shared chalk/theme pipeline.
  */
-export const SHOT_BG = terminalCanvas.bg
-export const SHOT_FG = terminalCanvas.fg
-export const SHOT_MUTED = terminalCanvas.muted
-export const SHOT_BORDER = terminalCanvas.border
+export const SHOT_BG = '#3f404e'
+export const SHOT_FG = '#e8e8ec'
+export const SHOT_MUTED = '#91929b'
+export const SHOT_BORDER = '#2e2f3a'
 /** Match common macOS / Cursor integrated-terminal mono stack. */
 export const SHOT_FONT =
   'Menlo, Monaco, "SF Mono", ui-monospace, "Cascadia Mono", "Segoe UI Mono", monospace'

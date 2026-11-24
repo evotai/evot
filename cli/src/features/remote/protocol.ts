@@ -1,7 +1,15 @@
 /** Display data from the selected TUI, never the underlying tool/agent DTOs. */
+/** One row of a Write/Edit patch, laid out as the TUI's unified diff on a narrow pane.
+ * `word` marks the changed tokens of a single-line edit. Older phones ignore it. */
+export interface RemoteDiffRow {
+  kind: 'add' | 'remove' | 'context' | 'ellipsis' | 'header'
+  num?: string
+  code: { text: string; word?: true }[]
+}
 export type RemoteBlock =
-  | { kind: 'text' | 'thinking'; text: string }
-  | { kind: 'tool'; text: string; state: 'pending' | 'success' | 'error' }
+  /** `html`: a text block as the TUI's Markdown lays it out (markdown/render/html.ts). Older windows omit it. */
+  | { kind: 'text' | 'thinking'; text: string; html?: string }
+  | { kind: 'tool'; text: string; state: 'pending' | 'success' | 'error'; diff?: RemoteDiffRow[] }
 export interface RemoteMessage {
   role: 'user' | 'assistant' | 'footer' | 'notice'
   text: string

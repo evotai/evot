@@ -51,43 +51,41 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.
-    return (live && !r.parked) || current || statusOnly || !r.session ? button : swipeable(button, r);
+    return (live && !r.parked) || current || statusOnly || !r.session ? button : deletable(button, r);
   }
-  // Swipe a saved row left to reveal Delete; a tap on Delete removes the session on the
-  // computer for every list. Open windows, the viewed one and status-only rows cannot be deleted here.
-  let openRow = null, removing = null;
-  function swipeable(button, r) {
+  // A trash button on each deletable row removes the session at once, on the computer and
+  // for every list. Open windows, the viewed one and status-only rows have none.
+  const removing = new Set();
+  function deletable(button, r) {
     const wrap = document.createElement('div'), remove = document.createElement('button');
-    wrap.className = 'swipe-row'; wrap.dataset.session = r.session;
-    remove.type = 'button'; remove.className = 'swipe-delete'; remove.textContent = 'Delete';
-    remove.setAttribute('aria-label', `Delete session ${r.title || r.session}`);
+    wrap.className = 'session-row'; wrap.dataset.session = r.session;
+    remove.type = 'button'; remove.className = 'row-delete'; remove.disabled = locked;
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+    remove.setAttribute('aria-label', `Delete ${r.title || 'session'}`); remove.title = 'Delete';
     wrap.append(button, remove);
-    let startX = 0, startY = 0, dx = 0, tracking = false, swiped = false;
-    const settle = (open) => { wrap.classList.toggle('open', open); button.style.transform = ''; if (open) { openRow?.classList.remove('open'); openRow = wrap; } else if (openRow === wrap) openRow = null; };
-    wrap.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' || locked) return; startX = e.clientX; startY = e.clientY; dx = 0; tracking = true; swiped = false; });
-    wrap.addEventListener('pointermove', e => {
-      if (!tracking) return;
-      const x = e.clientX - startX, y = e.clientY - startY;
-      if (!swiped && Math.abs(y) > Math.abs(x)) { tracking = false; return; }
-      if (Math.abs(x) > 8) swiped = true;
-      dx = Math.max(-96, Math.min(wrap.classList.contains('open') ? 96 : 0, x));
-      if (swiped) { wrap.classList.add('dragging'); button.style.transform = `translateX(${wrap.classList.contains('open') ? -96 + dx : dx}px)`; }
-    });
-    const end = () => { if (!tracking) return; tracking = false; wrap.classList.remove('dragging'); if (swiped) settle(wrap.classList.contains('open') ? dx < 48 : dx < -40); };
-    wrap.addEventListener('pointerup', end); wrap.addEventListener('pointercancel', end);
-    button.addEventListener('click', e => { if (swiped || wrap.classList.contains('open')) { e.stopImmediatePropagation(); e.preventDefault(); settle(false); } }, true);
     remove.onclick = async () => {
-      if (removing) return;
-      removing = r.session; remove.disabled = true; remove.textContent = 'Deleting…'; wrap.setAttribute('aria-busy', 'true');
+      if (removing.has(r.session)) return;
+      removing.add(r.session); remove.disabled = true; wrap.setAttribute('aria-busy', 'true');
       try {
         await api('/sessions/delete', { session: r.session });
         if (data) data = {...data, rows: data.rows.filter(x => x.session !== r.session), count: Math.max(0, data.count - 1)};
         error = ''; painted = ''; paint(); reload(200);
       } catch (e) {
-        error = e.message || 'Could not delete the session.'; paint(); reload(1500);
-      } finally { removing = null; }
+        wrap.removeAttribute('aria-busy'); remove.disabled = false;
+        error = e.message || 'Could not delete the session.'; painted = ''; paint(); reload(1500);
+      } finally { removing.delete(r.session); }
     };
     return wrap;
+  }
+  // Placeholder rows while the computer reads its sessions, so the list has a shape at once.
+  function skeleton() {
+    return [78, 62, 70, 54, 66].map(width => {
+      const row = document.createElement('div'), title = document.createElement('i'), meta = document.createElement('i');
+      row.className = 'terminal-row skeleton-row'; row.setAttribute('aria-hidden', 'true');
+      title.style.width = width + '%'; meta.style.width = Math.round(width / 2) + '%';
+      row.append(title, meta);
+      return row;
+    });
   }
   function paint() {
     const q = el('sessionSearch').value.trim().toLowerCase();
@@ -101,10 +99,11 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     if (askable) el('askSearch').textContent = `Ask evot: /sessions ${q}`;
     el('directoryMessage').textContent = error || (data?.unavailable ? 'A terminal is not responding; saved sessions are temporarily hidden.'
       : data?.failed ? 'Saved sessions unavailable. Retrying…' : '');
-    el('archived').textContent = rows.length || error || data?.unavailable || data?.failed ? '' : !data ? 'Loading…'
+    el('archived').textContent = rows.length || error || data?.unavailable || data?.failed || !data ? ''
       : q ? 'No matching sessions.' : 'No sessions yet.';
-    const renderKey = JSON.stringify([rows, selected(), locked]);
-    if (renderKey !== painted) { painted = renderKey; el('terminals').replaceChildren(...rows.map(row)); }
+    const loading = !data && !error;
+    const renderKey = JSON.stringify([rows, selected(), locked, loading]);
+    if (renderKey !== painted) { painted = renderKey; el('terminals').replaceChildren(...(loading ? skeleton() : rows.map(row))); }
   }
   const current = mine => mine === version && dialog.open && !document.hidden;
   async function load(mine) {
@@ -149,11 +148,10 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
   el('closeSessions').onclick = () => dialog.close();
   dialog.onclose = () => { ++version; clearTimeout(timer); data = null; };
   dialog.onclick = e => { if (e.target === dialog && e.clientX > dialog.getBoundingClientRect().right) dialog.close(); };
-  // Swipe the drawer itself left to close it. A swipe that starts on a saved row
-  // belongs to that row's Delete gesture; vertical movement is list scrolling.
+  // Swipe the drawer itself left to close it; vertical movement is list scrolling.
   let swipe = null;
   dialog.addEventListener('pointerdown', e => {
-    swipe = e.pointerType === 'mouse' || e.target.closest('.swipe-row, input, textarea, select') ? null : { x: e.clientX, y: e.clientY, dx: 0, live: false };
+    swipe = e.pointerType === 'mouse' || e.target.closest('input, textarea, select') ? null : { x: e.clientX, y: e.clientY, dx: 0, live: false };
   });
   dialog.addEventListener('pointermove', e => {
     if (!swipe) return;

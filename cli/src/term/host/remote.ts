@@ -4,7 +4,7 @@ import { getThemeScheme } from '../../ui/theme/index.js'
 import { remoteHome, sharingScope } from '../../features/remote/transport.js'
 import { manageGrants } from '../../features/remote/grants.js'
 import { openEnvironment } from '../../features/remote/environment.js'
-import { sharedConnectInvite, terminalInvite } from '../../features/remote/cloud-connect.js'
+import { sharedConnectInvite } from '../../features/remote/cloud-connect.js'
 import { isSessionIdPrefix, normalizeResumeQuery, sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
@@ -317,9 +317,10 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   async function command(args: string) {
     let status: ReturnType<typeof remoteStatus> | undefined
     const notice = (text: string) => deps.scrollback.commitLocalNotice('sys-remote', `  ${text}`)
+    // The phone picks its session from the list, so the code carries only the computer's
+    // invite: a shorter link is a smaller code. Two modules of quiet zone scan reliably.
     const showInvite = (url: string, owner: boolean) => {
-      url = terminalInvite(url, st.terminalBus!.id)
-      const qr = renderUnicodeCompact(url, { border: 4, invert: getThemeScheme() === 'light' })
+      const qr = renderUnicodeCompact(url, { border: 2, invert: getThemeScheme() === 'light' })
       notice(`Remote is on for this profile, including new windows. Scan to choose a session on your phone:\n${qr}\n  ${url}\n  /remote off hides one window. /remote shutdown in the gateway TUI stops the profile. Approve new devices in ${owner ? 'this' : 'the gateway’s'} TUI.`)
     }
     if (args === 'shutdown' && !st.remoteListener && !st.remoteOpening) {

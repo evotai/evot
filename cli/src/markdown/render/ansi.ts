@@ -42,7 +42,7 @@ const CJK_CHAR = '\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff'
 const PANGU_CJK_THEN_LATIN_RE = new RegExp(`([${CJK_CHAR}])([A-Za-z0-9])`, 'g')
 const PANGU_LATIN_THEN_CJK_RE = new RegExp(`([A-Za-z0-9])([${CJK_CHAR}])`, 'g')
 
-function applyPangu(text: string): string {
+export function applyPangu(text: string): string {
   return text
     .replace(PANGU_CJK_THEN_LATIN_RE, '$1 $2')
     .replace(PANGU_LATIN_THEN_CJK_RE, '$1 $2')
@@ -85,7 +85,7 @@ const LANG_ALIASES: Record<string, string> = {
   astro: 'html',
 }
 
-function resolveLanguage(lang: string | undefined): string | undefined {
+export function resolveLanguage(lang: string | undefined): string | undefined {
   if (!lang) return undefined
   const normalized = lang.toLowerCase()
   return LANG_ALIASES[normalized] ?? normalized
@@ -198,6 +198,13 @@ const SQL_START_RE = /^(SELECT|CREATE|INSERT|UPDATE|DELETE|WITH|ALTER|DROP|MERGE
 const DIAGRAM_ARROW_RE = /(?:[-=]{2,}>|<[-=]{2,}|[→←↑↓↗↘↙↖▲▼▶◀])/
 const DIAGRAM_BORDER_OR_SIDE_RE = /[┌└│][─┴┬\s]/
 const PLAIN_DIAGRAM_LANGUAGE = '__plain_diagram__'
+/** The language a fenced block highlights as, or null for box/arrow art the TUI shows unfenced. */
+export function codeBlockLanguage(text: string, lang: string | undefined): string | null {
+  const resolved = resolveLanguage(lang) ?? (BOX_DRAWING_RE.test(text) || DIAGRAM_ARROW_RE.test(text) ? PLAIN_DIAGRAM_LANGUAGE : 'plaintext')
+  if (resolved === PLAIN_DIAGRAM_LANGUAGE) return null
+  const aligned = alignTrailingCodeComments(text, resolved)
+  return resolved === 'plaintext' && (BOX_DRAWING_RE.test(aligned) || DIAGRAM_ARROW_RE.test(aligned)) ? null : resolved
+}
 const DIAGRAM_BRANCH_MARKER_RE = /[├└]─►/g
 
 function looksLikeSqlCode(text: string): boolean {
@@ -301,7 +308,7 @@ function alignStandaloneCodeComments(lines: string[], markers: LineCommentMarker
   return changed
 }
 
-function alignTrailingCodeComments(text: string, lang: string): string {
+export function alignTrailingCodeComments(text: string, lang: string): string {
   const markers = lineCommentMarkersForCode(lang, text)
   if (markers.length === 0) return text
 
@@ -348,7 +355,7 @@ function medianColumn(columns: number[]): number | null {
   return sorted[Math.floor(sorted.length / 2)] ?? null
 }
 
-function normalizeDiagramIndent(text: string): string {
+export function normalizeDiagramIndent(text: string): string {
   if (!BOX_DRAWING_RE.test(text)) return text
   const lines = text.split(EOL)
   const borderColumns = lines

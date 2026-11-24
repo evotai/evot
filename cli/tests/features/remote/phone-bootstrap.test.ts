@@ -4,13 +4,13 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runInNewContext } from 'node:vm'
-import { phoneAssets } from '../../../src/features/remote/assets.js'
+import { phonePage } from '../../../src/features/remote/assets.js'
 import { DeviceStore } from '../../../src/features/remote/devices.js'
 import { DeviceAccess } from '../../../src/features/remote/pairing.js'
 import { listenRemote } from '../../../src/features/remote/server.js'
 
 function embeddedClient(html: string) {
-  const matches = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]+?)<\/script>/g)]
+  const matches = [...html.matchAll(/<script data-cfasync="false">([\s\S]+?)<\/script>/g)]
   expect(matches).toHaveLength(1)
   return matches[0]![1]!
 }
@@ -28,11 +28,21 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(csp).not.toMatch(/unsafe-(inline|eval)/)
     expect(csp).toContain("form-action 'none'")
     expect(r.headers.get('cache-control')).toContain('no-transform')
+    // One fetch paints the page: styles and scripts are inline and hashed, nothing loads from 'self'.
+    expect(html).not.toMatch(/<link\b|<script\b[^>]*\bsrc=/)
+    for (const [, body] of html.matchAll(/<(?:script|style)\b[^>]*>([\s\S]*?)<\/(?:script|style)>/g))
+      expect(csp).toContain(`'sha256-${createHash('sha256').update(body!).digest('base64')}'`)
+    expect(csp).not.toContain("'self'; style-src 'self'")
+    const zipped = await fetch(gateway.address, { headers: { 'accept-encoding': 'gzip' }, decompress: false } as RequestInit)
+    expect(zipped.headers.get('content-encoding')).toBe('gzip')
+    expect(Number(zipped.headers.get('content-length'))).toBeLessThan(html.length / 2)
+    const again = await fetch(gateway.address, { headers: { 'if-none-match': r.headers.get('etag')! } })
+    expect(again.status).toBe(304)
   } finally { gateway.close(); rmSync(dir, {recursive:true,force:true}) }
 })
 
 test('a browser blocking tab storage shows a recovery action instead of a dead Connect button', async () => {
-  const client = embeddedClient(phoneAssets.get('/')![1])
+  const client = embeddedClient(phonePage.html)
   const status = {textContent:''}, button = {disabled:true,textContent:'Loading…',onclick:()=>{}}, loc = {hash:'',reload(){reloaded = true}}
   let reloaded = false
   runInNewContext(client, { document:{getElementById:()=>status,querySelector:()=>button},

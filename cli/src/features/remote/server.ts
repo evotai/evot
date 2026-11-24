@@ -1,4 +1,4 @@
-import { phoneAssets, phoneScriptHash } from './assets.js'
+import { phonePage, phoneScriptHash, phoneStyleHash } from './assets.js'
 import { stateStream } from './state-stream.js'
 import { validTerminal } from './discovery.js'
 import { DeviceAccess } from './pairing.js'
@@ -26,7 +26,7 @@ export function listenRemote(
     'Cache-Control': 'no-store, no-transform',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
-    'Content-Security-Policy': `default-src 'none'; script-src 'self' ${phoneScriptHash}; connect-src 'self'; style-src 'self'; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    'Content-Security-Policy': `default-src 'none'; script-src ${phoneScriptHash}; connect-src 'self'; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
   const handler = {
@@ -46,10 +46,15 @@ export function listenRemote(
       )
         return fail(403, 'Forbidden')
       const url = new URL(req.url),
-        path = url.pathname,
-        asset = phoneAssets.get(path)
-      if (req.method === 'GET' && asset)
-        return new Response(asset[1], { headers: { ...headers, 'Content-Type': `${asset[0]}; charset=utf-8` } })
+        path = url.pathname
+      if (req.method === 'GET' && path === '/') {
+        // The page is static; revalidate it (304) and send it compressed. no-transform stays:
+        // the tunnel must not rewrite it, so the compression is ours.
+        const page = { ...headers, 'Cache-Control': 'no-cache, no-transform', ETag: phonePage.etag, Vary: 'Accept-Encoding' }
+        if (req.headers.get('if-none-match') === phonePage.etag) return new Response(null, { status: 304, headers: page })
+        const gzip = /\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')
+        return new Response(gzip ? phonePage.gzip : phonePage.html, { headers: { ...page, 'Content-Type': 'text/html; charset=utf-8', ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) } })
+      }
       const enrollment = ['/device/challenge', '/device/prove', '/device/poll'].includes(path)
       if (!enrollment && !['/state', '/action', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
       const auth = req.headers.get('authorization'),

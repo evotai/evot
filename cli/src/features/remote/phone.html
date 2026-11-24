@@ -10,13 +10,15 @@
     <button id="newSession" class="icon-button" type="button" aria-label="New session" title="New session" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M11 13l1-4 7-7 3 3-7 7z"/></svg></button>
   </header>
   <section id="pair-screen"><form id="pair" class="pair-card">
+    <div class="spinner pair-spinner" aria-hidden="true"></div>
     <h2>Connect to your computer</h2><p>Approve this browser in the evot TUI to access sessions in this profile, including windows opened later.</p>
-    <output id="deviceStatus" aria-live="polite">Loading the connection page… If this message stays, reload the page in Safari or Chrome with JavaScript enabled.</output>
+    <output id="deviceStatus" aria-live="polite">Opening the connection page…</output><noscript><p>Enable JavaScript, or open the invite in Safari or Chrome.</p></noscript>
     <strong id="approvalCode" hidden></strong><small id="approvalClock" hidden></small>
     <button class="primary" type="submit" disabled>Loading…</button>
   </form></section>
   <section id="pickSession" hidden><h2>Your computer is connected</h2><p>Choose a session to follow its terminal window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
   <div class="chat-scroll" id="chat" hidden>
+    <div class="chat-loading" id="chatLoading" role="status" hidden><div class="spinner" aria-hidden="true"></div><span>Opening session…</span></div>
     <div class="welcome" id="welcome"><h2>What can I help you build?</h2>
       <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain this codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run relevant tests</button></div>
     </div><div id="history" aria-label="Recent conversation"></div><div id="outbox" aria-live="polite"></div><form id="questions" class="question-card" hidden></form>

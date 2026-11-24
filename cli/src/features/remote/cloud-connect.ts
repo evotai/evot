@@ -57,12 +57,6 @@ function environmentId(uid: string, secret: string) {
 function connectInviteUrl(base: string, env: string) {
   return base === 'https://auto.evot.ai' ? `https://connect.evot.ai/${env}` : `${base}/connect?env=${env}`
 }
-export function terminalInvite(invite: string, terminal: string) {
-  const url = new URL(invite)
-  if (url.origin === 'https://connect.evot.ai') url.pathname += '/' + terminal
-  else url.searchParams.set('terminal', terminal)
-  return url.href
-}
 // A sibling TUI on the same profile can display the same public invite without
 // registering again, obtaining a connector token or changing the live gateway.
 export function sharedConnectInvite(home: string, scope: string, account: string) {

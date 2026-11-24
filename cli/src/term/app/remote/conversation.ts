@@ -1,5 +1,7 @@
 import { stripVTControlCharacters } from 'node:util'
-import type { RemoteBlock, RemoteMessage } from '../../../features/remote/protocol.js'
+import type { RemoteBlock, RemoteDiffRow, RemoteMessage } from '../../../features/remote/protocol.js'
+import { colorizeUnifiedDiffRows } from '../../../render/diff.js'
+import { markdownToHtml } from '../../../markdown/render/html.js'
 import type { UIAssistantBlock, UIMessage } from '../../../render/message-types.js'
 import { assistantContentToOutputLines } from '../../../render/assistant.js'
 import { hasReasoningContent } from '../../../render/output.js'
@@ -19,42 +21,83 @@ const cards = [
   new WeakMap<UIAssistantBlock, RemoteBlock | null>(),
   new WeakMap<UIAssistantBlock, RemoteBlock | null>(),
 ] as const
+const MAX_DIFF_ROWS = 400
+// SGR 48 opens a background (the word-level fill), 49 or a reset closes it.
+function codeSegments(styled: string): RemoteDiffRow['code'] {
+  const out: RemoteDiffRow['code'] = []
+  let word = false
+  const parts = styled.split(/\x1b\[([\d;]*)m/)
+  parts.forEach((part, index) => {
+    if (index % 2) {
+      const codes = part.split(';')
+      if (codes[0] === '48') word = true
+      else if (codes.includes('49') || codes.includes('0') || part === '') word = false
+      return
+    }
+    const text = displayText(part.replace(/\t/g, '    '))
+    if (!text) return
+    const last = out.at(-1)
+    if (last && !!last.word === word) last.text += text
+    else out.push(word ? { text, word: true } : { text })
+  })
+  return out
+}
+/** The TUI's own unified rows (no signs, as on a narrow pane), bounded for the wire. */
+export function diffRows(patch: string, gutter = 0): RemoteDiffRow[] {
+  const rows = colorizeUnifiedDiffRows(patch, false, gutter)
+  const shown = rows.slice(0, MAX_DIFF_ROWS).map((row): RemoteDiffRow => {
+    const num = row.gutter ? displayText(row.gutter).trimEnd() : undefined
+    const code = codeSegments(row.code ?? row.text)
+    // Header and separator rows carry the TUI's two-column indent; the phone's grid supplies its own.
+    if ((row.kind === 'header' || row.kind === 'ellipsis') && code[0]) code[0].text = code[0].text.trimStart()
+    return { kind: row.kind, ...(num !== undefined ? { num } : {}), code }
+  })
+  if (rows.length > shown.length) shown.push({ kind: 'ellipsis', code: [{ text: `… ${rows.length - shown.length} more lines in the TUI` }] })
+  return shown
+}
 function toolCard(block: UIAssistantBlock, expanded: boolean): RemoteBlock | null {
   const cache = cards[expanded ? 1 : 0],
     cached = cache.get(block)
   if (cached !== undefined) return cached
   const lines = assistantContentToOutputLines([block], expanded),
     state = lines[0]?.toolCard?.state
-  // ask_user, for example, owns its question UI instead of a card.
-  const text = lines.map((l) => displayText(l.text)).join('\n')
+  // ask_user, for example, owns its question UI instead of a card. A Write/Edit
+  // patch travels as rows, so the phone can lay it out the way the TUI does.
+  const text = lines.filter((l) => l.diffText === undefined).map((l) => displayText(l.text)).join('\n')
+  const diff = lines.flatMap((l) => (l.diffText !== undefined ? diffRows(l.diffText, l.diffGutter) : []))
   const card: RemoteBlock | null = state
-    ? { kind: 'tool', state, text: text.length <= MAX_TEXT ? text : text.slice(0, 3072) + '\n…\n' + text.slice(-5115) }
+    ? { kind: 'tool', state, text: text.length <= MAX_TEXT ? text : text.slice(0, 3072) + '\n…\n' + text.slice(-5115),
+        ...(diff.length ? { diff } : {}) }
     : null
   cache.set(block, card)
   return card
 }
 export function assistantRow(content: readonly UIAssistantBlock[], expanded = false): RemoteMessage | null {
   const blocks: RemoteBlock[] = [],
-    budget = { text: MAX_TEXT, thinking: MAX_TEXT, tool: MAX_TEXT * 2 }
+    budget = { text: MAX_TEXT, thinking: MAX_TEXT, tool: MAX_TEXT * 2, diff: MAX_TEXT * 3 }
   for (const b of [...content].sort((a, b) => b.contentIndex - a.contentIndex)) {
     if (blocks.length === 32) break
     if (b.type === 'tool_call') {
       if (budget.tool <= 0) continue
       const card = toolCard(b, expanded)
-      if (card) {
-        blocks.push(card)
+      if (card?.kind === 'tool') {
+        // Patches have their own budget; past it, older cards keep their header only.
+        const size = card.diff ? JSON.stringify(card.diff).length : 0
+        if (size && size > budget.diff) { const { diff: _, ...bare } = card; blocks.push(bare) }
+        else { blocks.push(card); budget.diff -= size }
         budget.tool -= card.text.length
       }
     } else if (budget[b.type] > 1 && (b.type === 'thinking' ? hasReasoningContent(b.text) : b.text.trim())) {
       const text = boundedText(b.text, budget[b.type])
       budget[b.type] -= text.length
-      blocks.push({ kind: b.type, text })
+      // Reasoning is Markdown too: the TUI renders it with the same renderer (renderThinkingMarkdown).
+      blocks.push({ kind: b.type, text, html: markdownToHtml(text) })
     }
   }
   if (!blocks.length) return null
   blocks.reverse()
   const text = blocks.flatMap((b) => (b.kind === 'text' ? [b.text] : [])).join('\n')
-  return blocks.some((b) => b.kind !== 'text') ? { role: 'assistant', text, blocks } : { role: 'assistant', text }
+  return { role: 'assistant', text, blocks }
 }
 
 export class ConversationTail {

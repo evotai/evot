@@ -4,13 +4,17 @@ function safeHref(href) { return /^(https?:\/\/|mailto:)[^\s"'<>]+$/i.test(href)
 function emphasis(text) {
   return escape(text).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*\w])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/~~([^~]+)~~/g, '<del>$1</del>');
 }
+const anchor = (href, html) => '<a href="' + escape(href) + '" target="_blank" rel="noopener noreferrer">' + html + '</a>';
 function inline(text) {
   // Tokenize first: never run a text replacement across generated HTML/attributes.
+  // A bare web address is a link too, as the terminal shows it; trailing punctuation is prose.
   let html = '', start = 0;
-  for (const match of text.matchAll(/`([^`]+)`|\[([^\]\n]*)\]\(([^)\s]+)\)/g)) {
+  for (const match of text.matchAll(/`([^`]+)`|\[([^\]\n]*)\]\(([^)\s]+)\)|<?(https?:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}*~])>?/g)) {
     html += emphasis(text.slice(start, match.index));
-    html += match[1] !== undefined ? '<code>' + escape(match[1]) + '</code>'
-      : safeHref(match[3]) ? '<a href="' + escape(match[3]) + '" target="_blank" rel="noopener noreferrer">' + emphasis(match[2] || match[3]) + '</a>' : escape(match[0]);
+    if (match[1] !== undefined) html += '<code>' + escape(match[1]) + '</code>';
+    else if (match[4] !== undefined) html += safeHref(match[4]) ? anchor(match[4], escape(match[4])) : escape(match[0]);
+    else if (!safeHref(match[3])) html += escape(match[0]);
+    else html += anchor(match[3], emphasis(match[2] || match[3]));
     start = match.index + match[0].length;
   }
   return html + emphasis(text.slice(start));

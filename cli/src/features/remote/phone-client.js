@@ -106,6 +106,7 @@ function paired(yes) {
     $('welcome').hidden = true;
     background.render(null);
     $('threadTitle').textContent = 'Opening session…';
+    $('chatLoading').hidden = false;
     $('status').textContent = 'Waiting for the first live update…';
   }
   if (yes && !terminal) {
@@ -219,6 +220,7 @@ function render(s, mode) {
     $('draft').value = ''; $('draft').rows = 1; questions(null);
   }
   connected = true;
+  $('chatLoading').hidden = true;
   const chat = $('chat'),
     follow = !view || chat.scrollHeight - chat.scrollTop - chat.clientHeight < 64;
   view = s;
@@ -676,6 +678,7 @@ paired(!!token);
 const connectButton = $('pair').querySelector('button');
 connectButton.textContent = 'Connect';
 connectButton.disabled = false;
+$('deviceStatus').textContent = 'Tap Connect to ask your computer for access.';
 if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(!returnTicket && !invitedTerminal);
 else if (token && !terminal) drawer.open();
 else void refresh();
