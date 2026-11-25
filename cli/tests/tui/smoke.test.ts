@@ -342,6 +342,18 @@ async function startEvot(
   }
 }
 
+async function approveRemoteDevice(session: Session, address: string) {
+  const device = await pendingDevice(address)
+  expect(await device.poll()).toEqual({ pending: true })
+  // The TUI prefills the command; typing it again appends to the draft.
+  await session.waitForScreen(`/remote approve ${device.code}`)
+  session.write('\r')
+  await session.waitForScreen('Device approved.')
+  const { token } = await device.poll()
+  expect(typeof token).toBe('string')
+  return { key: device.key, token }
+}
+
 describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
   test('/new drops the share badge of the session it leaves', async () => {
     const session = await startEvot(true, false, false, undefined, state => {
@@ -1951,7 +1963,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     }
   }, 60_000)
 
-  test('connection interruption stays quiet until a second failed attempt', async () => {
+  test('repeated connection interruptions appear only in the spinner', async () => {
     let requests = 0
     const secondStarted = Promise.withResolvers<void>()
     const releaseSecond = Promise.withResolvers<void>()
@@ -1987,8 +1999,11 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(first).not.toContain('Connection interrupted')
       expect(first).not.toContain('llm  retry')
       releaseSecond.resolve()
-      await session.waitFor('Connection interrupted')
+      await session.waitForScreen('Connection interrupted · retrying')
       await session.waitFor('Connection recovered.')
+      const settled = await session.waitForScreen(/Enter a coding task|⇥ next · → accept/)
+      expect(settled).not.toContain('Connection interrupted')
+      expect(stripAnsi(session.outputSince())).not.toMatch(/✦ llm\s+(?:smoke-model|retry)/)
       expect(requests).toBe(3)
     } finally {
       releaseSecond.resolve()
@@ -2028,10 +2043,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const match = invite.exec(await session.waitFor(invite))!
       const address = match[1]!, headers: Record<string,string> = {origin:address, 'Content-Type':'application/json'}
       const post = (path:string, body:unknown) => fetch(address+path, {method:'POST', headers, body:JSON.stringify(body)})
-      const device=await pendingDevice(address); expect(await device.poll()).toEqual({pending:true})
-      session.write(`/remote approve ${device.code}\r`); await session.waitForScreen('Device approved.')
-      const token=(await device.poll()).token
-      headers.Authorization = `Bearer ${token}`
+      const device = await approveRemoteDevice(session, address)
+      headers.Authorization = `Bearer ${device.token}`
       const state = async () => {
         const res = await fetch(address + '/state', { headers, cache:'no-store' })
         if (!res.ok) throw new Error(`State unavailable: ${res.status}`)
@@ -2072,7 +2085,9 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await session.waitForScreen(/Enter a coding task|⇥ next · → accept/)
       const finishedRows = (await state()).messages
       const steps = finishedRows.flatMap(row => row.blocks ?? [])
-      expect(steps.filter(b => b.kind === 'thinking')).toEqual([{kind:'thinking',text:'Checking fixture scope.'}])
+      expect(steps.filter(b => b.kind === 'thinking')).toEqual([
+        expect.objectContaining({ kind: 'thinking', text: 'Checking fixture scope.' }),
+      ])
       expect(steps.find(b=>b.kind==='tool')).toBeUndefined()
       expect(finishedRows.find(r=>r.role==='notice')?.text).toContain('Phone answer')
       expect(callModels).toEqual(['smoke-model','smoke-other-model'])
@@ -2080,9 +2095,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect((await post('/action', {kind:'send', generation:first.generation, text:'Ask a second time'})).status).toBe(204)
       await session.waitForScreen('Second question?')
       const second = await state(); expect(second.sessionId).toBe(first.sessionId); expect(second.generation).not.toBe(first.generation)
-      expect((await post('/action', {kind:'stop', generation:first.generation})).status).toBe(409)
-      expect((await post('/action', {kind:'stop', generation:second.generation})).status).toBe(204)
-      await session.waitForScreen('Interrupted from phone.')
+      const interrupt = {kind:'interrupt-ask', id:second.ask!.id, generation:second.generation}
+      expect((await post('/action', {...interrupt, generation:first.generation})).status).toBe(409)
+      expect((await post('/action', interrupt)).status).toBe(204)
+      await session.waitForScreen('Cancelled.')
       const stopped = await state(); expect(stopped).toMatchObject({status:'Stopped', input:'send', ask:null})
       session.checkpoint(); session.write('/new\r'); await session.waitForScreen(/^\s*new session\s*$/m)
       expect(await state()).toMatchObject({sessionId:null, messages:[], input:'send'})
@@ -2148,9 +2164,8 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       session = await startEvot(false, false, false, `http://127.0.0.1:${server.port}/v1`)
       session.write('/remote\r')
       const invite=/gateway: (http:\/\/127\.0\.0\.1:\d+)/
-      const [,address]=invite.exec(await session.waitFor(invite))!
-      const device=await pendingDevice(address!); session.write(`/remote approve ${device.code}\r`); await session.waitForScreen('Device approved.')
-      const {token}=await device.poll()
+      const address = invite.exec(await session.waitFor(invite))![1]!
+      const { token } = await approveRemoteDevice(session, address)
       const snapshot=async (task?:string)=>(await (await fetch(address+'/state',{headers:{authorization:'Bearer '+token,...(task?{'x-evot-background':task}:{})}})).json()) as import('../../src/features/remote/protocol.js').RemoteSnapshot
       session.write('start a background task\x0d')
       await session.waitFor('1 background shell running')

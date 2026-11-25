@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import stripAnsi from 'strip-ansi'
-import { createSpinnerState } from '../../../src/term/widgets/spinner.js'
+import { createSpinnerState, spinnerDescription } from '../../../src/term/widgets/spinner.js'
 import { createInitialState } from '../../../src/term/app/run/state.js'
 import { createStreamMachineState, reduceRunEvent, finishStreaming, flushStreaming } from '../../../src/term/app/run/stream.js'
 import { buildToolCard } from '../../../src/render/output.js'
@@ -1225,26 +1225,39 @@ describe('term stream machine', () => {
     expect(completedText).not.toContain('applying changes')
   })
 
-  test('llm retry renders as a visible card with backoff and error', () => {
-    const appState = createInitialState('model', '/tmp')
-    const spinner = createSpinnerState()
-    const state = createStreamMachineState(appState, spinner)
-    const update = reduceRunEvent(state, {
-      kind: 'llm_call_retry',
-      payload: {
-        attempt: 1,
-        max_retries: 3,
-        retry_delay_ms: 1200,
-        error: 'network error',
-      },
-    }, { termRows: 24 })
-    expect(update.commitLines).toEqual([])
-    // Held until the retry settles; the end of the run releases it.
-    const ended = reduceRunEvent(update.state, { kind: 'error', payload: { message: 'network error' } }, { termRows: 24 })
-    const text = ended.commitLines.map(l => l.text).join('\n')
-    expect(text).toContain('✦ llm  retry')
-    expect(text).toContain('\u21bb \u00b7 retrying in 1 second \u00b7 attempt 1/3')
-    expect(text).toContain('Connection interrupted')
+  test('repeated connection failures update only the spinner and diagnostics', () => {
+    const ctx = { termRows: 24 }
+    const error = 'Network error: connection reset by peer'
+    let state = createStreamMachineState(createInitialState('model', '/tmp'), createSpinnerState())
+    for (const attempt of [1, 2, 3]) {
+      const partial = reduceRunEvent(state, {
+        kind: 'assistant_delta',
+        payload: { content_index: 0, content_type: 'text', delta: 'incomplete reply' },
+      }, ctx)
+      const failed = reduceRunEvent(partial.state, {
+        kind: 'llm_call_completed',
+        payload: { model: 'model', turn: 1, attempt: attempt - 1, error, metrics: { duration_ms: 10 } },
+      }, ctx)
+      const retry = reduceRunEvent(failed.state, {
+        kind: 'llm_call_retry',
+        payload: { turn: 1, attempt, max_retries: 3, delay_ms: 2000, error },
+      }, ctx)
+      expect([...failed.commitLines, ...retry.commitLines, ...retry.noticeLines]).toEqual([])
+      expect(failed.writeLines.map(l => l.text).join('\n')).toContain(error)
+      expect(retry.writeLines.map(l => l.text).join('\n')).toContain('Discarded an incomplete reply')
+      state = retry.state
+      expect(state.appState.currentAssistantContent).toEqual([])
+      expect(state.deferredRetry).toBeNull()
+      expect(spinnerDescription(state.spinnerState, state.spinnerState.phaseStartedAt).label)
+        .toBe(attempt === 1 ? 'Waiting for model…' : `Connection interrupted · retrying in 2s · attempt ${attempt}/3`)
+    }
+    const waiting = reduceRunEvent(state, { kind: 'outage_waiting', payload: { delay_ms: 60_000, error } }, ctx)
+    expect(waiting.commitLines).toEqual([])
+    expect(spinnerDescription(waiting.state.spinnerState, waiting.state.spinnerState.phaseStartedAt).label)
+      .toBe('Unable to connect · retrying in 60s')
+    const ended = reduceRunEvent(waiting.state, { kind: 'error', payload: { message: error } }, ctx)
+    expect(ended.commitLines.map(l => l.text)).toEqual(['Error: Connection interrupted'])
+    expect(finishStreaming(ended.state).lines).toEqual([])
   })
 
   test('llm stats route to writeLines (screen.log only), not commitLines', () => {
@@ -1498,26 +1511,18 @@ describe('term stream machine', () => {
     expect(logged.join('\n')).toContain(err)
   })
 
-  test('a user stop during the first connection backoff stays quiet but a broken stream shows the failure', () => {
-    const err = 'Network error: connection reset by peer'
-    let state = createStreamMachineState(createInitialState('m', '/tmp'), createSpinnerState())
-    state = reduceRunEvent(state, {
-      kind: 'llm_call_completed',
-      payload: { model: 'm', turn: 1, attempt: 0, error: err, metrics: { duration_ms: 10 } },
-    }, { termRows: 24 }).state
-    state = reduceRunEvent(state, {
-      kind: 'llm_call_retry',
-      payload: { turn: 1, attempt: 1, max_retries: 10, delay_ms: 2000, error: err },
-    }, { termRows: 24 }).state
-    const interrupted = finishStreaming(state, true)
-    expect(interrupted.lines).toEqual([])
-    expect(interrupted.state.deferredRetry).toBeNull()
-
-    const flushed = finishStreaming(state)
-    const text = flushed.lines.map(l => stripAnsi(l.text)).join('\n')
-    expect(text).toContain('Connection interrupted')
-    expect(text).toContain('✦ llm  retry')
-    expect(flushed.state.deferredRetry).toBeNull()
+  test('a user stop during connection backoff stays quiet but a broken stream leaves a plain error', () => {
+    const ctx = { termRows: 24 }
+    const initial = createStreamMachineState(createInitialState('m', '/tmp'), createSpinnerState())
+    const started = reduceRunEvent(initial, { kind: 'run_started', payload: {} }, ctx)
+    const retry = reduceRunEvent(started.state, {
+      kind: 'api_retry',
+      payload: { attempt: 2, max_retries: 10, retry_delay_ms: 2000, error: 'Network error: connection reset by peer' },
+    }, ctx)
+    expect(retry.commitLines).toEqual([])
+    expect(retry.state.spinnerState.phase).toBe('retrying')
+    expect(finishStreaming(retry.state, true).lines).toEqual([])
+    expect(finishStreaming(retry.state).lines.map(l => l.text)).toEqual(['Error: Connection interrupted'])
   })
 
   test('a recovered call keeps reporting its own errors', () => {

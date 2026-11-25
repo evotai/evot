@@ -10,7 +10,7 @@
 
 import { MODEL_SWITCH_TOOL, modelSwitchRoute, modelSwitchTarget, modelSwitchText } from './model-switch.js'
 import type { PrivacyLiveFinding, SavedPrivacyCard } from '../native/contracts/privacy.js'
-import { providerFailurePresentation } from './provider-error.js'
+import { classifyProviderFailure, providerFailurePresentation } from './provider-error.js'
 import { parsePrivacyStop, privacyActionLabel, privacyCard, privacyFindingRows, type PrivacyCard, type PrivacyDetail, type PrivacyStop } from './privacy-notice.js'
 import { renderMarkdown, renderThinkingMarkdown } from './markdown.js'
 import { colorizeUnifiedDiffRows, type DiffRowKind } from './diff.js'
@@ -803,12 +803,11 @@ export function buildVerboseEvent(eventText: string): OutputLine[] {
   }))
 }
 
-/** True for events that must always reach the TUI: LLM errors/retries,
- *  significant prompt-cache misses, and compactions that actually changed
- *  context. Per-call/no-op stats remain in screen.log only. */
+/** Whether an event can become a scrollback card. Connection attempts belong
+ * to live status and diagnostics, not the conversation. */
 export function isVisibleEvent(text: string): boolean {
-  return /^\[LLM\]\s+[↻✗⚠]/u.test(text)
-    || /^\[COMPACT\]\s+✓\s+·\s+(?!skipped\b)/u.test(text)
+  if (/^\[LLM\]\s+[↻✗]/u.test(text)) return classifyProviderFailure(errorTailOf(text) ?? '') !== 'connection'
+  return /^\[LLM\]\s+⚠/u.test(text) || /^\[COMPACT\]\s+✓\s+·\s+(?!skipped\b)/u.test(text)
 }
 
 /**
@@ -1080,6 +1079,12 @@ export function messagesToOutputLines(messages: UIMessage[], expanded: boolean =
         const isRetry = evt.kind === 'llm_retry'
         const isFailedCall = evt.kind === 'llm_completed' && /^\[LLM\]\s+✗/u.test(evt.text)
         if (isRetry || isFailedCall) {
+          // Spinner-only attempts never claim the visible retry slot. A
+          // failed completion can still settle an earlier, unrelated retry.
+          if (!isVisibleEvent(evt.text)) {
+            if (isFailedCall) release()
+            continue
+          }
           if (heldRetry) {
             release()
             continue

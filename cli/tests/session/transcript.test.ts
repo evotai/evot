@@ -294,7 +294,7 @@ describe('transcript conversion', () => {
     expect(rendered).toContain('turn 29')
   })
 
-  test('a one-off failure the retry recovered from is not replayed', () => {
+  test('connection retries are not replayed, even after repeated failures', () => {
     // In-memory messages close on the reply, so the recovered attempt's `✓`
     // lands on the next message; the reply itself is the evidence.
     const err = 'Network error: connection reset by peer'
@@ -311,12 +311,23 @@ describe('transcript conversion', () => {
     expect(recovered).not.toContain('Connection interrupted')
     expect(recovered).not.toContain('✦ llm  retry')
 
-    // The same attempt failing again shows the pair once.
-    const failedAgain = messagesToOutputLines([{
+    const failedAgain = {
       id: 'a1', role: 'assistant' as const, text: '', timestamp: 0,
-      verboseEvents: [...events, { kind: 'llm_completed' as const, text: `[LLM] ✗ · claude-opus-5.5 · turn 33 · 1.0s\n    error     ${err}` }],
-    }]).map(line => line.text).join('\n')
-    expect(failedAgain.split('Connection interrupted').length - 1).toBe(1)
-    expect(failedAgain.split('✦ llm  retry').length - 1).toBe(1)
+      verboseEvents: [
+        ...events,
+        { kind: 'llm_completed' as const, text: `[LLM] ✗ · claude-opus-5.5 · turn 33 · 1.0s\n    error     ${err}` },
+        { kind: 'llm_retry' as const, text: `[LLM] ↻ · retrying in 3 seconds · attempt 2/10\n    error     ${err}` },
+      ],
+    }
+    expect(messagesToOutputLines([failedAgain])).toEqual([])
+    expect(messagesToOutputLines([failedAgain], true)).toEqual([])
+
+    // A different provider failure still gets its usual card.
+    const gatewayFailure = { kind: 'llm_completed' as const, text: '[LLM] ✗ · claude-opus-5.5 · turn 33 · 1.0s\n    error     API error: HTTP 500' }
+    const mixed = messagesToOutputLines([{ ...failedAgain, verboseEvents: [...failedAgain.verboseEvents, gatewayFailure] }])
+      .map(line => line.text).join('\n')
+    expect(mixed).toContain('Gateway error, not the model provider')
+    expect(mixed).not.toContain('Connection interrupted')
+    expect(mixed).not.toContain('✦ llm  retry')
   })
 })
