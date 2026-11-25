@@ -5,7 +5,7 @@ import { readOutputTail } from './app/run/output-tail.js'
 import { TerminalInputBuffer } from './input/buffer.js'
 import { forkNotice } from './app/session/fork-nav.js'
 import { isBackgroundSelector, SELECTOR_OWNER } from '../ui/selector-identity.js'
-import { type AskQuestion } from './widgets/ask.js'
+import { type AskQuestion } from '../ui/ask.js'
 import { buildPrivacyCard, type OutputLine } from '../render/output.js'
 import { createHyperlink } from '../ui/hyperlink.js'
 import { renderErrorNotice } from '../ui/command-notice.js'
@@ -217,7 +217,8 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get renderDiagnostics() { return renderDiagnostics },
     get replCommands() { return replCommands },
     get restartAfterCleanup() { return restartAfterCleanup },
-      get buildImageContentBlocks() { return buildImageContentBlocks },
+    get allocPasteId() { return pasteStore.allocId },
+    get buildImageContentBlocks() { return buildImageContentBlocks },
     get getDisplayText() { return composer.getDisplayText },
     get getExpandedText() { return composer.getExpandedText },
     get getHistoryText() { return composer.getHistoryText },
@@ -308,7 +309,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     getDispatch: () => st.queueDispatchId,
     setDispatch: id => { st.queueDispatchId = id },
     consumed: entries => {
-      for (const entry of entries) scrollback.commitUserMessage(entry.text)
+      for (const entry of entries) scrollback.commitUserMessage(entry.text, entry.contentJson ? entry.phoneDraftId : undefined)
       const edit = st.queueEditState
       if (edit && entries.some(entry => entry.id === edit.entry.id)) edit.consumed = true
       renderer.requestRender()

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { InterruptConfirmation } from '../../../src/term/app/run/interrupt-confirmation.js'
+import { InterruptConfirmation } from '../../src/ui/interrupt-confirmation.js'
 
 test('confirmation requires two presses for the same live operation within five seconds', () => {
   let now = 100

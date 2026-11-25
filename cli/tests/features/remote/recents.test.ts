@@ -7,14 +7,22 @@ import { profileKey, registerTerminal, type SessionBadge } from '../../../src/fe
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
 test('the one session list keeps gateway order and appends status-only windows unless searching', () => {
-  const now = Date.UTC(2026, 8, 18), stamp = (minutes:number) => now - minutes * 60000
+  const now = new Date(2026, 8, 18, 12).getTime(), stamp = (minutes:number) => now - minutes * 60000
   const rows = [ {session:'working', phase:'working', updated:new Date(stamp(4)).toISOString()}, {session:'saved', updated:new Date(stamp(90)).toISOString()} ]
   const data = { rows, privateWindows:[{phase:'idle', updatedAt:now}] }
   const listed = directoryRows(data, '', now)
   expect(listed.map((r: {session?:string}) => r.session)).toEqual(['working', 'saved', undefined])
-  expect(listed[0]).toMatchObject({age:'4m ago'})
-  expect(listed[2]).toMatchObject({kind:'private', title:'Older evot window', age:'now'})
+  expect(listed[0].age).toMatch(/^Today · .+/)
+  expect(listed[2]).toMatchObject({kind:'private', title:'Older evot window', age:expect.stringMatching(/^Today · .+/)})
   expect(directoryRows(data, 'work', now)).toHaveLength(2)
+})
+
+test('calendar labels use local midnight (including year boundaries), not rolling 24-hour periods', () => {
+  const now = new Date(2027,0,1,0,2).getTime(), older = new Date(2026,11,30,16)
+  const rows = [{updatedAt:now}, {updated:new Date(now-5*60000).toISOString()}, {updated:older.toISOString()}, {updated:'unknown'}]
+  const labels = directoryRows({rows}, 'query', now).map(r => r.age)
+  expect(labels[0]).toMatch(/^Today · /); expect(labels[1]).toMatch(/^Yesterday · /)
+  expect(labels[2]).toBe(new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(older)); expect(labels[3]).toBe('')
 })
 
 test('an idle window the phone opened reads as a saved session; a busy one and a local one stay open', () => {
@@ -29,6 +37,14 @@ test('an idle window the phone opened reads as a saved session; a busy one and a
   // Still followable: tapping a parked row attaches to its window instead of starting another.
   expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
   expect(page.online).toHaveLength(4)
+})
+
+test('blank first-run metadata does not hide the live opening title in Sessions or search', () => {
+  const window = { terminal: 'phone', session: 's', workspace: 'w', phase: 'working' as const, title: 'Plan the migration' }
+  const saved = { session_id: 's', cwd: '/w', turns: 0 } as SessionMeta
+  const page = phoneCatalog([saved], [window], { limit: 10, query: 'migration' })
+  expect(page.rows[0]?.title).toBe(window.title)
+  expect(page.online[0]?.title).toBe(window.title)
 })
 
 test('sorts saved metadata before taking the first page', async () => {

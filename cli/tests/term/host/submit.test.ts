@@ -17,10 +17,10 @@ function harness(text = 'B') {
   } as ReplState
   const history: string[] = [], notices: string[] = [], calls: string[] = []
   const logQueries: { text: string; contentJson?: string }[] = [], queries: { text: string; contentJson?: string }[] = []
-  let imageReady = false
+  let imageReady = false, nextPasteId = 0
   const blocks: ContentBlock[] = [{ type: 'image' as const, mimeType: 'image/png', source: { type: 'base64' as const, data: 'fixture' } }]
   const deps = {
-    pendingQueue: pending, pendingImages: images,
+    pendingQueue: pending, pendingImages: images, allocPasteId: () => ++nextPasteId,
     composer: { snapshot: () => draft(getEditorText(st.editor)) },
     buildImageContentBlocks: () => imageReady && getEditorText(st.editor).includes('[Image #1]') ? { blocks, resolvedIds: new Set([1]) } : null,
     getDisplayText: () => getEditorText(st.editor).trim(),
@@ -44,7 +44,9 @@ function harness(text = 'B') {
 
 test('a phone steer joins the original native queue without consuming the terminal draft', () => {
   const h = harness('partially typed local message')
-  h.ctl.submitConversationText('phone follow-up', true)
+  const id = crypto.randomUUID()
+  h.ctl.submitConversationText('phone follow-up', 'steer', [], undefined, id)
+  expect(h.pending.state.entries[0]?.phoneDraftId).toBe(id)
   expect(h.native.calls).toEqual(['steering'])
   expect(h.pending.state.entries[0]?.snapshot.text).toBe('phone follow-up')
   expect(getEditorText(h.st.editor)).toBe('partially typed local message')
@@ -52,22 +54,52 @@ test('a phone steer joins the original native queue without consuming the termin
   expect(h.calls).toContain('reclaim')
 })
 
+test('phone Send and TUI Enter take the same native steering path and release waits only after admission', () => {
+  const tui = harness('new focus'), phone = harness('unrelated terminal draft')
+  tui.ctl.handleLoadingEnter(); phone.ctl.submitConversationText('new focus','steer')
+  expect(phone.native.calls).toStrictEqual(tui.native.calls); expect(phone.native.calls).toEqual(['steering'])
+  expect(phone.calls).toStrictEqual(tui.calls); expect(phone.calls).toEqual(['cancel suggestion','dispatch','reclaim'])
+  expect(phone.pending.state.entries[0]?.expandedText).toBe(tui.pending.state.entries[0]?.expandedText)
+  expect(getEditorText(phone.st.editor)).toBe('unrelated terminal draft')
+})
+
+test('phone Tab attaches a native follow-up with its recall identity; it never steers or releases the wait', () => {
+  const h = harness('untouched terminal draft'), id = crypto.randomUUID()
+  h.ctl.submitConversationText('later', 'queue', [{mimeType:'image/jpeg', data:'AAAA'}], undefined, id)
+  expect(h.native.calls).toEqual(['follow_up']); expect(h.calls).not.toContain('reclaim')
+  expect(h.pending.state.entries[0]).toMatchObject({queue:'follow_up', phoneDraftId:id, text:'later\n[Image from phone]'})
+  expect(getEditorText(h.st.editor)).toBe('untouched terminal draft')
+})
+
 test('phone photos become the same image content blocks as a TUI paste, for a new turn and a steer', () => {
   const h = harness('local draft')
   const photo = { mimeType: 'image/jpeg', data: 'AAAA' }
-  h.ctl.submitConversationText('what is this?', false, [photo])
+  h.ctl.submitConversationText('what is this?', 'send', [photo])
   expect(h.queries).toHaveLength(1)
   expect(JSON.parse(h.queries[0]!.contentJson!)).toEqual([
     { type: 'text', text: 'what is this?' },
     { type: 'image', mimeType: 'image/jpeg', source: { type: 'base64', data: 'AAAA' } },
   ])
-  h.ctl.submitConversationText('', false, [photo, photo])
+  h.ctl.submitConversationText('', 'send', [photo, photo])
   expect(h.queries[1]!.text).toBe('[2 images from phone]')
   expect(JSON.parse(h.queries[1]!.contentJson!).map((b: { type: string }) => b.type)).toEqual(['image', 'image'])
-  h.ctl.submitConversationText('look', true, [photo])
-  expect(h.pending.state.entries.at(-1)?.snapshot.text).toBe('look\n[Image from phone]')
+  h.ctl.submitConversationText('look, literally [Image #1]', 'steer', [photo])
+  expect(h.pending.state.entries.at(-1)?.snapshot).toMatchObject({text:'look, literally [Image #1]\n[Image #2]',
+    images:[[2,{id:2,base64:photo.data,mediaType:photo.mimeType}]]})
   expect(JSON.parse(h.pending.state.entries.at(-1)!.contentJson!).at(-1).type).toBe('image')
   expect(getEditorText(h.st.editor)).toBe('local draft')
+})
+
+test('a phone skill keeps its typed spelling in the queue and puts only the expanded prompt in model input, including images', () => {
+  const h = harness('unsent local draft'), text = '/ha xx', modelText = '<command>fixture</command>'
+  const photo = { mimeType: 'image/jpeg', data: 'AAAA' }
+  h.ctl.submitConversationText(text, 'send', [], modelText)
+  expect(h.queries[0]?.text).toBe(modelText)
+  h.ctl.submitConversationText(text, 'steer', [photo], modelText)
+  const entry = h.pending.state.entries[0]!
+  expect(entry).toMatchObject({ text: '/ha xx\n[Image from phone]', expandedText: modelText })
+  expect(JSON.parse(entry.contentJson!)[0]).toEqual({ type: 'text', text: modelText })
+  expect(getEditorText(h.st.editor)).toBe('unsent local draft')
 })
 
 test.each(['immediate', 'steering', 'follow_up'])('skill invocation is model input for %s submission', kind => {

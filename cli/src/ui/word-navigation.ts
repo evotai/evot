@@ -9,9 +9,9 @@
  * word granularity groups runs like "code" into a single word unit.
  */
 
-import { parsePasteRefs } from './paste_refs.js'
+type AtomicRanges = readonly { start: number; end: number }[]
 
-const wordSegmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
+const wordSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null
 const PUNCTUATION_REGEX = /[(){}[\]<>.,;:'"!?+\-=*/\\|&%^$#@~`]/
 
 interface NavSegment {
@@ -30,9 +30,8 @@ function isWhitespaceText(text: string): boolean {
  * Build navigation segments: atomic paste/image refs first, then word segments
  * for the plain-text gaps so "hello_world" / CJK / emoji stay coherent.
  */
-function buildNavSegments(text: string): NavSegment[] {
+function buildNavSegments(text: string, refs: AtomicRanges): NavSegment[] {
   if (!text) return []
-  const refs = parsePasteRefs(text)
   const segments: NavSegment[] = []
   let offset = 0
   let refIndex = 0
@@ -41,7 +40,7 @@ function buildNavSegments(text: string): NavSegment[] {
     const ref = refs[refIndex]
     if (ref && offset === ref.start) {
       segments.push({
-        text: ref.match,
+        text: text.slice(ref.start, ref.end),
         start: ref.start,
         end: ref.end,
         atomic: true,
@@ -54,7 +53,9 @@ function buildNavSegments(text: string): NavSegment[] {
 
     const end = ref?.start ?? text.length
     const slice = text.slice(offset, end)
-    for (const item of wordSegmenter.segment(slice)) {
+    const words = wordSegmenter?.segment(slice) ?? Array.from(slice.matchAll(/\s+|[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]+/gu),
+      m => ({ segment: m[0], index: m.index, isWordLike: /^[\p{L}\p{N}_]/u.test(m[0]) }))
+    for (const item of words) {
       const start = offset + item.index
       const segmentEnd = start + item.segment.length
       segments.push({
@@ -76,12 +77,12 @@ function buildNavSegments(text: string): NavSegment[] {
  * Skips trailing whitespace, then stops at the next word/punctuation boundary.
  * Atomic paste/image references are treated as a single unit.
  */
-export function findWordBackward(text: string, cursor: number): number {
+export function findWordBackward(text: string, cursor: number, refs: AtomicRanges = []): number {
   if (cursor <= 0) return 0
 
   // Include the segment that contains the cursor (start < cursor), truncated to
   // the cursor so mid-word jumps still stop at the previous boundary.
-  const segments = buildNavSegments(text)
+  const segments = buildNavSegments(text, refs)
     .filter(segment => segment.start < cursor)
     .map(segment => segment.end <= cursor
       ? segment
@@ -133,10 +134,10 @@ export function findWordBackward(text: string, cursor: number): number {
  * Skips leading whitespace, then stops at the next word/punctuation boundary.
  * Atomic paste/image references are treated as a single unit.
  */
-export function findWordForward(text: string, cursor: number): number {
+export function findWordForward(text: string, cursor: number, refs: AtomicRanges = []): number {
   if (cursor >= text.length) return text.length
 
-  const segments = buildNavSegments(text)
+  const segments = buildNavSegments(text, refs)
     .filter(segment => segment.end > cursor)
     .map(segment => segment.start >= cursor
       ? segment

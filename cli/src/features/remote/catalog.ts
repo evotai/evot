@@ -30,7 +30,7 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
   const byId = new Map(visible.map(m => [m.session_id, m]))
   const online = live.map(w => {
     const meta = byId.get(w.session)
-    return meta ? { ...w, title: sessionLineTitle(meta) } : w
+    return meta ? { ...w, title: sessionLineTitle(meta, w.title) } : w
   })
   const matched = new Set<string>()
   function row(meta?: SessionMeta, window?: OnlineTerminal) {
@@ -40,7 +40,7 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
     // on the computer: list it as a saved session. Tapping it still follows that window.
     const parked = !!window?.phoneCreated && window.phase === 'idle'
     return { session: meta?.session_id ?? window?.session ?? '',
-      title: meta ? sessionLineTitle(meta) : window?.title || 'New conversation',
+      title: window?.title || (meta ? sessionLineTitle(meta) : 'New conversation'),
       workspace: meta ? basename(meta.cwd) || '/' : window?.workspace,
       updatedAt, updated: updatedAt ? new Date(updatedAt).toISOString() : '',
       terminal: window?.terminal, phase: parked ? undefined : window?.phase, runState: window?.runState,

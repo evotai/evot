@@ -1,7 +1,8 @@
 # Coding Standards
 
 - Never use `unwrap()` or `expect()`
-- Always propagate errors with `?` or handle them explicitly using `match` / `if let`
+- Use `?` to propagate errors; otherwise handle them explicitly.
+- In Rust, prefer `match` for several cases of the same value, `if let` when only one pattern matters, and `let … else` when a failed match should exit early. Keep `if`/`else` for a simple boolean choice.
 
 # Architecture
 

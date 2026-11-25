@@ -2,8 +2,7 @@
 // resolves the task, formats status/output and restricts it to its session.
 export function backgroundPanel(refresh) {
   const el = (id) => document.getElementById(id),
-    panel = el('bgPanel'),
-    chip = el('bgChip'),
+    panel = el('bgPanel'), chip = el('bgChip'),
     output = el('bgOutput');
   let selected = null,
     tasks = [];
@@ -12,7 +11,7 @@ export function backgroundPanel(refresh) {
     if (!panel.open) panel.showModal();
     void refresh();
   }
-  chip.onclick = () => select(tasks.length === 1 ? tasks[0].id : 'list');
+  chip.onclick = () => { if (tasks.length) select(tasks.length === 1 ? tasks[0].id : 'list'); };
   el('allTasks').onclick = () => select('list');
   el('closeBg').onclick = () => panel.close();
   panel.onclose = () => {
@@ -22,7 +21,7 @@ export function backgroundPanel(refresh) {
   function render(bg) {
     tasks = bg?.tasks ?? [];
     chip.hidden = !tasks.length;
-    chip.textContent = bg?.chip || bg?.subtitle || '';
+    chip.textContent = `Tasks · ${tasks.length}`;
     if (!tasks.length || !selected) {
       if (!tasks.length && panel.open) panel.close();
       return;

@@ -24,7 +24,7 @@ const calls: UIToolCall[] = [
     name: 'task_output',
     status: 'done',
     args: { task_id: 'a', block: false },
-    details: { task_status: 'failed', exit_code: 2, elapsed_ms: 1234 },
+    details: { status: 'failed', exit_code: 66, elapsed_ms: 1234 },
   },
   { id: '6', name: 'task_stop', status: 'error', args: { task_id: 'a' }, result: 'task not found' },
   { id: '7', name: 'edit', status: 'done', args: { path: 'a.ts' }, details: { diff: '@@ -1 +1 @@\n-old\n+new' } },
@@ -53,8 +53,19 @@ test('live, committed and resumed tools reuse compact and expanded TUI display a
         : []
     })
     expect(assistantRow(content, expanded)?.blocks).toEqual(expected)
+    const failedPoll = expected.find(block => block.text.includes('failed · exit 66'))
+    expect(failedPoll?.state).toBe('error')
     expect(history.view(expanded)[0]?.blocks).toEqual(expected)
     expect(resumed.view(expanded)[0]?.blocks).toEqual(expected)
+  }
+})
+
+test('a background failure is a compact card; only expanding it shows the terminal detail, old phones still get text', () => {
+  const tail = new ConversationTail(), summary = '  ✗ failed in background · exit 66 · 93043e9e', text = `${summary}  command-preview`
+  tail.appendNoticeCard(text,{state:'error',summary}); tail.append('notice','Ordinary notice')
+  for (const expanded of [false,true]) {
+    expect(tail.view(expanded)).toEqual([{role:'notice',text,blocks:[{kind:'tool',state:'error',text:expanded ? text : summary}]},
+      {role:'notice',text:'Ordinary notice'}])
   }
 })
 

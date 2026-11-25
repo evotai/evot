@@ -60,7 +60,7 @@ function harness(options: {
 } = {}) {
   let processes = options.processes ?? []
   let panel: SelectorState | null = null
-  const commits: Array<{ slot: string; text: string }> = []
+  const commits: Array<{ slot: string; text: string; card?: {state:string; summary:string} }> = []
   let renders = 0
   let messageDetaches = 0
   let wakes = 0
@@ -121,7 +121,7 @@ function harness(options: {
       pendingProcessWakeNotifications: () => options.pendingNotifications?.() ?? 0,
     },
     sessionId: () => typeof options.sessionId === 'function' ? options.sessionId() : (options.sessionId === undefined ? 'session-1' : options.sessionId),
-    commit: (slot, text) => commits.push({ slot, text }),
+    commit: (slot, text, card) => commits.push({ slot, text, ...(card ? {card} : {}) }),
     requestRender: () => { renders++ },
     errorText: err => (err instanceof Error ? err.message : String(err)),
     watchOutput: (_path, changed) => {
@@ -443,6 +443,7 @@ describe('BackgroundTerminals.handlePanelKey', () => {
 
     expect(h.panel()?.presentation).toBe('background-list')
     expect(h.panel()?.items.map(item => item.id)).toEqual(['bbbbbbbb-2222'])
+    expect(h.commits.at(-1)?.card).toEqual({state:'error',summary:'  ✗ failed in background · exit 2 · aaaaaaaa'})
     expect(h.texts().join('\n')).toContain('✗ failed in background · exit 2')
   })
 

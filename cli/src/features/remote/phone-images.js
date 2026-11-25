@@ -17,21 +17,21 @@ async function shrink(file) {
       reader.onerror = () => fail(reader.error);
       reader.readAsDataURL(blob);
     });
-    return { mimeType: 'image/jpeg', data, url: URL.createObjectURL(blob) };
+    return { mimeType: 'image/jpeg', data, blob, url: URL.createObjectURL(blob) };
   } finally { bitmap.close?.(); }
 }
 
-export function imageTray({ tray, input, button, changed, notice }) {
-  let items = [], adding = 0;
+export function imageTray({ tray, input, button, thumbnail, changed, notice }) {
+  let items = [], adding = 0, epoch = 0;
   function paint() {
     tray.hidden = !items.length && !adding;
     tray.replaceChildren(...items.map((item, index) => {
       const cell = document.createElement('div'); cell.className = 'attachment';
-      const img = document.createElement('img'); img.src = item.url; img.alt = `Photo ${index + 1}`;
-      const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×';
+      const preview = thumbnail(item,index);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-photo'; remove.textContent = '×';
       remove.setAttribute('aria-label', `Remove photo ${index + 1}`);
       remove.onclick = () => { URL.revokeObjectURL(item.url); items.splice(index, 1); paint(); };
-      cell.append(img, remove);
+      cell.append(preview, remove);
       return cell;
     }), ...(adding ? [Object.assign(document.createElement('div'), { className: 'attachment loading', textContent: '…' })] : []));
     button.disabled = items.length + adding >= MAX_IMAGES;
@@ -40,12 +40,15 @@ export function imageTray({ tray, input, button, changed, notice }) {
   async function add(files) {
     const room = MAX_IMAGES - items.length - adding, picked = [...files].filter(f => f.type.startsWith('image/'));
     if (picked.length > room) notice(`Up to ${MAX_IMAGES} photos per message.`);
-    const batch = picked.slice(0, Math.max(0, room));
+    const batch = picked.slice(0, Math.max(0, room)), mine = epoch;
     adding += batch.length; paint();
     for (const file of batch) {
-      try { items.push(await shrink(file)); }
-      catch { notice(`Could not read ${file.name || 'that photo'}. Try another format.`); }
-      finally { adding--; paint(); }
+      if (epoch !== mine) break;
+      try {
+        const item = await shrink(file);
+        if (epoch === mine) items.push(item); else URL.revokeObjectURL(item.url);
+      } catch { if (epoch === mine) notice(`Could not read ${file.name || 'that photo'}. Try another format.`); }
+      finally { if (epoch === mine) { adding--; paint(); } }
     }
   }
   button.onclick = () => input.click();
@@ -57,10 +60,10 @@ export function imageTray({ tray, input, button, changed, notice }) {
     /** Hand the photos to a send; `restore` puts them back if it fails. */
     take() {
       const taken = items; items = []; paint();
-      return { images: taken.map(({ mimeType, data }) => ({ mimeType, data })), urls: taken.map(i => i.url),
-        restore() { items = [...taken, ...items].slice(0, MAX_IMAGES); paint(); },
+      return { images: taken.map(({ mimeType, data }) => ({ mimeType, data })), previews: taken.map(({blob,url}) => ({blob,url})),
+        restore() { items = [...taken, ...items]; paint(); },
         release() { for (const i of taken) URL.revokeObjectURL(i.url); } };
     },
-    clear() { for (const i of items) URL.revokeObjectURL(i.url); items = []; paint(); },
+    clear() { epoch++; adding = 0; for (const i of items) URL.revokeObjectURL(i.url); items = []; paint(); },
   };
 }

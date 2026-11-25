@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { messagePhotos } from '../../../src/features/remote/phone-photo-preview.js'
+import legacyPhoto from '../../fixtures/contracts/remote-photo-legacy.json'
 import { parseRemoteAction, REMOTE_IMAGE_LIMITS } from '../../../src/features/remote/protocol.js'
 import { DeviceStore } from '../../../src/features/remote/devices.js'
 import { DeviceAccess } from '../../../src/features/remote/pairing.js'
@@ -23,6 +25,20 @@ test('a phone message may carry up to four bounded photos of the image types mod
     'QUJD',
   ]) expect(parseRemoteAction({ kind: 'send', generation: 1, text: 'x', images })).toBeNull()
   expect(parseRemoteAction({ kind: 'send', generation: 1, text: '' })).toBeNull()
+})
+
+test('photo receipts associate only the submitting tab’s local blobs with confirmed rows; old rows remain text', async () => {
+  const draftId = crypto.randomUUID()
+  expect(parseRemoteAction({kind:'send', generation:0, text:'', images:[photo()], draftId})).toMatchObject({draftId})
+  const messages = [legacyPhoto.message, {...legacyPhoto.message, photoId:draftId}]
+  expect(parseRemoteAction(legacyPhoto.action)).toEqual(legacyPhoto.action)
+  const cached = messagePhotos(), blob = new Blob(['photo']), url = URL.createObjectURL(blob)
+  try {
+    cached.remember(draftId,[{url,blob}]); cached.prune(messages)
+    expect(cached.get(undefined)).toBeUndefined()
+    expect(await (await fetch(cached.get(draftId)[0].url)).text()).toBe('photo')
+    cached.prune([]); expect(cached.get(draftId)).toBeUndefined(); await expect(fetch(url)).rejects.toThrow()
+  } finally { URL.revokeObjectURL(url) }
 })
 
 test('only /action takes a photo-sized body; enrollment and other routes keep the small limit', async () => {

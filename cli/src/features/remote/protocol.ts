@@ -11,6 +11,8 @@ export type RemoteBlock =
   | { kind: 'text' | 'thinking'; text: string; html?: string }
   | { kind: 'tool'; text: string; state: 'pending' | 'success' | 'error'; diff?: RemoteDiffRow[] }
 export interface RemoteMessage {
+  /** Echo of the submitting tab's photo draftId, not an image URL or a retrieval token. */
+  photoId?: string
   role: 'user' | 'assistant' | 'footer' | 'notice'
   text: string
   blocks?: RemoteBlock[]
@@ -22,6 +24,8 @@ export interface RemoteQuestion {
 }
 export interface RemoteModels {
   active: string
+  /** `/model n` follows the TUI's catalog order, not the phone picker's display order. */
+  next?: string
   effort: string
   pending: { spec: string; effort?: string } | null
   /** Compare-and-set token: a stale phone must not overwrite a newer TUI pick. */
@@ -36,13 +40,28 @@ export interface RemotePlace {
   host: string
   branch: string | null
 }
+/** Only display metadata leaves the host, never a skill directory or prompt. */
+export interface RemoteCommand {
+  name: string
+  description: string
+  usage?: string
+  arguments?: readonly string[]
+  /** Shortest unambiguous TUI prefix for this spelling. */
+  prefix: string
+  /** When present, run the phone-native equivalent rather than a terminal overlay. */
+  shortcut?: 'sessions' | 'new' | 'model' | 'help'
+}
 export interface RemoteSnapshot {
+  /** Older windows don't advertise command completion. */
+  commands?: readonly RemoteCommand[]
   models: RemoteModels
   sessionId: string | null
   /** Older windows omit it. */
   place?: RemotePlace
   /** The TUI's next-prompt suggestion (Tab/→ there); a phone taps it into its own draft. */
   suggestion?: string
+  /** Display-only feedback for the empty composer, never an insertable candidate. Older windows omit it. */
+  suggestionHint?: string
   /** Same metadata title as /sessions; older windows omit it. */
   title?: string
   generation: number
@@ -56,6 +75,17 @@ export interface RemoteSnapshot {
   input: 'send' | 'steer' | null
   expanded?: boolean
   background?: RemoteBackground
+  /** TUI queue order and state. Only the submitting page can supply the original preview.
+   * No terminal input, expanded text, attachments or private task arguments. */
+  promptQueue?: { state: 'now' | 'after' | 'paused'; draftId?: string }[]
+  /** Still-pending phone drafts (steering and follow-up), oldest first; no prompt contents. */
+  pendingDrafts?: string[]
+  /** Steer-only projection for phones predating follow-up support. */
+  pendingSteers?: string[]
+  /** Only actions supported by this window in its current state. Older windows omit these. */
+  composerKeys?: { queue: boolean; cycleEffort: boolean; suggest: boolean }
+  /** Identifies exactly the set of background shells offered for stopping. */
+  stopBackgroundTarget?: string
   canStop: boolean
   ask: { id: string; questions: RemoteQuestion[] } | null
 }
@@ -69,11 +99,16 @@ export interface RemoteBackground {
 export interface RemoteImage { mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif'; data: string }
 export const REMOTE_IMAGE_LIMITS = { count: 4, base64Each: 6 * 1024 * 1024, base64Total: 14 * 1024 * 1024 }
 export type RemoteAction = { generation: number } & (
-  | { kind: 'send' | 'steer'; text: string; images?: RemoteImage[] }
-  | { kind: 'stop' }
+  | { kind: 'send' | 'steer' | 'queue'; text: string; images?: RemoteImage[]; draftId?: string }
+  | { kind: 'pull-draft' | 'pull-steer'; draftId: string }
+  | { kind: 'cycle-effort'; revision: string }
+  | { kind: 'suggest' }
+  | { kind: 'stop'; askId?: string }
+  | { kind: 'stop-background'; target: string }
   | { kind: 'tool-view'; expanded: boolean }
   | { kind: 'select-model'; spec: string; effort?: string; revision: string }
   | { kind: 'answer'; id: string; answers: string[] }
+  | { kind: 'cancel-ask' | 'interrupt-ask'; id: string }
 )
 export interface RemoteHost {
   snapshot(backgroundView?: string): RemoteSnapshot
@@ -95,16 +130,28 @@ export function parseRemoteAction(value: unknown): RemoteAction | null {
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0) return null
   if (kind === 'tool-view' && 'expanded' in value && typeof value.expanded === 'boolean')
     return { kind, generation, expanded: value.expanded }
-  if (kind === 'stop') return { kind, generation }
+  if ((kind === 'cancel-ask' || kind === 'interrupt-ask') && plain(id) && id.length <= 512) return { kind, generation, id }
+  if (kind === 'stop') {
+    if (!('askId' in value)) return { kind, generation }
+    return plain(value.askId) ? { kind, generation, askId:value.askId } : null
+  }
+  const { draftId } = value as Record<string, unknown>
+  if (draftId !== undefined && (typeof draftId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(draftId))) return null
+  if ((kind === 'pull-draft' || kind === 'pull-steer') && draftId) return { kind, generation, draftId }
+  if (kind === 'cycle-effort' && plain(revision)) return { kind, generation, revision }
+  if (kind === 'suggest') return { kind, generation }
+  if (kind === 'stop-background' && 'target' in value && typeof value.target === 'string' && /^[0-9a-f]{64}$/.test(value.target))
+    return { kind, generation, target: value.target }
   if (kind === 'select-model' && plain(spec) && plain(revision) && (effort === undefined || plain(effort))) {
     return { kind, generation, spec, effort, revision }
   }
-  if (kind === 'send' || kind === 'steer') {
+  if (kind === 'send' || kind === 'steer' || kind === 'queue') {
     const images = parseImages((value as Record<string, unknown>).images)
     if (images === null) return null
     // A photo alone is a prompt too; text, when present, is still checked like any message.
-    if (plain(text)) return { kind, generation, text: text.trim(), ...(images.length ? { images } : {}) }
-    if (images.length && (text === undefined || text === '')) return { kind, generation, text: '', images }
+    const receipt = (kind !== 'send' || images.length > 0) && draftId ? { draftId } : {}
+    if (plain(text)) return { kind, generation, text: text.trim(), ...(images.length ? { images } : {}), ...receipt }
+    if (images.length && (text === undefined || text === '')) return { kind, generation, text: '', images, ...receipt }
     return null
   }
   if (

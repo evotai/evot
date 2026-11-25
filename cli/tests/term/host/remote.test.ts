@@ -17,15 +17,36 @@ import { createAskController, type AskDeps } from '../../../src/term/host/ask.js
 import { createStreamMachineState } from '../../../src/term/app/run/stream.js'
 import { RunOwnership } from '../../../src/term/app/run/run-ownership.js'
 import { createModelSelectionController, type ModelSelectionDeps } from '../../../src/term/host/model-selection.js'
+import { PendingQueue, currentQueueTarget } from '../../../src/term/app/queue/pending-queue.js'
+import { draft, queueFixture } from '../../helpers/prompt-queue.js'
 import { ConversationTail } from '../../../src/term/app/remote/conversation.js'
+import { commandChoices, phoneShortcut } from '../../../src/features/remote/phone-commands.js'
+import type { RemoteSnapshot } from '../../../src/features/remote/protocol.js'
+import legacyComposer from '../../fixtures/contracts/remote-composer-legacy.json'
 import { getEditorText, insertText } from '../../../src/term/input/editor.js'
 import { PARKED_CHECK_MS, PARKED_EXIT_MS, parkedExpired, tmuxAttached } from '../../../src/term/app/remote/parked-exit.js'
+import { PromptSuggestion } from '../../../src/term/app/suggestion/controller.js'
+import { context as suggestionContext } from '../../helpers/suggestion-context.js'
+import type { SuggestionOutcome } from '../../../src/native/contracts/ports.js'
+import { inlineSuggestion } from '../../../src/features/remote/phone-composer-keys.js'
 
-const suggested = { text: '', completing: false }
 function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => []) {
   const st = createReplState('fixture','/fixture')
   const runOwnership = new RunOwnership(), calls: string[] = []
-  const askDeps = {sessionHook:{ state() {} }, renderer:{ requestRender() {} }, freezeTerminalTitle() {}, unfreezeTerminalTitle() {}, scrollback:{commitLines() {}}} as unknown as AskDeps
+  let request = Promise.withResolvers<SuggestionOutcome>()
+  const suggestions = new PromptSuggestion({
+    key: () => 'fixture', eligible: () => true, draft: () => getEditorText(st.editor), context: suggestionContext, changed() {},
+    start() {
+      calls.push('suggest'); request = Promise.withResolvers<SuggestionOutcome>()
+      const { promise } = request
+      return { abort() {}, outcome: () => promise, result: async () => (await promise).candidates[0] ?? null }
+    },
+  })
+  async function finishSuggestion(candidates: string[]) {
+    request.resolve({ status: candidates.length ? 'ready' : 'empty', candidates }); await new Promise(resolve => setImmediate(resolve))
+  }
+  const submissions: Parameters<RemoteDeps['submit']['submitConversationText']>[] = []
+  const askDeps = {sessionHook:{ state() {} }, renderer:{ requestRender() {} }, freezeTerminalTitle() {}, unfreezeTerminalTitle() {}, scrollback:{commitLines() {}, commitSystem() {}}} as unknown as AskDeps
   const asks = createAskController(st, askDeps)
   st.configInfo = {provider:'local', protocol:'openai', envPath:'/private/settings', hasApiKey:true, baseUrl:'https://private.invalid', thinkingLevel:'low',
     availableModels:['fixture','another'].map(model => ({spec:'local:'+model,provider:'local',model,thinking_levels:['low','high']}))}
@@ -34,16 +55,24 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
     runCtl:{requestModelHandoff:(spec:string,effort?:string) => { st.pendingModelHandoff = {spec,effort,submitted:true}; return true }},
     renderer:{requestRender(){}}, refreshConfigInfo(){}, scrollback:{commitStatusLine(){}},
   } as unknown as ModelSelectionDeps)
+  const pendingQueue = new PendingQueue(st.pendingQueue)
+  const shells = { target:'["fixture",["a"]]', afterRefresh:'' }
+  const runInteractionInput = () => ({active:st.isLoading, phase:st.spinnerState.phase, owner:1,
+    backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0, backgroundOwner:shells.target})
   const activity = createActivityController(st, {manualCompaction:{active:false},loopSession:{waiting:false},runInteraction:new RunInteraction(),
-    awaitedTaskSummary:()=>undefined, runInteractionInput:()=>({active:st.isLoading,phase:st.spinnerState.phase,owner:1,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}),
+    awaitedTaskSummary:()=>undefined, runInteractionInput,
   } as unknown as ActivityDeps)
-  const remote = createRemoteController(st, { activity, asks, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions:{text:()=>suggested.text, completing:()=>suggested.completing, replacing:()=>false}, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined},composer:{toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
+  const remote = createRemoteController(st, { activity, asks, pendingQueue, suggest:{suggestionInputReady:()=>true}, queueLifecycle:{reconcile(){ if (st.streamRef) pendingQueue.reconcile(st.streamRef) }}, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined,
+      stopTarget:()=>shells.target,
+      refresh:()=>{if (shells.afterRefresh) shells.target = shells.afterRefresh}, stopAll:(target:string)=>calls.push('stop:'+target)},composer:{cycleThinkingLevel(){calls.push('cycle'); return true}, toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
     exitAfterCleanup:(code:number) => calls.push('exit:'+code),
-    submit:{ submitConversationText:(text:string, steer:boolean) => calls.push(steer ? 'steer:'+text : 'send:'+text) },
-    runCtl:{ runInteractionInput:()=>({active:st.isLoading,owner:1,phase:st.spinnerState.phase,backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0}), interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); calls.push('stop') } },
+    submit:{ submitConversationText:(...args: Parameters<RemoteDeps['submit']['submitConversationText']>) => {
+      submissions.push(args); calls.push(args[1] + ':' + args[0])
+    } },
+    runCtl:{ runInteractionInput, interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); st.isLoading = false; st.streamMachine = null; calls.push('stop') } },
   } as unknown as RemoteDeps)
   function run() { st.isLoading = true; st.streamMachine = createStreamMachineState(st.appState,st.spinnerState); return runOwnership.begin() }
-  return {st,remote,asks,run,calls}
+  return {st,remote,asks,run,calls,submissions,shells,pendingQueue,suggestions,finishSuggestion}
 }
 
 test('three open sessions retain their picker titles/order as each terminal changes state or closes', async () => {
@@ -136,13 +165,17 @@ test('three open sessions retain their picker titles/order as each terminal chan
   }
 })
 
-test('a late title lookup never names the next window session; the transcript never supplies the title', async () => {
+test('opening prompt names an unsaved session until metadata arrives; a late title never names its successor', async () => {
   let reads = 0
   const {promise,resolve} = Promise.withResolvers<SessionMeta | null>()
   const {st,remote} = harness(async id => { reads++; return id === 'a' ? promise : {session_id:id,title:'From metadata'} as SessionMeta })
-  st.sessionId = 'a'; st.conversationTail.append('user','A moving tail')
-  expect(remote.snapshot().title).toBe('(untitled)'); remote.snapshot(); expect(reads).toBe(1)
-  st.sessionId = 'b'; remote.snapshot(); resolve({session_id:'a',title:'Previous title'} as SessionMeta)
+  expect(remote.snapshot().title).toBe('New conversation')
+  st.conversationTail.append('user','First\n  request'); expect(remote.snapshot().title).toBe('First request')
+  st.sessionId = 'a'
+  for (let i = 0; i < 35; i++) st.conversationTail.append('user', `Later ${i}`)
+  expect(remote.snapshot().title).toBe('First request'); remote.snapshot(); expect(reads).toBe(1)
+  st.sessionId = 'b'; st.conversationTail.replace([]); expect(remote.snapshot().title).toBe('Session b')
+  resolve({session_id:'a',title:'Previous title'} as SessionMeta)
   await Bun.sleep(0)
   expect(remote.snapshot().title).toBe('From metadata'); expect(reads).toBe(2)
   st.sessionId = null; expect(remote.snapshot().title).toBe('New conversation')
@@ -158,24 +191,106 @@ test('actions target the observed turn, never a successor or a local setup dialo
   expect(newId).not.toBe(id)
   expect(() => remote.act({ kind:'answer', generation, id, answers:['Large'] })).toThrow()
   expect(() => remote.act({ kind:'answer', generation, id:newId, answers:[] })).toThrow()
-  remote.act({ kind:'stop', generation }); expect(await again).toBeNull(); expect(calls).toEqual(['stop'])
+  expect(() => remote.act({kind:'cancel-ask', generation, id})).toThrow()
+  remote.act({kind:'cancel-ask', generation, id:newId}); expect(await again).toBeNull()
+  expect(remote.snapshot()).toMatchObject({ask:null,input:'steer',generation})
+  expect(st.conversationTail.view(false).at(-1)?.text).toContain('Cancelled.')
+  expect(() => remote.act({kind:'cancel-ask', generation, id:newId})).toThrow(); expect(calls).toEqual([])
+  const interrupted = asks.collectAskUserAnswers({questions:qs}), current = remote.snapshot().ask!.id
+  expect(() => remote.act({kind:'stop', generation, askId:id})).toThrow()
+  expect(() => remote.act({kind:'interrupt-ask', generation, id:newId})).toThrow()
+  remote.act({kind:'interrupt-ask', generation, id:current}); expect(await interrupted).toBeNull(); expect(calls).toEqual(['stop'])
   const next = run(); expect(() => remote.act({kind:'stop',generation})).toThrow()
   const local = asks.presentAskQuestions(qs,'idle',true)
   expect(remote.snapshot()).toMatchObject({ask:null,input:null,canStop:false}); expect(() => remote.act({kind:'stop',generation:next})).toThrow()
   asks.resolvePendingAsk(); await local
 })
 
+test('pullback removes only the observed pending steer; consumption is never mistaken for a stop', () => {
+  const {st, remote, run, calls, pendingQueue} = harness(), generation = run()
+  const native = queueFixture(), target = currentQueueTarget(st)
+  st.streamRef = native.stream; pendingQueue.begin(target)
+  const enqueue = (phoneDraftId?:string) => pendingQueue.accept({queue:'steering', target, text:'same text',
+    expandedText:'same text', snapshot:draft('same text'), phoneDraftId})
+  const a = crypto.randomUUID(), b = crypto.randomUUID()
+  enqueue(a); enqueue(b); const local = enqueue(); pendingQueue.attach(native.stream)
+  expect(remote.snapshot().pendingDrafts).toEqual([a,b])
+  expect(remote.snapshot().promptQueue).toStrictEqual([{state:'now',draftId:a},{state:'now',draftId:b},{state:'now'}])
+  expect(() => remote.act({kind:'pull-draft',generation,draftId:a})).toThrow()
+  expect(() => remote.act({kind:'pull-draft',generation,draftId:b})).toThrow() // TUI posted a newer prompt
+  pendingQueue.remove(local,local.version)
+  remote.act({kind:'pull-draft',generation,draftId:b})
+  expect(remote.snapshot().input).toBe('steer')
+  native.consume('steering') // races the phone's next Esc
+  expect(() => remote.act({kind:'pull-draft',generation,draftId:a})).toThrow()
+  expect(pendingQueue.visible(target)).toEqual([]); expect(calls).toEqual([])
+  remote.act({kind:'stop', generation})
+  const idle = remote.snapshot(); expect(idle.input).toBe('send')
+  expect(() => remote.act({kind:'steer',generation,text:'next'})).toThrow()
+  remote.act({kind:'send',generation:idle.generation,text:'next'})
+  expect(calls).toEqual(['stop','send:next'])
+})
+
+test('Tab queues only during the observed run; Shift+Tab uses the host ladder, stale picks never advance it', () => {
+  const {remote,run,calls,st} = harness(), first = remote.snapshot()
+  const queue = {kind:'queue' as const, text:'later', generation:first.generation}
+  expect(() => remote.act(queue)).toThrow()
+  remote.act({kind:'suggest',generation:first.generation}); st.editor = insertText(st.editor,'private draft')
+  expect(() => remote.act({kind:'suggest',generation:first.generation})).toThrow()
+  const generation = run(), active = remote.snapshot(); expect(active.composerKeys?.queue).toBe(true)
+  remote.act({...queue,generation}); remote.act({kind:'cycle-effort',generation,revision:active.models.revision})
+  expect(() => remote.act({kind:'cycle-effort',generation,revision:'stale'})).toThrow()
+  expect(calls).toEqual(['suggest','queue:later','cycle'])
+})
+
+test('explicit empty-input suggestions are available during a run without reading or changing local drafts', () => {
+  const {remote,run,calls,st} = harness(), generation = run()
+  remote.act({kind:'suggest',generation}); expect(calls).toEqual(['suggest'])
+  st.editor = insertText(st.editor,'local only'); expect(remote.snapshot().composerKeys?.suggest).toBe(false)
+  expect(remote.snapshot().suggestion).toBeUndefined(); expect(() => remote.act({kind:'suggest',generation})).toThrow()
+})
+
+test('stop all is scoped to the observed idle task set, even if it changes inside a turn generation', () => {
+  const {st, remote, run, calls, shells} = harness()
+  st.backgroundWaitSince = Date.now()
+  const {generation, stopBackgroundTarget:target} = remote.snapshot()
+  expect(target).toMatch(/^[a-f0-9]{64}$/)
+  const action = {kind:'stop-background' as const, target:target!, generation}
+  remote.act(action)
+  expect(calls).toEqual(['stop:'+shells.target])
+  shells.afterRefresh = '["fixture",["b"]]'
+  expect(() => remote.act(action)).toThrow('changed')
+  expect(() => remote.act(action)).toThrow()
+  st.overlay = {kind:'help'}; expect(remote.snapshot().stopBackgroundTarget).toBeUndefined()
+  st.overlay = {kind:'none'}; run(); expect(remote.snapshot().stopBackgroundTarget).toBeUndefined()
+  expect(calls).toHaveLength(1)
+})
+
+test('Tab Suggest mirrors TUI pending → empty → retry → candidate and cycling, never local draft completion', async () => {
+  const { st, remote, suggestions, finishSuggestion, calls } = harness()
+  const tab = () => remote.act({ kind:'suggest', generation:remote.snapshot().generation })
+  const preview = () => inlineSuggestion(remote.snapshot(), true, '')
+  tab(); expect(preview()?.text).toContain('suggesting…')
+  await finishSuggestion([])
+  expect(preview()).toMatchObject({ candidate:'', text:expect.stringContaining('nothing to suggest') })
+  tab(); expect(preview()?.text).toContain('suggesting…')
+  await finishSuggestion(['Run the tests.', 'Review the diff.'])
+  expect(preview()).toMatchObject({ candidate:suggestions.text(), text:'Run the tests.' })
+  tab(); expect(preview()?.text).toBe('Review the diff.')
+  expect(calls).toEqual(['suggest','suggest']) // cycling didn't start another request or send a message
+  st.editor = insertText(st.editor, 'private draft')
+  suggestions.complete('private draft'); expect(preview()).toBeNull()
+  await finishSuggestion(['private suffix']); expect(suggestions.text()).toBe('private suffix'); expect(preview()).toBeNull()
+  expect(remote.snapshot().suggestion).toBeUndefined(); expect(remote.snapshot().suggestionHint).toBeUndefined()
+})
+
 test('ordered snapshots use the TUI card, only serializing its displayed text and tone', () => {
   const {st,remote,run,calls} = harness()
-  // The TUI's next-prompt suggestion reaches the phone; a completion of the TUI's own draft does not.
-  suggested.text = 'Run the tests.'; expect(remote.snapshot().suggestion).toBe('Run the tests.')
-  suggested.completing = true; expect(remote.snapshot().suggestion).toBeUndefined()
-  suggested.text = ''; suggested.completing = false; expect(remote.snapshot().suggestion).toBeUndefined()
   remote.act({kind:'send',generation:0,text:'start'}); expect(() => remote.act({kind:'send',generation:0,text:'/clear'})).toThrow()
   // The drawer's "Ask evot" sends a session search: an agent turn, like the TUI's. Lookups, pickers and other commands stay local.
   remote.act({kind:'send',generation:0,text:'/sessions databend planner bug'})
   expect(calls).toContain('send:/sessions databend planner bug')
-  for (const text of ['/sessions', '/sessions 01a20c97', '/sessions   ', '/resume planner', '/model x'])
+  for (const text of ['/sessions', '/sessions 01a20c97', '/sessions   ', '/sessions --all', '/model x'])
     expect(() => remote.act({kind:'send',generation:0,text})).toThrow()
   calls.splice(0)
   calls.push('send:start')
@@ -191,9 +306,49 @@ test('ordered snapshots use the TUI card, only serializing its displayed text an
   expect(remote.snapshot().liveBlocks?.at(-1)?.text).toContain('reading')
 })
 
+test('remote skills use the current registry on send and steer, even after the browser saw a stale catalog', () => {
+  const {st,remote,run,submissions} = harness()
+  st.skillEntries = [{name:'harden',dir:'/fixture/harden',command:{arguments:['changes']}}]
+  const {generation,commands} = remote.snapshot()
+  expect(commands).toContainEqual(expect.objectContaining({name:'/harden',arguments:['changes']}))
+  expect(JSON.stringify(commands)).not.toContain('/fixture')
+  remote.act({kind:'send',generation,text:'/ha xx'})
+  const active = run(); remote.act({kind:'steer',generation:active,text:'/ha xx'})
+  for (const mode of ['send','steer']) expect(submissions).toContainEqual(['/ha xx', mode, undefined, expect.stringContaining('/fixture/harden/SKILL.md'), undefined])
+  st.skillEntries = []
+  expect(() => remote.act({kind:'steer',generation:active,text:'/ha xx'})).toThrow('Unknown command')
+  expect(submissions).toHaveLength(2)
+})
+
+test('composer commands, suggestions and task shortcuts are additive for old windows and old phones', async () => {
+  const old = legacyComposer as RemoteSnapshot
+  expect(commandChoices('/ha', old.commands).items).toEqual([])
+  expect(phoneShortcut('/new', old.commands)).toBeNull()
+  expect(inlineSuggestion(old,true,'')).toBeNull()
+  const {remote, st, pendingQueue, finishSuggestion} = harness()
+  remote.act({ kind:'suggest', generation:old.generation }); await finishSuggestion([])
+  const current = remote.snapshot()
+  expect(current.suggestionHint).toContain('nothing to suggest'); expect(current.suggestion).toBeUndefined()
+  // The legacy composer reads these fields directly, ignoring unfamiliar snapshot fields.
+  const legacyFields = (s: RemoteSnapshot) => [s.suggestion, s.sessionId, s.generation, s.title, s.status, s.input, s.canStop,
+    s.messages, s.live, s.ask, s.models.active, s.models.effort, s.models.pending, s.models.revision,
+    s.models.options[0]?.spec, s.models.options[0]?.levels]
+  expect(legacyFields(current)).toStrictEqual(legacyFields(old))
+  const id = crypto.randomUUID()
+  pendingQueue.accept({queue:'steering', target:currentQueueTarget(st), text:'original', expandedText:'private', snapshot:draft('original'), phoneDraftId:id})
+  const after = remote.snapshot()
+  expect(after.pendingDrafts).toEqual([id]); expect(old.pendingDrafts).toBeUndefined()
+  expect(old.promptQueue).toBeUndefined(); expect(after.promptQueue).toStrictEqual([{state:'paused',draftId:id}])
+  expect(after.pendingSteers).toEqual([id]); expect(old.composerKeys).toBeUndefined()
+  remote.act({kind:'pull-steer',generation:after.generation,draftId:id})
+  expect(remote.snapshot().pendingDrafts).toEqual([])
+  expect(legacyFields(after)).toStrictEqual(legacyFields(current))
+})
+
 test('paired picker selects only advertised models and tiers, synchronizes both ways and distinguishes a pending handoff', () => {
   const {st,remote,run} = harness()
   const start = remote.snapshot().models
+  expect(start.next).toBe('local:another')
   const change = {kind:'select-model' as const, generation:0, spec:'local:another', effort:'high', revision:start.revision}
   expect(() => remote.act({...change,spec:'unknown:route'})).toThrow()
   expect(() => remote.act({...change,effort:'not-a-tier'})).toThrow()

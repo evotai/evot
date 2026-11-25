@@ -2,6 +2,7 @@ import { type OutputLine, buildPrivacyNoticeCard, buildUserMessage } from '../..
 import { stripVTControlCharacters } from 'node:util'
 import { buildRunFooterLine } from '../../render/run-footer.js'
 import type { RunThinking } from '../../render/run-thinking.js'
+import type { settledNoticeCard } from '../app/background/background-processes.js'
 import type { PrivacyFeed } from '../app/privacy-feed.js'
 import type { SuggestionContext, WorkflowRuntime } from '../app/suggestion/context.js'
 import { formatMemoryLine, memorySnapshot } from '../diagnostics/memory.js'
@@ -22,7 +23,7 @@ export interface ScrollbackDeps {
 }
 
 export interface ScrollbackController {
-  commitBackgroundLine(slot: string, text: string): void
+  commitBackgroundLine(slot: string, text: string, card?: ReturnType<typeof settledNoticeCard>): void
   commitFlushResult(flushed: { lines: OutputLine[]; expandedLines?: OutputLine[] | undefined; }): void
   commitLines(outputLines: OutputLine[]): void
   commitPrivacyHappenings(): void
@@ -32,7 +33,7 @@ export interface ScrollbackController {
   commitSystem(id: string, text: string, kind?: "user" | "assistant" | "thinking" | "tool" | "tool_result" | "verbose" | "error" | "system" | "cancelled"): void
   commitLocalNotice(id: string, text: string): void
   commitSystemLines(outputLines: OutputLine[]): void
-  commitUserMessage(text: string): void
+  commitUserMessage(text: string, photoId?: string): void
   memoryLine(): string
   restoreLines(outputLines: OutputLine[], expandedOutputLines?: OutputLine[]): void
 }
@@ -48,8 +49,8 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
     deps.committer.restore(outputLines, expandedOutputLines)
   }
 
-  function commitUserMessage(text: string): void {
-    if (!st.logMode) st.conversationTail.append('user', text)
+  function commitUserMessage(text: string, photoId?: string): void {
+    if (!st.logMode) st.conversationTail.append('user', text, photoId)
     deps.suggestionContext.user(text, deps.liveWorkflowRuntime())
     commitLines(buildUserMessage(text))
   }
@@ -131,8 +132,11 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
   }
 
   /** Unique id per emission: these lines are history, not collapsible status. */
-  function commitBackgroundLine(slot: string, text: string): void {
-    if (!st.logMode) st.conversationTail.append('notice', stripVTControlCharacters(text))
+  function commitBackgroundLine(slot: string, text: string, card?: ReturnType<typeof settledNoticeCard>): void {
+    if (!st.logMode) {
+      if (card) st.conversationTail.appendNoticeCard(text, card)
+      else st.conversationTail.append('notice', stripVTControlCharacters(text))
+    }
     commitSystem(`sys-bg-${slot}-${st.nextBackgroundLineId++}`, text)
   }
 

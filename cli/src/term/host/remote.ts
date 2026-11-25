@@ -1,11 +1,12 @@
-import { basename, join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { basename } from 'node:path'
 import { renderUnicodeCompact } from 'uqr'
 import { getThemeScheme } from '../../ui/theme/index.js'
 import { remoteHome, sharingScope } from '../../features/remote/transport.js'
 import { manageGrants } from '../../features/remote/grants.js'
 import { openEnvironment } from '../../features/remote/environment.js'
 import { sharedConnectInvite } from '../../features/remote/cloud-connect.js'
-import { isSessionIdPrefix, normalizeResumeQuery, sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
+import { sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
 import { machineName } from '../../features/remote/machine-name.js'
@@ -13,14 +14,18 @@ import type { Agent } from '../../native/index.js'
 import type { PromptSuggestion } from '../app/suggestion/controller.js'
 import type { CloudSessionSync } from '../../session/cloud-sessions.js'
 import type { ResumeSessionCache } from '../app/session/resume-cache.js'
-import { isSlashCommand } from '../../commands/index.js'
+import { currentQueueTarget, pendingEntryState, type PendingQueue } from '../app/queue/pending-queue.js'
+import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
+import { phoneCommands, phonePrompt } from '../app/remote/commands.js'
 import { resolveRunInteraction } from '../app/run/run-interaction.js'
+import type { SuggestController } from './suggest.js'
 import { insertText, isEditorEmpty } from '../input/editor.js'
 import { RemoteConflict, type RemoteAction, type RemoteSnapshot } from '../../features/remote/protocol.js'
 import { errorText, formatElapsed, renderBar } from '../../ui/format.js'
 import { renderCommandNotice } from '../../ui/command-notice.js'
 import { createCommandOutput, type CommandOutputPort } from '../widgets/command-output.js'
 import type { ActivityController } from './activity.js'
+import { suggestionStatusText } from '../viewmodel/suggestion.js'
 import { spinnerDescription } from '../widgets/spinner.js'
 import { remoteModels } from '../app/remote/models.js'
 import { assistantRow } from '../app/remote/conversation.js'
@@ -43,13 +48,16 @@ export interface RemoteDeps {
   readonly composer: ComposerController
   readonly activity: ActivityController
   readonly agent: Agent
-  readonly suggestions: Pick<PromptSuggestion, 'text' | 'completing' | 'replacing'>
+  readonly suggestions: Pick<PromptSuggestion, 'text' | 'feedback' | 'completing' | 'replacing' | 'next' | 'complete'>
+  readonly suggest: Pick<SuggestController, 'suggestionInputReady'>
   readonly gitInfo: { getBranch(): string | null }
   readonly cloudSessions: Pick<CloudSessionSync, 'remoteFor' | 'forget'>
   readonly resumeCache: Pick<ResumeSessionCache, 'remove'>
   readonly modelSelection: ModelSelectionController
   readonly asks: AskController
   readonly pendingImages: PendingImages
+  readonly pendingQueue: PendingQueue
+  readonly queueLifecycle: QueueLifecycle
   readonly rendererTrace: RendererTrace
   readonly runCtl: RunController
   readonly runOwnership: RunOwnership
@@ -96,31 +104,27 @@ export function remoteStatus(port: CommandOutputPort) {
   }
 }
 
-/** The one command a phone may run: semantic search, never an id lookup or a picker. */
-function phoneSearch(text: string) {
-  const query = /^\/sessions\s+(\S[\s\S]*)$/.exec(text.trim())?.[1]?.trim()
-  return !!query && !isSessionIdPrefix(normalizeResumeQuery(query))
-}
+const targetRevision = (target: string) => createHash('sha256').update(target).digest('hex')
 
 export function createRemoteController(st: ReplState, deps: RemoteDeps) {
-  // The visible tail moves as a run streams; its first message is not a session title.
-  // Read only this session's metadata, single-flight, off the snapshot hot path.
+  // Before the first save, use the opening prompt pinned independently of the moving tail.
+  // Saved/renamed titles take precedence; read this session only, single-flight, off the hot path.
   function sessionTitle(): string {
     const session = st.sessionId
-    if (!session) { st.remoteTitle = null; return 'New conversation' }
+    if (!session) { st.remoteTitle = null; return st.conversationTail.openingTitle || 'New conversation' }
     if (st.remoteTitle?.session !== session) {
       const meta = st.lastLineage.find(m => m.session_id === session) ?? st.preloadedSessions.find(m => m.session_id === session)
-      st.remoteTitle = { session, title: meta ? sessionLineTitle(meta) : '(untitled)', refreshAfter: 0 }
+      st.remoteTitle = { session, title: meta ? sessionLineTitle(meta, '') : '', refreshAfter: 0 }
     }
     const entry = st.remoteTitle
     if (Date.now() >= entry.refreshAfter) {
       entry.refreshAfter = Infinity
       void deps.agent.findSession(session).then(meta => {
-        if (meta?.session_id === session) entry.title = sessionLineTitle(meta)
+        if (meta?.session_id === session) entry.title = sessionLineTitle(meta, '')
       }).catch(() => { /* keep the last known title if storage is busy */ })
         .finally(() => { entry.refreshAfter = Date.now() + 3000 })
     }
-    return entry.title
+    return entry.title || st.conversationTail.openingTitle || `Session ${session.slice(-8)}`
   }
   function snapshot(backgroundView?: string): RemoteSnapshot {
     if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
@@ -140,6 +144,8 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       st.cloudLoginRequired
     const input = local ? null : running ? 'steer' : !st.isLoading ? 'send' : null
     const activity = deps.activity.current()
+    const interaction = activity?.kind === 'spinner' ? activity.options.interaction : resolveRunInteraction(deps.runCtl.runInteractionInput())
+    const stopTarget = input === 'send' && interaction.interruptTarget === 'background' ? deps.backgroundTerminals.stopTarget() : null
     const description =
       activity?.kind === 'spinner'
         ? spinnerDescription(activity.state, Date.now(), activity.stats, activity.options)
@@ -158,15 +164,28 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         st.streamMachine.pendingSwitch?.content ?? st.streamMachine.appState.currentAssistantContent,
         st.expanded,
       )
+    const canSuggest = !!input && isEditorEmpty(st.editor) && deps.suggest.suggestionInputReady()
+    const shareSuggestion = canSuggest && !deps.suggestions.completing() && !deps.suggestions.replacing()
+    const suggestionStatus = shareSuggestion ? deps.suggestions.feedback() : undefined
+    const models = remoteModels(st.configInfo, st.appState.model, st.pendingModelHandoff)
+    const entries = deps.pendingQueue.visible(currentQueueTarget(st))
+    const pending = entries.filter(e => e.version === 1 && e.phoneDraftId)
     return {
       sessionId: st.sessionId,
       title: sessionTitle(),
+      commands: input ? phoneCommands(st.skillEntries) : undefined,
       // Only a next-prompt suggestion; a completion of the TUI's own half-typed draft stays local.
-      suggestion: input === 'send' && !deps.suggestions.completing() && !deps.suggestions.replacing() ? deps.suggestions.text() || undefined : undefined,
+      suggestion: shareSuggestion ? deps.suggestions.text() || undefined : undefined,
+      suggestionHint: suggestionStatus === 'quiet' ? 'no suggestion' : suggestionStatusText({ suggestionStatus }).trim() || undefined,
       place: { name: basename(deps.agent.cwd) || '/', path: shortenSessionCwd(deps.agent.cwd), host: machineName(), branch: deps.gitInfo.getBranch() },
       generation: deps.runOwnership.owner + st.remoteEpoch,
       status,
-      models: remoteModels(st.configInfo, st.appState.model, st.pendingModelHandoff),
+      models,
+      composerKeys: {
+        queue: input === 'steer',
+        cycleEffort: !!input && !models.pending && !!models.options.find(o => o.spec === models.active)?.levels.length,
+        suggest: canSuggest,
+      },
       messageOffset: st.conversationTail.offset,
       messages: st.conversationTail.view(st.expanded),
       live: live?.text ?? '',
@@ -175,6 +194,10 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       statusDetail: description?.detail,
       expanded: st.expanded,
       background: deps.backgroundTerminals.presentation(backgroundView),
+      promptQueue: entries.map(e => ({ state: pendingEntryState(e), ...(e.version === 1 && e.phoneDraftId ? {draftId:e.phoneDraftId} : {}) })),
+      pendingDrafts: pending.map(e => e.phoneDraftId!),
+      pendingSteers: pending.filter(e => e.queue === 'steering').map(e => e.phoneDraftId!),
+      stopBackgroundTarget: stopTarget ? targetRevision(stopTarget) : undefined,
       input,
       canStop: running && (!local || !!ask),
       ask,
@@ -204,21 +227,48 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     }
     if (action.kind === 'answer' && s.ask?.id === action.id && deps.asks.answerRequest(action.id, action.answers))
       return
-    if (action.kind === 'stop' && s.canStop) {
-      if (s.ask) st.overlay = { kind: 'none' }
-      deps.runCtl.interruptStream('sys-remote-stop', '  Interrupted from phone.')
+    if (action.kind === 'cancel-ask' && s.ask?.id === action.id) {
+      deps.asks.handleAskKey({ type: 'escape' })
       return
     }
-    if ((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) {
-      if (isSlashCommand(action.text) && !phoneSearch(action.text))
-        throw new RemoteConflict('Run slash commands in the TUI. From the phone only /sessions <request> is available.')
-      if (phoneSearch(action.text) && action.kind === 'steer')
-        throw new RemoteConflict('Wait for the current run to finish before searching sessions.')
-      if (phoneSearch(action.text) && action.images?.length)
-        throw new RemoteConflict('Session search takes text only. Remove the photos.')
-      // `/sessions <request>` is an ordinary agent turn with the session-search task, the same
-      // turn the TUI runs; the phone reads the answer in the chat and picks from its own list.
-      deps.submit.submitConversationText(action.text, action.kind === 'steer', action.images)
+    if (action.kind === 'cycle-effort' && s.composerKeys?.cycleEffort && s.models.revision === action.revision) {
+      if (!deps.composer.cycleThinkingLevel()) throw new RemoteConflict('Thinking level is no longer selectable.')
+      return
+    }
+    if (action.kind === 'suggest' && s.composerKeys?.suggest) {
+      if (!deps.suggestions.next()) deps.suggestions.complete('')
+      return
+    }
+    if ((action.kind === 'pull-steer' || action.kind === 'pull-draft') && s.input &&
+        (action.kind === 'pull-steer' ? s.pendingSteers?.at(-1) : s.promptQueue?.at(-1)?.draftId) === action.draftId) {
+      const entry = deps.pendingQueue.visible(currentQueueTarget(st)).find(e => e.phoneDraftId === action.draftId)
+      if (!entry) throw new RemoteConflict('Message is no longer pending.')
+      try { deps.pendingQueue.remove(entry, 1) } // native compare-and-remove can still lose to consumption
+      catch { deps.queueLifecycle.reconcile(); throw new RemoteConflict('Message changed or was already sent.') }
+      deps.replCommands.requestRender()
+      return
+    }
+    if (action.kind === 'stop-background' && action.target === s.stopBackgroundTarget) {
+      // As for the TUI's confirmed Esc: reread before stopping, never include a replacement task.
+      deps.backgroundTerminals.refresh(false)
+      const target = deps.backgroundTerminals.stopTarget()
+      if (!target || targetRevision(target) !== action.target) throw new RemoteConflict('The background tasks changed. Check again.')
+      deps.backgroundTerminals.stopAll(target)
+      return
+    }
+    if (s.canStop && ((action.kind === 'interrupt-ask' && s.ask?.id === action.id) ||
+        (action.kind === 'stop' && (action.askId === undefined || action.askId === s.ask?.id)))) {
+      if (s.ask) {
+        st.overlay = { kind: 'none' }
+        deps.runCtl.interruptStream('sys-ask-cancel', '  ⏺ Cancelled.')
+      } else deps.runCtl.interruptStream('sys-remote-stop', '  Interrupted from phone.')
+      return
+    }
+    if (((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) || (action.kind === 'queue' && s.composerKeys?.queue)) {
+      if (action.kind !== 'send' && action.draftId && st.pendingQueue.entries.some(e => e.phoneDraftId === action.draftId))
+        throw new RemoteConflict('This message is already pending.')
+      const modelText = phonePrompt(action.text, st.skillEntries, action.kind !== 'send', !!action.images?.length)
+      deps.submit.submitConversationText(action.text, action.kind, action.images, modelText, action.draftId)
       return
     }
     throw new RemoteConflict('This action is no longer available.')

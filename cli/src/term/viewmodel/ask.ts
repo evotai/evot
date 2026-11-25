@@ -1,6 +1,6 @@
 import { wrapTextWithAnsi } from '../../ui/wrap.js'
 import { blocksToLines, styledLineToAnsi } from './types.js'
-import { isFreeText, type AskState } from '../widgets/ask.js'
+import { isFreeText, selectedAnswerText, type AskState } from '../../ui/ask.js'
 import { prefixedAskLines } from '../app/run/ask-user.js'
 import { CURSOR_MARKER } from '../screen/render-frame.js'
 import { getTheme } from '../../ui/theme/index.js'
@@ -18,14 +18,6 @@ const CHECKBOX_OFF = '☐'
 const TICK = '✓'
 const BULLET = '•'
 const ARROW_RIGHT = '→'
-
-function selectedAnswerText(state: AskState, questionIndex: number): string | null {
-  const answer = state.answers[questionIndex]
-  if (!answer) return null
-  if (answer.customText !== null) return answer.customText
-  if (answer.selectedOption !== null) return state.questions[questionIndex]?.options[answer.selectedOption]?.label ?? null
-  return null
-}
 
 function isAnswered(state: AskState, index: number): boolean {
   const a = state.answers[index]

@@ -28,16 +28,20 @@ function isSettled(status: BackgroundProcess['status']): boolean {
  * work — reviving it for background tasks would make both states read alike and
  * advertise a key that would not do what it says.
  */
-export function settledNoticeMessage(process: BackgroundProcess): string {
+export function settledNoticeCard(process: BackgroundProcess): { state: 'error' | 'success'; summary: string } {
   const id = process.task_id.slice(0, 8)
-  const command = formatCommandLabel(process.command)
   const exit = process.exit_code === null ? '' : ` · exit ${process.exit_code}`
   if (process.status === 'killed') {
     const how = process.stopped_by_user ? 'was cancelled by the user' : 'was stopped'
-    return `  ■ ${id} ${how}  ${command}`
+    return { state: 'success', summary: `  ■ ${id} ${how}` }
   }
   const outcome = process.status === 'failed' ? '✗ failed' : '✓ completed'
-  return `  ${outcome} in background${exit} · ${id}  ${command}`
+  const state = process.status === 'failed' ? 'error' : 'success'
+  return { state, summary: `  ${outcome} in background${exit} · ${id}` }
+}
+
+export function settledNoticeMessage(process: BackgroundProcess): string {
+  return `${settledNoticeCard(process).summary}  ${formatCommandLabel(process.command)}`
 }
 
 /** Output lines kept when a watched task's live view closes on completion. */

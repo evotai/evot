@@ -75,7 +75,7 @@ function paintCard(rail, text) {
   rows.forEach((row, i) => {
     const line = document.createElement('div');
     line.className = i === 0 ? 'card-row card-head' : 'card-row';
-    const mark = i > 0 && /^(\s*)([✓✗●○])(.*)$/.exec(row);
+    const mark = /^(\s*)([✓✗●○■])(.*)$/.exec(row);
     if (mark) {
       const glyph = document.createElement('span'); glyph.className = 'card-mark'; glyph.textContent = mark[2];
       line.append(mark[1], glyph, mark[3]);
@@ -111,7 +111,7 @@ function paintDiff(node, rows) {
   }
   node.append(box);
 }
-export function renderHistory(root, s) {
+export function renderHistory(root, s, photos, thumbnail) {
   const rows = [...s.messages];
   if (s.live || s.liveBlocks?.length) rows.push({ role: 'assistant', text: s.live, blocks: s.liveBlocks });
   const first = s.messageOffset ?? 0;
@@ -126,11 +126,17 @@ export function renderHistory(root, s) {
       el.dataset.role = m.role;
       el.className = 'message message-' + m.role;
     }
-    if (m.role !== 'assistant') {
-      if (el.source === m.text) return;
+    if (m.role !== 'assistant' && !(m.role === 'notice' && m.blocks?.length)) {
+      const images = m.role === 'user' && photos?.get(m.photoId);
+      if (el.source === m.text && el.photos === images) return;
+      el.photos = images;
       const body = document.createElement('div');
       body.className = m.role === 'user' ? 'bubble' : m.role === 'notice' ? 'terminal-notice' : 'turn-footer';
       body.textContent = el.source = m.text;
+      if (images) {
+        const strip = document.createElement('div'); strip.className = 'bubble-images';
+        strip.append(...images.map(thumbnail)); body.append(strip);
+      }
       el.replaceChildren(body);
       return;
     }

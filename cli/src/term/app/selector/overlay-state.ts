@@ -1,4 +1,4 @@
-import type { AskState } from '../../widgets/ask.js'
+import type { AskState } from '../../../ui/ask.js'
 import type { SelectorState } from '../../../ui/selector.js'
 
 /** Application-owned transient surface state. Views consume this union but

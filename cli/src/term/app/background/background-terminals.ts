@@ -9,6 +9,7 @@ import {
   decideSessionSwitch,
   newlySettled,
   runningBackgroundCount,
+  settledNoticeCard,
   settledNoticeMessage,
   settledOutputSnapshot,
   shouldWakeForNotifications,
@@ -51,7 +52,7 @@ export interface BackgroundTerminalsDeps {
   /** Current session, or null while none is bound. */
   sessionId: () => string | null
   /** Commit one line of history. `slot` only labels the line's origin. */
-  commit: (slot: string, text: string) => void
+  commit: (slot: string, text: string, card?: ReturnType<typeof settledNoticeCard>) => void
   requestRender: () => void
   /** Renders a caught error as text. */
   errorText: (err: unknown) => string
@@ -658,7 +659,7 @@ export class BackgroundTerminals {
   private settleOutputView(state: SelectorState, process: BackgroundProcess): void {
     if (!this.announced.has(process.task_id)) {
       this.announced.add(process.task_id)
-      this.deps.commit('settled', settledOutputSnapshot(process, this.readOutput(process)))
+      this.deps.commit('settled', settledOutputSnapshot(process, this.readOutput(process)), settledNoticeCard(process))
       if (!process.stopped_by_user) this.wakeArmed = true
     }
     const othersLive = this.panelProcesses().some(candidate =>
@@ -730,7 +731,7 @@ export class BackgroundTerminals {
         if (!isLiveStatus(stopped.status)) this.announced.add(stopped.task_id)
         const finishedNaturally = !stopped.stopped_by_user && (stopped.status === 'completed' || stopped.status === 'failed')
         if (finishedNaturally) this.wakeArmed = true
-        if (!alreadyAnnounced) this.deps.commit('stop', finishedNaturally ? settledNoticeMessage(stopped) : stopOneMessage(stopped))
+        if (!alreadyAnnounced) this.deps.commit('stop', finishedNaturally ? settledNoticeMessage(stopped) : stopOneMessage(stopped), finishedNaturally ? settledNoticeCard(stopped) : undefined)
       }
     } catch (err) {
       if (sessionId === this.deps.sessionId()) {
@@ -805,7 +806,7 @@ export class BackgroundTerminals {
     for (const process of newlySettled(previous, next)) {
       if (this.announced.has(process.task_id)) continue
       this.announced.add(process.task_id)
-      this.deps.commit('settled', settledNoticeMessage(process))
+      this.deps.commit('settled', settledNoticeMessage(process), settledNoticeCard(process))
       if (!process.stopped_by_user) this.wakeArmed = true
     }
     // Forget ids the engine has reclaimed so the set cannot grow without bound

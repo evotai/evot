@@ -1,7 +1,6 @@
 import stringWidth from 'string-width'
 import { parsePasteRefs } from './paste_refs.js'
-
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+import { graphemeSegmenter } from '../../ui/grapheme.js'
 
 export interface TextSegment {
   text: string
@@ -69,27 +68,6 @@ export function previousSegmentBoundary(text: string, cursorCol: number): number
 export function nextSegmentBoundary(text: string, cursorCol: number): number {
   for (const segment of segmentEditorText(text)) {
     if (cursorCol < segment.end) return segment.end
-  }
-  return text.length
-}
-
-/** Previous user-perceived character boundary, without paste-ref semantics. */
-export function previousGraphemeBoundary(text: string, cursorCol: number): number {
-  const clamped = Math.max(0, Math.min(cursorCol, text.length))
-  let previous = 0
-  for (const item of graphemeSegmenter.segment(text)) {
-    if (item.index >= clamped) break
-    previous = item.index
-  }
-  return previous
-}
-
-/** Next user-perceived character boundary, without treating paste refs specially. */
-export function nextGraphemeBoundary(text: string, cursorCol: number): number {
-  const clamped = Math.max(0, Math.min(cursorCol, text.length))
-  for (const item of graphemeSegmenter.segment(text)) {
-    const end = item.index + item.segment.length
-    if (clamped < end) return end
   }
   return text.length
 }

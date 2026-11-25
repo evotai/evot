@@ -1,4 +1,4 @@
-import { nextGraphemeBoundary, previousGraphemeBoundary } from '../input/grapheme.js'
+import { nextGraphemeBoundary, previousGraphemeBoundary } from './grapheme.js'
 
 export interface AskOption {
   label: string
@@ -60,8 +60,23 @@ function initialUIState(state: AskState, tab: number): QuestionUIState {
   }
 }
 
-function getUIState(state: AskState, tab: number): QuestionUIState {
+export function getUIState(state: AskState, tab = state.currentTab): QuestionUIState {
   return state.uiStates.get(tab) ?? initialUIState(state, tab)
+}
+
+export function selectedAnswerText(state: AskState, index: number): string | null {
+  const answer = state.answers[index]
+  if (!answer) return null
+  if (answer.customText !== null) return answer.customText
+  return answer.selectedOption === null ? null : state.questions[index]?.options[answer.selectedOption]?.label ?? null
+}
+
+export function askResponses(state: AskState) {
+  return state.questions.map(({ header, question }, i) => ({ header, question, answer: selectedAnswerText(state, i) ?? 'Skipped' }))
+}
+
+export function askEditText(state: AskState, text: string): AskState {
+  return setUIState(state, state.currentTab, { focusIndex: optionCount(state) - 1, inOtherMode: true, otherText: text, otherCursor: text.length })
 }
 
 function setUIState(
@@ -118,7 +133,7 @@ function hasAnswer(state: AskState): boolean {
   return answer !== undefined && (answer.selectedOption !== null || answer.customText !== null)
 }
 
-function focusOption(state: AskState, index: number): AskState {
+export function focusOption(state: AskState, index: number): AskState {
   const tab = state.currentTab
   const max = optionCount(state) - 1
   const next = Math.max(0, Math.min(index, max))
@@ -161,47 +176,19 @@ export function askDown(state: AskState): AskState {
   })
 }
 
+export function askGoTo(state: AskState, tab: number): AskState {
+  const count = state.questions.length
+  if (count < 2 || tab < 0 || tab > count) return state
+  if (tab === count) return { ...state, onSubmitTab: true, submitFocus: 0 }
+  return { ...state, currentTab: tab, onSubmitTab: false, focusIndex: getUIState(state, tab).focusIndex }
+}
+
 export function askNextTab(state: AskState): AskState {
-  // If on submit tab, can't go further
-  if (state.onSubmitTab) return state
-
-  if (state.currentTab >= state.questions.length - 1) {
-    if (state.questions.length > 1) {
-      return { ...state, onSubmitTab: true, submitFocus: 0 }
-    }
-    return state
-  }
-
-  const next = state.currentTab + 1
-  const ui = getUIState(state, next)
-  return {
-    ...state,
-    currentTab: next,
-    focusIndex: ui.focusIndex,
-  }
+  return state.onSubmitTab ? state : askGoTo(state, state.currentTab + 1)
 }
 
 export function askPrevTab(state: AskState): AskState {
-  if (state.onSubmitTab) {
-    // From submit tab, go back to last question
-    const last = state.questions.length - 1
-    const ui = getUIState(state, last)
-    return {
-      ...state,
-      currentTab: last,
-      focusIndex: ui.focusIndex,
-      onSubmitTab: false,
-    }
-  }
-
-  if (state.currentTab <= 0) return state
-  const prev = state.currentTab - 1
-  const ui = getUIState(state, prev)
-  return {
-    ...state,
-    currentTab: prev,
-    focusIndex: ui.focusIndex,
-  }
+  return askGoTo(state, state.onSubmitTab ? state.questions.length - 1 : state.currentTab - 1)
 }
 
 export function askTypeChar(state: AskState, char: string): AskState {
@@ -451,26 +438,5 @@ export function askSelect(state: AskState): { state: AskState; done: boolean } {
   }
 
   // Multi question: advance to next tab or enter submit review if last
-  if (tab < state.questions.length - 1) {
-    const next = tab + 1
-    const nextUI = getUIState(newState, next)
-    return {
-      state: {
-        ...newState,
-        currentTab: next,
-        focusIndex: nextUI.focusIndex,
-      },
-      done: false,
-    }
-  }
-
-  // Last question answered: enter submit review page
-  return {
-    state: {
-      ...newState,
-      onSubmitTab: true,
-      submitFocus: 0,
-    },
-    done: false,
-  }
+  return { state: askNextTab(newState), done: false }
 }

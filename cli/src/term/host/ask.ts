@@ -3,11 +3,11 @@ import { type TaskModelPickerRequest, type TaskModelSelection, createTaskModelWi
 import type { Agent } from '../../native/index.js'
 import type { OutputLine } from '../../render/output.js'
 import type { SessionHook } from '../../session/hook.js'
-import { askStateToResponse, prefixedAskLines } from '../app/run/ask-user.js'
+import { prefixedAskLines } from '../app/run/ask-user.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { ReplState } from './state.js'
 import type { TermRenderer } from '../screen/renderer.js'
-import { type AskQuestion, createAskState, handleAskKeyEvent } from '../widgets/ask.js'
+import { type AskQuestion, askResponses, createAskState, handleAskKeyEvent } from '../../ui/ask.js'
 import type { KeyEvent } from '../../ui/keys.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
@@ -164,7 +164,7 @@ export function createAskController(st: ReplState, deps: AskDeps): AskController
         deps.renderer.requestRender()
         return
       case 'submit':
-        submitAnswers(askStateToResponse(result.state), transient)
+        submitAnswers(askResponses(result.state), transient)
         return
       case 'update':
         st.overlay = { kind: 'ask-user', state: result.state }

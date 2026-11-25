@@ -8,7 +8,7 @@ import {
   moveWordRight,
 } from '../../../src/term/input/editor.js'
 import { UndoStack } from '../../../src/term/input/undo-stack.js'
-import { findWordBackward, findWordForward } from '../../../src/term/input/word-navigation.js'
+import { findWordBackward, findWordForward } from '../../../src/ui/word-navigation.js'
 
 describe('word navigation', () => {
   test('moves across ASCII words and punctuation', () => {
@@ -26,8 +26,9 @@ describe('word navigation', () => {
     const ref = '[Image #7]'
     const text = `prefix ${ref} tail`
     const endOfRef = `prefix ${ref}`.length
-    expect(findWordBackward(text, endOfRef)).toBe('prefix '.length)
-    expect(findWordForward(text, 'prefix '.length)).toBe(endOfRef)
+    const at = (cursorCol: number) => ({ ...insertText(createEditorState(), text), cursorCol })
+    expect(moveWordLeft(at(endOfRef)).cursorCol).toBe('prefix '.length)
+    expect(moveWordRight(at('prefix '.length)).cursorCol).toBe(endOfRef)
   })
 
   test('editor word moves cross lines at boundaries', () => {

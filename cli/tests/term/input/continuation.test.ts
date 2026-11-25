@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { needsContinuation } from '../../../src/term/input/continuation.js'
+import { needsContinuation } from '../../../src/ui/continuation.js'
 
 describe('needsContinuation', () => {
   test('returns false for plain text', () => {

@@ -1,0 +1,20 @@
+{
+  "sessionId": null,
+  "title": "New conversation",
+  "generation": 0,
+  "status": "Ready",
+  "models": {
+    "active": "local:fixture",
+    "effort": "low",
+    "revision": "[\"local:fixture\",\"low\",null]",
+    "pending": null,
+    "options": [
+      { "spec": "local:fixture", "label": "fixture", "group": "local", "levels": ["low", "high"], "warning": "" }
+    ]
+  },
+  "messages": [],
+  "live": "",
+  "input": "send",
+  "canStop": false,
+  "ask": null
+}

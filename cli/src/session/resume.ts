@@ -76,21 +76,7 @@ function groupedSessionItems<T extends SessionMeta>(
   return items
 }
 
-export function normalizeResumeQuery(value: string): string {
-  const query = value.trim()
-  const quotePairs = [["'", "'"], ['"', '"'], ['‘', '’'], ['“', '”']] as const
-  for (const [open, close] of quotePairs) {
-    if (query.startsWith(open) && query.endsWith(close)) {
-      return query.slice(open.length, -close.length).trim()
-    }
-  }
-  return query
-}
-
-export function isSessionIdPrefix(value: string): boolean {
-  return /^[0-9a-f]{1,36}$/i.test(value)
-    || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
-}
+export { normalizeResumeQuery, isSessionIdPrefix } from './resume-query.js'
 
 export function resolveSessionByPrefix(sessions: SessionMeta[], prefix: string): SessionPrefixResolution {
   const matches = sessions.filter(s => s.session_id === prefix || s.session_id.startsWith(prefix))
@@ -343,8 +329,8 @@ export function sessionAge(iso: string, now = new Date()): string {
  * One-line row: full session id and the line that identifies the session,
  * the name the user chose or else the automatic title.
  */
-export function sessionLineTitle(s: Pick<SessionMeta, 'custom_title' | 'title'>): string {
-  return (s.custom_title?.trim() || sanitizeSessionTitle(s.title)).replace(/\s+/g, ' ')
+export function sessionLineTitle(s: Pick<SessionMeta, 'custom_title' | 'title'>, fallback = '(untitled)'): string {
+  return (s.custom_title?.trim() || (s.title?.trim() ? sanitizeSessionTitle(s.title.trim()) : fallback)).replace(/\s+/g, ' ')
 }
 
 function formatSessionLine(

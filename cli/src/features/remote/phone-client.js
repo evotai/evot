@@ -1,8 +1,16 @@
+import { questionPanel } from './phone-ask.js';
+import { installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
+import { applyEdit, enterIntent } from './phone-editor.js';
+import { composerTab, draftHintText, inlineSuggestion } from './phone-composer-keys.js';
+import { photoViewer, messagePhotos } from './phone-photo-preview.js';
+import { taskKeys } from './phone-task-keys.js';
+import { lastDraft, pendingDrafts, queueStrip } from './phone-queue.js';
 import { sessionDrawer } from './phone-directory.js';
 import { renderHistory } from './phone-history.js';
 import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
+import { commandMenu, phoneShortcut } from './phone-commands.js';
 
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
@@ -13,16 +21,17 @@ let token = sessionStorage.getItem('evot.remote'),
 let timer,
   noticeTimer,
   epoch = 0,
-  askId = null,
   catalogKey = '',
   levelsKey = '';
+const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
+const askPanel = questionPanel($('questions'), action);
 const pickStart = new WeakMap();
 // A QR code or account return only starts pairing. Which session to follow is
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
-// The TUI's next-prompt suggestion, shown in the empty composer; `dismissed` is the one Backspace cleared.
-let ghost = '', dismissed = '';
+// Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
+let dismissed = '';
 function selectTarget(id, session) {
   nav.select(id, session);
   terminal = nav.target?.terminal ?? null;
@@ -31,11 +40,28 @@ const background = backgroundPanel(() => {
   etag = '';
   return refresh();
 });
-const photos = imageTray({ tray: $('attachments'), input: $('imageInput'), button: $('attach'),
+function clearDraft() { $('draft').value = ''; photos.clear(); resize(); }
+function draftEmpty() { return !messageField.value && !tab.composing; }
+function currentSuggestion(empty = draftEmpty()) {
+  return inlineSuggestion(connected ? view : null, empty && !photos.count && !photos.busy, dismissed);
+}
+function dismissHint() {
+  if (commands.dismiss()) return;
+  const preview = currentSuggestion();
+  if (preview) { dismissed = preview.key; controls(); }
+}
+const shortcuts = taskKeys($('stop'), {pull:pullDraft, dismissMenu:dismissHint, clear:clearDraft,
+  act:payload => { $('draft').focus({preventScroll:true}); return action(payload); }});
+const commands = commandMenu($('draft'), $('commandMenu'), resize);
+const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue:() => submitMessage('queue'),
+  suggest:() => action({kind:'suggest'}), disarm:shortcuts.disarm});
+const viewer = photoViewer($('photoPreview')), sentPhotos = messagePhotos();
+const outbox = [], renderQueue = queueStrip($('promptQueue'),viewer.thumbnail);
+const photos = imageTray({ thumbnail:viewer.thumbnail, tray: $('attachments'), input: $('imageInput'), button: $('attach'),
   changed: () => controls(), notice: (text) => notice(text) });
 const drawer = sessionDrawer({ api, selected: () => connected ? terminal : null, choose, create: () => choose(null, null),
   createIn: () => showFolders(), host: () => view?.place?.host,
-  ask: { available: () => connected && !!view?.input && !busy, submit: (text) => { $('draft').value = text; resize(); $('compose').requestSubmit(); } } });
+  ask: { available: () => connected && view?.input === 'send' && !busy, submit: (text) => { $('draft').value = text; resize(); submitMessage(view?.input); } } });
 function requestId() {
   const hex = Array.from(crypto.getRandomValues(new Uint8Array(16)), (n) => n.toString(16).padStart(2, '0')).join('');
   return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join('-');
@@ -61,8 +87,7 @@ async function choose(id, session, folder) {
     view = null;
     paired(true);
     etag = '';
-    $('history').replaceChildren(); for (const item of outbox.splice(0)) item.release?.(); $('outbox').replaceChildren(); photos.clear();
-    questions(null);
+    $('history').replaceChildren(); clearOutbox(); photos.clear();
     $('draft').value = '';
     $('draft').rows = 1;
     await refresh();
@@ -88,11 +113,10 @@ function paired(yes) {
   $('openSessions').hidden = $('newSession').hidden = !yes;
   if (!yes) {
     drawer.reset();
+    clearOutbox(); photos.clear();
     background.render(null);
     $('threadTitle').textContent = 'evot remote';
     $('history').replaceChildren();
-    $('questions').replaceChildren();
-    askId = null;
     $('draft').value = '';
     $('deviceStatus').textContent = 'Connect to request device access.';
   }
@@ -118,24 +142,34 @@ function paired(yes) {
 function controls() {
   const input = connected ? view?.input : null,
     switchable = connected && !!(input || view?.ask) && !busy;
+  commands.render(input && !busy ? view.commands : null, view?.models.options);
   drawer.lock(busy);
   $('openSessions').disabled = $('browseSessions').disabled = busy;
-  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count && !ghost);
+  const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
+  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count && !candidate);
   $('attach').disabled = busy || !input || photos.count >= 4;
-  $('send').textContent = busy ? '…' : input === 'steer' ? '↱' : '↑';
+  renderQueue(view, outbox);
+  const queuedCount = view?.promptQueue?.length ?? pendingDrafts(view)?.length ?? 0;
+  const accept = !!candidate;
+  $('send').textContent = busy ? '…' : accept ? '→' : input === 'steer' ? '↱' : '↑';
   $('send').toggleAttribute('aria-busy', busy);
   $('newSession').disabled = $('drawerNew').disabled = !token || busy;
-  $('send').ariaLabel = $('send').title = input === 'steer' ? 'Steer active run' : 'Send message';
-  $('draft').placeholder = view?.ask
-    ? 'Answer the question above to continue…'
-    : ghost || (input === 'steer' ? 'Steer the active run…' : 'Ask anything about this project…');
-  $('draft').classList.toggle('ghost', !!ghost);
-  $('stop').hidden = !view?.canStop;
-  $('stop').disabled = busy || !connected;
+  $('send').ariaLabel = $('send').title = accept ? 'Accept suggestion' : input === 'steer' ? 'Steer active run' : 'Send message';
+  const hint = $('draftHint'), text = draftHintText(empty, connected ? view : null, preview, queuedCount);
+  if (hint.textContent !== text) hint.textContent = text;
+  hint.hidden = !text;
+  hint.toggleAttribute('data-preview', !!preview);
+  const pending = lastDraft(view);
+  shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count || photos.busy,
+    pending && outbox.some(item => item.draftId === pending) ? pending : null,
+    !!input && (!$('commandMenu').hidden || !!preview));
+  tab.render(connected ? view : null, busy || photos.busy, photos.count, candidate);
+  $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
+  $('bgChip').disabled = !connected || busy;
   $('models').disabled = !switchable || !view.models.options.length;
   $('effort').disabled = !switchable || !!view.models.pending;
-  const answer = $('questions').querySelector('[type=submit]');
-  if (answer) answer.disabled = busy || !connected || !view?.ask;
+  $('compose').hidden = !!view?.ask;
+  askPanel.render(view?.ask, view?.generation, busy || !connected);
 }
 function models(m) {
   const key = JSON.stringify(m.options),
@@ -168,61 +202,19 @@ function models(m) {
   $('effort').value = m.effort;
   $('effortLabel').textContent = titleCase(m.effort) || 'Thinking';
 }
-function questions(ask) {
-  const id = ask?.id ?? null;
-  if (id === askId) return;
-  askId = id;
-  const form = $('questions');
-  form.replaceChildren();
-  form.hidden = !ask;
-  if (!ask) return;
-  const label = document.createElement('div');
-  label.className = 'eyebrow';
-  label.textContent = 'INPUT REQUESTED';
-  form.append(label);
-  for (const q of ask.questions) {
-    const field = document.createElement('fieldset'),
-      legend = document.createElement('legend'),
-      input = document.createElement('textarea');
-    legend.textContent = q.question;
-    field.append(legend);
-    input.rows = 2;
-    input.maxLength = 8192;
-    input.required = true;
-    input.setAttribute('aria-label', q.question);
-    input.placeholder = 'Your answer';
-    const choices = document.createElement('div');
-    choices.className = 'suggestions';
-    for (const o of q.options) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = o.label + (o.description ? ' · ' + o.description : '');
-      b.onclick = () => {
-        input.value = o.label;
-      };
-      choices.append(b);
-    }
-    field.append(choices, input);
-    form.append(field);
-  }
-  const button = document.createElement('button');
-  button.type = 'submit';
-  button.className = 'primary';
-  button.textContent = 'Send answers';
-  form.append(button);
-}
 function render(s, mode) {
   if (nav.target?.session && nav.target.session !== s.sessionId)
     throw Object.assign(Error('This window changed sessions. Choose the session again.'), {status:409});
   // A QR points at a window, not at a conversation chosen from Sessions.
   // Never reuse that window's unsent input after a local /new or /resume.
   if (view?.sessionId && view.sessionId !== s.sessionId) {
-    $('draft').value = ''; $('draft').rows = 1; questions(null);
+    $('draft').value = ''; $('draft').rows = 1; clearOutbox(); photos.clear(); askPanel.render(null, null, true);
   }
   connected = true;
   $('chatLoading').hidden = true;
   const chat = $('chat'),
     follow = !view || chat.scrollHeight - chat.scrollTop - chat.clientHeight < 64;
+  if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
   $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
   $('connection').toggleAttribute('data-online', true);
@@ -238,20 +230,12 @@ function render(s, mode) {
   document.querySelector('.run-line').toggleAttribute('data-active', !!s.active);
   models(s.models);
   place(s.place);
-  suggestion(s.suggestion);
   background.render(s.background);
   settleOutbox(s);
-  $('welcome').hidden = !!renderHistory($('history'), s) || !!s.ask || s.active || outbox.length > 0;
-  questions(s.ask);
+  $('welcome').hidden = !!renderHistory($('history'), s, sentPhotos, viewer.thumbnail) || !!s.ask || s.active || outbox.length > 0;
   controls();
   if (follow) chat.scrollTop = chat.scrollHeight;
   jumpState();
-}
-// The TUI's next-prompt suggestion sits in the empty composer, as in the TUI.
-// Send sends it; typing replaces it; Backspace on the empty box clears it.
-function suggestion(text) {
-  ghost = connected && view?.input === 'send' && text && text !== dismissed ? text : '';
-  controls();
 }
 // Where this window runs, in the status line: folder and branch. The computer's
 // name sits at the foot of the Sessions drawer; a new folder starts from its + button.
@@ -408,7 +392,7 @@ async function synchronize(ready) {
     void checkIdleOwner(mine);
   } catch (e) {
     if (mine !== epoch) return;
-    failures++; connected = false; etag = ''; controls(); suggestion(null);
+    failures++; connected = false; etag = ''; controls();
     if (e.status === 409 || e.status === 403) {
       // Never silently resume a copy or send a draft to a different session.
       // If the conversation moved to another shared TUI, follow that same session only.
@@ -502,20 +486,25 @@ async function pair(auto = false) {
 async function action(payload, done, failed) {
   if (!connected || !view || busy) return;
   busy = true;
+  if (payload.kind === 'suggest') dismissed = ''; // an explicit retry may return the same candidate
   controls();
   const feedback = {
-    send: ['Sending message…', 'Message sent.'], steer: ['Sending guidance…', 'Guidance sent.'],
+    send: ['Sending message…', 'Message sent.'],
+    'cancel-ask': ['Cancelling question…', 'Question cancelled.'], 'interrupt-ask': ['Stopping this run…', 'Stop requested.'],
     answer: ['Sending answers…', 'Answers sent.'], stop: ['Stopping this run…', 'Stop requested.'],
+    'pull-draft': ['Pulling back pending message…', 'Pulled back · not sent.'],
+    'stop-background': ['Stopping background tasks…', 'Stop requested.'],
     'select-model': ['Applying selection…', 'Selection received.'], 'tool-view': ['Updating details…', 'Details updated.'],
-  }[payload.kind];
-  notice(feedback[0], true);
+  }[payload.kind === 'pull-steer' ? 'pull-draft' : payload.kind];
+  // The queue strip is the feedback for a steer/follow-up. HTTP admission is not consumption.
+  notice(feedback?.[0] ?? '', true);
   try {
     await api('/action', { generation: view.generation, ...payload });
     done?.();
-    notice(feedback[1]);
+    notice(feedback?.[1] ?? '');
   } catch (e) {
     failed?.();
-    notice(e.message + ' Check before retrying.', true);
+    notice(e.status === 409 ? e.message : e.message + ' Check before retrying.', true);
   } finally {
     etag = '';
     await refresh();
@@ -549,93 +538,164 @@ $('pair').onsubmit = (e) => {
   e.preventDefault();
   void pair();
 };
-// The sent text shows at once as a pending bubble; the TUI's own copy replaces
-// it when the next frame carries that user turn. A failure puts the draft back.
-const outbox = [];
+// An idle send has an optimistic bubble; steers/follow-ups live only in the queue strip.
+// The host owns the transcript. A rejected request stays recoverable in this page.
+function clearOutbox() {
+  dismissed = ''; viewer.close(); sentPhotos.prune([]);
+  for (const item of outbox.splice(0)) item.release();
+  $('outbox').replaceChildren(); renderQueue(null, outbox);
+}
 function settleOutbox(s) {
-  const spoken = new Set(s.messages.filter((m) => m.role === 'user').map((m) => m.text));
+  sentPhotos.prune(s.messages);
+  const confirmed = new Set(), spoken = new Map();
+  s.messages.forEach((m,i) => {
+    if (m.role !== 'user') return;
+    if (m.photoId) confirmed.add(m.photoId);
+    else spoken.set(m.text, (s.messageOffset ?? 0) + i);
+  });
   for (const item of outbox.splice(0)) {
-    if (spoken.has(item.text) || Date.now() > item.expires) { item.el.remove(); item.release?.(); }
-    else outbox.push(item);
+    // A repeated message can already be in history. The host queue, not the text or a timeout,
+    // decides whether the original draft and its photos must stay recoverable.
+    if (item.sending || item.pulling || (item.draftId && pendingDrafts(s)?.includes(item.draftId))) outbox.push(item);
+    else if (item.previews.length && confirmed.has(item.draftId)) {
+      sentPhotos.remember(item.draftId,item.previews); item.el?.remove(); // history now owns the object URLs
+    } else if ((item.kind !== 'send' && item.draftId && pendingDrafts(s)) || (spoken.get(item.text) ?? -1) >= item.firstRow || Date.now() > item.expires) {
+      // Missing from an authoritative queue: consumed, edited or removed elsewhere. Only
+      // the transcript can speak for consumption. Text/expiry are fallbacks for old hosts.
+      item.el?.remove(); item.release();
+    } else outbox.push(item);
   }
 }
-$('compose').onsubmit = (e) => {
-  e.preventDefault();
-  const kind = view?.input, text = $('draft').value || (photos.count ? '' : ghost);
-  if (!kind || (!text.trim() && !photos.count) || photos.busy || busy) return;
-  if (text === ghost) dismissed = ghost; // sent: do not offer it again
+function removeBubble(item) {
+  item.el?.remove();
+  const index = outbox.indexOf(item);
+  if (index >= 0) outbox.splice(index, 1);
+}
+function pullDraft(draftId) {
+  const item = outbox.find(i => i.draftId === draftId);
+  if (!item || draftId !== lastDraft(view)) return;
+  if ($('draft').value || photos.count || photos.busy) { notice('Clear the current draft before pulling back a pending message.'); return; }
+  // Keep the insertion point empty while the host atomically removes the native queue entry.
+  $('draft').readOnly = true; item.pulling = true;
+  void action({kind:view.pendingDrafts ? 'pull-draft' : 'pull-steer', draftId}, () => {
+    if (outbox.includes(item)) { removeBubble(item); item.restore(); }
+  })
+    .finally(() => { item.pulling = false; $('draft').readOnly = false; $('draft').focus({preventScroll:true}); });
+}
+$('send').onclick = () => { if (currentSuggestion()?.candidate) tab.accept(); else submitMessage(view?.input); };
+function sendingBubble(text, previews) {
+  const el = document.createElement('article'), bubble = document.createElement('div'), state = document.createElement('small');
+  el.className = 'message message-user pending'; bubble.className = 'bubble'; bubble.textContent = text;
+  if (previews.length) {
+    const strip = document.createElement('div'); strip.className = 'bubble-images';
+    strip.append(...previews.map(viewer.thumbnail)); bubble.append(strip);
+  }
+  state.className = 'outbox-state'; state.textContent = previews.length ? 'Uploading…' : 'Sending…';
+  el.append(bubble,state); $('outbox').append(el); return el;
+}
+function submitMessage(kind) {
+  if (kind === 'queue' && !view?.composerKeys?.queue) return;
+  const text = $('draft').value;
+  if (!connected || !kind || tab.composing || messageField.readOnly || (!text.trim() && !photos.count) || photos.busy || busy) return;
+  if (text.length > messageField.maxLength) { notice(`Message is too long (${text.length}/${messageField.maxLength}). Shorten it before sending.`); return; }
+  const shortcut = phoneShortcut(text, view.commands);
+  if (shortcut) { if (kind !== 'queue') runShortcut(shortcut); return; }
+  if (text && text === view.suggestion) dismissed = text; // sent: do not offer it again
   const taken = photos.take(), n = taken.images.length;
   // The computer records the turn as text plus this label; match it to retire the pending bubble.
   const shown = [text.trim(), n ? `[${n === 1 ? 'Image' : `${n} images`} from phone]` : ''].filter(Boolean).join('\n');
-  const el = document.createElement('article');
-  el.className = 'message message-user pending';
-  const bubble = document.createElement('div'); bubble.className = 'bubble'; bubble.textContent = text.trim() || (n === 1 ? 'Photo' : `${n} photos`);
-  if (n) {
-    const strip = document.createElement('div'); strip.className = 'bubble-images';
-    strip.append(...taken.urls.map((url) => Object.assign(document.createElement('img'), { src: url, alt: '' })));
-    bubble.append(strip);
-  }
-  const state = document.createElement('small'); state.className = 'outbox-state'; state.textContent = kind === 'steer' ? 'Steering…' : n ? 'Uploading…' : 'Sending…';
-  el.append(bubble, state);
-  $('outbox').append(el);
-  outbox.push({ text: shown, el, expires: Date.now() + 30000, release: taken.release });
-  $('draft').value = ''; resize(); $('welcome').hidden = true;
-  $('chat').scrollTop = $('chat').scrollHeight;
-  void action({ kind, text: text.trim(), ...(n ? { images: taken.images } : {}) }, () => { state.textContent = kind === 'steer' ? 'Steered' : 'Sent'; }, () => {
-    el.remove(); outbox.splice(outbox.findIndex((i) => i.el === el), 1);
+  const el = kind === 'send' ? sendingBubble(shown,taken.previews) : null;
+  const draftId = (n > 0 || (kind !== 'send' && pendingDrafts(view))) ? requestId() : undefined;
+  const item = {kind, text:shown, el, draftId, firstRow:(view.messageOffset ?? 0) + view.messages.length, previews:taken.previews, sending:true, expires:Date.now()+30000, release:taken.release, restore() {
     taken.restore();
-    if (!$('draft').value) { $('draft').value = text; resize(); }
-  });
-};
-$('questions').onsubmit = (e) => {
-  e.preventDefault();
-  if (view?.ask)
-    void action({
-      kind: 'answer',
-      id: askId,
-      answers: [...$('questions').querySelectorAll('textarea')].map((i) => i.value),
-    });
-};
-$('stop').onclick = () => {
-  if (view?.canStop) void action({ kind: 'stop' });
-};
+    const d = $('draft');
+    // A failed HTTP request can race typing the next draft. Restore both, keep the
+    // selection on the new text, and never resubmit automatically.
+    if (text && d.value) {
+      const prefix = `${text}\n`, start = d.selectionStart, end = d.selectionEnd, direction = d.selectionDirection;
+      d.value = prefix + d.value; d.setSelectionRange(start + prefix.length,end + prefix.length,direction);
+    } else if (text) d.value = text;
+    resize();
+  }};
+  outbox.push(item);
+  $('draft').value = ''; resize(); $('welcome').hidden = true;
+  if (el) $('chat').scrollTop = $('chat').scrollHeight;
+  void action({ kind, text: text.trim(), draftId, ...(n ? { images: taken.images } : {}) }, () => {
+    item.sending = false; if (el) el.lastElementChild.textContent = 'Sent';
+  }, () => { if (outbox.includes(item)) { removeBubble(item); item.restore(); } });
+}
+// These commands already have native phone controls. Never open an invisible overlay in the followed TUI.
+function runShortcut({kind, args}) {
+  if (photos.count) { notice('Remove the photos before running this command.'); return; }
+  const setDraft = value => { $('draft').value = value; resize(); };
+  if (kind === 'sessions') { setDraft(''); drawer.open('', args); }
+  if (kind === 'new') { if (args) { notice('Usage: /new'); return; } void showFolders(); }
+  if (kind === 'help') {
+    setDraft(args ? '/' + args.replace(/^\//, '') : '/'); $('draft').focus();
+    if ($('commandMenu').hidden) notice('No matching command in this window. Type / to browse.');
+  }
+  if (kind === 'model') {
+    const select = $('models');
+    if (select.disabled) { notice('No models available in this window.'); return; }
+    if (!args) {
+      setDraft(''); select.focus();
+      try { select.showPicker(); } catch { notice('Tap the model name below the message to choose.'); }
+    } else {
+      if (args === 'n' && !view.models.next) { notice('No next model in this window.'); return; }
+      const exact = view.models.options.find(o => o.spec === (args === 'n' ? view.models.next : args));
+      const matches = exact ? [exact] : view.models.options.filter(o => o.spec.slice(o.spec.indexOf(':') + 1) === args);
+      if (matches.length !== 1) { notice('Choose a configured model from the picker or type its full provider:model name.'); return; }
+      const submitted = $('draft').value;
+      void action({kind:'select-model', spec:matches[0].spec, revision:view.models.revision}, () => {
+        if ($('draft').value === submitted) setDraft('');
+      });
+    }
+  }
+}
 function resize() {
   const d = $('draft');
-  d.rows = Math.min(5, Math.max(1, d.value.split('\n').length));
+  if (d.localName === 'textarea') d.rows = Math.min(5, Math.max(1, d.value.split('\n').length));
   controls();
 }
 function jumpState() {
   const c = $('chat');
   $('jump').hidden = c.scrollHeight - c.scrollTop - c.clientHeight < 80;
-  $('jump').textContent = view?.ask ? '↓ Answer question' : '↓ Latest';
 }
 $('chat').onscroll = jumpState;
 $('jump').onclick = () => {
   $('chat').scrollTop = $('chat').scrollHeight;
 };
-$('draft').oninput = resize;
+$('draft').oninput = () => { shortcuts.disarm(); resize(); };
+if (messageField.isContentEditable) document.addEventListener('selectionchange', () => { if (document.activeElement === messageField) controls(); });
+else messageField.addEventListener('selectionchange', controls);
 // A photo pasted into the box (desktop browsers, iPad) joins the tray instead of the text.
 $('draft').addEventListener('paste', (e) => {
   const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
-  if (files.length && view?.input) { e.preventDefault(); void photos.add(files); }
+  if (files.length && view?.input && !busy) { e.preventDefault(); void photos.add(files); }
 });
 $('draft').onkeydown = (e) => {
-  if ((e.key === 'Backspace' || e.key === 'Delete') && ghost && !$('draft').value) {
-    e.preventDefault();
-    dismissed = ghost;
-    suggestion(view?.suggestion);
-    return;
+  if (tab.composing || e.isComposing || e.keyCode === 229) return;
+  if (e.key !== 'Escape') shortcuts.disarm();
+  const desktop = matchMedia('(pointer: fine)').matches;
+  if (e.key === 'Enter' && !desktop) return; // phone Return is always a newline
+  if (tab.keydown(e) || commands.keydown(e) || shortcuts.keydown(e)) return;
+  const intent = enterIntent(e, connected && !busy ? view?.input : null, $('draft').value,
+    $('draft').selectionStart, desktop);
+  if (!intent) return;
+  e.preventDefault();
+  if (intent === 'continue') {
+    const d = $('draft'), start = d.selectionStart;
+    applyEdit(d,{start:d.value[start-1] === '\\' ? start-1 : start,end:d.selectionEnd,text:'\n'}); resize();
   }
-  if (
-    e.key === 'Enter' &&
-    !e.shiftKey &&
-    !e.isComposing &&
-    (matchMedia('(pointer: fine)').matches || e.metaKey || e.ctrlKey)
-  ) {
-    e.preventDefault();
-    $('compose').requestSubmit();
-  }
+  if (intent === 'submit') submitMessage(view?.input);
 };
+// Clicking Send can leave focus on the button (or on body once it disables).
+// Native selects/dialogs and an open completion keep first refusal on Escape.
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented || e.target === $('draft') || document.querySelector('dialog[open]') || e.target.closest('select')) return;
+  if (view?.ask && (e.target === document.body || e.target.closest('#questions'))) askPanel.keydown(e);
+  else if (e.key === 'Escape' && (e.target === document.body || e.target.closest('#compose'))) shortcuts.keydown(e);
+});
 $('welcome').onclick = (e) => {
   const prompt = e.target.closest('[data-prompt]')?.dataset.prompt;
   if (prompt) {

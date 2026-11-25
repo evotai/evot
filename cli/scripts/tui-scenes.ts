@@ -1,5 +1,5 @@
 import type { ConfigInfo } from '../src/native/contracts/config-info.js'
-import { createAskState } from '../src/term/widgets/ask.js'
+import { createAskState } from '../src/ui/ask.js'
 import { createModelWindow, createResumeWindow } from '../src/term/app/selector/selector-windows.js'
 import { createInitialState } from '../src/term/app/run/state.js'
 import { createEditorState, insertText } from '../src/term/input/editor.js'

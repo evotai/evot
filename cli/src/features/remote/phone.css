@@ -34,13 +34,18 @@ html.remote-shell[data-theme="light"] {
 .remote-page .chat-scroll { padding-bottom:16px; overflow-anchor:none; }
 .remote-page .message { font-size:16px; line-height:1.55; }
 /* Let the table keep its natural column widths, not the whole conversation. */
-.remote-page .message-assistant,.remote-page .text-content { min-width:0; max-width:100%; }
+.remote-page .message-assistant,.remote-page .message-notice,.remote-page .text-content { min-width:0; max-width:100%; }
 .remote-page .table-wrap { max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; -webkit-overflow-scrolling:touch; }
 .remote-page .table-wrap table { width:max-content; min-width:100%; }
 .remote-page .table-wrap :is(th,td) { white-space:nowrap; word-break:normal; overflow-wrap:normal; }
 .remote-page .message-user .bubble { max-width:85%; font-size:16px; border-radius:18px 18px 4px 18px; background:var(--raised-bg); }
 .remote-page .message.pending { flex-direction:column; align-items:flex-end; gap:3px; }
 .remote-page .message.pending .bubble { opacity:.6; }
+#promptQueue { width:min(var(--composer-width),100%); padding:4px 12px; color:var(--muted); font-size:13px; }
+#promptQueue > div { display:flex; align-items:center; gap:5px; }
+#promptQueue span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#promptQueue .photo-thumb { pointer-events:auto; flex:none; width:32px; height:32px; border-radius:6px; }
+#promptQueue img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
 .outbox-state { display:block; font-size:11px; color:var(--faint); text-align:end; }
 .send-btn[aria-busy=true] { cursor:progress; }
 .remote-page .text-content :not(pre)>code { color:var(--accent); }
@@ -56,27 +61,48 @@ html.remote-shell[data-theme="light"] {
 .remote-page .text-content .md-diagram { margin:6px 0 9px; overflow-x:auto; font:12px/1.35 ui-monospace,Menlo,monospace; white-space:pre; }
 .remote-page .text-content .md-math { font-family:ui-serif,Georgia,serif; } .remote-page .text-content div.md-math { margin:6px 0 9px; }
 .remote-page .text-content :is(h2,h3,h4,h5,h6,h7) { margin:12px 0 6px; font-size:1em; }
-.remote-page .send-btn { color:var(--btn-ink); }
+/* Smaller painted disc, unchanged tap area. */
+.remote-page #send { color:var(--btn-ink); border:4px solid transparent; background-clip:padding-box; font-size:14px; }
 .remote-page #draft { caret-color:var(--green); }
 .remote-page .message-assistant :is(pre,code),.pair-card input { font-family:ui-monospace,Menlo,monospace; }
 .remote-page .code-copy { width:44px; height:40px; }
 .remote-page .composer-seat { position:relative; flex:none; padding:5px max(12px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)); }
-.remote-page .composer-card { border-radius:24px; box-shadow:none; padding:8px 6px 6px; }
-.remote-page .composer-card textarea { font:inherit; font-size:16px; min-height:44px; max-height:20dvh; }
+.remote-page .composer-card { border-radius:20px; box-shadow:none; padding:4px 6px 2px; }
+.remote-page .composer-card #draft { font:inherit; font-size:16px; line-height:1.4; min-height:36px; max-height:20dvh; }
+evot-message-draft { display:block; position:relative; width:100%; padding:4px 8px 6px; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink); cursor:text; }
+evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:8px; }
 @supports(field-sizing:content) { .remote-page .composer-card textarea { field-sizing:content; } }
+.command-menu { max-height:min(24dvh,180px); overflow-y:auto; overscroll-behavior:contain; padding:0 4px 4px; margin:0 2px 4px; border-bottom:1px solid var(--line); }
+.command-menu button { display:flex; align-items:center; gap:10px; width:100%; min-height:44px; padding:6px 10px; border:0; border-radius:12px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.command-menu button:is([data-current],:focus-visible,:active) { background:var(--accent-soft); }
+.command-menu strong { font:600 14px ui-monospace,monospace; overflow-wrap:anywhere; }
+.command-menu span,.command-menu small { color:var(--muted); font-size:12px; }
+.command-menu span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.command-menu small { display:block; padding:4px 10px; overflow-wrap:anywhere; }
 .attachments { display:flex; gap:8px; overflow-x:auto; padding:10px 10px 0; }
 .attachments[hidden] { display:none; }
 .attachment { position:relative; flex:none; width:64px; height:64px; border-radius:12px; overflow:hidden; background:var(--fill); border:1px solid var(--line); }
 .attachment img { width:100%; height:100%; object-fit:cover; display:block; }
-.attachment button { position:absolute; top:3px; right:3px; width:22px; height:22px; border:0; border-radius:50%; background:#000a; color:#fff; font-size:14px; line-height:22px; padding:0; cursor:pointer; }
+.photo-thumb { display:block; width:100%; height:100%; padding:0; border:0; border-radius:inherit; background:none; cursor:zoom-in; }
+.attachment .remove-photo { position:absolute; top:3px; right:3px; width:22px; height:22px; border:0; border-radius:50%; background:#000a; color:#fff; font-size:14px; line-height:22px; padding:0; cursor:pointer; }
 .attachment.loading { display:grid; place-items:center; color:var(--muted); }
 .remote-page .attach-btn { background:transparent; color:var(--muted); }
-.attach-btn svg { width:20px; height:20px; stroke:currentColor; stroke-width:1.7; fill:none; }
+.attach-btn svg { width:17px; height:17px; stroke:currentColor; stroke-width:1.7; fill:none; }
 .attach-btn:disabled { opacity:.45; }
-.message.pending .bubble-images { display:flex; gap:6px; margin-top:6px; justify-content:flex-end; }
-.message.pending .bubble-images img { width:56px; height:56px; object-fit:cover; border-radius:10px; }
-/* The TUI's suggestion is the placeholder: brighter than a hint, dimmer than typed text. */
-.remote-page #draft.ghost::placeholder { color:var(--muted); }
+.bubble-images { display:flex; gap:6px; margin-top:6px; justify-content:flex-end; }
+.bubble-images .photo-thumb { flex:none; width:56px; height:56px; border-radius:10px; }
+.bubble-images img { display:block; width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+#photoPreview { position:fixed; inset:0; width:100vw; height:100dvh; max-width:none; max-height:none; margin:0; padding:max(48px,env(safe-area-inset-top)) 12px max(16px,env(safe-area-inset-bottom)); border:0; background:transparent; }
+#photoPreview[open] { display:grid; place-items:center; }
+#photoPreview::backdrop { background:#000d; }
+#photoPreview img { max-width:100%; max-height:100%; min-height:0; object-fit:contain; border-radius:6px; }
+#photoPreview button { position:absolute; top:max(4px,env(safe-area-inset-top)); right:max(8px,env(safe-area-inset-right)); color:white; background:#222b; }
+/* Keep the preview in the composer but outside its editable DOM. Both editors
+   grow with wrapped suggestions; selection, IME and native undo see only the draft. */
+.draft-surface { display:grid; }
+.draft-surface > * { grid-area:1 / 1; min-width:0; }
+#draftHint { z-index:1; pointer-events:none; user-select:none; padding:4px 8px 6px; max-height:20dvh; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.45; color:var(--faint); }
+#draftHint[data-preview] { color:var(--muted); }
 #folderPanel { width:min(92vw,560px); max-height:80dvh; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--side-bg); color:var(--ink); }
 #folderPanel::backdrop { background:#0008; } #folderMessage { font-size:12px; color:var(--muted); }
 #folderList { display:grid; gap:4px; margin-top:10px; }
@@ -130,7 +156,16 @@ html.remote-shell[data-theme="light"] {
 .diff-row[data-kind=remove] mark { background:var(--diff-remove-word); color:inherit; }
 .diff-row[data-kind=header] { background:var(--diff-header-bg); color:var(--diff-header-fg); }
 .diff-row[data-kind=ellipsis] { color:var(--diff-gutter); }
-.bg-chip,#jump { pointer-events:auto; } .bg-chip { flex:none; min-height:26px; border:0; background:transparent; color:var(--accent); padding:0; font:inherit; font-weight:600; cursor:pointer; }
+#jump { pointer-events:auto; }
+/* An accessory row inside the composer. Only the keys scroll on a very narrow phone. */
+.task-keys { display:flex; align-items:center; gap:4px; margin:0 2px 2px; padding:0 2px; overflow-x:auto; border-bottom:1px solid var(--line); }
+.task-keys button { flex:none; display:flex; align-items:center; gap:5px; min-height:44px; padding:0 7px; border:0; border-radius:12px; background:transparent; color:var(--ink); font-size:12px; font-weight:550; cursor:pointer; }
+.task-keys kbd { padding:3px 5px; border:1px solid var(--line); border-radius:5px; background:var(--fill); color:var(--muted); font:11px/1.1 ui-monospace,monospace; }
+.task-keys button:disabled { opacity:.5; cursor:default; }
+.task-keys button:is(:active,:focus-visible) { background:var(--fill); outline-offset:-2px; }
+.task-keys #stop { margin-inline-start:auto; color:var(--muted); }
+#bgChip { pointer-events:auto; border:0; padding:4px 8px; border-radius:8px; color:var(--accent); background:var(--fill); font:inherit; cursor:pointer; }
+.task-keys #stop[data-confirm] { background:var(--fill); color:var(--red); }
 #bgPanel { width:min(92vw,560px); max-height:80dvh; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--side-bg); color:var(--ink); }
 #bgPanel::backdrop,#sessionsDrawer::backdrop { background:#0008; }
 #bgSubtitle { margin:3px 0 12px; color:var(--muted); font-size:13px; }
@@ -140,10 +175,10 @@ html.remote-shell[data-theme="light"] {
 #bgTasks button::after { content:'›'; position:absolute; right:12px; align-self:center; color:var(--faint); }
 #bgTasks strong,#bgTasks small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #bgTasks small { font-size:12px; color:var(--muted); }
-.remote-page .composer-row { gap:4px; } .remote-page .composer-tools { flex:1; gap:3px; min-width:0; }
+.remote-page .composer-row { gap:4px; } .remote-page .composer-tools { flex:1; gap:1px; min-width:0; }
 /* Model and thinking level read as one pill: "Fable 5.2 · High ⌄". */
 .model-pill { display:flex; align-items:center; min-width:0; }
-.native-picker { position:relative; min-width:0; max-width:min(46vw,300px); gap:4px; padding:4px 6px; border-radius:12px; min-height:40px; color:var(--muted); font-size:13px; }
+.native-picker { position:relative; min-width:0; max-width:min(46vw,300px); gap:3px; padding:2px 4px; border-radius:10px; min-height:40px; color:var(--muted); font-size:12px; line-height:1.2; }
 .model-pill:has(#effortPicker:not([hidden])) .native-picker:first-child { padding-inline-end:3px; } .model-pill:has(#effortPicker:not([hidden])) .native-picker:first-child::after { content:none; }
 .native-picker.effort-picker { padding-inline-start:0; } .native-picker.effort-picker::before { content:'·'; color:var(--faint); }
 .native-picker::after { content:'⌄'; flex:none; color:var(--faint); } .native-picker .seat-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -173,9 +208,20 @@ html.remote-shell[data-theme="light"] {
 .pair-card input,.question-card textarea { width:100%; background:var(--page); color:var(--ink); font-size:16px; border:1px solid var(--line); border-radius:10px; padding:10px; }
 .pair-card input { letter-spacing:.2em; } .pair-card .primary { width:100%; }
 .primary { min-height:44px; margin-top:10px; padding:7px 14px; border:0; border-radius:12px; background:var(--accent); color:var(--btn-ink); font:inherit; cursor:pointer; } button:disabled { opacity:.5; }
-.question-card { margin:12px auto; border-left:3px solid var(--accent); } .question-card fieldset { border:0; margin:12px 0; min-width:0; }
-.question-card legend { font-weight:600; margin-bottom:8px; } .question-card .suggestions { margin:0 0 8px; justify-content:flex-start; }
-.question-card .suggestions button { text-align:left; min-height:44px; } .question-card textarea { resize:vertical; }
+.question-card { pointer-events:auto; max-height:60dvh; overflow:auto; overscroll-behavior:contain; padding:8px 12px; font-size:14px; overflow-wrap:anywhere; }
+.question-card h2,.question-card dt,.question-card dd { white-space:pre-wrap; }
+.question-card h2 { font-size:15px; margin:5px 0; }
+.question-card nav,.question-card .ask-actions { display:flex; gap:4px; }
+.question-card nav { flex-wrap:wrap; border-bottom:1px solid var(--line); }
+.question-card button { min-height:40px; padding:4px 8px; background:none; color:var(--ink); font:inherit; text-align:start; border:0; border-radius:8px; }
+.question-card [aria-current=step],.question-card button:is(:active,:focus-visible) { background:var(--fill); }
+.question-card nav button,.question-card small,.question-card label span { font-size:12px; color:var(--muted); }
+.question-card .ask-option { width:100%; display:block; border-bottom:1px solid var(--line); }
+.question-card small,.question-card label span { display:block; }
+.question-card label { display:block; margin-top:6px; }
+.question-card textarea { resize:vertical; min-height:40px; max-height:24dvh; }
+.question-card dd,.question-card .ask-actions button:first-child { color:var(--green); }
+.question-card .ask-actions { justify-content:space-between; }
 #notice { position:absolute; z-index:8; top:66px; inset-inline:12px; width:fit-content; max-width:min(90%,520px); margin:auto; padding:8px 14px; border:1px solid var(--line); border-radius:12px; background:var(--bg); color:var(--ink); box-shadow:0 4px 20px #0002; }
 /* Native modal semantics give us focus containment, Escape and inert chat. */
 #sessionsDrawer { touch-action:pan-y; position:fixed; inset:0 auto 0 0; width:min(360px,88vw); max-width:none; height:100dvh; max-height:none; margin:0; padding:0; border:0; border-right:1px solid var(--line); border-radius:0 20px 20px 0; background:var(--side-bg); color:var(--ink); }

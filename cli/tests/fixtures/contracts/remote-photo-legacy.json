@@ -1,0 +1,4 @@
+{
+  "action": { "kind": "send", "generation": 0, "text": "", "images": [{ "mimeType": "image/jpeg", "data": "QUJD" }] },
+  "message": { "role": "user", "text": "[Image from phone]" }
+}

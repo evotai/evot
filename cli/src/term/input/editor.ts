@@ -1,7 +1,7 @@
 import { complete, getGhostHint, type GhostHintContext } from '../../commands/completion.js'
 import { commandInventory } from '../../commands/index.js'
 import type { SkillEntry } from '../../commands/skill/scan.js'
-import { needsContinuation } from './continuation.js'
+import { needsContinuation } from '../../ui/continuation.js'
 import {
   boundaryAtDisplayWidth,
   displayWidthBefore,
@@ -11,7 +11,8 @@ import {
   snapToSegmentBoundary,
   wrapEditorText,
 } from './grapheme.js'
-import { findWordBackward, findWordForward } from './word-navigation.js'
+import { findWordBackward, findWordForward } from '../../ui/word-navigation.js'
+import { parsePasteRefs } from './paste_refs.js'
 
 export interface CompletionCandidate {
   label: string
@@ -40,8 +41,7 @@ export interface EditorState {
 
 /** Check whether Enter should continue the draft instead of submitting it. */
 export function editorNeedsContinuation(state: EditorState): boolean {
-  const line = state.lines[state.cursorLine] ?? ''
-  return line[state.cursorCol - 1] === '\\' || needsContinuation(getEditorText(state))
+  return needsContinuation(getEditorText(state), editorCursorOffset(state))
 }
 
 export interface HistoryState {
@@ -187,7 +187,7 @@ export function moveWordLeft(state: EditorState): EditorState {
   const line = state.lines[state.cursorLine]!
   const cursorCol = snapToSegmentBoundary(line, state.cursorCol)
   if (cursorCol > 0) {
-    return withoutGhost({ ...state, cursorCol: findWordBackward(line, cursorCol) })
+    return withoutGhost({ ...state, cursorCol: findWordBackward(line, cursorCol, parsePasteRefs(line)) })
   }
   if (state.cursorLine > 0) {
     const prevLine = state.lines[state.cursorLine - 1]!
@@ -205,7 +205,7 @@ export function moveWordRight(state: EditorState): EditorState {
   const line = state.lines[state.cursorLine]!
   const cursorCol = snapToSegmentBoundary(line, state.cursorCol)
   if (cursorCol < line.length) {
-    return withoutGhost({ ...state, cursorCol: findWordForward(line, cursorCol) })
+    return withoutGhost({ ...state, cursorCol: findWordForward(line, cursorCol, parsePasteRefs(line)) })
   }
   if (state.cursorLine < state.lines.length - 1) {
     return withoutGhost({ ...state, cursorLine: state.cursorLine + 1, cursorCol: 0 })

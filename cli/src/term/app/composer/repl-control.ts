@@ -1,4 +1,5 @@
 import { resolveRunInteraction, type RunInteractionState } from '../run/run-interaction.js'
+import { composerEscape } from '../../../ui/composer-escape.js'
 import type { KeyEvent } from '../../../ui/keys.js'
 import type { OverlayState } from '../selector/overlay-state.js'
 import type { EditorState } from '../../input/editor.js'
@@ -78,23 +79,10 @@ export function decideReplControl(input: ReplControlInput): ReplControlAction[] 
       return actions.concat({ kind: 'close-overlay' })
     }
     if (editor.completion) return actions.concat({ kind: 'close-completion' })
-    // A sent-but-pending prompt is cancelled before the run is: Esc pulls the
-    // newest one back into the empty composer, running or idle, and reaches
-    // interrupt only once nothing is pending. With a draft in a running turn
-    // the same action explains itself instead of interrupting; an idle draft
-    // falls through to the ordinary clear, and the next Esc pulls back.
-    if (hasQueuedPrompt && (isLoading || isEditorEmpty(editor))) return actions.concat({ kind: 'restore-queued' })
-    // Esc is the interrupt key; the REPL asks for a second press within a
-    // short window. Backgrounding lives on ctrl+b, so neither key's meaning
-    // depends on state the user cannot see.
-    if (interaction.interruptTarget === 'background') return actions.concat({ kind: 'stop-background' })
-    // A parked loop is interruptible like a run: two presses, same window, so
-    // one stray Esc (a vim reflex, an escape sequence) cannot end it.
-    if (interaction.interruptTarget === 'loop') return actions.concat({ kind: 'stop-loop' })
-    if (interaction.interruptTarget) return actions.concat({ kind: 'interrupt' })
-    if (interaction.backgroundStopping) return actions
-    if (!isEditorEmpty(editor)) return actions.concat({ kind: 'clear-editor' })
-    if (logMode) return actions.concat({ kind: 'exit-log-mode' })
+    const kind = composerEscape({pending:hasQueuedPrompt, running:isLoading, draft:!isEditorEmpty(editor),
+      interrupt:interaction.interruptTarget, stopping:interaction.backgroundStopping})
+    if (kind) return actions.concat({ kind })
+    if (logMode && !interaction.backgroundStopping) return actions.concat({ kind: 'exit-log-mode' })
     return actions
   }
 

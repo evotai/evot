@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { buildAskBlocks } from '../../../src/term/viewmodel/ask.js'
 import { buildHelpBlocks } from '../../../src/term/viewmodel/help.js'
 import { buildOverlayBlocks } from '../../../src/term/viewmodel/overlays.js'
-import { createAskState, handleAskKeyEvent } from '../../../src/term/widgets/ask.js'
+import { createAskState, handleAskKeyEvent } from '../../../src/ui/ask.js'
 
 const questions = [
   { header: 'Scope', question: 'Which scope?', options: [{ label: 'Small', description: 'One feature' }, { label: 'Large', description: 'All features' }] },

@@ -6,6 +6,8 @@ import type { PromptQueueKind } from './queue-manage.js'
 export interface StartupQueueTarget { startup: number }
 export type QueueTarget = string | ForkedAgent | StartupQueueTarget | null
 export interface PendingEntry {
+  /** The submitting browser keeps its original text and attachments for Esc pullback. */
+  phoneDraftId?: string
   id: string
   version: number
   sequence: number
@@ -46,8 +48,11 @@ export function visiblePendingEntries(state: PendingQueueState, target: QueueTar
 }
 /** `[now]` joins the running turn, `[after]` waits for it to end, `[paused]`
  * waits for an explicit resume. */
+export function pendingEntryState(entry: PendingEntry) {
+  return entry.paused ? 'paused' : entry.queue === 'follow_up' ? 'after' : 'now'
+}
 export function pendingEntryLabel(entry: PendingEntry): string {
-  return `${entry.paused ? '[paused] ' : entry.queue === 'follow_up' ? '[after] ' : '[now] '}${entry.text}`
+  return `[${pendingEntryState(entry)}] ${entry.text}`
 }
 
 /** Logical ownership survives stream cleanup. Only acknowledged native removals

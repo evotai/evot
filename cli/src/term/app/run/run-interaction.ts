@@ -1,5 +1,5 @@
 import type { SpinnerPhase } from '../../widgets/spinner.js'
-import { InterruptConfirmation } from './interrupt-confirmation.js'
+import { InterruptConfirmation } from '../../../ui/interrupt-confirmation.js'
 
 /** Runtime facts, not a second copy of engine or process state. */
 export interface RunInteractionInput {

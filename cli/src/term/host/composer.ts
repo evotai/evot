@@ -47,6 +47,7 @@ export interface ComposerDeps {
 }
 
 export interface ComposerController {
+  cycleThinkingLevel(): boolean
   clearAll(): void
   snapshot(): ComposerSnapshot
   restore(snapshot: ComposerSnapshot, recovery?: boolean): void
@@ -132,16 +133,16 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
   }
 
   /** Cycle the model's reasoning effort (Shift+Tab) and reflect it in the footer. */
-  function cycleThinkingLevel(): void {
+  function cycleThinkingLevel(): boolean {
     let level: string | null
     try {
       level = deps.agent.cycleThinkingLevel()
     } catch {
-      return
+      return false
     }
     if (level === null) {
       deps.scrollback.commitStatusLine({ id: 'sys-think', kind: 'system', text: '  This model has no selectable thinking level' })
-      return
+      return false
     }
     deps.refreshConfigInfo()
     const label = level === 'off' ? 'off' : level
@@ -149,6 +150,7 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
       shareEvents: [{ kind: 'thinking_level_change', data: { thinking_level: level } }],
     })
     deps.renderer.requestRender()
+    return true
   }
 
   /** Get expanded text — resolves paste refs, strips only resolved image refs. */
@@ -472,5 +474,5 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
     }
   }
 
-  return { clearAll, snapshot, restore, invalidateDraft, getDisplayText, getExpandedText, getHistoryText, handleNormalKey, mutateEditor, saveInputHistory, toggleExpanded }
+  return { cycleThinkingLevel, clearAll, snapshot, restore, invalidateDraft, getDisplayText, getExpandedText, getHistoryText, handleNormalKey, mutateEditor, saveInputHistory, toggleExpanded }
 }

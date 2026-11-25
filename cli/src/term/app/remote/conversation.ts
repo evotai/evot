@@ -100,7 +100,16 @@ export function assistantRow(content: readonly UIAssistantBlock[], expanded = fa
   return { role: 'assistant', text, blocks }
 }
 
+// Match the single-prompt metadata title until the first save publishes it.
+function openingTitle(text: string): string {
+  // At most 80 Unicode code points; don't allocate an array for an entire pasted file.
+  const head = displayText(text).trim().replace(/\s+/g, ' ').slice(0, 162)
+  const chars = Array.from(head)
+  return chars.length > 80 ? chars.slice(0, 80).join('') + '...' : head
+}
+
 export class ConversationTail {
+  openingTitle = ''
   updatedAt = Date.now()
   outcome: 'Completed' | 'Stopped' | 'Run failed · see the TUI' | null = null
   offset = 0
@@ -119,8 +128,16 @@ export class ConversationTail {
       this.offset++
     }
   }
-  append(role: RemoteMessage['role'], text: string): void {
-    if (text.trim()) this.push({ role, text: boundedText(text) })
+  append(role: RemoteMessage['role'], text: string, photoId?: string): void {
+    if (role === 'user' && !this.openingTitle) this.openingTitle = openingTitle(text)
+    if (text.trim()) this.push({ role, text: boundedText(text), ...(photoId ? {photoId} : {}) })
+  }
+  appendNoticeCard(full: string, card: { state: 'error' | 'success'; summary: string }) {
+    // Old phones render notice.text. New ones can fold long command/output rows
+    // using the normal tool-view toggle. Never send the process object or raw args.
+    const text = boundedText(displayText(full)), summary = boundedText(displayText(card.summary))
+    const row = (body: string): RemoteMessage => ({role:'notice', text, blocks:[{kind:'tool', state:card.state, text:body}]})
+    this.push(row(summary), row(text))
   }
   appendAssistant(content: readonly UIAssistantBlock[]) {
     const row = assistantRow(content)
@@ -131,6 +148,8 @@ export class ConversationTail {
     this.offset += this.rows.length + 1
     this.rows = []
     this.outcome = null
+    const first = messages.find(m => m.role === 'user' && m.text.trim() && !isLegacyContextSummary(m))
+    this.openingTitle = first ? openingTitle(first.text) : ''
     for (let index = messages.length - 1; index >= 0; index--) {
       const m = messages[index]!
       // Only format the visible tail, not every old tool result on /resume.

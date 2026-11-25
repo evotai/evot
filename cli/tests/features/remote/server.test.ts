@@ -8,6 +8,17 @@ import { listenRemote } from '../../../src/features/remote/server.js'
 import { pendingDevice } from '../../helpers/remote-device.js'
 import { parseRemoteAction } from '../../../src/features/remote/protocol.js'
 
+test('remote task actions are semantic intents with a generation, not arbitrary key events', () => {
+  const target = 'f'.repeat(64)
+  const draftId = crypto.randomUUID()
+  for (const cmd of [{kind:'queue', text:'later', draftId}, {kind:'suggest'}, {kind:'cycle-effort',revision:'r'}, {kind:'pull-draft', draftId}, {kind:'steer', text:'hi', draftId}, {kind:'stop', askId:'a'}, {kind:'cancel-ask', id:'ask-a'}, {kind:'interrupt-ask', id:'ask-b'}, {kind:'stop-background', target}]) {
+    expect(parseRemoteAction({...cmd, generation:7})).toEqual({...cmd, generation:7})
+    expect(parseRemoteAction(cmd)).toBeNull()
+  }
+  for (const cmd of [{kind:'cancel-ask'}, {kind:'cancel-ask', id:''}, {kind:'stop-background'}, {kind:'stop-background', target:'all'}, {kind:'pull-draft'}, {kind:'cycle-effort'}, {kind:'steer', text:'hi', draftId:9}, {kind:'background-shell'}, {kind:'release-wait'}, {kind:'keypress', key:'Ctrl+B'}])
+    expect(parseRemoteAction({...cmd, generation:7})).toBeNull()
+})
+
 test('only loopback, same-origin, locally approved devices can use the gateway; revocation closes current sessions', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'evot-device-'))
   let count = 0,

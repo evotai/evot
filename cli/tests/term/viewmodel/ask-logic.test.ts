@@ -17,8 +17,9 @@ import {
   askDelete,
   askPasteText,
   handleAskKeyEvent,
-} from '../../../src/term/widgets/ask.js'
-import { askStateToResponse, prefixedAskLines } from '../../../src/term/app/run/ask-user.js'
+  askResponses as askStateToResponse,
+} from '../../../src/ui/ask.js'
+import { prefixedAskLines } from '../../../src/term/app/run/ask-user.js'
 import { buildOverlayBlocks } from '../../../src/term/viewmodel/overlays.js'
 import { buildAskRegionLines } from '../../../src/term/viewmodel/ask.js'
 import { blocksToLines } from '../../../src/term/viewmodel/types.js'

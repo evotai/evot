@@ -606,7 +606,10 @@ export function buildToolCard(call: UIToolCall, expanded?: boolean, _now = Date.
     )
     insertToolStatus(lines, resultLines.shift() ?? toolStatusLine(settledFailed ? '✗' : '✓', []))
     lines.push(...resultLines)
-    return stampToolCard(lines, settledFailed ? 'error' : 'success')
+    // Polling can succeed even though the underlying shell failed. The card's
+    // state must agree with the ✗ on its status row in both the TUI and Remote.
+    const taskFailed = isTaskTool(call.name) && detailString(details, 'status') === 'failed'
+    return stampToolCard(lines, settledFailed || taskFailed ? 'error' : 'success')
   }
 
   if (diff) {

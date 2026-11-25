@@ -15,6 +15,8 @@ import type { ComposerController } from './composer.js'
 import { currentQueueTarget, type PendingQueue } from '../app/queue/pending-queue.js'
 import { draftImageIds, type PendingImages } from '../app/composer/pending-images.js'
 import { errorText } from '../../ui/format.js'
+import type { ComposerSnapshot } from '../app/composer/snapshot.js'
+import { formatImageRef, parsePasteRefs } from '../input/paste_refs.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SlashController } from './slash.js'
 import type { ReplState } from './state.js'
@@ -28,6 +30,7 @@ export interface SubmitDeps {
   readonly pendingQueue: PendingQueue
   readonly pendingImages: PendingImages
   readonly backgroundTerminals: BackgroundTerminals
+  readonly allocPasteId: () => number
   readonly buildImageContentBlocks: () => { blocks: ContentBlock[]; resolvedIds: Set<number>; } | null
   readonly clearAll: () => void
   readonly computeSession: ComputeSession
@@ -53,7 +56,7 @@ export interface SubmitController {
   handleLoadingEnter(): void
   submitDraft(): void
   enqueueDraft(): void
-  submitConversationText(text: string, steer: boolean, images?: readonly { mimeType: string; data: string }[]): void
+  submitConversationText(text: string, mode: 'send' | 'steer' | 'queue', images?: readonly { mimeType: string; data: string }[], modelText?: string, phoneDraftId?: string): void
 }
 
 /** Enter on the composer: submits a draft when idle; steers, queues or blocks it while a turn runs. */
@@ -69,29 +72,44 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
     }
   }
 
-  function startTurn(display: string, text: string, contentJson?: string) {
-    deps.scrollback.commitUserMessage(display)
+  // Commit the same queue handoff for both composers. Only a steer releases a foreground
+  // shell or task_output wait; neither submission interrupts or starts a second turn.
+  function finishQueuedPrompt(queue: 'steering' | 'follow_up') {
+    deps.suggestions.cancel()
+    deps.queueLifecycle.reconcile()
+    deps.queueLifecycle.dispatchNext()
+    if (queue === 'steering' && st.streamRef) deps.backgroundTerminals.reclaimTurnForMessage()
+    deps.renderer.requestRender()
+  }
+
+  function startTurn(display: string, text: string, contentJson?: string, photoId?: string) {
+    deps.scrollback.commitUserMessage(display, photoId)
     const extension = deps.taskSession.followUpExtension(st.sessionId) ?? deps.computeSession.followUpExtension(st.sessionId)
     void deps.runCtl.runQuery(text, contentJson, undefined, extension)
   }
 
-  function submitConversationText(text: string, steer: boolean, images: readonly { mimeType: string; data: string }[] = []) {
+  function submitConversationText(text: string, mode: 'send' | 'steer' | 'queue', images: readonly { mimeType: string; data: string }[] = [], modelText = text, phoneDraftId?: string) {
     // Photos from the phone become the same content blocks as an image pasted in the TUI.
     const label = images.length ? `[${images.length === 1 ? 'Image' : `${images.length} images`} from phone]` : ''
     const display = [text, label].filter(Boolean).join('\n')
     const contentJson = images.length ? JSON.stringify([
-      ...(text ? [{ type: 'text', text }] : []),
+      ...(modelText ? [{ type: 'text', text: modelText }] : []),
       ...images.map(image => ({ type: 'image', mimeType: image.mimeType, source: { type: 'base64', data: image.data } })),
     ]) : undefined
-    if (!steer) { startTurn(display, text || label, contentJson); return }
-    const lines = display.split('\n')
-    attachPrompt({ target: currentQueueTarget(st), queue: 'steering', text: display, expandedText: text || label, contentJson,
-      snapshot: { text: display, cursorLine: lines.length - 1, cursorCol: lines.at(-1)?.length ?? 0, chunks: [], images: [], undo: [], history: { index: 0, savedInput: '', length: 0 } } })
-    deps.suggestions.cancel()
-    deps.queueLifecycle.reconcile()
-    deps.queueLifecycle.dispatchNext()
-    if (st.streamRef) deps.backgroundTerminals.reclaimTurnForMessage()
-    deps.renderer.requestRender()
+    if (mode === 'send') { startTurn(display, modelText || label, contentJson, images.length ? phoneDraftId : undefined); return }
+    // Esc on the TUI can pull back a phone prompt too. Keep real attachment refs in the
+    // recoverable draft (not the display caption), without touching the terminal editor.
+    const literals = new Set(parsePasteRefs(text).map(ref => ref.id))
+    const savedImages: ComposerSnapshot['images'] = images.map(({mimeType, data}) => {
+      let id = deps.allocPasteId()
+      while (literals.has(id)) id = deps.allocPasteId()
+      return [id, {id, mediaType:mimeType, base64:data}]
+    })
+    const savedText = [text, savedImages.map(([id]) => formatImageRef(id)).join(' ')].filter(Boolean).join('\n')
+    const lines = savedText.split('\n'), queue = mode === 'queue' ? 'follow_up' : 'steering'
+    attachPrompt({ target: currentQueueTarget(st), queue, phoneDraftId, text: display, expandedText: modelText || label, contentJson,
+      snapshot: { text:savedText, cursorLine:lines.length - 1, cursorCol:lines.at(-1)?.length ?? 0, chunks:[], images:savedImages, undo:[], history:{index:0, savedInput:'', length:0} } })
+    finishQueuedPrompt(queue)
   }
 
   function acceptDraft(queue: 'steering' | 'follow_up', sequence?: number): boolean {
@@ -127,12 +145,9 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       deps.renderer.requestRender()
       return false
     }
-    deps.suggestions.cancel()
     if (history) deps.saveInputHistory(history)
     deps.clearAll()
-    deps.queueLifecycle.reconcile()
-    deps.queueLifecycle.dispatchNext()
-    deps.renderer.requestRender()
+    finishQueuedPrompt(queue)
     return true
   }
 
@@ -226,15 +241,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
       return
     }
 
-    if (action === 'steer') {
-      const accepted = acceptDraft('steering')
-      // Steering is only inspected between tool calls, so anything holding the
-      // turn holds this message with it — a shell watched in the foreground or a
-      // blocking task_output call alike. During that wait typing appears to do
-      // nothing. Freeing both lets the message land now; the work keeps running.
-      if (accepted && st.streamRef) deps.backgroundTerminals.reclaimTurnForMessage()
-      deps.renderer.requestRender()
-    }
+    if (action === 'steer') acceptDraft('steering')
   }
 
   function submitDraft() {

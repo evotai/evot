@@ -8,7 +8,7 @@
 
 ## News
 
-- **2026-11-24** `/remote` — scan a QR code to follow, steer and resume your sessions on this machine (macOS or Linux) from your phone; new devices are approved in the TUI.
+- **2026-11-24** `/remote` — scan a QR code to follow, steer and resume your sessions on this machine (macOS or Linux) from your phone; type `/` for command and installed-skill suggestions, and tap a match to complete it. The phone composer shows `Tab` when it can complete a command, offer a suggestion, or queue a follow-up (`Send after`); `Esc` dismisses, pulls back or interrupts. Return on the phone keyboard inserts a newline. Sessions show local calendar dates, and tapping a photo thumbnail opens a larger preview. Pending prompts appear above the composer as in the TUI: `[now]` steers at the next opportunity, `[after]` waits for the turn to finish, and `[paused]` stays queued. Only consumed prompts enter the transcript. Steering releases shell waits automatically. New devices are approved in the TUI.
 - **2026-11-03** `/compute` — add your ssh machines; the agent runs commands and long jobs on them for you.
 - **2026-10-18** `Tab` — context-aware suggestions, e.g. “Run the tests.” `Tab` cycles; `→` accepts without sending.
 

@@ -1,15 +1,24 @@
 // Same-origin, paired computer only. The gateway ranks windows and sessions before pagination.
-function age(time, now) {
-  if (!time) return '';
-  const mins = Math.max(0, Math.floor((now - time) / 60000));
-  return mins < 1 ? 'now' : mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins/60)}h ago` : `${Math.floor(mins/1440)}d ago`;
+const localTime = new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'});
+const localDate = new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'});
+function calendarLabel(time, today, yesterday) {
+  const date = new Date(time);
+  if (!time || !Number.isFinite(date.getTime())) return '';
+  const day = date.toDateString();
+  if (day === today) return `Today · ${localTime.format(date)}`;
+  if (day === yesterday) return `Yesterday · ${localTime.format(date)}`;
+  return localDate.format(date);
 }
 /** One list: the gateway's ranked page, then older windows that report status only.
  * An idle window the phone opened reads as saved; it is not open on the computer. */
 export function directoryRows(data, query, now = Date.now()) {
-  const rows = (data?.rows ?? []).map(r => ({...r, age:age(Date.parse(r.updated), now)}));
+  // Compare local calendar dates, not elapsed hours (midnight, DST, New Year).
+  const date = new Date(now), today = date.toDateString();
+  date.setDate(date.getDate()-1);
+  const yesterday = date.toDateString(), label = time => calendarLabel(time,today,yesterday);
+  const rows = (data?.rows ?? []).map(r => ({...r, age:label(r.updatedAt || Date.parse(r.updated))}));
   if (query) return rows;
-  return [...rows, ...(data?.privateWindows ?? []).map(w => ({...w, kind:'private', title:'Older evot window', age:age(w.updatedAt, now)}))];
+  return [...rows, ...(data?.privateWindows ?? []).map(w => ({...w, kind:'private', title:'Older evot window', age:label(w.updatedAt)}))];
 }
 // This is state, not an action: a window can be running even while it is
 // being viewed, and an unshared window can still be waiting for input.
@@ -46,7 +55,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
       heading.append(badge);
     }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
-    meta.textContent = [r.workspace, r.age, note].filter(Boolean).join(' · ');
+    meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
     button.setAttribute('aria-label', [r.title || 'New conversation', windowStatusLabel(r), r.workspace, r.age].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
@@ -132,10 +141,10 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     if (data) data = {...data, count:0, rows:[]};
     paint(); reload(120);
   }
-  function open(message = '') {
+  function open(message = '', query = '') {
     const info = el('selectionMessage');
     info.textContent = typeof message === 'string' ? message : ''; info.hidden = !info.textContent;
-    limit = 40; data = null; error = ''; el('sessionSearch').value = '';
+    limit = 40; data = null; error = ''; el('sessionSearch').value = query;
     if (!dialog.open) dialog.showModal();
     paint(); reload();
   }

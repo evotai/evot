@@ -21,6 +21,15 @@ test('the public pairing page ships one complete client allowed by its CSP, with
   try {
     const r = await fetch(gateway.address), html = await r.text(), client = embeddedClient(html)
     expect(r.status).toBe(200)
+    expect([...html.matchAll(/aria-keyshortcuts="([^"]+)"/g)].map(m => m[1])).toEqual(['Tab','Escape'])
+    const draft = html.match(/<textarea id="draft"[^>]*>/)?.[0] ?? ''
+    for (const attr of ['autocomplete="off"','autocorrect="off"','autocapitalize="none"','spellcheck="false"','writingsuggestions="false"']) expect(draft).toContain(attr)
+    expect(draft).not.toContain('readonly')
+    expect(draft).not.toContain('placeholder=') // fallback must not paint behind the shared hint
+    expect(draft).toContain('aria-describedby="draftHint"')
+    expect(html.match(/id="draftHint"/g)).toHaveLength(1)
+    expect(html).toContain('<section class="composer-card" id="compose"')
+    expect(html).toContain('<button id="send" type="button"')
     expect(html).toMatch(/id="pair"[\s\S]*?<button[^>]*disabled[^>]*>Loading…<\/button>/)
     expect(new Bun.Transpiler({loader:'js'}).scanImports(client)).toEqual([])
     const csp = r.headers.get('content-security-policy') ?? ''
