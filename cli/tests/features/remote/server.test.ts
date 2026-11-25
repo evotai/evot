@@ -54,6 +54,13 @@ test('only loopback, same-origin, locally approved devices can use the gateway; 
     expect((await post('/device/approve', { code: notice })).status).toBe(404)
     access.decide(notice, true)
     const auth = 'Bearer ' + (await pending.poll()).token
+    const catalog = await fetch(l.address + '/sessions?catalog=1', {headers:{authorization:auth}})
+    expect(catalog.status).toBe(200)
+    expect(catalog.headers.get('X-Evot-Time-Zone')).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    // A strict reader of the previous JSON contract still sees the same fields.
+    expect(await catalog.json()).toStrictEqual({
+      count:0, more:false, rows:[], online:[], privateWindows:[], unavailable:false, failed:false,
+    })
     expect((await post('/action', { kind: 'stop', generation: 1 }, auth, 'https://example.org')).status).toBe(403)
     expect((await post('/action', { kind: 'stop', generation: 1 }, auth)).status).toBe(204)
     expect(count).toBe(1)

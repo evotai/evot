@@ -17,14 +17,17 @@
     <button class="primary" type="submit" disabled>Loading…</button>
   </form></section>
   <section id="pickSession" hidden><h2>Your computer is connected</h2><p>Choose a session to follow its terminal window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
-  <div class="chat-scroll" id="chat" hidden>
+  <div class="chat-scroll" id="chat" role="region" aria-label="Conversation" tabindex="0" hidden>
     <div class="chat-loading" id="chatLoading" role="status" hidden><div class="spinner" aria-hidden="true"></div><span>Opening session…</span></div>
     <div class="welcome" id="welcome"><h2>What can I help you build?</h2>
       <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain this codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run relevant tests</button></div>
     </div><div id="history" aria-label="Recent conversation"></div><div id="outbox" aria-live="polite"></div>
   </div>
   <div class="composer-seat" id="seat" hidden>
-    <button id="jump" type="button" hidden>↓ Latest</button>
+    <div class="history-actions" id="historyActions">
+      <button id="writeMessage" type="button" aria-controls="compose" aria-label="Open composer" title="Open composer" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16-1 5 5-1L20 8l-4-4L4 16zm10-10 4 4"/></svg><span>Draft</span></button>
+      <button id="jump" type="button" aria-label="Back to latest" hidden>↓ Latest</button>
+    </div>
     <div id="promptQueue" aria-label="Pending messages" role="status" hidden></div>
     <div class="run-line"><span class="run-state"><span class="activity-dot" id="activity"></span><span id="status" role="status">Connecting…</span><span id="statusDetail"></span><span id="nextModel"></span></span><button type="button" id="bgChip" aria-controls="bgPanel" aria-haspopup="dialog" hidden></button><span class="run-place" id="place" hidden><span id="placeName"></span><span id="placeBranch"></span></span></div>
     <section id="questions" class="question-card" aria-label="Question from evot" hidden></section>

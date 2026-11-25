@@ -1,24 +1,48 @@
 // Same-origin, paired computer only. The gateway ranks windows and sessions before pagination.
-const localTime = new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit'});
-const localDate = new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'});
-function calendarLabel(time, today, yesterday) {
-  const date = new Date(time);
-  if (!time || !Number.isFinite(date.getTime())) return '';
-  const day = date.toDateString();
-  if (day === today) return `Today · ${localTime.format(date)}`;
-  if (day === yesterday) return `Yesterday · ${localTime.format(date)}`;
-  return localDate.format(date);
+function calendarStamp(now, timeZone) {
+  const calendar = zone => Intl.DateTimeFormat('en-US', {
+    timeZone:zone, calendar:'gregory', numberingSystem:'latn', year:'numeric', month:'numeric', day:'numeric',
+  });
+  let dayFormat;
+  try { dayFormat = calendar(timeZone); }
+  catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    dayFormat = calendar(undefined); // Older browsers may not recognize the host's zone name.
+  }
+  const zone = dayFormat.resolvedOptions().timeZone;
+  const clock = Intl.DateTimeFormat(undefined, {timeZone:zone, hour:'2-digit', minute:'2-digit'});
+  const date = Intl.DateTimeFormat(undefined, {timeZone:zone, year:'numeric', month:'short', day:'numeric'});
+  // Treat the host's calendar date as a UTC day number for comparison only.
+  // Subtracting 24 hours from the real instant would mislabel days around DST.
+  function dayOf(instant) {
+    const parts = dayFormat.formatToParts(instant);
+    const number = type => Number(parts.find(part => part.type === type)?.value);
+    return Date.UTC(number('year'), number('month') - 1, number('day'));
+  }
+  const today = dayOf(now), yesterday = today - 86400000;
+  return time => {
+    if (!time || !Number.isFinite(new Date(time).getTime())) return { day:'other', text:'' };
+    const day = dayOf(time);
+    if (day === today) return { day:'today', text:clock.format(time) };
+    if (day === yesterday) return { day:'yesterday', text:clock.format(time) };
+    return { day:'earlier', text:date.format(time) };
+  };
 }
-/** One list: the gateway's ranked page, then older windows that report status only.
- * An idle window the phone opened reads as saved; it is not open on the computer. */
-export function directoryRows(data, query, now = Date.now()) {
-  // Compare local calendar dates, not elapsed hours (midnight, DST, New Year).
-  const date = new Date(now), today = date.toDateString();
-  date.setDate(date.getDate()-1);
-  const yesterday = date.toDateString(), label = time => calendarLabel(time,today,yesterday);
-  const rows = (data?.rows ?? []).map(r => ({...r, age:label(r.updatedAt || Date.parse(r.updated))}));
-  if (query) return rows;
-  return [...rows, ...(data?.privateWindows ?? []).map(w => ({...w, kind:'private', title:'Older evot window', age:label(w.updatedAt)}))];
+const groupTitles = { active:'In progress', today:'Today', yesterday:'Yesterday', earlier:'Earlier', other:'Other' };
+/** Keep running sessions visible, then group the ranked page by host date. */
+export function directoryGroups(data, query, {now = Date.now(), timeZone = undefined} = {}) {
+  if (!data) return [];
+  const stamp = calendarStamp(now, timeZone);
+  const groups = { active:[], today:[], yesterday:[], earlier:[], other:[] };
+  function add(row) {
+    const { day, text } = stamp(row.updatedAt || Date.parse(row.updated));
+    const active = row.terminal && ['working','input','busy'].includes(row.phase);
+    const timeLabel = day === 'today' || day === 'yesterday' ? `${groupTitles[day]} · ${text}` : text;
+    groups[active ? 'active' : day].push({ ...row, age:active ? timeLabel : text, timeLabel });
+  }
+  for (const row of data.rows ?? []) add(row);
+  if (!query) for (const row of data.privateWindows ?? []) add({...row, kind:'private', title:'Older evot window'});
+  return Object.entries(groups).filter(([,rows]) => rows.length).map(([key, rows]) => ({ key, title:groupTitles[key], rows }));
 }
 // This is state, not an action: a window can be running even while it is
 // being viewed, and an unshared window can still be waiting for input.
@@ -32,7 +56,7 @@ export function windowStatusLabel(r) {
 }
 export function sessionDrawer({ api, selected, choose, create, createIn, host, ask }) {
   const el = id => document.getElementById(id), dialog = el('sessionsDrawer');
-  let timer, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
+  let timer, timeZone, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
   function row(r) {
     const live = !!r.terminal, statusOnly = r.kind === 'private' || !!r.unshared;
     const button = document.createElement(statusOnly ? 'div' : 'button');
@@ -56,7 +80,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
-    button.setAttribute('aria-label', [r.title || 'New conversation', windowStatusLabel(r), r.workspace, r.age].filter(Boolean).join(', '));
+    button.setAttribute('aria-label', [r.title || 'New conversation', windowStatusLabel(r), r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.
@@ -96,9 +120,18 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
       return row;
     });
   }
+  function group({key, title, rows}) {
+    const section = document.createElement('section'), heading = document.createElement('h3');
+    section.className = 'session-group';
+    heading.id = 'session-group-' + key;
+    heading.textContent = title;
+    section.setAttribute('aria-labelledby', heading.id);
+    section.append(heading, ...rows.map(row));
+    return section;
+  }
   function paint() {
     const q = el('sessionSearch').value.trim().toLowerCase();
-    const rows = directoryRows(data, q);
+    const groups = directoryGroups(data, q, {timeZone});
     el('drawerHost').textContent = host() ?? '';
     el('moreSessions').hidden = !data || !data.more;
     el('moreSessions').disabled = loadingMore; el('moreSessions').textContent = loadingMore ? 'Loading…' : 'Load more';
@@ -108,19 +141,20 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     if (askable) el('askSearch').textContent = `Ask evot: /sessions ${q}`;
     el('directoryMessage').textContent = error || (data?.unavailable ? 'A terminal is not responding; saved sessions are temporarily hidden.'
       : data?.failed ? 'Saved sessions unavailable. Retrying…' : '');
-    el('archived').textContent = rows.length || error || data?.unavailable || data?.failed || !data ? ''
+    el('archived').textContent = groups.length || error || data?.unavailable || data?.failed || !data ? ''
       : q ? 'No matching sessions.' : 'No sessions yet.';
     const loading = !data && !error;
-    const renderKey = JSON.stringify([rows, selected(), locked, loading]);
-    if (renderKey !== painted) { painted = renderKey; el('terminals').replaceChildren(...(loading ? skeleton() : rows.map(row))); }
+    const renderKey = JSON.stringify([groups, selected(), locked, loading]);
+    if (renderKey !== painted) { painted = renderKey; el('terminals').replaceChildren(...(loading ? skeleton() : groups.map(group))); }
   }
   const current = mine => mine === version && dialog.open && !document.hidden;
   async function load(mine) {
     if (!current(mine)) return;
     const params = new URLSearchParams({limit, catalog:'1', q:el('sessionSearch').value.trim()});
     try {
-      const result = await (await api('/sessions?' + params)).json();
+      const response = await api('/sessions?' + params), result = await response.json();
       if (!current(mine)) return;
+      timeZone = response.headers.get('X-Evot-Time-Zone') ?? undefined;
       data = result; error = ''; loadingMore = false;
     } catch {
       loadingMore = false;

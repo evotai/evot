@@ -8,6 +8,7 @@ import { taskKeys } from './phone-task-keys.js';
 import { lastDraft, pendingDrafts, queueStrip } from './phone-queue.js';
 import { sessionDrawer } from './phone-directory.js';
 import { renderHistory } from './phone-history.js';
+import { conversationScroll } from './phone-scroll.js';
 import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
 import { commandMenu, phoneShortcut } from './phone-commands.js';
@@ -24,6 +25,7 @@ let timer,
   catalogKey = '',
   levelsKey = '';
 const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
+const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), actions:$('historyActions'), write:$('writeMessage'), jump:$('jump'), draft:messageField});
 const askPanel = questionPanel($('questions'), action);
 const pickStart = new WeakMap();
 // A QR code or account return only starts pairing. Which session to follow is
@@ -136,6 +138,7 @@ function paired(yes) {
   if (yes && !terminal) {
     $('threadTitle').textContent = 'Your sessions';
   }
+  transcript.latest();
   controls();
   $('connection').removeAttribute('data-online');
 }
@@ -170,6 +173,7 @@ function controls() {
   $('effort').disabled = !switchable || !!view.models.pending;
   $('compose').hidden = !!view?.ask;
   askPanel.render(view?.ask, view?.generation, busy || !connected);
+  transcript.update(!!view && !view.ask, !empty || !!photos.count || photos.busy);
 }
 function models(m) {
   const key = JSON.stringify(m.options),
@@ -209,11 +213,10 @@ function render(s, mode) {
   // Never reuse that window's unsent input after a local /new or /resume.
   if (view?.sessionId && view.sessionId !== s.sessionId) {
     $('draft').value = ''; $('draft').rows = 1; clearOutbox(); photos.clear(); askPanel.render(null, null, true);
+    transcript.latest();
   }
   connected = true;
   $('chatLoading').hidden = true;
-  const chat = $('chat'),
-    follow = !view || chat.scrollHeight - chat.scrollTop - chat.clientHeight < 64;
   if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
   $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
@@ -234,8 +237,7 @@ function render(s, mode) {
   settleOutbox(s);
   $('welcome').hidden = !!renderHistory($('history'), s, sentPhotos, viewer.thumbnail) || !!s.ask || s.active || outbox.length > 0;
   controls();
-  if (follow) chat.scrollTop = chat.scrollHeight;
-  jumpState();
+  transcript.keepLatest();
 }
 // Where this window runs, in the status line: folder and branch. The computer's
 // name sits at the foot of the Sessions drawer; a new folder starts from its + button.
@@ -619,7 +621,7 @@ function submitMessage(kind) {
   }};
   outbox.push(item);
   $('draft').value = ''; resize(); $('welcome').hidden = true;
-  if (el) $('chat').scrollTop = $('chat').scrollHeight;
+  if (el) transcript.latest();
   void action({ kind, text: text.trim(), draftId, ...(n ? { images: taken.images } : {}) }, () => {
     item.sending = false; if (el) el.lastElementChild.textContent = 'Sent';
   }, () => { if (outbox.includes(item)) { removeBubble(item); item.restore(); } });
@@ -657,14 +659,6 @@ function resize() {
   if (d.localName === 'textarea') d.rows = Math.min(5, Math.max(1, d.value.split('\n').length));
   controls();
 }
-function jumpState() {
-  const c = $('chat');
-  $('jump').hidden = c.scrollHeight - c.scrollTop - c.clientHeight < 80;
-}
-$('chat').onscroll = jumpState;
-$('jump').onclick = () => {
-  $('chat').scrollTop = $('chat').scrollHeight;
-};
 $('draft').oninput = () => { shortcuts.disarm(); resize(); };
 if (messageField.isContentEditable) document.addEventListener('selectionchange', () => { if (document.activeElement === messageField) controls(); });
 else messageField.addEventListener('selectionchange', controls);

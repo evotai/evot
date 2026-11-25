@@ -75,7 +75,10 @@ export function listenRemote(
           const catalog = await workspace?.catalog(page ?? { limit: 40, query: '' }) ?? {
             count: 0, more: false, rows: [], online: [], privateWindows: [], unavailable: false, failed: false,
           }
-          return authorized() ? Response.json(catalog, { headers }) : unauthorized()
+          if (!authorized()) return unauthorized()
+          // Format on the phone for its locale, but in this computer's time zone.
+          const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+          return Response.json(catalog, { headers: { ...headers, 'X-Evot-Time-Zone': timeZone } })
         }
         const rows = (await workspace?.list(url.searchParams.has('online'), page)) ?? {
           current: null,

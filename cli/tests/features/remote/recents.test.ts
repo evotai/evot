@@ -2,27 +2,72 @@ import { expect, test } from 'bun:test'
 import type { SessionMeta, SessionWithText } from '../../../src/native/index.js'
 import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import { phoneCatalog } from '../../../src/features/remote/catalog.js'
-import { directoryRows, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
+import { directoryGroups, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
-test('the one session list keeps gateway order and appends status-only windows unless searching', () => {
-  const now = new Date(2026, 8, 18, 12).getTime(), stamp = (minutes:number) => now - minutes * 60000
-  const rows = [ {session:'working', phase:'working', updated:new Date(stamp(4)).toISOString()}, {session:'saved', updated:new Date(stamp(90)).toISOString()} ]
-  const data = { rows, privateWindows:[{phase:'idle', updatedAt:now}] }
-  const listed = directoryRows(data, '', now)
-  expect(listed.map((r: {session?:string}) => r.session)).toEqual(['working', 'saved', undefined])
-  expect(listed[0].age).toMatch(/^Today · .+/)
-  expect(listed[2]).toMatchObject({kind:'private', title:'Older evot window', age:expect.stringMatching(/^Today · .+/)})
-  expect(directoryRows(data, 'work', now)).toHaveLength(2)
+test('the drawer keeps live work first, retains the gateway order inside each group, and adds status-only windows outside search', () => {
+  const now = Date.UTC(2026, 8, 18, 12), day = 86400000
+  const data = {
+    rows: [
+      {session:'working', terminal:'live', phase:'working', updatedAt:now - day},
+      {session:'yesterday', terminal:'idle', phase:'idle', updatedAt:now - day},
+      {session:'open', terminal:'open', phase:'idle', updatedAt:now - 60000},
+      {session:'saved', updatedAt:now},
+    ],
+    privateWindows:[{phase:'idle', updatedAt:now}],
+  }
+  const options = {now, timeZone:'UTC'}
+  const groups = directoryGroups(data, '', options)
+  expect(groups.map(({title, rows}) => [title, rows.map(r => r.session)])).toEqual([
+    ['In progress', ['working']], ['Today', ['open', 'saved', undefined]], ['Yesterday', ['yesterday']],
+  ])
+  expect(groups[0].rows[0].age).toBe(`Yesterday · ${localClock(now - day, 'UTC')}`)
+  expect(groups[1].rows[2]).toMatchObject({kind:'private', title:'Older evot window', age:localClock(now, 'UTC')})
+  expect(directoryGroups(data, 'work', options).flatMap(group => group.rows.map(row => row.session)))
+    .toEqual(['working', 'open', 'saved', 'yesterday'])
 })
 
-test('calendar labels use local midnight (including year boundaries), not rolling 24-hour periods', () => {
-  const now = new Date(2027,0,1,0,2).getTime(), older = new Date(2026,11,30,16)
-  const rows = [{updatedAt:now}, {updated:new Date(now-5*60000).toISOString()}, {updated:older.toISOString()}, {updated:'unknown'}]
-  const labels = directoryRows({rows}, 'query', now).map(r => r.age)
-  expect(labels[0]).toMatch(/^Today · /); expect(labels[1]).toMatch(/^Yesterday · /)
-  expect(labels[2]).toBe(new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(older)); expect(labels[3]).toBe('')
+const localClock = (instant: number, timeZone?: string) =>
+  Intl.DateTimeFormat(undefined, {timeZone, hour:'2-digit', minute:'2-digit'}).format(instant)
+
+test('session times and day labels use the host zone for live, saved, and status-only windows', () => {
+  const timeZone = 'Asia/Shanghai', now = Date.parse('2026-12-31T16:02:00Z') // Jan 1, 00:02 on the host.
+  const recent = now - 5 * 60000, older = Date.parse('2026-12-29T20:00:00Z') // Dec 30 on the host.
+  const data = {
+    rows: [{updatedAt:now}, {updated:new Date(recent).toISOString()}, {updatedAt:older}, {updated:'unknown'}],
+    privateWindows: [{updatedAt:recent}],
+  }
+  const groups = directoryGroups(data, '', {now, timeZone})
+  expect(groups.map(({title,rows}) => [title, rows.map(r => r.age)])).toEqual([
+    ['Today', [localClock(now, timeZone)]],
+    ['Yesterday', [localClock(recent, timeZone), localClock(recent, timeZone)]],
+    ['Earlier', [Intl.DateTimeFormat(undefined, {timeZone,year:'numeric',month:'short',day:'numeric'}).format(older)]],
+    ['Other', ['']],
+  ])
+  expect(groups[1].rows[0].timeLabel).toBe(`Yesterday · ${localClock(recent, timeZone)}`)
+  const utc = directoryGroups(data, 'search', {now, timeZone:'UTC'})
+  expect(utc[0].title).toBe('Today')
+  expect(utc[0].rows.map(r => r.age)).toEqual([localClock(now, 'UTC'), localClock(recent, 'UTC')])
+})
+
+test('yesterday is a calendar day across the host’s spring DST transition', () => {
+  const timeZone = 'America/Los_Angeles', now = Date.parse('2026-03-09T07:30:00Z') // Mar 9, 00:30 PDT.
+  const yesterday = Date.parse('2026-03-08T19:00:00Z')
+  const rows = [{updatedAt:yesterday}]
+  expect(directoryGroups({rows}, '', {now, timeZone})).toEqual([
+    {key:'yesterday', title:'Yesterday', rows:[expect.objectContaining({age:localClock(yesterday, timeZone)})]},
+  ])
+})
+
+test('a catalog from an older gateway without a timezone still uses browser time', () => {
+  const now = new Date(2027,0,1,0,2).getTime(), recent = now - 5 * 60000
+  const catalog = { rows:[{updated:new Date(recent).toISOString()}], privateWindows:[] }
+  for (const timeZone of [undefined, 'Unknown/Zone']) {
+    expect(directoryGroups(catalog, '', {now, timeZone})[0]).toMatchObject({
+      title:'Yesterday', rows:[expect.objectContaining({age:localClock(recent)})],
+    })
+  }
 })
 
 test('an idle window the phone opened reads as a saved session; a busy one and a local one stay open', () => {
