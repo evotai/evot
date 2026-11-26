@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { sharingScope } from '../../../src/features/remote/transport.js'
 import { DeviceStore } from '../../../src/features/remote/devices.js'
 import { testDevice } from '../../helpers/remote-device.js'
-import { privateSocketDirectory } from '../../../src/features/remote/discovery.js'
+import { privateSocketDirectory, registerTerminal } from '../../../src/features/remote/discovery.js'
+import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import type { CloudPushProgress, CloudPushResult, SessionMeta } from '../../../src/native/index.js'
 import type { OutputLine } from '../../../src/render/output.js'
 import { Committer } from '../../../src/term/screen/committer.js'
@@ -27,13 +28,13 @@ import { commandChoices, phoneShortcut } from '../../../src/features/remote/phon
 import type { RemoteSnapshot } from '../../../src/features/remote/protocol.js'
 import legacyComposer from '../../fixtures/contracts/remote-composer-legacy.json'
 import { getEditorText, insertText } from '../../../src/term/input/editor.js'
-import { PARKED_CHECK_MS, PARKED_EXIT_MS, parkedExpired, tmuxAttached } from '../../../src/term/app/remote/parked-exit.js'
+import { PARKED_CHECK_MS, PARKED_EXIT_MS, PARKED_VIEW_GRACE_MS, canParkWindow, tmuxAttached } from '../../../src/term/app/remote/parked-exit.js'
 import { PromptSuggestion } from '../../../src/term/app/suggestion/controller.js'
 import { context as suggestionContext } from '../../helpers/suggestion-context.js'
 import type { SuggestionOutcome } from '../../../src/native/contracts/ports.js'
 import { inlineSuggestion } from '../../../src/features/remote/phone-composer-keys.js'
 
-function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => []) {
+function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => [], extra: Partial<RemoteDeps> = {}) {
   const st = createReplState('fixture','/fixture')
   const runOwnership = new RunOwnership(), calls: string[] = [], notices: string[] = []
   const compactLines: OutputLine[] = [], expandedLines: OutputLine[] = []
@@ -83,6 +84,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
       submissions.push(args); calls.push(args[1] + ':' + args[0])
     } },
     runCtl:{ runInteractionInput, startSpinner() {}, stopSpinner() {}, interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); st.isLoading = false; st.streamMachine = null; calls.push('stop') } },
+    ...extra,
   } as unknown as RemoteDeps)
   function run() { st.isLoading = true; st.streamMachine = createStreamMachineState(st.appState,st.spinnerState); return runOwnership.begin() }
   return {st,remote,asks,run,calls,notices,share,submissions,shells,pendingQueue,suggestions,finishSuggestion,compactLines,scrollback}
@@ -566,9 +568,13 @@ test('/remote startup is one status row rewritten in place, ending in the outcom
 
 test('a parked window exits only when idle, unwatched for 5 minutes, without a draft or an attached terminal', () => {
   const now = 1_000_000_000, quiet = { lastWatched: now - PARKED_EXIT_MS, idle: true, draft: false, attached: false }
-  expect(parkedExpired(quiet, now)).toBe(true)
-  expect(parkedExpired({ ...quiet, lastWatched: now - PARKED_EXIT_MS + 1 }, now)).toBe(false)
-  for (const blocker of [{ idle: false }, { draft: true }, { attached: true }]) expect(parkedExpired({ ...quiet, ...blocker }, now)).toBe(false)
+  expect(canParkWindow(quiet, now, 'timeout')).toBe(true)
+  expect(canParkWindow({ ...quiet, lastWatched: now - PARKED_EXIT_MS + 1 }, now, 'timeout')).toBe(false)
+  expect(canParkWindow({ ...quiet, lastWatched: now - PARKED_VIEW_GRACE_MS + 1 }, now, 'capacity')).toBe(false)
+  expect(canParkWindow({ ...quiet, lastWatched: now - PARKED_VIEW_GRACE_MS }, now, 'capacity')).toBe(true)
+  for (const reason of ['timeout', 'capacity'] as const) {
+    for (const blocker of [{ idle: false }, { draft: true }, { attached: true }]) expect(canParkWindow({ ...quiet, ...blocker }, now, reason)).toBe(false)
+  }
   // Without a tmux pane to ask, the window counts as attached and stays.
   expect(tmuxAttached({})).toBe(true)
   expect(tmuxAttached({ TMUX: '/nonexistent/socket,1,0', TMUX_PANE: '%0' })).toBe(true)
@@ -610,6 +616,44 @@ test('only a phone-opened window arms the idle exit; following it keeps it alive
     expect(cleared).toHaveLength(1)
   } finally {
     globalThis.setInterval = realSet; globalThis.clearInterval = realClear
+    for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key]
+    Object.assign(process.env, prev)
+    rmSync(privateSocketDirectory(home), {recursive:true, force:true}); rmSync(home, {recursive:true, force:true})
+  }
+})
+
+test('a full gateway can park only an unwatched phone window, through the same rule as the idle timer', async () => {
+  const home = mkdtempSync(join(tmpdir(),'evot-capacity-')), prev = { ...process.env }
+  const realWhich = Bun.which, realSpawn = Bun.spawnSync
+  const scope = sharingScope(home, '/private/settings', 'local')
+  const fixtureHost = { snapshot() { throw Error('unused') }, act() {} }
+  let gateway: ReturnType<typeof registerTerminal> | undefined, stopRelay: (() => void) | undefined
+  let phone: ReturnType<typeof harness> | undefined, desktop: ReturnType<typeof harness> | undefined
+  try {
+    process.env.EVOT_HOME = home
+    desktop = harness(); desktop.remote.register(); desktop.st.terminalBus!.share(scope)
+    process.env.EVOT_PHONE_TERMINAL = crypto.randomUUID(); process.env.EVOT_PHONE_SCOPE = scope
+    process.env.TMUX = '/fixture,1,0'; process.env.TMUX_PANE = '%0'
+    Object.assign(Bun, { which: () => '/fixture/tmux', spawnSync: () => ({ exitCode: 0, stdout: Buffer.from('0\n') }) })
+    phone = harness(); phone.remote.register()
+    gateway = registerTerminal(home, fixtureHost, () => ({ session: '', workspace: 'w', title: 'gateway', phase: 'idle' }))
+    stopRelay = await startFixtureRelay(home, scope, gateway)
+    const child = phone.st.terminalBus!.id
+    expect(await gateway.park(desktop.st.terminalBus!.id)).toBe(false) // a window the user opened is never parked
+    phone.remote.snapshot() // a phone is reading it right now
+    expect(await gateway.park(child)).toBe(false)
+    phone.st.editor = insertText(phone.st.editor, 'typed after tmux attach')
+    phone.st.remoteWatchedAt = Date.now() - PARKED_VIEW_GRACE_MS
+    expect(await gateway.park(child)).toBe(false)
+    phone.st.editor = createReplState('fixture','/fixture').editor
+    phone.st.remoteWatchedAt = Date.now() - PARKED_VIEW_GRACE_MS
+    expect(phone.calls).not.toContain('exit:0')
+    expect(await gateway.park(child)).toBe(true)
+    expect(phone.calls).toContain('exit:0')
+    expect(desktop.calls).not.toContain('exit:0')
+  } finally {
+    Object.assign(Bun, { which: realWhich, spawnSync: realSpawn })
+    stopRelay?.(); gateway?.close(); phone?.remote.dispose(); desktop?.remote.dispose()
     for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key]
     Object.assign(process.env, prev)
     rmSync(privateSocketDirectory(home), {recursive:true, force:true}); rmSync(home, {recursive:true, force:true})
@@ -778,6 +822,39 @@ test('only an opted-in profile elects a gateway; /remote off from a sibling stop
     expect(c.st.remoteListener?.active()).toBe(true)
   } finally {
     for (const p of [a,b,c,other]) p.remote.dispose()
+    if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
+    if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
+    rmSync(privateSocketDirectory(home), {recursive:true,force:true}); rmSync(home, {recursive:true,force:true})
+  }
+})
+
+test('a tmux window never adopts the gateway on its own, but /remote on and its own restart still run it', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-tmux-takeover-')), previous = process.env.EVOT_HOME, local = process.env.EVOT_REMOTE_LOCAL_TEST
+  const owner = harness(), visible = harness()
+  const tmux = harness(undefined, undefined, { insideTmux: () => true }), restarted = harness(undefined, undefined, { insideTmux: () => true })
+  try {
+    process.env.EVOT_HOME = home; process.env.EVOT_REMOTE_LOCAL_TEST = '1'
+    for (const p of [owner, tmux, visible]) p.remote.register()
+    await owner.remote.command('')
+    const address = owner.st.remoteListener!.address
+    owner.remote.dispose()
+    await tmux.remote.maintain()
+    expect(tmux.st.remoteListener).toBeNull()
+    await visible.remote.maintain()
+    expect(visible.st.remoteListener?.address).toBe(address)
+    visible.remote.dispose()
+    await tmux.remote.maintain()
+    expect(tmux.st.remoteListener).toBeNull() // only tmux windows remain: wait for a visible one
+
+    await tmux.remote.command('on')
+    expect(tmux.st.remoteListener?.address).toBe(address)
+    const handoff = tmux.remote.handoff()!
+    tmux.remote.dispose()
+    restarted.remote.register(handoff)
+    await restarted.remote.resume(handoff)
+    expect(restarted.st.remoteListener?.address).toBe(address)
+  } finally {
+    for (const p of [owner, tmux, visible, restarted]) p.remote.dispose()
     if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
     if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
     rmSync(privateSocketDirectory(home), {recursive:true,force:true}); rmSync(home, {recursive:true,force:true})

@@ -39,7 +39,7 @@ export const validTerminal = (value: unknown): value is string =>
  * Only a running profile gateway requests inherited access; device credentials
  * stay at its ingress. Older gateways can only follow explicitly shared windows. */
 export function registerTerminal(home: string, host: RemoteHost, badge: () => SessionBadge, id: string = randomUUID(),
-  membership?: { session(): string; currentScope(): string | null; pairing?(code: string, device: string): void }, control?: WindowControl) {
+  membership?: { session(): string; currentScope(): string | null; pairing?(code: string, device: string): void; parkIfIdle?(): boolean }, control?: WindowControl) {
   if (!validTerminal(id)) throw new Error('Cannot register this terminal.')
   const dir = privateSocketDirectory(home)
   const socket = (terminal: string) => join(dir, terminal + '.sock')
@@ -68,6 +68,14 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         return request ? Response.json(control.request(request)) : new Response(null, { status: 400 })
       }
       const ticket = req.headers.get('x-evot-relay')
+      if (path === '/park') {
+        // Private gateway only. The child rechecks live state before exiting;
+        // neither an old badge nor a device-facing /action can stop a window.
+        if (req.method !== 'POST' || !membership?.parkIfIdle || !requested || !validTerminal(ticket) || req.headers.has('origin')
+          || !matches(requested, false) || !await confirmRelay(gatewaySocket(dir, requested), ticket, id, path) || !matches(requested, false))
+          return new Response(null, { status: 403 })
+        return new Response(null, { status: membership.parkIfIdle() ? 204 : 409 })
+      }
       if (path === '/pairing') {
         if (req.method !== 'POST' || !membership?.pairing || !requested || !validTerminal(ticket) || req.headers.has('origin'))
           return new Response(null, { status: 403 })
@@ -110,7 +118,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
   async function request(terminal: string, path: '/badge' | '/state' | '/action', body?: unknown, background?: string) {
     return requestInScope(terminal, path, routerScope || scope || '', body, background)
   }
-  async function requestInScope(terminal: string, path: '/badge' | '/state' | '/action' | '/pairing', requestedScope: string, body?: unknown, background?: string) {
+  async function requestInScope(terminal: string, path: '/badge' | '/state' | '/action' | '/pairing' | '/park', requestedScope: string, body?: unknown, background?: string) {
     if (!validTerminal(terminal)) throw new RemoteConflict('Invalid terminal.')
     const ticket = routerScope ? permits.issue(terminal, path) : null
     try {
@@ -169,6 +177,12 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
     id,
     inventory,
     request,
+    /** Ask a phone-opened window to exit to make room. It applies its own park rule. */
+    async park(terminal: string) {
+      if (!routerScope) return false
+      try { return (await requestInScope(terminal, '/park', routerScope, {})).status === 204 }
+      catch { return true } // exit can close the socket before the reply: verify via tmux
+    },
     async notifyPairing(terminal: string, code: string, device: string) {
       if (!routerScope) return false
       try { return (await requestInScope(terminal, '/pairing', routerScope, { code, device })).status === 204 }

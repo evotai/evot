@@ -8,6 +8,7 @@ import { isBackgroundSelector, SELECTOR_OWNER } from '../ui/selector-identity.js
 import { type AskQuestion } from '../ui/ask.js'
 import { buildPrivacyCard, type OutputLine } from '../render/output.js'
 import { createHyperlink } from '../ui/hyperlink.js'
+import { insideTmux } from '../ui/key-hints.js'
 import { renderErrorNotice } from '../ui/command-notice.js'
 import { Agent, fastExit, authNotices, privacyLive, type SessionMeta } from '../native/index.js'
 import { assistantToolCalls } from './app/run/assistant-content.js'
@@ -162,6 +163,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get windowControl() { return restartCtl.control },
     get installedBuild() { return installedBuild },
     outdatedBuild: runningOutdatedBuild,
+    insideTmux,
     get readAuthIdentity() { return readAuthIdentity },
     get modelSelection() { return modelSelection },
     get clearAll() { return composer.clearAll },

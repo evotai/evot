@@ -93,6 +93,35 @@ test('history does not disclose or duplicate an unshared occupied session; crash
   }
 })
 
+test.skipIf(!Bun.which('tmux'))('four phone terminals block new launches but not following an open session', async () => {
+  const tmux = Bun.which('tmux')
+  if (!tmux) throw Error('tmux unavailable')
+  const home = '/fixture/' + crypto.randomUUID(), scope = 'a'.repeat(24)
+  const group = 'evot-phone-' + profileKey(home) + '-' + scope
+  const tm = (...args: string[]) => Bun.spawnSync([tmux, '-L', group, '-f', '/dev/null', ...args], { timeout: 2500 })
+  const host = { snapshot() { throw Error('unused') }, act() {} }
+  const gateway = registerTerminal(home, host, () => ({ session: 'live', workspace: 'w', title: 'Live', phase: 'idle' }))
+  const workspace = phoneWorkspace(gateway, {
+    listSessions: async () => [{ session_id: 'saved', cwd: '/tmp', title: 'Saved', source: 'repl' } as SessionMeta],
+    listSessionsWithText: async () => [],
+    deleteSession: async () => false,
+  }, home, '/tmp', scope)
+  try {
+    gateway.share(scope)
+    for (let i = 0; i < 4; i++) {
+      expect(tm('new-session', '-d', '-s', `chat-${crypto.randomUUID()}`, '--', 'sleep', '60').exitCode).toBe(0)
+    }
+    const open = (session: string | null) => workspace.open(crypto.randomUUID(), session, () => true)
+    await expect(open(null)).rejects.toThrow('4 phone terminals are already open')
+    await expect(open('saved')).rejects.toThrow('4 phone terminals are already open')
+    expect(await open('live')).toBe(gateway.id)
+    expect(tm('list-sessions', '-F', '#{session_name}').stdout.toString().trim().split('\n')).toHaveLength(4)
+  } finally {
+    tm('kill-server')
+    gateway.close()
+  }
+}, 15_000)
+
 test.skipIf(!Bun.which('tmux'))('deleting a session closes only an idle window this gateway launched for a phone', async () => {
   const home = '/fixture/' + crypto.randomUUID(), scope = 'a'.repeat(24), tmux = Bun.which('tmux')!
   const group = 'evot-phone-' + profileKey(home) + '-' + scope

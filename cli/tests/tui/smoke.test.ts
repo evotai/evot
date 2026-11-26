@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {pendingDevice} from '../helpers/remote-device.js'
 import {deviceId} from '../../src/features/remote/devices.js'
 import {sharingScope} from '../../src/features/remote/transport.js'
+import { PARKED_VIEW_GRACE_MS } from '../../src/term/app/remote/parked-exit.js'
 import { smokeEnvironment, seedSmokeHome } from '../helpers/smoke-home.js'
 import { suggestionInstructions, suggestionWorkflow } from '../helpers/suggestion-request.js'
 import { fixtureClipboard } from '../helpers/clipboard.js'
@@ -2111,6 +2112,14 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         const resumed=await open(SEEDED_SESSION_ID); expect(resumed).not.toBe(fresh); expect(await open(SEEDED_SESSION_ID)).toBe(resumed)
         headers['X-Evot-Terminal']=resumed; expect((await state()).sessionId).toBe(SEEDED_SESSION_ID)
         headers['X-Evot-Terminal']=directory.current; expect((await state()).ask?.id).toBe(first.ask!.id)
+        await open(null); await open(null) // four occupied; none has been idle for five minutes
+        await expect(open(null)).rejects.toThrow('4 phone terminals are already open') // all four were just opened
+        await Bun.sleep(PARKED_VIEW_GRACE_MS + 100) // nobody reads them now
+        const fifth = await open(null)
+        const online = (await list(true)).online.map(row => row.terminal)
+        expect(online).toHaveLength(5) // four phone terminals plus the original desktop
+        expect(online).toContain(fifth)
+        expect((await state()).ask?.id).toBe(first.ask!.id)
       }
       const answer = {kind:'answer', id:first.ask!.id, generation:first.generation, answers:['Phone answer']}
       expect((await post('/action', answer)).status).toBe(204)

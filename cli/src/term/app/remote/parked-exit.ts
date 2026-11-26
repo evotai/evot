@@ -2,6 +2,12 @@
  * long and it has nothing in flight, it exits; its session stays saved for Resume. */
 export const PARKED_EXIT_MS = 5 * 60_000
 export const PARKED_CHECK_MS = 30_000
+/** A phone following a window refreshes `lastWatched` about every 200ms (stream)
+ * or 800ms (poll); a hidden page stops at once. When all slots are taken, a
+ * window nobody has read for this long can make room for a new one. */
+export const PARKED_VIEW_GRACE_MS = 3_000
+export type ParkReason = 'timeout' | 'capacity'
+const UNWATCHED_MS: Record<ParkReason, number> = { timeout: PARKED_EXIT_MS, capacity: PARKED_VIEW_GRACE_MS }
 
 export interface ParkedWindow {
   /** Last /state or /action from a phone, or the last moment the window was not idle. */
@@ -13,8 +19,9 @@ export interface ParkedWindow {
   attached: boolean
 }
 
-export function parkedExpired(window: ParkedWindow, now: number): boolean {
-  return window.idle && !window.draft && !window.attached && now - window.lastWatched >= PARKED_EXIT_MS
+/** One rule for both exits; only how long nobody may have watched differs. */
+export function canParkWindow(window: ParkedWindow, now: number, reason: ParkReason): boolean {
+  return window.idle && !window.draft && !window.attached && now - window.lastWatched >= UNWATCHED_MS[reason]
 }
 
 /** Whether a terminal is attached to the tmux session holding this TUI. Unknown

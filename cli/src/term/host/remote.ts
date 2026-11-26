@@ -35,7 +35,7 @@ import { suggestionStatusText } from '../viewmodel/suggestion.js'
 import { createSpinnerState, setSpinnerPhase, spinnerDescription } from '../widgets/spinner.js'
 import { remoteModels } from '../app/remote/models.js'
 import { assistantRow } from '../app/remote/conversation.js'
-import { PARKED_CHECK_MS, parkedExpired, tmuxAttached } from '../app/remote/parked-exit.js'
+import { PARKED_CHECK_MS, canParkWindow, tmuxAttached, type ParkReason } from '../app/remote/parked-exit.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
 import type { ComposerController } from './composer.js'
 import type { PendingImages } from '../app/composer/pending-images.js'
@@ -54,6 +54,8 @@ import type { WindowControl } from '../../features/restart/protocol.js'
 export interface RemoteDeps {
   readonly readAuthIdentity: () => string | null | undefined
   readonly outdatedBuild?: () => boolean | null
+  /** A tmux window may be detached and unseen; it never takes the gateway on its own. */
+  readonly insideTmux?: () => boolean
   readonly backgroundTerminals: BackgroundTerminals
   readonly composer: ComposerController
   readonly activity: ActivityController
@@ -402,7 +404,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
             const current = currentScope()
             return st.remoteChild && (!validTerminal(id) || current !== scope) ? null : current
           },
-          ...(!st.remoteChild ? { pairing: announcePairing } : {}),
+          ...(st.remoteChild ? { parkIfIdle: () => tryPark('capacity') } : { pairing: announcePairing }),
         },
         deps.windowControl,
       )
@@ -419,16 +421,27 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   function parkWhenUnwatched() {
     if (st.remoteParkTimer) return
     st.remoteWatchedAt = Date.now()
-    st.remoteParkTimer = setInterval(() => {
-      if (st.destroyed) return
-      const now = Date.now(), idle = windowStatus().phase === 'idle' && !st.pendingQueue.entries.length
-      if (!idle) { st.remoteWatchedAt = now; return }
-      const window = { lastWatched: st.remoteWatchedAt, idle, draft: !isEditorEmpty(st.editor), attached: false }
-      if (!parkedExpired(window, now)) return
-      if (tmuxAttached()) { st.remoteWatchedAt = now; return }
-      deps.exitAfterCleanup(0)
-    }, PARKED_CHECK_MS)
+    st.remoteParkTimer = setInterval(() => tryPark('timeout'), PARKED_CHECK_MS)
     st.remoteParkTimer.unref?.()
+  }
+  /** The idle timer and a full gateway both ask here; the window decides from its own state. */
+  function tryPark(reason: ParkReason): boolean {
+    if (!st.remoteChild || !st.remoteParkTimer || st.destroyed || st.restarting || st.restartPending) return false
+    const now = Date.now()
+    const idle = windowStatus().phase === 'idle' && !st.foregroundCommand && !st.logMode && !st.pendingAsk && !st.pendingTaskModel
+      && !st.pendingQueue.entries.length && !st.pendingQueue.blocked && !st.queueDispatchId && !st.pendingEnqueue && !st.queueEditState
+      && !deps.pendingImages.awaiting && !deps.pendingImages.size && !st.pendingModelHandoff
+    if (!idle) { st.remoteWatchedAt = now; return false }
+    if (!canParkWindow({ lastWatched: st.remoteWatchedAt, idle, draft: !isEditorEmpty(st.editor), attached: false }, now, reason)) return false
+    // Do not trust only the badge's cached shell count when deciding to exit.
+    if (st.sessionId) {
+      try {
+        if (deps.agent.backgroundProcesses(st.sessionId).some(task => task.status === 'running') || deps.agent.pendingProcessWakeNotifications(st.sessionId)) return false
+      } catch { return false }
+    }
+    if (tmuxAttached()) { st.remoteWatchedAt = now; return false }
+    deps.exitAfterCleanup(0)
+    return true
   }
   function close(hide = true) {
     st.remoteAttempt++
@@ -632,13 +645,18 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       gateway: !!st.remoteListener?.active() }
   }
 
-  async function maintain() {
+  async function maintain() { await takeOver(false) }
+
+  /** Automatic takeover. Only a window the user can see on the computer may
+   * adopt the gateway and its approval prompts; `/remote on` anywhere still
+   * starts one. A restart keeps a gateway the previous image already ran. */
+  async function takeOver(restarted: boolean) {
     if (st.remoteListener) {
       if (!st.remoteListener.active()) close(false)
       return
     }
     if (!st.terminalBus || st.destroyed || st.restarting || st.restartPending || st.remoteChild || st.remoteOpening ||
-        Date.now() < st.remoteRetryAt) return
+        (!restarted && deps.insideTmux?.()) || Date.now() < st.remoteRetryAt) return
     let p: ReturnType<typeof gatewayProfile>
     try { p = gatewayProfile() } catch { return }
     if (allowed(p.policyHome, p.scope) && deps.outdatedBuild?.() !== true) await enable(p, false)
@@ -657,7 +675,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         }
         await updateGatewayPolicy(p.policyHome, p.scope, 'adopt', () => currentScope() === p.scope)
       }
-      await maintain()
+      await takeOver(true)
     } catch (err) { notice(`Remote: ${errorText(err)}`) }
   }
   return {

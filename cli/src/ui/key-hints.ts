@@ -79,6 +79,6 @@ export function backgroundChordLabel(env: NodeJS.ProcessEnv = process.env): stri
   return insideTmux(env) ? 'Ctrl+B Ctrl+B (twice)' : 'Ctrl+B'
 }
 
-function insideTmux(env: NodeJS.ProcessEnv): boolean {
+export function insideTmux(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.TMUX !== undefined && env.TMUX !== ''
 }

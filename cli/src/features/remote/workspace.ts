@@ -6,6 +6,7 @@ import { isInteractiveSession, sanitizeSessionTitle, shortenSessionCwd } from '.
 import { profileKey, validTerminal, type TerminalBus } from './discovery.js'
 import { liveSessions, phoneCatalog, type CatalogPage } from './catalog.js'
 import { RemoteConflict } from './protocol.js'
+import { makePhoneTerminalRoom, phoneTerminalSlots } from './phone-terminal-slots.js'
 
 export interface WorkspaceSource {
   listSessions(limit: number): Promise<SessionMeta[]>
@@ -22,6 +23,7 @@ export function phoneWorkspace(
   scope: string,
   envFile?: string
 ) {
+  const slots = phoneTerminalSlots()
   const group = 'evot-phone-' + profileKey(home) + '-' + scope
   const tmuxIn = (tmux: string, ...args: string[]) =>
     Bun.spawnSync([tmux, '-L', group, '-f', '/dev/null', ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe', timeout: 2500 })
@@ -145,11 +147,6 @@ export function phoneWorkspace(
       if (first.live) return first.live.terminal
     }
     const saved = session ? (await listHistory()).find(m => m.session_id === session) : undefined
-    const { live: existing, online } = await owner()
-    if (existing) return existing.terminal
-    if (session !== null && !saved) throw new RemoteConflict('Session no longer exists in this profile.')
-    const tmux = Bun.which('tmux')
-    if (!tmux) throw new RemoteConflict('Install tmux on the computer to open an independent TUI.')
     const digest = createHash('sha256')
       .update(JSON.stringify([group, session || requestId, ...(folder ? [folder] : [])]))
       .digest('hex')
@@ -158,22 +155,33 @@ export function phoneWorkspace(
       16,
       20
     )}-${digest.slice(20)}`
-    // The same saved session can be left via a local /new. Do not reattach a
-    // deterministic terminal to a different session on a stale history click.
-    const old = online.find((t) => t.terminal === id)
-    if (old && (!session || old.session === session)) return id
-    if (old) throw new RemoteConflict('That window changed sessions. Pick it again from Sessions.')
-    if (!stillAuthorized()) throw new RemoteConflict('Pairing changed.')
-    const binary = /^(bun|bun-debug)$/.test(basename(process.execPath))
-      ? [process.execPath, Bun.main]
-      : [process.execPath]
-    const args = [...binary, ...(envFile ? ['--env-file', envFile] : []), ...(session ? ['--resume', session] : [])]
-    const tm = (...args: string[]) => tmuxIn(tmux, ...args)
-    const target = 'chat-' + id
-    const exists = () => tm('has-session', '-t', '=' + target).exitCode === 0
-    if (!exists()) {
-      if (tm('list-sessions', '-F', '#{session_name}').stdout.toString().split('\n').filter(Boolean).length >= 16)
-        throw new RemoteConflict('16 phone terminals are already open. Close an unused terminal on the computer.')
+    const current = await slots.admit(async () => {
+      const { live, online } = await owner()
+      if (live) return live.terminal
+      if (session !== null && !saved) throw new RemoteConflict('Session no longer exists in this profile.')
+      const old = online.find(t => t.terminal === id)
+      if (old && (!session || old.session === session)) return id
+      if (old) throw new RemoteConflict('That window changed sessions. Pick it again from Sessions.')
+      if (!stillAuthorized()) throw new RemoteConflict('Pairing changed.')
+      const tmux = Bun.which('tmux')
+      if (!tmux) throw new RemoteConflict('Install tmux on the computer to open an independent TUI.')
+      const tm = (...args: string[]) => tmuxIn(tmux, ...args)
+      const target = 'chat-' + id
+      const exists = () => tm('has-session', '-t', '=' + target).exitCode === 0
+      if (exists()) return null // already launching; join its readiness check below
+      const sessions = () => {
+        const result = tm('start-server', ';', 'list-sessions', '-F', '#{session_name}')
+        if (result.exitCode !== 0) throw new RemoteConflict('Cannot check phone terminal capacity.')
+        return new Set(result.stdout.toString().split('\n').filter(Boolean))
+      }
+      await makePhoneTerminalRoom(online, sessions, terminal => bus.park(terminal), stillAuthorized)
+      if (session) {
+        const { live } = await owner()
+        if (live) return live.terminal
+      }
+      if (!stillAuthorized()) throw new RemoteConflict('Pairing changed.')
+      const binary = /^(bun|bun-debug)$/.test(basename(process.execPath)) ? [process.execPath, Bun.main] : [process.execPath]
+      const args = [...binary, ...(envFile ? ['--env-file', envFile] : []), ...(session ? ['--resume', session] : [])]
       const launch = tm(
         'new-session',
         '-d',
@@ -189,7 +197,9 @@ export function phoneWorkspace(
       )
       if (launch.exitCode !== 0 && !exists())
         throw new RemoteConflict('Could not start a TUI. Check tmux and the saved working directory on the computer.')
-    }
+      return null
+    })
+    if (current) return current
     const end = Date.now() + 9000
     while (Date.now() < end && stillAuthorized()) {
       try {
