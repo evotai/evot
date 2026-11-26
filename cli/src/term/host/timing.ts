@@ -1,5 +1,4 @@
-/** Animation tick shared by the spinner and the terminal title. */
-export const SPINNER_INTERVAL_MS = 100
+import { SPINNER_INTERVAL_MS } from '../../ui/activity-frames.js'
 
 /** Spinner ticks between terminal-title frames (~960ms). */
 export const TITLE_INTERVAL_FRAMES = Math.round(960 / SPINNER_INTERVAL_MS)

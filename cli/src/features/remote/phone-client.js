@@ -1,6 +1,8 @@
 import { questionPanel } from './phone-ask.js';
 import { installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
+import { registerActivityMarks } from './phone-activity.js';
+import { completionReminder } from './phone-reminder.js';
 import { applyEdit, enterIntent } from './phone-editor.js';
 import { composerTab, draftHintText, inlineSuggestion } from './phone-composer-keys.js';
 import { photoViewer, messagePhotos } from './phone-photo-preview.js';
@@ -24,9 +26,11 @@ let timer,
   epoch = 0,
   catalogKey = '',
   levelsKey = '';
+registerActivityMarks(document, document.documentElement.dataset.activityFrames.split(' '));
 const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
-const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'), write:$('writeMessage'), jump:$('jump'), foldHandle:$('foldComposer'), draft:messageField});
+const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'), write:$('writeMessage'), jump:$('jump'), draft:messageField});
 const askPanel = questionPanel($('questions'), action);
+const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
 // A QR code or account return only starts pairing. Which session to follow is
 // always the user's pick from the list, never the window that happened to show the code.
@@ -113,6 +117,7 @@ function notice(text, persistent = false) {
 }
 function paired(yes) {
   $('openSessions').hidden = $('newSession').hidden = !yes;
+  reminder.setPaired(yes);
   if (!yes) {
     drawer.reset();
     clearOutbox(); photos.clear();
@@ -170,7 +175,7 @@ function controls() {
     !!input && (!$('commandMenu').hidden || !!preview));
   tab.render(connected ? view : null, busy || photos.busy, photos.count, candidate);
   $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
-  $('bgChip').disabled = !connected || busy;
+  background.setConnected(connected);
   $('models').disabled = !switchable || !view.models.options.length;
   $('effort').disabled = !switchable || !!view.models.pending;
   $('compose').hidden = !!view?.ask;

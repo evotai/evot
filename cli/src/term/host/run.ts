@@ -28,7 +28,8 @@ import type { ScrollbackController } from './scrollback.js'
 import type { SessionController } from './session.js'
 import type { ReplState } from './state.js'
 import type { SuggestController } from './suggest.js'
-import { SPINNER_INTERVAL_MS, TITLE_INTERVAL_FRAMES } from './timing.js'
+import { SPINNER_INTERVAL_MS } from '../../ui/activity-frames.js'
+import { TITLE_INTERVAL_FRAMES } from './timing.js'
 import type { Committer } from '../screen/committer.js'
 import type { TermRenderer } from '../screen/renderer.js'
 import { triggerAdSlot } from '../viewmodel/ad-slot.js'
@@ -395,6 +396,7 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
         st.pendingModelHandoff = null
         st.isLoading = false
         st.conversationTail.outcome = completed ? 'Completed' : 'Run failed · see the TUI'
+        st.conversationTail.finishedRound = generation + st.remoteEpoch
         st.appState = settleRunCallModel(st.appState)
         st.streamMachine = null
         stopSpinner()

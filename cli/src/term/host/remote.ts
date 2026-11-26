@@ -315,6 +315,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           title: sessionTitle(),
           ...windowStatus(),
           updatedAt: st.conversationTail.updatedAt,
+          finishedRound: st.conversationTail.finishedRound,
         }),
         validTerminal(id) ? id : undefined,
         {

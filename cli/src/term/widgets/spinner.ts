@@ -5,22 +5,13 @@
 
 import { providerFailurePresentation } from '../../render/provider-error.js'
 import { formatCacheHitPercent } from '../../render/cache.js'
+import { spinnerFrames } from '../../ui/activity-frames.js'
 import { truncateAnsiToWidth, visibleWidth } from '../../ui/wrap.js'
 import { resolveRunInteraction, type RunInteractionState } from '../app/run/run-interaction.js'
 import { runStatusPresentation, type AwaitedTasks } from '../viewmodel/run-status.js'
 import { confirmationHintAnsi } from '../viewmodel/confirmation-hint.js'
 
-function getSpinnerChars(): string[] {
-  if (process.env.TERM === 'xterm-ghostty') {
-    return ['·', '✢', '✳', '✶', '✻', '*']
-  }
-  return process.platform === 'darwin'
-    ? ['·', '✢', '✳', '✶', '✻', '✽']
-    : ['·', '✢', '*', '✶', '✻', '✽']
-}
-
-const SPINNER_CHARS = getSpinnerChars()
-const SPINNER_FRAMES = [...SPINNER_CHARS, ...[...SPINNER_CHARS].reverse()]
+const SPINNER_FRAMES = spinnerFrames(process.platform, process.env.TERM)
 const SLOW_THRESHOLD_MS = 8000
 // Actions that legitimately run long get wider thresholds so routine
 // execution is not painted red as "slow": bash commands regularly outlive 8s

@@ -112,6 +112,7 @@ export class ConversationTail {
   openingTitle = ''
   updatedAt = Date.now()
   outcome: 'Completed' | 'Stopped' | 'Run failed · see the TUI' | null = null
+  finishedRound: number | null = null
   offset = 0
   private rows: { compact: RemoteMessage; expanded: RemoteMessage }[] = []
   get messages() {
@@ -148,6 +149,7 @@ export class ConversationTail {
     this.offset += this.rows.length + 1
     this.rows = []
     this.outcome = null
+    this.finishedRound = null
     const first = messages.find(m => m.role === 'user' && m.text.trim() && !isLegacyContextSummary(m))
     this.openingTitle = first ? openingTitle(first.text) : ''
     for (let index = messages.length - 1; index >= 0; index--) {

@@ -19,6 +19,8 @@ export interface SessionBadge {
   updatedAt?: number
   phase: Phase
   runState?: RunBadge
+  /** Last non-interrupted agent round to settle. Older terminals omit this. */
+  finishedRound?: number | null
   title: string
 }
 export type WindowPresence = { phase: Phase; updatedAt: number }

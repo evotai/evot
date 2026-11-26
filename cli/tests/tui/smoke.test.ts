@@ -2051,8 +2051,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         return await res.json() as import('../../src/features/remote/protocol.js').RemoteSnapshot
       }
       const initial = await state()
-      const directory = await (await fetch(address+'/sessions',{headers})).json() as {current:string;online:{terminal:string}[];history:{session:string}[]}
+      const list = async (onlineOnly = false) => (await (await fetch(address+'/sessions'+(onlineOnly ? '?online' : ''),{headers})).json()) as {
+        current:string; online:{terminal:string;finishedRound?:number|null}[]; history:{session:string}[]
+      }
+      const directory = await list()
+      const finishedRound = async () => (await list(true)).online.find(r => r.terminal === directory.current)?.finishedRound
       expect(directory.online.map(r=>r.terminal)).toEqual([directory.current]); expect(directory.history.map(r=>r.session)).toContain(SEEDED_SESSION_ID)
+      expect(await finishedRound()).toBeNull()
       expect(initial.models.options.map(o => o.spec)).toContain('smoke:smoke-other-model')
       expect((await post('/action', {kind:'select-model', spec:'smoke:smoke-other-model', generation:initial.generation, revision:initial.models.revision})).status).toBe(204)
       await session.waitForScreen('Model → smoke-other-model@smoke')
@@ -2064,6 +2069,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       advance.resolve(); await session.waitForScreen('Which fixture name?')
       const first = await state(), reconnected = await state()
       expect(first.ask).not.toBeNull(); expect(reconnected).toEqual(first)
+      expect(await finishedRound()).toBeNull() // Being asked a question is still mid-round.
       expect((await post('/action', {kind:'select-model', generation:first.generation, revision:first.models.revision, spec:'smoke:smoke-other-model'})).status).toBe(204)
       expect(await state()).toMatchObject({ask:{id:first.ask!.id}, models:{active:'smoke:smoke-model',pending:{spec:'smoke:smoke-other-model'}}})
       if (Bun.which('tmux')) {
@@ -2092,6 +2098,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(finishedRows.find(r=>r.role==='notice')?.text).toContain('Phone answer')
       expect(callModels).toEqual(['smoke-model','smoke-other-model'])
       expect(await state()).toMatchObject({sessionId:first.sessionId, generation:first.generation, ask:null, input:'send', models:{active:'smoke:smoke-other-model',pending:null}})
+      expect(await finishedRound()).toBe(first.generation)
       expect((await post('/action', {kind:'send', generation:first.generation, text:'Ask a second time'})).status).toBe(204)
       await session.waitForScreen('Second question?')
       const second = await state(); expect(second.sessionId).toBe(first.sessionId); expect(second.generation).not.toBe(first.generation)
@@ -2100,8 +2107,10 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect((await post('/action', interrupt)).status).toBe(204)
       await session.waitForScreen('Cancelled.')
       const stopped = await state(); expect(stopped).toMatchObject({status:'Stopped', input:'send', ask:null})
+      expect(await finishedRound()).toBe(first.generation) // A manual interrupt never publishes a completion.
       session.checkpoint(); session.write('/new\r'); await session.waitForScreen(/^\s*new session\s*$/m)
       expect(await state()).toMatchObject({sessionId:null, messages:[], input:'send'})
+      expect(await finishedRound()).toBeNull()
       expect((await post('/action', {kind:'send',generation:stopped.generation,text:'old draft'})).status).toBe(409)
       session.write(`/remote revoke ${deviceId(device.key)}\r`); await session.waitForScreen('Device revoked.'); await expect(state()).rejects.toThrow('401')
       session.write('/remote shutdown\r'); await session.waitForScreen('Remote off.'); await expect(state()).rejects.toThrow()

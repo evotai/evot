@@ -2,53 +2,77 @@
 // resolves the task, formats status/output and restricts it to its session.
 export function backgroundPanel(document, refresh) {
   const el = (id) => document.getElementById(id),
-    panel = el('bgPanel'), chip = el('bgChip'), countLabel = el('bgCount'),
-    output = el('bgOutput');
-  let selected = null,
-    tasks = [];
+    panel = el('bgPanel'), chip = el('bgChip'), statusButton = el('bgStatus'), countLabel = el('bgCount'),
+    output = el('bgOutput'), subtitle = el('bgSubtitle'), activity = el('bgActivity'), outputActivity = el('bgOutputActivity'),
+    list = el('bgTasks'), allTasks = el('allTasks');
+  let selected = null, background = null, connected = false, loading = false, shownTask = null;
+  function setConnected(yes) {
+    if (connected === yes) return;
+    connected = yes;
+    activity.toggleAttribute('data-running', yes);
+    outputActivity.toggleAttribute('data-running', yes);
+    for (const mark of list.querySelectorAll('evot-activity')) mark.toggleAttribute('data-running', yes);
+    if (panel.open && loading) paint();
+  }
   function select(id) {
     selected = id;
+    loading = true;
+    paint();
     if (!panel.open) panel.showModal();
     void refresh();
   }
-  chip.onclick = () => { if (tasks.length) select(tasks.length === 1 ? tasks[0].id : 'list'); };
-  el('allTasks').onclick = () => select('list');
+  chip.onclick = statusButton.onclick = () => {
+    const tasks = background?.tasks;
+    if (tasks?.length) select(tasks.length === 1 ? tasks[0].id : 'list');
+  };
+  allTasks.onclick = () => select('list');
   el('closeBg').onclick = () => panel.close();
   panel.onclose = () => {
-    selected = null;
-    output.textContent = '';
+    if (panel.open || !selected) return;
+    clearSelection();
+    void refresh(); // Stop the old stream from reading task output after dismissal.
   };
+  function clearSelection() {
+    selected = shownTask = null;
+    loading = false;
+    output.textContent = '';
+  }
   function render(bg) {
-    tasks = bg?.tasks ?? [];
-    const count = tasks.length;
-    chip.hidden = !count;
+    background = bg;
+    loading = false;
+    const count = bg?.tasks.length ?? 0;
+    chip.hidden = statusButton.hidden = !count;
     const label = count ? `${count} ${count === 1 ? 'task' : 'tasks'} running` : '';
     if (countLabel.textContent !== label) {
       countLabel.textContent = label;
       chip.ariaLabel = label ? `Background: ${label}` : '';
     }
     if (!count) {
-      selected = null;
+      clearSelection();
       if (panel.open) panel.close();
-      return;
-    }
-    if (!selected) return;
-    const task = tasks.find((t) => t.id === selected);
+    } else if (panel.open) paint();
+  }
+  function paint() {
+    const tasks = background.tasks;
+    const task = tasks.find(t => t.id === selected);
     if (!task) selected = 'list';
-    const data = task && bg.output?.id === task.id ? bg.output : null;
-    el('bgTitle').textContent = data ? 'Background output' : 'Background';
-    el('bgOutputActivity').hidden = !data;
-    el('bgSubtitle').textContent = data ? [task.title, task.status].filter(Boolean).join(' · ') : bg.subtitle ?? '';
-    el('allTasks').hidden = !data || tasks.length < 2;
-    output.hidden = !data;
-    el('bgTasks').hidden = !!data;
-    if (data) {
-      const follow = output.scrollHeight - output.scrollTop - output.clientHeight < 32;
-      if (output.textContent !== data.text) output.textContent = data.text;
+    const data = task && !loading && background.output?.id === task.id ? background.output : null;
+    el('bgTitle').textContent = task ? 'Background output' : 'Background';
+    outputActivity.hidden = !task;
+    const description = task ? [task.title, task.status].filter(Boolean).join(' · ') : background.subtitle ?? '';
+    if (subtitle.textContent !== description) subtitle.textContent = description;
+    allTasks.hidden = !task || tasks.length < 2;
+    output.hidden = !task;
+    list.hidden = !!task;
+    if (task) {
+      const follow = shownTask !== task.id || output.scrollHeight - output.scrollTop - output.clientHeight < 32;
+      shownTask = task.id;
+      const text = data?.text ?? (loading ? connected ? 'Loading task output…' : 'Reconnecting to load task output…' : 'No task output available yet.');
+      if (output.textContent !== text) output.textContent = text;
       if (follow) output.scrollTop = output.scrollHeight;
     } else {
-      const list = el('bgTasks'),
-        keep = new Set();
+      shownTask = null;
+      const keep = new Set();
       for (const task of tasks) {
         let button = Array.from(list.children).find((b) => b.dataset.id === task.id);
         if (!button) {
@@ -56,8 +80,8 @@ export function backgroundPanel(document, refresh) {
           button.type = 'button';
           button.dataset.id = task.id;
           button.onclick = () => select(task.id);
-          const glyph = document.createElement('span');
-          glyph.className = 'activity-mark';
+          const glyph = document.createElement('evot-activity');
+          glyph.toggleAttribute('data-running', connected);
           glyph.setAttribute('aria-hidden', 'true');
           button.append(document.createElement('strong'), glyph, document.createElement('small'));
           list.append(button);
@@ -72,7 +96,7 @@ export function backgroundPanel(document, refresh) {
     }
   }
   return {
-    render,
+    render, setConnected,
     get selected() {
       return panel.open ? selected : null;
     },

@@ -28,19 +28,14 @@ html.remote-shell[data-theme="light"] {
 #bgChip:is(:hover,:active):not(:disabled) { background:var(--accent-soft); }
 .native-picker { display:flex; align-items:center; }
 .pair-card small { font-size:12px; color:var(--muted); }
-/* TUI's 12-frame star cycle at 100ms/frame, without replacing DOM or polling. */
-.activity-mark { display:inline-block; flex:none; width:1.15em; height:1em; overflow:hidden; vertical-align:-.08em; text-align:center; color:var(--accent); font:600 1em/1 ui-monospace,monospace; }
-.activity-mark::before { display:block; white-space:pre; content:'·\a ✢\a ✳\a ✶\a ✻\a ✽\a ✽\a ✻\a ✶\a ✳\a ✢\a ·'; transform:translateY(-3em); }
-#activity,#bgPanel h2 .activity-mark { margin-inline-end:4px; }
-#activity:not([data-running]) { color:var(--faint); }
-#activity:not([data-running])::before { transform:none; }
-@keyframes activity-frames { from { transform:translateY(0); } to { transform:translateY(-12em); } }
-@media(prefers-reduced-motion:no-preference) {
-  #activity[data-running]::before,.remote-page:has(#connection[data-online]) :is(#bgChip,#bgPanel[open]) .activity-mark::before,
-  .terminal-row[data-phase=working] .activity-mark::before { animation:activity-frames 1.2s steps(12,end) infinite; }
-}
+/* A fixed slot for the same glyph changes as the TUI, without layout movement. */
+evot-activity { display:inline-block; flex:none; width:1.15em; text-align:center; color:var(--faint); font:600 1em/1 ui-monospace,monospace; }
+evot-activity[data-running] { color:var(--accent); }
+#activity,#bgOutputActivity { margin-inline-end:4px; }
 .icon-button { width:44px; height:44px; flex:none; display:grid; place-items:center; border:0; border-radius:12px; background:transparent; color:var(--ink); cursor:pointer; font-size:24px; }
 .icon-button:hover,.icon-button:active { background:var(--fill); } .icon-button svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+#completionSound { color:var(--muted); }
+#completionSound[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
 .remote-page .chat-scroll { padding-bottom:16px; overflow-anchor:none; overscroll-behavior-y:contain; }
 .remote-page .message { font-size:16px; line-height:1.55; }
 /* Let the table keep its natural column widths, not the whole conversation. */
@@ -121,14 +116,14 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #folderList small { color:var(--muted); font-size:12px; }
 /* The only line above the composer: what the window is doing, then where it runs. */
 .run-line { display:flex; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:32px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
-.run-state { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
+.run-state { position:relative; flex:1; min-width:0; align-self:stretch; align-content:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
+#bgStatus { position:absolute; inset:0; width:100%; padding:0; border:0; background:transparent; cursor:pointer; pointer-events:auto; }
+#bgStatus:focus-visible { outline-offset:-2px; }
+.run-state:has(#bgStatus:not([hidden])) #status { color:var(--accent); }
 #statusDetail:not(:empty)::before,#nextModel:not(:empty)::before,#placeBranch:not(:empty)::before { content:' · '; }
 /* While a run is busy its own detail needs the room; the place returns when idle. */
 .run-line[data-active] .run-place { display:none; }
 .run-place { flex:none; max-width:34%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--faint); }
-#foldComposer { display:grid; place-items:center; flex:none; width:44px; min-height:28px; margin-inline-end:-8px; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; pointer-events:auto; touch-action:none; }
-#foldComposer svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
-#foldComposer:is(:hover,:active) { background:var(--fill); color:var(--ink); }
 .turn-footer { color:var(--faint); font-size:11.5px; }
 .remote-page .message-footer { margin-top:-14px; }
 .reason-card { margin:7px 0 12px; padding:4px 10px; border-left:2px solid var(--line); color:var(--muted); font-size:14px; }
@@ -184,7 +179,7 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #allTasks { min-height:44px; background:none; border:0; color:var(--accent); cursor:pointer; }
 #bgTasks button { position:relative; display:grid; gap:3px; width:100%; min-height:52px; margin:3px 0; padding:9px 30px 9px 34px; border:0; border-radius:10px; background:var(--fill); color:var(--ink); text-align:left; cursor:pointer; }
 #bgTasks button::after { content:'›'; position:absolute; right:12px; align-self:center; color:var(--faint); }
-#bgTasks .activity-mark { position:absolute; left:12px; top:12px; }
+#bgTasks evot-activity { position:absolute; left:12px; top:12px; }
 #bgTasks strong,#bgTasks small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #bgTasks small { font-size:12px; color:var(--muted); }
 .remote-page .composer-row { gap:4px; } .remote-page .composer-tools { flex:1; gap:1px; min-width:0; }

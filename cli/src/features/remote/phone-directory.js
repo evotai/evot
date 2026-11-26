@@ -78,8 +78,8 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
       const badge = document.createElement('span'), label = windowStatusLabel(r);
       badge.className = 'terminal-status';
       if (phase === 'working') {
-        const glyph = document.createElement('span');
-        glyph.className = 'activity-mark';
+        const glyph = document.createElement('evot-activity');
+        glyph.setAttribute('data-running', '');
         glyph.setAttribute('aria-hidden', 'true');
         badge.append(glyph);
       }

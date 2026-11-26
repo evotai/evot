@@ -2,6 +2,7 @@
 // only the product palette and base styles (app.css, theme.css/js) with the console.
 import { createHash } from 'node:crypto'
 import { bundlePhone } from './browser-bundle.js' with { type: 'macro' }
+import { spinnerFrames } from '../../ui/activity-frames.js'
 import { darkTheme } from '../../ui/theme/dark.js'
 import { lightTheme } from '../../ui/theme/light.js'
 import type { Theme } from '../../ui/theme/types.js'
@@ -46,6 +47,7 @@ const sha = (text: string) => `'sha256-${createHash('sha256').update(text).diges
 export const phoneScriptHash = `${sha(themeJs)} ${sha(client)}`
 export const phoneStyleHash = sha(css)
 const html = String(page)
+  .replace('class="remote-shell"', `class="remote-shell" data-activity-frames="${spinnerFrames(process.platform, process.env.TERM).join(' ')}"`)
   .replace('<link rel="stylesheet" href="/chat.css"><script src="/theme.js"></script>', () => `<style>${css}</style><script data-theme-boot>${themeJs}</script>`)
   .replace('<!-- phone-client -->', () => `<script data-cfasync="false">${client}</script>`)
 if (!html.includes('data-theme-boot')) throw Error('Remote page head changed; inline its assets again')

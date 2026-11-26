@@ -1,21 +1,24 @@
 import { expect, test } from 'bun:test'
 import { conversationScroll } from '../../../src/features/remote/phone-scroll.js'
 
-function transcript() {
-  let resize = () => {}, reading = false, top = 0
+function transcript(reducedMotion = false) {
+  let resize = () => {}, reading = false, top = 0, time = 0, rafId = 0
+  const frames = new Map<number, (time:number) => void>()
   const events = new Map<string, (event?: unknown) => void>()
   const document = {
     activeElement: null as object | null,
-    defaultView: { ResizeObserver: class {
-      constructor(callback: () => void) { resize = callback }
-      observe() {}
-    } },
+    defaultView: {
+      performance: {now: () => time}, matchMedia: () => ({matches:reducedMotion}),
+      requestAnimationFrame(callback: (time:number) => void) { frames.set(++rafId, callback); return rafId },
+      cancelAnimationFrame(id: number) { frames.delete(id) },
+      ResizeObserver: class {
+        constructor(callback: () => void) { resize = callback }
+        observe() {}
+      },
+    },
   }
   const write = { inert: true, ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
   const jump = { hidden: true, onclick() {} }
-  type Pointer = { pointerId:number; isPrimary:boolean; button:number; clientX:number; clientY:number }
-  const foldHandle = { hidden:true, onclick(_event: {detail:number}) {}, onpointerdown(_event: Pointer) {},
-    onpointerup(_event: Pointer) {}, setPointerCapture(_id: number) {} }
   const draft = { value: 'A draft for later', focus() { document.activeElement = this } }
   const editor = { inert:false, contains(node:object | null) { return node === draft } }
   const seat = {
@@ -34,20 +37,27 @@ function transcript() {
     focus() { document.activeElement = this },
     addEventListener(event: string, callback: (event?: unknown) => void) { events.set(event, callback) },
   }
-  const controller = conversationScroll({ chat, seat, editor, write, jump, foldHandle, draft })
+  const controller = conversationScroll({ chat, seat, editor, write, jump, draft })
   controller.update(true, true)
   controller.latest()
   return {
-    controller, chat, seat, editor, document, draft, write, jump, foldHandle, events,
+    controller, chat, seat, editor, document, draft, write, jump, events,
     get reading() { return reading },
     get bottom() { return Math.max(0, chat.scrollHeight - chat.clientHeight) },
     scrollTo(top: number) { chat.scrollTop = top; events.get('scroll')?.() },
     scrollBack(pixels: number) { this.scrollTo(this.bottom - pixels) },
-    touch(event: string, x = 100, y = 100) {
+    touch(event: string, x = 100, y = 100, rail?: {scrollHeight:number; clientHeight:number}) {
       const points = [{identifier:1, clientX:x, clientY:y}]
-      events.get(event)?.(event === 'touchend' ? {changedTouches:points} : {touches:points})
+      events.get(event)?.(event === 'touchend' ? {changedTouches:points} : {touches:points, target:{closest: () => rail}})
     },
     resize() { resize() },
+    frame(ms: number) {
+      time += ms
+      const next = [...frames.values()]
+      frames.clear()
+      for (const callback of next) callback(time)
+      events.get('scroll')?.()
+    },
   }
 }
 
@@ -70,7 +80,7 @@ test('small scrolls do not flash controls; a folded composer stays folded throug
   expect(ui.chat.scrollTop).toBe(top)
   ui.scrollTo(ui.bottom)
   expect(ui.reading).toBe(true)
-  expect(ui.jump.hidden).toBe(false)
+  expect(ui.jump.hidden).toBe(true)
 })
 
 test('growing the viewport does not mistake its new bottom for a downward swipe', () => {
@@ -139,49 +149,92 @@ test('short conversations can fold on a downward pull, but not on horizontal, ca
   expect(ui.reading).toBe(true)
 })
 
-test('the composer handle can be tapped or dragged down and released', () => {
+test('arriving at the bottom stays folded; another upward pull reveals the preserved draft without focusing it', () => {
   const ui = transcript()
-  const start = { pointerId:1, isPrimary:true, button:0, clientX:60, clientY:500 }
-  ui.foldHandle.onpointerdown(start)
-  ui.foldHandle.onpointerup({ ...start, clientX:95, clientY:510 })
-  ui.foldHandle.onclick({detail:1})
-  expect(ui.reading).toBe(false)
-  ui.foldHandle.onpointerdown(start)
-  expect(ui.reading).toBe(false)
-  ui.foldHandle.onpointerup({ ...start, clientY:525 })
+  ui.scrollBack(600)
+  ui.scrollBack(170)
+  ui.touch('touchstart', 100, 500)
+  ui.scrollTo(ui.bottom)
+  ui.touch('touchend', 105, 320)
   expect(ui.reading).toBe(true)
-  ui.write.onclick()
-  ui.foldHandle.onclick({detail:0})
-  expect(ui.reading).toBe(true)
-})
-
-test('manually folding and reopening at the live edge keeps following new output', () => {
-  const ui = transcript()
-  ui.foldHandle.onclick({detail:0})
-  expect(ui.reading).toBe(true)
-  ui.write.onclick()
+  ui.touch('touchstart', 100, 500)
+  ui.touch('touchend', 105, 445)
   expect(ui.reading).toBe(false)
+  expect(ui.document.activeElement).not.toBe(ui.draft)
+  expect(ui.draft.value).toBe('A draft for later')
   expect(ui.jump.hidden).toBe(true)
   ui.chat.scrollHeight += 200
   ui.controller.keepLatest()
   expect(ui.chat.scrollTop).toBe(ui.bottom)
 })
 
-test('Latest opens the editor and pins the bottom without focusing the draft', () => {
+test('a continuous swipe can reveal after reaching the bottom, but not from a nested scroll rail', () => {
   const ui = transcript()
-  ui.scrollBack(300)
+  ui.scrollBack(600)
+  ui.scrollBack(60)
+  ui.touch('touchstart', 100, 500)
+  ui.scrollTo(ui.bottom)
+  ui.touch('touchend', 105, 380)
+  expect(ui.reading).toBe(false)
+  // Resume desktop scrolling to fold again without inheriting touch momentum.
+  ui.events.get('wheel')?.()
+  ui.scrollBack(600)
+  ui.scrollTo(ui.bottom)
+  expect(ui.reading).toBe(true)
+  for (const [x, y] of [[105,490], [220,445]]) {
+    ui.touch('touchstart', 100, 500)
+    ui.touch('touchend', x, y)
+    expect(ui.reading).toBe(true)
+  }
+  ui.touch('touchstart', 100, 500, {scrollHeight:300, clientHeight:100})
+  ui.touch('touchend', 105, 430)
+  expect(ui.reading).toBe(true)
+})
+
+test('Latest eases to an advancing live edge while keeping the composer folded', () => {
+  const ui = transcript()
+  ui.scrollBack(600)
+  const start = ui.chat.scrollTop
   ui.document.activeElement = ui.jump
   ui.jump.onclick()
-  expect(ui.reading).toBe(false)
+  expect(ui.reading).toBe(true)
   expect(ui.jump.hidden).toBe(true)
   expect(ui.document.activeElement).toBe(ui.chat)
+  expect(ui.chat.scrollTop).toBe(start)
+  ui.frame(100)
+  expect(ui.chat.scrollTop).toBeGreaterThan(start)
+  expect(ui.chat.scrollTop).toBeLessThan(ui.bottom)
+  ui.chat.scrollHeight += 40
+  ui.controller.keepLatest()
+  expect(ui.chat.scrollTop).toBeLessThan(ui.bottom)
+  ui.frame(200)
   expect(ui.chat.scrollTop).toBe(ui.bottom)
-  ui.seat.height += 40
-  ui.resize()
-  expect(ui.chat.scrollTop).toBe(ui.bottom)
+  expect(ui.reading).toBe(true)
+  expect(ui.editor.inert).toBe(true)
   ui.chat.scrollHeight += 100
   ui.controller.keepLatest()
   expect(ui.chat.scrollTop).toBe(ui.bottom)
+  ui.write.onclick()
+  expect(ui.reading).toBe(false)
+  expect(ui.chat.scrollTop).toBe(ui.bottom)
+})
+
+test('manual scrolling interrupts Latest, and reduced motion scrolls once without reopening', () => {
+  const ui = transcript()
+  ui.scrollBack(600)
+  ui.jump.onclick()
+  ui.frame(100)
+  ui.events.get('wheel')?.()
+  const top = ui.chat.scrollTop
+  ui.frame(300)
+  expect(ui.chat.scrollTop).toBe(top)
+  expect(ui.reading).toBe(true)
+  expect(ui.jump.hidden).toBe(false)
+  const reduced = transcript(true)
+  reduced.scrollBack(600)
+  reduced.jump.onclick()
+  expect(reduced.reading).toBe(true)
+  expect(reduced.chat.scrollTop).toBe(reduced.bottom)
 })
 
 test('a pending question can replace the compact composer without snapping to the latest', () => {
