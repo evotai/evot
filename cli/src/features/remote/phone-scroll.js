@@ -1,85 +1,138 @@
-// Follow the live conversation until the reader deliberately scrolls away.
-// The compact bar is only a view: it never moves or replaces the editor.
-export function conversationScroll({ chat, seat, actions, write, jump, draft }) {
-  let following = true, compact = false, canCompact = false, jumpTarget = null;
-  const { ownerDocument } = chat, window = ownerDocument.defaultView;
+// Scrolling and editing are independent: once folded, only an explicit action
+// reopens the composer. A viewport resize or the tail of a swipe cannot do it.
+const FOLD_DISTANCE = 72;
+const HANDLE_DISTANCE = 24;
+const LATEST_DISTANCE = 16;
+const pulledDown = (start, end, distance) => {
+  const down = end.clientY - start.clientY;
+  return down >= distance && down > Math.abs(end.clientX - start.clientX);
+};
+
+export function conversationScroll({ chat, seat, editor, write, jump, foldHandle, draft }) {
+  let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
+  let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false, drag = null, dragged = false;
+  const { ownerDocument } = chat;
+  // Safari can report negative or past-bottom positions during rubber-banding.
+  const bottom = () => Math.max(0, chat.scrollHeight - chat.clientHeight);
+  const scrollTop = () => Math.max(0, Math.min(chat.scrollTop, bottom()));
+  const rememberPosition = () => { lastHeight = chat.clientHeight; backFrom = lastTop = scrollTop(); };
   function layout() {
-    const showCompact = !following && compact && canCompact;
-    const hideJump = following || jumpTarget !== null;
+    const folded = compact && canCompact;
+    const hideJump = !folded && !showLatest;
     const focused = ownerDocument.activeElement;
-    if ((hideJump && actions.contains(focused)) || (!showCompact && focused === write)) {
+    if ((hideJump && focused === jump) || (!folded && focused === write) ||
+        ((folded || !canCompact) && focused === foldHandle) || (folded && editor.contains(focused))) {
       chat.focus({preventScroll:true});
     }
-    seat.toggleAttribute('data-reading', showCompact);
-    write.hidden = !showCompact;
+    write.inert = !folded;
     jump.hidden = hideJump;
+    foldHandle.hidden = folded || !canCompact;
+    editor.inert = folded;
+    if (shownCompact !== folded) {
+      shownCompact = folded;
+      seat.toggleAttribute('data-reading', folded);
+      rememberPosition();
+    }
   }
   function keepLatest() {
-    if (following) chat.scrollTop = chat.scrollHeight;
+    if (!following) return;
+    chat.scrollTop = bottom();
+    rememberPosition();
   }
   function latest() {
-    jumpTarget = null;
     following = true;
-    compact = false;
+    showLatest = compact = false;
     layout();
     keepLatest();
   }
-  function animateToBottom() {
-    jumpTarget = chat.scrollHeight - chat.clientHeight;
-    if (jumpTarget - chat.scrollTop <= 1) { latest(); return; }
-    chat.scrollTo({top:jumpTarget, behavior:'smooth'});
-  }
-  function interruptJump() {
-    if (jumpTarget === null) return;
-    jumpTarget = null;
-    chat.scrollTop = chat.scrollTop; // Cancel the native animation, even before the gesture scrolls.
+  function fold() {
+    if (!canCompact || compact) return;
+    showLatest ||= !following;
+    following = false;
+    compact = true;
     layout();
   }
   chat.addEventListener('scroll', () => {
     if (!chat.clientHeight) return;
-    const gap = chat.scrollHeight - chat.scrollTop - chat.clientHeight;
-    if (jumpTarget !== null) {
-      // If a reply grew while we scrolled, finish at the new bottom too.
-      if (gap <= 1) latest();
-      else if (chat.scrollTop >= jumpTarget - 1) animateToBottom();
-      return;
+    if (chat.clientHeight !== lastHeight) { rememberPosition(); return; }
+    const top = scrollTop(), previous = lastTop, gap = bottom() - top;
+    lastTop = top;
+    if (top > previous) {
+      backFrom = top;
+      if (!compact && !following && gap <= LATEST_DISTANCE) latest();
+    } else if (top < previous) {
+      if (gap <= 1) { backFrom = top; return; } // Layout can clamp to an earlier bottom.
+      following = false;
+      if (gap >= FOLD_DISTANCE) showLatest = true;
+      if (!touchScroll && backFrom - top >= FOLD_DISTANCE) fold();
     }
-    if (!following && gap <= 16) { latest(); return; }
-    if (gap < 80) return;
-    following = false;
-    const focused = ownerDocument.activeElement;
-    // Leave room for the larger transcript viewport after folding. Fold on
-    // scroll, not blur: a touch blur can precede the click on Send.
-    if (!compact && gap >= seat.offsetHeight && (!seat.contains(focused) || actions.contains(focused))) compact = true;
     layout();
   }, {passive:true});
-  // Resizing the editor or opening the soft keyboard should only pin the
-  // transcript if it was already following, never when reading history.
-  new window.ResizeObserver(keepLatest).observe(chat);
-  chat.addEventListener('pointerdown', interruptJump, {passive:true});
-  chat.addEventListener('wheel', interruptJump, {passive:true});
+  new ownerDocument.defaultView.ResizeObserver(() => {
+    if (following) keepLatest();
+    else if (chat.clientHeight !== lastHeight || scrollTop() !== lastTop) rememberPosition();
+  }).observe(chat);
+
+  // Listen without taking over native scrolling. The whole touch gesture (not
+  // a scroll event or its momentum) decides whether to fold on release.
+  chat.addEventListener('touchstart', event => {
+    touchScroll = true;
+    touchStart = event.touches.length === 1 ? {touch:event.touches[0], top:scrollTop()} : null;
+  }, {passive:true});
+  chat.addEventListener('touchend', event => {
+    const start = touchStart;
+    touchStart = null;
+    const end = start && Array.from(event.changedTouches).find(touch => touch.identifier === start.touch.identifier);
+    if (end && (start.top <= FOLD_DISTANCE || start.top - scrollTop() >= LATEST_DISTANCE) &&
+        pulledDown(start.touch, end, FOLD_DISTANCE)) fold();
+  }, {passive:true});
+  chat.addEventListener('touchcancel', () => { touchStart = null; }, {passive:true});
+  const nonTouchScroll = () => {
+    if (touchScroll) rememberPosition();
+    touchScroll = false;
+  };
+  chat.addEventListener('wheel', nonTouchScroll, {passive:true});
+  chat.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch') nonTouchScroll();
+  }, {passive:true});
   chat.addEventListener('keydown', event => {
-    if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) interruptJump();
+    if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) nonTouchScroll();
   });
+
+  foldHandle.onclick = event => { if (!dragged || event.detail === 0) fold(); };
+  foldHandle.onpointerdown = event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    dragged = false;
+    drag = event;
+    foldHandle.setPointerCapture(event.pointerId);
+  };
+  foldHandle.onpointerup = event => {
+    if (drag?.pointerId !== event.pointerId) return;
+    const start = drag;
+    drag = null;
+    dragged = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) >= HANDLE_DISTANCE;
+    if (pulledDown(start, event, HANDLE_DISTANCE)) fold();
+  };
+  foldHandle.onpointercancel = foldHandle.onlostpointercapture = () => { drag = null; };
   write.onclick = () => {
+    // Stop any outstanding momentum before focusing the real editor in place.
+    const top = scrollTop();
+    chat.scrollTop = top;
+    following = !showLatest && bottom() - top <= 1;
     compact = false;
     layout();
     draft.focus({preventScroll:true});
+    keepLatest();
   };
-  jump.onclick = () => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { latest(); return; }
-    // Measure the final viewport first so opening the editor won't jump the
-    // last few lines after the smooth scroll has already finished.
-    jumpTarget = 0;
-    compact = false;
-    layout();
-    animateToBottom();
-  };
+  // One move, not a native smooth scroll competing with the composer resize.
+  jump.onclick = latest;
   return { latest, keepLatest, update(compactable, hasDraft) {
     canCompact = compactable;
     const label = hasDraft ? 'Resume draft' : 'Open composer';
-    if (write.ariaLabel !== label) write.ariaLabel = write.title = label;
-    write.toggleAttribute('data-has-draft', hasDraft);
+    if (write.ariaLabel !== label) {
+      write.ariaLabel = write.title = label;
+      write.textContent = hasDraft ? 'Resume draft…' : 'Message…';
+    }
     layout();
   } };
 }

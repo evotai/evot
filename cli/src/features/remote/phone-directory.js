@@ -29,14 +29,16 @@ function calendarStamp(now, timeZone) {
   };
 }
 const groupTitles = { active:'In progress', today:'Today', yesterday:'Yesterday', earlier:'Earlier', other:'Other' };
-/** Keep running sessions visible, then group the ranked page by host date. */
+const directoryPhase = r => r.unshared ? 'unshared'
+  : r.parked || (!r.terminal && r.kind !== 'private') ? 'history' : r.phase ?? 'idle';
+/** Keep running windows visible, then group the ranked page by host date. */
 export function directoryGroups(data, query, {now = Date.now(), timeZone = undefined} = {}) {
   if (!data) return [];
   const stamp = calendarStamp(now, timeZone);
   const groups = { active:[], today:[], yesterday:[], earlier:[], other:[] };
   function add(row) {
     const { day, text } = stamp(row.updatedAt || Date.parse(row.updated));
-    const active = row.terminal && ['working','input','busy'].includes(row.phase);
+    const active = ['working','input','busy'].includes(directoryPhase(row));
     const timeLabel = day === 'today' || day === 'yesterday' ? `${groupTitles[day]} · ${text}` : text;
     groups[active ? 'active' : day].push({ ...row, age:active ? timeLabel : text, timeLabel });
   }
@@ -50,9 +52,10 @@ const phases = { input:'Needs input', working:'Running', busy:'Busy', idle:'Open
 const runStates = { 'waiting-task':'Waiting for task', 'waiting-background':'Background task',
   'waiting-loop':'Loop waiting', retrying:'Retrying', compacting:'Compacting' };
 export function windowStatusLabel(r) {
-  if (r.unshared) return 'Open, not shared';
-  if (r.parked || (!r.terminal && r.kind !== 'private')) return 'Saved';
-  return (r.phase === 'working' && runStates[r.runState]) || phases[r.phase] || 'Open';
+  const phase = directoryPhase(r);
+  if (phase === 'unshared') return 'Open, not shared';
+  if (phase === 'history') return 'Saved';
+  return (phase === 'working' && runStates[r.runState]) || phases[phase] || 'Open';
 }
 export function sessionDrawer({ api, selected, choose, create, createIn, host, ask }) {
   const el = id => document.getElementById(id), dialog = el('sessionsDrawer');
@@ -64,17 +67,23 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     button.className = 'terminal-row';
     const current = live && r.terminal === selected();
     if (current) button.setAttribute('aria-current', 'page');
-    // Saved and parked rows carry no badge: only something happening on the computer does.
-    const phase = r.unshared ? 'unshared' : r.parked || !r.terminal ? 'history' : r.phase ?? 'history';
+    // Older windows can report a phase without sharing a session to open.
+    const phase = directoryPhase(r);
     button.dataset.phase = phase;
     const heading = document.createElement('span'), title = document.createElement('strong'), meta = document.createElement('small');
     heading.className = 'terminal-heading';
     title.textContent = r.title || 'New conversation';
     heading.append(title);
-    if (phase !== 'history' && phase !== 'unshared' && r.kind !== 'private') {
+    if (phase !== 'history' && phase !== 'unshared' && !(r.kind === 'private' && phase === 'idle')) {
       const badge = document.createElement('span'), label = windowStatusLabel(r);
       badge.className = 'terminal-status';
-      badge.textContent = phase === 'idle' ? '' : label;
+      if (phase === 'working') {
+        const glyph = document.createElement('span');
+        glyph.className = 'activity-mark';
+        glyph.setAttribute('aria-hidden', 'true');
+        badge.append(glyph);
+      }
+      if (phase !== 'idle') badge.append(label);
       badge.title = label;
       heading.append(badge);
     }

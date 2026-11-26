@@ -1,8 +1,8 @@
 // The phone only chooses which TUI view to inspect. The owning terminal
 // resolves the task, formats status/output and restricts it to its session.
-export function backgroundPanel(refresh) {
+export function backgroundPanel(document, refresh) {
   const el = (id) => document.getElementById(id),
-    panel = el('bgPanel'), chip = el('bgChip'),
+    panel = el('bgPanel'), chip = el('bgChip'), countLabel = el('bgCount'),
     output = el('bgOutput');
   let selected = null,
     tasks = [];
@@ -20,16 +20,25 @@ export function backgroundPanel(refresh) {
   };
   function render(bg) {
     tasks = bg?.tasks ?? [];
-    chip.hidden = !tasks.length;
-    chip.textContent = `Tasks · ${tasks.length}`;
-    if (!tasks.length || !selected) {
-      if (!tasks.length && panel.open) panel.close();
+    const count = tasks.length;
+    chip.hidden = !count;
+    const label = count ? `${count} ${count === 1 ? 'task' : 'tasks'} running` : '';
+    if (countLabel.textContent !== label) {
+      countLabel.textContent = label;
+      chip.ariaLabel = label ? `Background: ${label}` : '';
+    }
+    if (!count) {
+      selected = null;
+      if (panel.open) panel.close();
       return;
     }
-    if (selected !== 'list' && !tasks.some((t) => t.id === selected)) selected = 'list';
-    const data = bg.output?.id === selected ? bg.output : null;
+    if (!selected) return;
+    const task = tasks.find((t) => t.id === selected);
+    if (!task) selected = 'list';
+    const data = task && bg.output?.id === task.id ? bg.output : null;
     el('bgTitle').textContent = data ? 'Background output' : 'Background';
-    el('bgSubtitle').textContent = data ? data.id.slice(0, 8) : bg.subtitle;
+    el('bgOutputActivity').hidden = !data;
+    el('bgSubtitle').textContent = data ? [task.title, task.status].filter(Boolean).join(' · ') : bg.subtitle ?? '';
     el('allTasks').hidden = !data || tasks.length < 2;
     output.hidden = !data;
     el('bgTasks').hidden = !!data;
@@ -47,7 +56,10 @@ export function backgroundPanel(refresh) {
           button.type = 'button';
           button.dataset.id = task.id;
           button.onclick = () => select(task.id);
-          button.append(document.createElement('strong'), document.createElement('small'));
+          const glyph = document.createElement('span');
+          glyph.className = 'activity-mark';
+          glyph.setAttribute('aria-hidden', 'true');
+          button.append(document.createElement('strong'), glyph, document.createElement('small'));
           list.append(button);
         }
         keep.add(button);

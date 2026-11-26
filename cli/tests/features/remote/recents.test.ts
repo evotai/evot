@@ -28,6 +28,25 @@ test('the drawer keeps live work first, retains the gateway order inside each gr
     .toEqual(['working', 'open', 'saved', 'yesterday'])
 })
 
+test('the drawer preserves live statuses without exposing an older window as a selectable session', () => {
+  const now = Date.UTC(2026, 8, 18, 12)
+  const data = {
+    rows: [
+      { terminal:'bg', phase:'working', runState:'waiting-background', updatedAt:now },
+      { terminal:'retry', phase:'working', runState:'retrying', updatedAt:now },
+      { terminal:'ask', phase:'input', updatedAt:now },
+      { session:'unshared', unshared:true, updatedAt:now },
+    ],
+    privateWindows: [{ phase:'working', updatedAt:now }],
+  }
+  const [active, today] = directoryGroups(data, '', {now, timeZone:'UTC'})
+  expect(active.key).toBe('active')
+  expect(active.rows.map(windowStatusLabel)).toEqual(['Background task', 'Retrying', 'Needs input', 'Running'])
+  expect(active.rows.at(-1)).toMatchObject({ kind:'private', title:'Older evot window' })
+  expect(active.rows.at(-1)?.terminal).toBeUndefined()
+  expect(today.rows.map(windowStatusLabel)).toEqual(['Open, not shared'])
+})
+
 const localClock = (instant: number, timeZone?: string) =>
   Intl.DateTimeFormat(undefined, {timeZone, hour:'2-digit', minute:'2-digit'}).format(instant)
 

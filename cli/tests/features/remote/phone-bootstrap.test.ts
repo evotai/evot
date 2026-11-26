@@ -30,8 +30,12 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(html.match(/id="draftHint"/g)).toHaveLength(1)
     expect(html).toContain('<section class="composer-card" id="compose"')
     expect(html).toContain('<button id="send" type="button"')
-    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*><svg viewBox=/)
-    expect(html).not.toContain('Write a message')
+    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*inert>Message…/)
+    const header = html.match(/<header class="conversation-head">[\s\S]*?<\/header>/)?.[0] ?? ''
+    expect(header).toMatch(/id="bgChip"[^>]*aria-controls="bgPanel"[^>]*hidden><span class="activity-mark" aria-hidden="true"/)
+    expect(html.match(/id="bgChip"/g)).toHaveLength(1)
+    expect(html).toContain('id="queueSummary" role="status" hidden')
+    expect(html).toContain('animation:activity-frames 1.2s steps(12,end) infinite')
     expect(html).toMatch(/id="pair"[\s\S]*?<button[^>]*disabled[^>]*>Loading…<\/button>/)
     expect(new Bun.Transpiler({loader:'js'}).scanImports(client)).toEqual([])
     const csp = r.headers.get('content-security-policy') ?? ''

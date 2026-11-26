@@ -25,7 +25,7 @@ let timer,
   catalogKey = '',
   levelsKey = '';
 const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
-const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), actions:$('historyActions'), write:$('writeMessage'), jump:$('jump'), draft:messageField});
+const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'), write:$('writeMessage'), jump:$('jump'), foldHandle:$('foldComposer'), draft:messageField});
 const askPanel = questionPanel($('questions'), action);
 const pickStart = new WeakMap();
 // A QR code or account return only starts pairing. Which session to follow is
@@ -38,7 +38,7 @@ function selectTarget(id, session) {
   nav.select(id, session);
   terminal = nav.target?.terminal ?? null;
 }
-const background = backgroundPanel(() => {
+const background = backgroundPanel(document, () => {
   etag = '';
   return refresh();
 });
@@ -151,8 +151,10 @@ function controls() {
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
   $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count && !candidate);
   $('attach').disabled = busy || !input || photos.count >= 4;
-  renderQueue(view, outbox);
-  const queuedCount = view?.promptQueue?.length ?? pendingDrafts(view)?.length ?? 0;
+  const queuedCount = renderQueue(view, outbox), queueSummary = $('queueSummary');
+  const queueLabel = queuedCount ? `${queuedCount} queued` : '';
+  if (queueSummary.textContent !== queueLabel) queueSummary.textContent = queueLabel;
+  queueSummary.hidden = !queuedCount;
   const accept = !!candidate;
   $('send').textContent = busy ? '…' : accept ? '→' : input === 'steer' ? '↱' : '↑';
   $('send').toggleAttribute('aria-busy', busy);
@@ -213,6 +215,7 @@ function render(s, mode) {
   // Never reuse that window's unsent input after a local /new or /resume.
   if (view?.sessionId && view.sessionId !== s.sessionId) {
     $('draft').value = ''; $('draft').rows = 1; clearOutbox(); photos.clear(); askPanel.render(null, null, true);
+    background.render(null);
     transcript.latest();
   }
   connected = true;
@@ -229,7 +232,7 @@ function render(s, mode) {
   $('nextModel').textContent = pending
     ? `next: ${next?.label || pending.spec}${pending.effort ? ' · ' + pending.effort : ''}`
     : '';
-  $('activity').toggleAttribute('data-running', s.active);
+  $('activity').toggleAttribute('data-running', !!s.active && !s.ask);
   document.querySelector('.run-line').toggleAttribute('data-active', !!s.active);
   models(s.models);
   place(s.place);
@@ -325,6 +328,7 @@ const inventory = async () => (await api('/sessions?online')).json();
 function followOwner(owner, session) {
   selectTarget(owner.terminal, session);
   view = null; connected = false; etag = '';
+  background.render(null);
   $('connection').textContent = 'Following live window…';
   $('connection').removeAttribute('data-online');
   controls();

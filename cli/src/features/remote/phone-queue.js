@@ -22,7 +22,7 @@ export function queueStrip(root, thumbnail) {
   return function render(s, outbox) {
     const rows = queueRows(s,outbox), visible = rows.slice(0,3);
     const key = JSON.stringify([rows.length,visible.map(({state,item}) => [state,item?.draftId,item?.text,item?.previews.map(p => p.url)])]);
-    if (key === painted) return;
+    if (key === painted) return rows.length;
     painted = key; root.hidden = !rows.length;
     root.replaceChildren(...visible.map(({state,item},i) => {
       const row = document.createElement('div'), label = document.createElement('span');
@@ -33,5 +33,6 @@ export function queueStrip(root, thumbnail) {
     if (rows.length > visible.length) {
       const more = document.createElement('small'); more.textContent = `↓ ${rows.length-visible.length} more queued`; root.append(more);
     }
+    return rows.length;
   };
 }

@@ -24,14 +24,24 @@ html.remote-shell[data-theme="light"] {
 .identity h1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:15px; font-weight:600; line-height:1.4; letter-spacing:-.01em; }
 .connection { display:block; font-size:12px; color:var(--amber); } .connection[data-online] { display:none; }
 .conversation:has(#pair-screen:not([hidden])) .connection { display:none; }
+#bgChip { display:inline-flex; align-items:center; gap:4px; flex:none; min-height:44px; padding:0 8px; border:0; border-radius:12px; color:var(--accent); background:var(--fill); font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
+#bgChip:is(:hover,:active):not(:disabled) { background:var(--accent-soft); }
 .native-picker { display:flex; align-items:center; }
 .pair-card small { font-size:12px; color:var(--muted); }
-.activity-dot { display:inline-block; width:6px; height:6px; margin-inline-end:6px; vertical-align:1px; border-radius:50%; background:var(--faint); }
-.activity-dot[data-running] { background:var(--accent); }
-@media(prefers-reduced-motion:no-preference) { .activity-dot[data-running] { animation:pulse 1.4s ease-in-out infinite; } @keyframes pulse { 50% { opacity:.35; } } }
+/* TUI's 12-frame star cycle at 100ms/frame, without replacing DOM or polling. */
+.activity-mark { display:inline-block; flex:none; width:1.15em; height:1em; overflow:hidden; vertical-align:-.08em; text-align:center; color:var(--accent); font:600 1em/1 ui-monospace,monospace; }
+.activity-mark::before { display:block; white-space:pre; content:'·\a ✢\a ✳\a ✶\a ✻\a ✽\a ✽\a ✻\a ✶\a ✳\a ✢\a ·'; transform:translateY(-3em); }
+#activity,#bgPanel h2 .activity-mark { margin-inline-end:4px; }
+#activity:not([data-running]) { color:var(--faint); }
+#activity:not([data-running])::before { transform:none; }
+@keyframes activity-frames { from { transform:translateY(0); } to { transform:translateY(-12em); } }
+@media(prefers-reduced-motion:no-preference) {
+  #activity[data-running]::before,.remote-page:has(#connection[data-online]) :is(#bgChip,#bgPanel[open]) .activity-mark::before,
+  .terminal-row[data-phase=working] .activity-mark::before { animation:activity-frames 1.2s steps(12,end) infinite; }
+}
 .icon-button { width:44px; height:44px; flex:none; display:grid; place-items:center; border:0; border-radius:12px; background:transparent; color:var(--ink); cursor:pointer; font-size:24px; }
 .icon-button:hover,.icon-button:active { background:var(--fill); } .icon-button svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
-.remote-page .chat-scroll { padding-bottom:16px; overflow-anchor:none; }
+.remote-page .chat-scroll { padding-bottom:16px; overflow-anchor:none; overscroll-behavior-y:contain; }
 .remote-page .message { font-size:16px; line-height:1.55; }
 /* Let the table keep its natural column widths, not the whole conversation. */
 .remote-page .message-assistant,.remote-page .message-notice,.remote-page .text-content { min-width:0; max-width:100%; }
@@ -110,12 +120,15 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #folderList button[aria-current] { background:var(--accent-soft); } #folderList button:disabled { opacity:.6; cursor:progress; }
 #folderList small { color:var(--muted); font-size:12px; }
 /* The only line above the composer: what the window is doing, then where it runs. */
-.run-line { display:flex; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:26px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
+.run-line { display:flex; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:32px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
 .run-state { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
 #statusDetail:not(:empty)::before,#nextModel:not(:empty)::before,#placeBranch:not(:empty)::before { content:' · '; }
 /* While a run is busy its own detail needs the room; the place returns when idle. */
 .run-line[data-active] .run-place { display:none; }
-.run-place { flex:none; max-width:42%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--faint); }
+.run-place { flex:none; max-width:34%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--faint); }
+#foldComposer { display:grid; place-items:center; flex:none; width:44px; min-height:28px; margin-inline-end:-8px; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; pointer-events:auto; touch-action:none; }
+#foldComposer svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+#foldComposer:is(:hover,:active) { background:var(--fill); color:var(--ink); }
 .turn-footer { color:var(--faint); font-size:11.5px; }
 .remote-page .message-footer { margin-top:-14px; }
 .reason-card { margin:7px 0 12px; padding:4px 10px; border-left:2px solid var(--line); color:var(--muted); font-size:14px; }
@@ -163,15 +176,15 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 .task-keys button:disabled { opacity:.5; cursor:default; }
 .task-keys button:is(:active,:focus-visible) { background:var(--fill); outline-offset:-2px; }
 .task-keys #stop { margin-inline-start:auto; color:var(--muted); }
-#bgChip { pointer-events:auto; border:0; padding:4px 8px; border-radius:8px; color:var(--accent); background:var(--fill); font:inherit; cursor:pointer; }
 .task-keys #stop[data-confirm] { background:var(--fill); color:var(--red); }
 #bgPanel { width:min(92vw,560px); max-height:80dvh; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--side-bg); color:var(--ink); }
 #bgPanel::backdrop,#sessionsDrawer::backdrop { background:#0008; }
-#bgSubtitle { margin:3px 0 12px; color:var(--muted); font-size:13px; }
+#bgSubtitle { margin:3px 0 12px; color:var(--muted); font-size:13px; overflow-wrap:anywhere; }
 #bgOutput { margin:0; overflow:auto; max-height:52dvh; white-space:pre; overscroll-behavior:contain; padding:12px; background:var(--fill); border-radius:10px; font:13px/1.55 ui-monospace,monospace; }
 #allTasks { min-height:44px; background:none; border:0; color:var(--accent); cursor:pointer; }
-#bgTasks button { position:relative; display:grid; gap:3px; width:100%; min-height:52px; margin:3px 0; padding:9px 30px 9px 12px; border:0; border-radius:10px; background:var(--fill); color:var(--ink); text-align:left; cursor:pointer; }
+#bgTasks button { position:relative; display:grid; gap:3px; width:100%; min-height:52px; margin:3px 0; padding:9px 30px 9px 34px; border:0; border-radius:10px; background:var(--fill); color:var(--ink); text-align:left; cursor:pointer; }
 #bgTasks button::after { content:'›'; position:absolute; right:12px; align-self:center; color:var(--faint); }
+#bgTasks .activity-mark { position:absolute; left:12px; top:12px; }
 #bgTasks strong,#bgTasks small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 #bgTasks small { font-size:12px; color:var(--muted); }
 .remote-page .composer-row { gap:4px; } .remote-page .composer-tools { flex:1; gap:1px; min-width:0; }
@@ -193,17 +206,26 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
   .native-picker option::checkmark { color:var(--accent); }
 }
 .native-picker.effort-picker { flex:none; max-width:26vw; } .remote-page .send-btn,.remote-page .round-tool { width:40px; height:40px; }
-.history-actions { width:min(var(--composer-width),100%); }
-.history-actions button { min-height:44px; padding:0 14px; border:0; border-radius:22px; color:var(--muted); background:transparent; font-size:13px; white-space:nowrap; pointer-events:auto; cursor:pointer; }
-.history-actions button:is(:hover,:active) { color:var(--ink); background:var(--fill); }
-#writeMessage { display:inline-flex; align-items:center; gap:6px; min-width:44px; padding-inline:12px; }
-#writeMessage svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
-#writeMessage:not([data-has-draft]) > span { display:none; }
-.history-actions #jump { position:absolute; bottom:100%; left:50%; transform:translateX(-50%); border:1px solid var(--line); background:var(--bg); color:var(--ink); }
-.composer-seat[data-reading] :is(.run-line,#promptQueue,#compose) { display:none; }
-.composer-seat[data-reading] .history-actions { display:flex; justify-content:space-between; align-items:center; gap:8px; border-top:1px solid var(--line); }
-.composer-seat[data-reading] #jump { position:static; transform:none; border:0; background:transparent; color:var(--accent); }
-.composer-seat[data-reading] #jump:is(:hover,:active) { background:var(--fill); }
+/* Latest stays above the dock; the collapsed field occupies the same dock as the editor. */
+#jump,#writeMessage { min-height:44px; padding:0 14px; border:1px solid var(--line); border-radius:16px; background:var(--bg); font-size:13px; white-space:nowrap; cursor:pointer; }
+#jump { position:absolute; z-index:1; bottom:calc(100% + 4px); right:max(12px,env(safe-area-inset-right),calc((100% - var(--composer-width)) / 2)); color:var(--accent); pointer-events:auto; }
+#writeMessage { position:absolute; inset:auto 0 0; width:100%; color:var(--muted); text-align:start; opacity:0; pointer-events:none; }
+:is(#jump,#writeMessage):is(:hover,:active) { background:var(--fill); color:var(--ink); }
+.composer-stack { position:relative; width:min(var(--composer-width),100%); }
+.composer-fold { display:grid; grid-template-rows:1fr; }
+.composer-stack:has(#compose:not([hidden])) .composer-fold { min-height:44px; }
+.composer-content { min-height:0; overflow:hidden; overflow:clip; }
+.composer-seat[data-reading] .composer-fold { grid-template-rows:0fr; }
+.composer-seat[data-reading] .composer-content { opacity:0; }
+.composer-seat[data-reading] #writeMessage { opacity:1; pointer-events:auto; }
+@media(prefers-reduced-motion:no-preference) {
+  .composer-fold { transition:grid-template-rows 240ms ease; }
+  .composer-content,#writeMessage { transition:opacity 160ms ease; }
+  .composer-seat[data-reading] #writeMessage { transition-delay:60ms; }
+}
+#queueSummary { display:none; flex:none; white-space:nowrap; }
+.composer-seat[data-reading] .run-place { display:none; }
+.composer-seat[data-reading] #queueSummary:not([hidden]) { display:block; }
 .remote-page .welcome { min-height:100%; padding:6vh 0; } .welcome h2,.pair-card h2,.drawer-head h2 { font-size:clamp(21px,4vw,26px); letter-spacing:-.04em; }
 #pair-screen { display:grid; flex:1; place-items:center; overflow-y:auto; padding:20px; }
 .pair-card,.question-card { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:18px; padding:20px; }
@@ -259,7 +281,7 @@ div.terminal-row { cursor:default; opacity:.7; }
 .terminal-row[aria-current] .terminal-heading strong { font-weight:600; }
 .terminal-row small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--muted); }
 .terminal-status { flex:none; display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; color:var(--faint); }
-.terminal-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.terminal-row:not([data-phase=working]) .terminal-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
 .terminal-row[data-phase=working] .terminal-status { color:var(--green); }
 .terminal-row:is([data-phase=input],[data-phase=busy]) .terminal-status { color:var(--amber); }
 .session-row { display:flex; align-items:center; border-radius:10px; }
@@ -279,7 +301,7 @@ div.terminal-row { cursor:default; opacity:.7; }
 /* Loading: a spinner while pairing or opening a session, placeholder rows while the list loads. */
 .spinner { width:26px; height:26px; border-radius:50%; border:2.5px solid var(--line); border-top-color:var(--accent); animation:spin .8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
-@media(prefers-reduced-motion:reduce) { .spinner { animation-duration:2.4s; } }
+@media(prefers-reduced-motion:reduce) { .spinner { animation:none; } }
 .pair-spinner { display:none; margin:0 auto 6px; }
 .pair-card:is([aria-busy=true],:has(button.primary:disabled)) .pair-spinner { display:block; }
 .pair-card:is([aria-busy=true],:has(button.primary:disabled)) { text-align:center; }
@@ -287,4 +309,4 @@ div.terminal-row { cursor:default; opacity:.7; }
 .skeleton-row { gap:7px; cursor:default; }
 .skeleton-row i { display:block; height:11px; border-radius:6px; background:color-mix(in srgb,var(--ink) 11%,transparent); }
 .skeleton-row i + i { height:9px; opacity:.7; }
-@media(prefers-reduced-motion:no-preference) { .skeleton-row i { animation:pulse 1.2s ease-in-out infinite; } }
+@media(prefers-reduced-motion:no-preference) { .skeleton-row i { animation:pulse 1.2s ease-in-out infinite; } @keyframes pulse { 50% { opacity:.35; } } }
