@@ -15,7 +15,7 @@ html.remote-shell[data-theme="light"] {
 }
 .remote-page [hidden] { display:none !important }
 .remote-page { height:100%; min-height:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
-.remote-page .conversation { height:100%; height:100dvh; }
+.remote-page .conversation { position:fixed; inset:var(--remote-viewport-top,0px) 0 auto; height:100%; height:var(--remote-viewport-height,100dvh); }
 .remote-page :is(button,textarea,select,input) { font-family:inherit; }
 .remote-page :is(button,a,select,textarea,input):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .remote-page .conversation-head { display:flex; align-items:center; gap:4px; padding: max(6px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left)); }
@@ -36,7 +36,8 @@ evot-activity[data-running] { color:var(--accent); }
 .icon-button:hover,.icon-button:active { background:var(--fill); } .icon-button svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
 #completionSound { color:var(--muted); }
 #completionSound[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
-.remote-page .chat-scroll { padding-bottom:16px; overflow-anchor:none; overscroll-behavior-y:contain; }
+/* Keep room for the transcript even when the keyboard, draft and queue are all visible. */
+.remote-page .chat-scroll { min-height:min(5rem,35%); padding-block:clamp(8px,3dvh,30px) 16px; overflow-anchor:none; overscroll-behavior-y:contain; }
 .remote-page .message { font-size:16px; line-height:1.55; }
 /* Let the table keep its natural column widths, not the whole conversation. */
 .remote-page .message-assistant,.remote-page .message-notice,.remote-page .text-content { min-width:0; max-width:100%; }
@@ -71,7 +72,7 @@ evot-activity[data-running] { color:var(--accent); }
 .remote-page #draft { caret-color:var(--green); }
 .remote-page .message-assistant :is(pre,code),.pair-card input { font-family:ui-monospace,Menlo,monospace; }
 .remote-page .code-copy { width:44px; height:40px; }
-.remote-page .composer-seat { position:relative; flex:none; padding:5px max(12px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)); }
+.remote-page .composer-seat { position:relative; flex:0 1 auto; min-height:0; padding:5px max(12px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)); }
 .remote-page .composer-card { border-radius:20px; box-shadow:none; padding:4px 6px 2px; }
 .remote-page .composer-card #draft { font:inherit; font-size:16px; line-height:1.4; min-height:36px; max-height:20dvh; }
 evot-message-draft { display:block; position:relative; width:100%; padding:4px 8px 6px; overflow-y:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink); cursor:text; }
@@ -115,7 +116,7 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #folderList button[aria-current] { background:var(--accent-soft); } #folderList button:disabled { opacity:.6; cursor:progress; }
 #folderList small { color:var(--muted); font-size:12px; }
 /* The only line above the composer: what the window is doing, then where it runs. */
-.run-line { display:flex; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:32px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
+.run-line { display:flex; flex:none; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:32px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
 .run-state { position:relative; flex:1; min-width:0; align-self:stretch; align-content:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
 #bgStatus { position:absolute; inset:0; width:100%; padding:0; border:0; background:transparent; cursor:pointer; pointer-events:auto; }
 #bgStatus:focus-visible { outline-offset:-2px; }
@@ -202,21 +203,24 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 }
 .native-picker.effort-picker { flex:none; max-width:26vw; } .remote-page .send-btn,.remote-page .round-tool { width:40px; height:40px; }
 /* Latest stays above the dock; the collapsed field occupies the same dock as the editor. */
-#jump,#writeMessage { min-height:44px; padding:0 14px; border:1px solid var(--line); border-radius:16px; background:var(--bg); font-size:13px; white-space:nowrap; cursor:pointer; }
+#jump,.compact-composer button { min-height:44px; padding:0 14px; border:1px solid var(--line); border-radius:16px; background:var(--bg); font-size:13px; white-space:nowrap; cursor:pointer; }
 #jump { position:absolute; z-index:1; bottom:calc(100% + 4px); right:max(12px,env(safe-area-inset-right),calc((100% - var(--composer-width)) / 2)); color:var(--accent); pointer-events:auto; }
-#writeMessage { position:absolute; inset:auto 0 0; width:100%; color:var(--muted); text-align:start; opacity:0; pointer-events:none; }
-:is(#jump,#writeMessage):is(:hover,:active) { background:var(--fill); color:var(--ink); }
-.composer-stack { position:relative; width:min(var(--composer-width),100%); }
-.composer-fold { display:grid; grid-template-rows:1fr; }
-.composer-stack:has(#compose:not([hidden])) .composer-fold { min-height:44px; }
-.composer-content { min-height:0; overflow:hidden; overflow:clip; }
-.composer-seat[data-reading] .composer-fold { grid-template-rows:0fr; }
-.composer-seat[data-reading] .composer-content { opacity:0; }
-.composer-seat[data-reading] #writeMessage { opacity:1; pointer-events:auto; }
+.compact-composer { position:absolute; inset:auto 0 0; display:flex; gap:6px; opacity:0; pointer-events:none; }
+#writeMessage { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); text-align:start; }
+#compactTask { flex:none; color:var(--muted); }
+#compactTask[data-confirm] { color:var(--red); }
+:is(#jump,.compact-composer button):is(:hover,:active):not(:disabled) { background:var(--fill); color:var(--ink); }
+.composer-stack { position:relative; display:flex; flex-direction:column; width:min(var(--composer-width),100%); min-height:0; }
+.composer-fold { display:grid; grid-template-rows:1fr; min-height:0; }
+.composer-content { min-height:0; overflow:auto; overscroll-behavior:contain; pointer-events:auto; }
+.composer-seat[data-reading] .composer-fold { grid-template-rows:0fr; min-height:44px; }
+.composer-seat[data-reading] .composer-content { opacity:0; overflow:hidden; overflow:clip; }
+.composer-seat[data-reading] .compact-composer { opacity:1; pointer-events:auto; }
 @media(prefers-reduced-motion:no-preference) {
   .composer-fold { transition:grid-template-rows 240ms ease; }
-  .composer-content,#writeMessage { transition:opacity 160ms ease; }
-  .composer-seat[data-reading] #writeMessage { transition-delay:60ms; }
+  .composer-content,.compact-composer { transition:opacity 160ms ease; }
+  .composer-seat[data-reading] .composer-fold { transition-duration:120ms; }
+  .composer-seat[data-reading] :is(.composer-content,.compact-composer) { transition-duration:100ms; }
 }
 #queueSummary { display:none; flex:none; white-space:nowrap; }
 .composer-seat[data-reading] .run-place { display:none; }
@@ -279,6 +283,7 @@ div.terminal-row { cursor:default; opacity:.7; }
 .terminal-row:not([data-phase=working]) .terminal-status::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
 .terminal-row[data-phase=working] .terminal-status { color:var(--green); }
 .terminal-row:is([data-phase=input],[data-phase=busy]) .terminal-status { color:var(--amber); }
+.terminal-open { flex:none; padding:1px 7px; border-radius:999px; color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent); font-size:11px; font-weight:650; line-height:1.5; white-space:nowrap; }
 .session-row { display:flex; align-items:center; border-radius:10px; }
 .session-row .terminal-row { flex:1; min-width:0; }
 .session-row[aria-busy=true] { opacity:.5; }

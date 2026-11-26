@@ -43,7 +43,10 @@
       </div><div class="composer-trailing"><button id="send" type="button" class="send-btn" aria-label="Send message" title="Send message" disabled>↑</button></div></div>
     </section>
     </div></div>
-    <button id="writeMessage" type="button" aria-controls="compose" aria-label="Open composer" title="Open composer" inert>Message…</button>
+    <div class="compact-composer" id="compactComposer" inert>
+      <button id="writeMessage" type="button" aria-controls="compose" aria-label="Open composer" title="Open composer">Message…</button>
+      <button id="compactTask" type="button" aria-keyshortcuts="Escape" hidden><span aria-live="polite"></span></button>
+    </div>
     </div>
   </div>
   <div id="notice" role="status" hidden></div>

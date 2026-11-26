@@ -5,12 +5,12 @@ import legacy from '../../fixtures/contracts/remote-composer-legacy.json'
 function harness() {
   const button = () => ({hidden:true, disabled:false, lastElementChild:{textContent:''}, toggleAttribute(){},
     onclick(){}, click(){ if (!this.disabled && !this.hidden) this.onclick() }})
-  const stop = button()
+  const stop = button(), dock = button()
   const actions: unknown[] = []
-  const keys = taskKeys(stop, { act:(a:unknown) => actions.push(a),
+  const keys = taskKeys(stop, { act:(a:unknown) => actions.push(a), dockAction:dock,
     pull:(id:string) => actions.push({pull:id}), clear:() => actions.push('clear'), dismissMenu:() => actions.push('dismiss')})
-  const press = (key:string, value='', extra={}) => keys.keydown({key, target:{value}, preventDefault(){}, ...extra})
-  return {stop, actions, press, render:keys.render}
+  const press = (key:string, value='', extra={}, fromDock=false) => keys.keydown({key, target:{value}, preventDefault(){}, ...extra}, fromDock)
+  return {stop, dock, actions, press, render:keys.render}
 }
 
 test('only Escape is intercepted, even while a background task is present', () => {
@@ -42,6 +42,28 @@ test('Esc dismisses a visible hint before pullback or stopping, with the same la
   stop.click(); render(run,false,false,'draft',false); press('Escape')
   render(run,false,false,undefined,true); press('Escape'); render(run,false); press('Escape')
   expect(actions).toEqual(['dismiss',{pull:'draft'},'dismiss']); press('Escape'); expect(actions.at(-1)).toEqual({kind:'stop'})
+})
+
+test('compact dock shares stop confirmation and supports pullback without acting on hidden drafts or hints', () => {
+  const {stop, dock, render, press, actions} = harness(), run = {...legacy, input:'steer', canStop:true}
+  render(run, false, false, 'pending')
+  expect(dock.lastElementChild.textContent).toBe('Pull back')
+  dock.click()
+  expect(actions).toEqual([{pull:'pending'}])
+  render(run, false, 'unfinished', 'pending', true)
+  expect(stop.lastElementChild.textContent).toBe('Dismiss')
+  expect(dock.lastElementChild.textContent).toBe('Stop run')
+  dock.click()
+  expect(dock.lastElementChild.textContent).toBe('Confirm stop')
+  expect(press('Escape', '', {}, true)).toBe(true)
+  expect(actions).toEqual([{pull:'pending'}, {kind:'stop'}])
+  render(run, false)
+  dock.click()
+  expect(stop.lastElementChild.textContent).toBe('Confirm stop')
+  render(legacy, false, 'unfinished')
+  expect(dock.hidden).toBe(true)
+  expect(press('Escape', '', {}, true)).toBe(false)
+  expect(actions).toHaveLength(2)
 })
 
 test('stop confirmation cannot carry over to a successor run, a changed task set or a reconnect', () => {

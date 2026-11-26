@@ -1,10 +1,10 @@
-// Only a deliberate pull beyond the bottom or a tap on the collapsed field
-// reopens the composer. Latest, momentum and layout changes only move history.
+// Sending and reading history give space back to the transcript. Latest,
+// momentum, and run updates never reopen the composer.
 const FOLD_DISTANCE = 72;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
-export function conversationScroll({ chat, seat, editor, write, jump, draft }) {
+export function conversationScroll({ chat, seat, editor, dock, write, jump, draft }) {
   let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
   let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false;
   const { ownerDocument } = chat, window = ownerDocument.defaultView;
@@ -17,10 +17,10 @@ export function conversationScroll({ chat, seat, editor, write, jump, draft }) {
     const folded = compact && canCompact;
     const hideJump = !showLatest || jumpFrame !== null;
     const focused = ownerDocument.activeElement;
-    if ((hideJump && focused === jump) || (!folded && focused === write) || (folded && editor.contains(focused))) {
+    if ((hideJump && focused === jump) || (!folded && dock.contains(focused)) || (folded && editor.contains(focused))) {
       chat.focus({preventScroll:true});
     }
-    write.inert = !folded;
+    dock.inert = !folded;
     jump.hidden = hideJump;
     editor.inert = folded;
     if (shownCompact !== folded) {
@@ -51,6 +51,21 @@ export function conversationScroll({ chat, seat, editor, write, jump, draft }) {
     stopJump();
     compact = false;
     followBottom();
+  }
+  function submitted({followLatest}) {
+    if (followLatest) {
+      stopJump();
+      compact = true;
+      followBottom();
+    } else {
+      fold();
+      keepLatest();
+    }
+  }
+  function openComposer() {
+    compact = false;
+    layout();
+    keepLatest();
   }
   function scrollToLatest() {
     const top = scrollTop();
@@ -143,13 +158,11 @@ export function conversationScroll({ chat, seat, editor, write, jump, draft }) {
     const top = scrollTop();
     chat.scrollTop = top;
     following = !showLatest && bottom() - top <= 1;
-    compact = false;
-    layout();
+    openComposer();
     draft.focus({preventScroll:true});
-    keepLatest();
   };
   jump.onclick = scrollToLatest;
-  return { latest, keepLatest, update(compactable, hasDraft) {
+  return { latest, keepLatest, submitted, openComposer, update(compactable, hasDraft) {
     canCompact = compactable;
     const label = hasDraft ? 'Resume draft' : 'Open composer';
     if (write.ariaLabel !== label) {

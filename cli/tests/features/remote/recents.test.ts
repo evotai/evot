@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { SessionMeta, SessionWithText } from '../../../src/native/index.js'
 import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import { phoneCatalog } from '../../../src/features/remote/catalog.js'
-import { directoryGroups, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
+import { directoryGroups, hasOpenWindow, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 
@@ -45,6 +45,7 @@ test('the drawer preserves live statuses without exposing an older window as a s
   expect(active.rows.at(-1)).toMatchObject({ kind:'private', title:'Older evot window' })
   expect(active.rows.at(-1)?.terminal).toBeUndefined()
   expect(today.rows.map(windowStatusLabel)).toEqual(['Open, not shared'])
+  expect([...active.rows, ...today.rows].every(hasOpenWindow)).toBe(true)
 })
 
 const localClock = (instant: number, timeZone?: string) =>
@@ -98,6 +99,7 @@ test('an idle window the phone opened reads as a saved session; a busy one and a
   const page = phoneCatalog([saved], live, { limit: 10, query: '' })
   expect(page.rows.map(r => [r.session, windowStatusLabel(r)])).toEqual([
     ['phone-running', 'Running'], ['local', 'Open'], ['parked', 'Saved'], ['viewed', 'Saved'], ['saved', 'Saved']])
+  expect(page.rows.filter(hasOpenWindow).map(r => r.session)).toEqual(['phone-running', 'local'])
   // Still followable: tapping a parked row attaches to its window instead of starting another.
   expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
   expect(page.online).toHaveLength(4)

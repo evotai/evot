@@ -11,6 +11,7 @@ import { lastDraft, pendingDrafts, queueStrip } from './phone-queue.js';
 import { sessionDrawer } from './phone-directory.js';
 import { renderHistory } from './phone-history.js';
 import { conversationScroll } from './phone-scroll.js';
+import { fitConversationViewport } from './phone-viewport.js';
 import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
 import { commandMenu, phoneShortcut } from './phone-commands.js';
@@ -28,7 +29,10 @@ let timer,
   levelsKey = '';
 registerActivityMarks(document, document.documentElement.dataset.activityFrames.split(' '));
 const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
-const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'), write:$('writeMessage'), jump:$('jump'), draft:messageField});
+fitConversationViewport($('conversation'));
+const compactComposer = $('compactComposer');
+const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
+  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
@@ -56,8 +60,8 @@ function dismissHint() {
   const preview = currentSuggestion();
   if (preview) { dismissed = preview.key; controls(); }
 }
-const shortcuts = taskKeys($('stop'), {pull:pullDraft, dismissMenu:dismissHint, clear:clearDraft,
-  act:payload => { $('draft').focus({preventScroll:true}); return action(payload); }});
+const shortcuts = taskKeys($('stop'), {pull:pullDraft, dismissMenu:dismissHint, clear:clearDraft, dockAction:$('compactTask'),
+  act:payload => { if (compactComposer.inert) messageField.focus({preventScroll:true}); return action(payload); }});
 const commands = commandMenu($('draft'), $('commandMenu'), resize);
 const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue:() => submitMessage('queue'),
   suggest:() => action({kind:'suggest'}), disarm:shortcuts.disarm});
@@ -589,7 +593,7 @@ function pullDraft(draftId) {
   // Keep the insertion point empty while the host atomically removes the native queue entry.
   $('draft').readOnly = true; item.pulling = true;
   void action({kind:view.pendingDrafts ? 'pull-draft' : 'pull-steer', draftId}, () => {
-    if (outbox.includes(item)) { removeBubble(item); item.restore(); }
+    if (outbox.includes(item)) { removeBubble(item); item.restore(); transcript.openComposer(); }
   })
     .finally(() => { item.pulling = false; $('draft').readOnly = false; $('draft').focus({preventScroll:true}); });
 }
@@ -630,10 +634,13 @@ function submitMessage(kind) {
   }};
   outbox.push(item);
   $('draft').value = ''; resize(); $('welcome').hidden = true;
-  if (el) transcript.latest();
+  transcript.submitted({followLatest:kind === 'send'});
   void action({ kind, text: text.trim(), draftId, ...(n ? { images: taken.images } : {}) }, () => {
     item.sending = false; if (el) el.lastElementChild.textContent = 'Sent';
-  }, () => { if (outbox.includes(item)) { removeBubble(item); item.restore(); } });
+  }, () => {
+    if (!outbox.includes(item)) return;
+    removeBubble(item); item.restore(); transcript.openComposer();
+  });
 }
 // These commands already have native phone controls. Never open an invisible overlay in the followed TUI.
 function runShortcut({kind, args}) {
@@ -697,7 +704,11 @@ $('draft').onkeydown = (e) => {
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented || e.target === $('draft') || document.querySelector('dialog[open]') || e.target.closest('select')) return;
   if (view?.ask && (e.target === document.body || e.target.closest('#questions'))) askPanel.keydown(e);
-  else if (e.key === 'Escape' && (e.target === document.body || e.target.closest('#compose'))) shortcuts.keydown(e);
+  else if (e.key === 'Escape') {
+    if (!compactComposer.inert) {
+      if (e.target === document.body || e.target === $('chat') || compactComposer.contains(e.target)) shortcuts.keydown(e, true);
+    } else if (e.target === document.body || e.target.closest('#compose')) shortcuts.keydown(e);
+  }
 });
 $('welcome').onclick = (e) => {
   const prompt = e.target.closest('[data-prompt]')?.dataset.prompt;

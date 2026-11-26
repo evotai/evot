@@ -22,7 +22,8 @@ test('the public pairing page ships one complete client allowed by its CSP, with
   try {
     const r = await fetch(gateway.address), html = await r.text(), client = embeddedClient(html)
     expect(r.status).toBe(200)
-    expect([...html.matchAll(/aria-keyshortcuts="([^"]+)"/g)].map(m => m[1])).toEqual(['Tab','Escape'])
+    expect([...html.matchAll(/aria-keyshortcuts="([^"]+)"/g)].map(m => m[1])).toEqual(['Tab','Escape','Escape'])
+    expect(html).toContain('id="compactComposer" inert')
     const draft = html.match(/<textarea id="draft"[^>]*>/)?.[0] ?? ''
     for (const attr of ['autocomplete="off"','autocorrect="off"','autocapitalize="none"','spellcheck="false"','writingsuggestions="false"']) expect(draft).toContain(attr)
     expect(draft).not.toContain('readonly')
@@ -31,7 +32,7 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(html.match(/id="draftHint"/g)).toHaveLength(1)
     expect(html).toContain('<section class="composer-card" id="compose"')
     expect(html).toContain('<button id="send" type="button"')
-    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*inert>Message…/)
+    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*>Message…/)
     const header = html.match(/<header class="conversation-head">[\s\S]*?<\/header>/)?.[0] ?? ''
     expect(header).toMatch(/id="completionSound"[^>]*aria-label="Round-end sound"[^>]*aria-pressed="false"[^>]*hidden/)
     expect(header).toMatch(/id="bgChip"[^>]*aria-controls="bgPanel"[^>]*hidden><evot-activity id="bgActivity" aria-hidden="true"/)

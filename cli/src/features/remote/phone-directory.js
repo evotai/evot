@@ -57,6 +57,10 @@ export function windowStatusLabel(r) {
   if (phase === 'history') return 'Saved';
   return (phase === 'working' && runStates[r.runState]) || phases[phase] || 'Open';
 }
+// A parked phone-created window is not an open session on the computer's desktop.
+export function hasOpenWindow(r) {
+  return !r.parked && (!!r.terminal || !!r.unshared || r.kind === 'private');
+}
 export function sessionDrawer({ api, selected, choose, create, createIn, host, ask }) {
   const el = id => document.getElementById(id), dialog = el('sessionsDrawer');
   let timer, timeZone, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
@@ -65,7 +69,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     const button = document.createElement(statusOnly ? 'div' : 'button');
     if (!statusOnly) { button.type = 'button'; button.disabled = locked; }
     button.className = 'terminal-row';
-    const current = live && r.terminal === selected();
+    const current = !statusOnly && live && r.terminal === selected();
     if (current) button.setAttribute('aria-current', 'page');
     // Older windows can report a phase without sharing a session to open.
     const phase = directoryPhase(r);
@@ -74,7 +78,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     heading.className = 'terminal-heading';
     title.textContent = r.title || 'New conversation';
     heading.append(title);
-    if (phase !== 'history' && phase !== 'unshared' && !(r.kind === 'private' && phase === 'idle')) {
+    if (['working','input','busy'].includes(phase)) {
       const badge = document.createElement('span'), label = windowStatusLabel(r);
       badge.className = 'terminal-status';
       if (phase === 'working') {
@@ -83,13 +87,22 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
         glyph.setAttribute('aria-hidden', 'true');
         badge.append(glyph);
       }
-      if (phase !== 'idle') badge.append(label);
+      badge.append(label);
       badge.title = label;
+      heading.append(badge);
+    }
+    const open = hasOpenWindow(r) ? 'Open in evot' : '';
+    if (open) {
+      const badge = document.createElement('span');
+      badge.className = 'terminal-open';
+      badge.setAttribute('aria-hidden', 'true'); // Included in the row's accessible name.
+      badge.textContent = open;
       heading.append(badge);
     }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
-    button.setAttribute('aria-label', [r.title || 'New conversation', windowStatusLabel(r), r.workspace, r.timeLabel].filter(Boolean).join(', '));
+    const status = r.unshared ? 'Not shared' : open && phase === 'idle' ? '' : windowStatusLabel(r);
+    button.setAttribute('aria-label', [title.textContent, open, status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.
