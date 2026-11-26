@@ -29,8 +29,11 @@ function calendarStamp(now, timeZone) {
   };
 }
 const groupTitles = { active:'In progress', today:'Today', yesterday:'Yesterday', earlier:'Earlier', other:'Other' };
-const directoryPhase = r => r.unshared ? 'unshared'
-  : r.parked || (!r.terminal && r.kind !== 'private') ? 'history' : r.phase ?? 'idle';
+function directoryPhase(r) {
+  if (r.unshared) return 'unshared';
+  const phase = r.parked || (!r.terminal && r.kind !== 'private') ? 'history' : r.phase ?? 'idle';
+  return r.completed === true && (phase === 'idle' || phase === 'history') ? 'completed' : phase;
+}
 /** Keep running windows visible, then group the ranked page by host date. */
 export function directoryGroups(data, query, {now = Date.now(), timeZone = undefined} = {}) {
   if (!data) return [];
@@ -48,13 +51,12 @@ export function directoryGroups(data, query, {now = Date.now(), timeZone = undef
 }
 // This is state, not an action: a window can be running even while it is
 // being viewed, and an unshared window can still be waiting for input.
-const phases = { input:'Needs input', working:'Running', busy:'Busy', idle:'Open' };
+const phases = { input:'Needs input', working:'Running', busy:'Busy', idle:'Open',
+  completed:'Completed', history:'Saved', unshared:'Open, not shared' };
 const runStates = { 'waiting-task':'Waiting for task', 'waiting-background':'Background task',
   'waiting-loop':'Loop waiting', retrying:'Retrying', compacting:'Compacting' };
 export function windowStatusLabel(r) {
   const phase = directoryPhase(r);
-  if (phase === 'unshared') return 'Open, not shared';
-  if (phase === 'history') return 'Saved';
   return (phase === 'working' && runStates[r.runState]) || phases[phase] || 'Open';
 }
 // A parked phone-created window is not an open session on the computer's desktop.
@@ -72,23 +74,27 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     const current = !statusOnly && live && r.terminal === selected();
     if (current) button.setAttribute('aria-current', 'page');
     // Older windows can report a phase without sharing a session to open.
-    const phase = directoryPhase(r);
-    button.dataset.phase = phase;
+    const phase = directoryPhase(r), label = windowStatusLabel(r);
     const heading = document.createElement('span'), title = document.createElement('strong'), meta = document.createElement('small');
     heading.className = 'terminal-heading';
     title.textContent = r.title || 'New conversation';
     heading.append(title);
-    if (['working','input','busy'].includes(phase)) {
-      const badge = document.createElement('span'), label = windowStatusLabel(r);
+    if (['working','completed','input','busy'].includes(phase)) {
+      const badge = document.createElement('span');
       badge.className = 'terminal-status';
-      if (phase === 'working') {
-        const glyph = document.createElement('evot-activity');
-        glyph.setAttribute('data-running', '');
-        glyph.setAttribute('aria-hidden', 'true');
-        badge.append(glyph);
-      }
-      badge.append(label);
+      badge.dataset.state = phase;
       badge.title = label;
+      if (phase === 'working' || phase === 'completed') {
+        badge.setAttribute('role', 'img');
+        badge.setAttribute('aria-label', label);
+        if (phase === 'completed') badge.textContent = '✓';
+        else {
+          const glyph = document.createElement('evot-activity');
+          glyph.setAttribute('data-running', '');
+          glyph.setAttribute('aria-hidden', 'true');
+          badge.append(glyph);
+        }
+      } else badge.textContent = label;
       heading.append(badge);
     }
     const open = hasOpenWindow(r) ? 'Open in evot' : '';
@@ -101,7 +107,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
-    const status = r.unshared ? 'Not shared' : open && phase === 'idle' ? '' : windowStatusLabel(r);
+    const status = r.unshared ? 'Not shared' : open && phase === 'idle' ? '' : label;
     button.setAttribute('aria-label', [title.textContent, open, status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);

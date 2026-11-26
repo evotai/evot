@@ -4,7 +4,7 @@ import { needsContinuation } from '../../ui/continuation.js';
 export function applyEdit(draft, {start,end,text}) {
   if (draft.value.length - (end-start) + text.length > draft.maxLength) return;
   draft.setSelectionRange(start,end);
-  if (!document.execCommand?.('insertText',false,text)) draft.setRangeText(text,start,end,'end');
+  if (!draft.ownerDocument.execCommand?.('insertText',false,text)) draft.setRangeText(text,start,end,'end');
 }
 
 // Software Return and modified keys stay with the browser. Plain desktop Enter sends,

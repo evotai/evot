@@ -163,42 +163,58 @@ test('tap the collapsed field to focus the original draft without moving history
   expect(ui.jump.hidden).toBe(false)
 })
 
-test('a downward touch folds on release, while a short swipe and its momentum never fold', () => {
+test('a downward drag folds before release and streaming does not pull history back to the bottom', () => {
   const ui = transcript()
   ui.touch('touchstart')
-  ui.scrollBack(40)
-  ui.touch('touchend', 100, 140)
-  ui.scrollBack(120)
+  ui.touch('touchmove', 102, 114)
+  ui.scrollBack(14)
   expect(ui.reading).toBe(false)
+  ui.touch('touchend', 102, 114)
+  ui.scrollBack(120) // Momentum from the short swipe must not fold.
+  expect(ui.reading).toBe(false)
+  ui.scrollTo(ui.bottom)
   ui.touch('touchstart')
-  ui.scrollBack(220)
-  expect(ui.reading).toBe(false)
-  ui.touch('touchend', 105, 190)
+  ui.touch('touchmove', 104, 128) // Native scroll hasn't fired yet.
+  expect(ui.reading).toBe(true)
+  expect(ui.editor.inert).toBe(true)
+  expect(ui.jump.hidden).toBe(false)
+  const top = ui.chat.scrollTop
+  ui.chat.scrollHeight += 250
+  ui.controller.keepLatest()
+  ui.resize()
+  expect(ui.chat.scrollTop).toBe(top)
+  ui.touch('touchend', 104, 128)
   expect(ui.reading).toBe(true)
   ui.write.onclick()
   ui.scrollBack(300)
   expect(ui.reading).toBe(false)
 })
 
-test('short conversations can fold on a downward pull, but not on horizontal, cancelled or question gestures', () => {
+test('short conversations fold on a downward pull without intercepting horizontal, nested or question gestures', () => {
   const ui = transcript()
   ui.chat.scrollHeight = 300
   ui.controller.latest()
   ui.touch('touchstart')
-  ui.touch('touchend', 210, 120)
+  ui.touch('touchmove', 210, 135)
   expect(ui.reading).toBe(false)
-  ui.touch('touchstart')
   ui.touch('touchcancel')
-  ui.touch('touchend', 100, 210)
+  ui.touch('touchmove', 100, 140)
+  expect(ui.reading).toBe(false)
+  ui.touch('touchstart', 100, 100, {scrollHeight:300, clientHeight:100})
+  ui.touch('touchmove', 100, 140)
   expect(ui.reading).toBe(false)
   ui.controller.update(false, true)
   ui.touch('touchstart')
-  ui.touch('touchend', 100, 210)
+  ui.touch('touchmove', 100, 140)
   expect(ui.reading).toBe(false)
   ui.controller.update(true, true)
   ui.touch('touchstart')
-  ui.touch('touchend', 100, 210)
+  ui.touch('touchmove', 100, 140)
   expect(ui.reading).toBe(true)
+  expect(ui.jump.hidden).toBe(true)
+  ui.chat.scrollHeight = 1800
+  ui.controller.keepLatest()
+  expect(ui.chat.scrollTop).toBe(ui.bottom)
 })
 
 test('arriving at the bottom stays folded; another upward pull reveals the preserved draft without focusing it', () => {

@@ -1,6 +1,9 @@
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { allocateCloud } from './cloud-connect.js'
+import { allocateCloud, machineSocketDirectory } from './cloud-connect.js'
+import { machineIdentity } from './machine-identity.js'
 import { ensureCloudflared, type InstallProgress } from './cloudflared.js'
+import { superviseConnector } from './connector.js'
 import { leasePath, tryGatewayLease } from './lease.js'
 import { withRelayChecks } from './relay-permit.js'
 import { grantHandler } from './grants.js'
@@ -26,6 +29,8 @@ export async function reachable(origin: string, cancelled: () => boolean, timeou
   return false
 }
 
+export class GatewayOccupied extends Error {}
+
 /** The origin socket and child connector have the same owner/lifetime. A crashed
  * or failed gateway never forwards to another service on a recycled TCP port. */
 export async function openEnvironment(input: {
@@ -36,7 +41,8 @@ export async function openEnvironment(input: {
   workspace: PhoneWorkspace
   host: RemoteHost
   pending: (code: string, id: string) => void
-  exited: () => void
+  exited: (reason: string) => void
+  presenceChanged: () => void
   /** Phase text while starting (and bytes while downloading the connector); later, reconnect notices. */
   progress?: InstallProgress
 }) {
@@ -47,11 +53,19 @@ export async function openEnvironment(input: {
   let grants: DeviceAccess | null = null
   const handle = withRelayChecks(
     (ticket, target) => !!grants && active() && workspace.bus.consumeRelay(ticket, target),
-    grantHandler(() => active() ? grants : null),
+    grantHandler(() => active() ? grants : null, workspace.bus.id),
   )
   const release = await tryGatewayLease(leasePath(home, scope), handle)
-  if (!release) throw Error('Another gateway is starting or active. Retry /remote.')
+  if (!release) throw new GatewayOccupied('Another gateway is starting or active. Retry /remote.')
+  let releaseMachine: (() => void) | null = null
   try {
+    if (!active()) throw Error('Sharing request cancelled.')
+    const identity = account ? machineIdentity(homedir(), false) : null
+    if (identity) {
+      releaseMachine = await tryGatewayLease(join(machineSocketDirectory(identity.environment), 'owner.lock'))
+      if (!releaseMachine) throw new GatewayOccupied('Another Remote gateway is active on this computer. Shut it down before changing profiles.')
+      if (!active()) throw Error('Sharing request cancelled.')
+    }
     const store = new DeviceStore(dir)
     const progress: InstallProgress = (text, bytes) => input.progress?.(text, bytes)
     const connector = async () => {
@@ -59,50 +73,44 @@ export async function openEnvironment(input: {
       progress('Registering this computer with evot Connect…')
       return bin
     }
-    const allocation = account ? await allocateCloud(dir, account, connector) : null
+    const allocation = account && identity ? await allocateCloud(identity, account, connector) : null
     if (allocation && !(await reapDeadSocket(allocation.gate.unix)))
       throw Error('Environment socket is already active.')
     if (!active()) throw Error('Sharing request cancelled.')
-    const access = new DeviceAccess(store, pending)
+    const access = new DeviceAccess(
+      store,
+      (code, device, terminal) => terminal ? workspace.bus.notifyPairing(terminal, code, device) : pending(code, device),
+      { presenceChanged: input.presenceChanged },
+    )
     const gateway = listenRemote(host, access, { port: gatewayPort(scope), cloud: allocation?.gate, active, workspace })
-    let closed = false, restarts = 0,
-      proc: ReturnType<NonNullable<typeof allocation>['start']> | undefined
-    // cloudflared rides out network loss by itself. It exits when its token stops
-    // working, e.g. after the server released a long-offline tunnel: register again
-    // (same hostname) and resume, a few times, before reporting the gateway down.
-    const launch = (start: NonNullable<typeof allocation>['start']) => {
-      const began = Date.now()
-      proc = start()
-      void proc.exited.then(async () => {
-        if (closed) return
-        if (Date.now() - began > 10 * 60_000) restarts = 0
-        if (!account || ++restarts > 3) { input.exited(); return }
-        input.progress?.('Connector stopped; reconnecting to evot Connect…')
-        await Bun.sleep(12_000 * restarts) // the server throttles re-registration to once per 10 s
-        if (closed) return
-        try {
-          const next = await allocateCloud(dir, account, connector)
-          if (!closed) { launch(next.start); input.progress?.('Reconnected to evot Connect.') }
-        } catch {
-          if (!closed) input.exited()
-        }
-      })
-    }
+    let stopConnector: (() => void) | undefined, failure: string | undefined
+    let online = true, ready = false
     try {
-      if (allocation) {
+      if (allocation && account && identity) {
         progress('Starting the tunnel connector…')
-        launch(allocation.start)
+        stopConnector = superviseConnector({
+          start: allocation.start,
+          refresh: async () => {
+            const next = await allocateCloud(identity, account, connector, allocation.binding)
+            if (next.gate.origin !== allocation.gate.origin || next.gate.unix !== allocation.gate.unix)
+              throw Error('Connect returned a different address; refusing to move this gateway.')
+            return next.start
+          },
+          active,
+          recovering: () => progress('Connector stopped; retrying on the same address…'),
+          failed: reason => { failure = reason; if (ready) input.exited(reason) },
+        })
+        progress(`Waiting for ${new URL(allocation.gate.origin).host} to come online…`)
+        online = await reachable(allocation.gate.origin, () => !!failure || !active())
+        if (failure) throw Error(failure)
+        if (!active()) throw Error('Sharing request cancelled.')
       }
     } catch (e) {
+      stopConnector?.()
       gateway.close()
       throw e
     }
-    // The invite is only useful once Cloudflare routes the hostname to this socket.
-    let online = true
-    if (allocation) {
-      progress(`Waiting for ${new URL(allocation.gate.origin).host} to come online…`)
-      online = await reachable(allocation.gate.origin, () => closed || !active())
-    }
+    ready = true
     grants = access
     return {
       ...gateway,
@@ -112,14 +120,15 @@ export async function openEnvironment(input: {
       cloud: !!allocation,
       active,
       close() {
-        closed = true
         grants = null
-        proc?.kill()
+        stopConnector?.()
         gateway.close()
+        releaseMachine?.()
         release()
       },
     }
   } catch (error) {
+    releaseMachine?.()
     release()
     throw error
   }

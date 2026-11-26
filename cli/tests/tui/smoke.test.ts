@@ -342,6 +342,12 @@ async function startEvot(
   }
 }
 
+async function startLocalRemote(session: Session) {
+  session.write('/remote\r')
+  const bookmark = /Bookmark this computer: (http:\/\/127\.0\.0\.1:\d+)/
+  return bookmark.exec(await session.waitFor(bookmark))![1]!
+}
+
 async function approveRemoteDevice(session: Session, address: string) {
   const device = await pendingDevice(address)
   expect(await device.poll()).toEqual({ pending: true })
@@ -1042,6 +1048,20 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       await server.stop(true)
     }
   }, 60_000)
+
+  test('/share shows the shared visibility choices and completes without submitting', async () => {
+    const session = await startEvot()
+    try {
+      session.write('/share ')
+      await session.waitForScreen(/\[public\s+team\s+private\s+off\s+list\]/)
+      session.write('te\t')
+      await session.waitForScreen('/share team')
+      expect(session.historyEntries()).toEqual([])
+      expect(session.persistedSessionCount()).toBe(0)
+    } finally {
+      await session.kill()
+    }
+  }, 20_000)
 
   test('registered harden shows inline /har description and completes its declared arguments without submitting', async () => {
     const session = await startEvot(false, false, false, undefined, home => {
@@ -2038,10 +2058,9 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     try {
       const {profileKey} = await import('../../src/features/remote/discovery.js')
       session = await startEvot(true, false, false, `http://127.0.0.1:${server.port}/v1`,home=>{group='evot-phone-'+profileKey(home)+'-'+sharingScope(home,join(home,'evot.env'),'local')})
-      session.write('/remote\r')
-      const invite = /gateway: (http:\/\/127\.0\.0\.1:\d+)/
-      const match = invite.exec(await session.waitFor(invite))!
-      const address = match[1]!, headers: Record<string,string> = {origin:address, 'Content-Type':'application/json'}
+      const address = await startLocalRemote(session), headers: Record<string,string> = {
+        origin: address, 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (iPhone) Mobile/15E148',
+      }
       const post = (path:string, body:unknown) => fetch(address+path, {method:'POST', headers, body:JSON.stringify(body)})
       const device = await approveRemoteDevice(session, address)
       headers.Authorization = `Bearer ${device.token}`
@@ -2055,15 +2074,24 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         current:string; online:{terminal:string;finishedRound?:number|null}[]; history:{session:string}[]
       }
       const directory = await list()
+      await session.waitForScreen('Remote · 1 online · 1 phone')
       const finishedRound = async () => (await list(true)).online.find(r => r.terminal === directory.current)?.finishedRound
       expect(directory.online.map(r=>r.terminal)).toEqual([directory.current]); expect(directory.history.map(r=>r.session)).toContain(SEEDED_SESSION_ID)
       expect(await finishedRound()).toBeNull()
       expect(initial.models.options.map(o => o.spec)).toContain('smoke:smoke-other-model')
       expect((await post('/action', {kind:'select-model', spec:'smoke:smoke-other-model', generation:initial.generation, revision:initial.models.revision})).status).toBe(204)
       await session.waitForScreen('Model → smoke-other-model@smoke')
-      expect((await state()).models.active).toBe('smoke:smoke-other-model')
+      const afterPhonePick = await state()
+      expect(afterPhonePick.models.active).toBe('smoke:smoke-other-model')
+      expect(afterPhonePick.messages.at(-1)?.text).toBe('  Model → smoke-other-model@smoke')
       session.write('/model smoke:smoke-model\r'); await session.waitForScreen('Model → smoke-model@smoke')
-      expect((await state()).models.active).toBe('smoke:smoke-model')
+      const afterLocalPick = await state()
+      expect(afterLocalPick.models.active).toBe('smoke:smoke-model')
+      expect(afterLocalPick.messages).toHaveLength(afterPhonePick.messages.length)
+      expect(afterLocalPick.messages.at(-1)?.text).toBe('  Model → smoke-model@smoke')
+      expect((await post('/action', {kind:'send', generation:afterLocalPick.generation, text:'/version'})).status).toBe(204)
+      await session.waitForScreen(/evot v\d+\.\d+/)
+      expect((await state()).messages.at(-1)).toMatchObject({role:'notice',text:expect.stringMatching(/evot v\d+\.\d+/)})
       session.write('Ask me which fixture name to use.\r'); await session.waitForScreen('Checking fixture scope.')
       expect(await state()).toMatchObject({status:'Thinking…',liveBlocks:[{kind:'thinking',text:'Checking fixture scope.'}]})
       advance.resolve(); await session.waitForScreen('Which fixture name?')
@@ -2095,7 +2123,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
         expect.objectContaining({ kind: 'thinking', text: 'Checking fixture scope.' }),
       ])
       expect(steps.find(b=>b.kind==='tool')).toBeUndefined()
-      expect(finishedRows.find(r=>r.role==='notice')?.text).toContain('Phone answer')
+      expect(finishedRows.some(r=>r.role==='notice' && r.text.includes('Phone answer'))).toBe(true)
       expect(callModels).toEqual(['smoke-model','smoke-other-model'])
       expect(await state()).toMatchObject({sessionId:first.sessionId, generation:first.generation, ask:null, input:'send', models:{active:'smoke:smoke-other-model',pending:null}})
       expect(await finishedRound()).toBe(first.generation)
@@ -2113,7 +2141,12 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       expect(await finishedRound()).toBeNull()
       expect((await post('/action', {kind:'send',generation:stopped.generation,text:'old draft'})).status).toBe(409)
       session.write(`/remote revoke ${deviceId(device.key)}\r`); await session.waitForScreen('Device revoked.'); await expect(state()).rejects.toThrow('401')
-      session.write('/remote shutdown\r'); await session.waitForScreen('Remote off.'); await expect(state()).rejects.toThrow()
+      expect(await session.waitForScreen('Device revoked.')).not.toContain('Remote · 1 online')
+      session.write('/remote off\r'); await session.waitForScreen('Remote off. Run /remote on'); await expect(state()).rejects.toThrow()
+      session.checkpoint()
+      session.write('/remote '); await session.waitForScreen('[on  off  devices]')
+      session.write('on\r'); await session.waitFor(`Bookmark this computer: ${address}`)
+      expect((await fetch(address)).status).toBe(200)
     } finally {
       advance.resolve(); if (group && Bun.which('tmux')) spawnSync('tmux',['-L',group,'kill-server'])
       if (session) await session.kill(); await server.stop(true)
@@ -2171,9 +2204,7 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
     let session: Session | undefined
     try {
       session = await startEvot(false, false, false, `http://127.0.0.1:${server.port}/v1`)
-      session.write('/remote\r')
-      const invite=/gateway: (http:\/\/127\.0\.0\.1:\d+)/
-      const address = invite.exec(await session.waitFor(invite))![1]!
+      const address = await startLocalRemote(session)
       const { token } = await approveRemoteDevice(session, address)
       const snapshot=async (task?:string)=>(await (await fetch(address+'/state',{headers:{authorization:'Bearer '+token,...(task?{'x-evot-background':task}:{})}})).json()) as import('../../src/features/remote/protocol.js').RemoteSnapshot
       session.write('start a background task\x0d')

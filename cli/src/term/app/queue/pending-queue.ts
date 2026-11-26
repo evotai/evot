@@ -116,6 +116,19 @@ export class PendingQueue {
     entry.native = { stream, id: queued.id, version: queued.version }
   }
 
+  /** Messages a restart carried over rejoin the queue in their old order;
+   * those that were ready to run stay ready, paused ones stay paused. */
+  restore(target: QueueTarget, prompts: readonly Omit<PendingEntry, 'id' | 'version' | 'sequence' | 'chain' | 'target' | 'native'>[]): PendingEntry[] {
+    if (!prompts.length) return []
+    this.state.target = target
+    this.state.continuable = prompts.some(prompt => !prompt.paused)
+    return prompts.map(({ paused, ...prompt }) => {
+      const entry = this.accept({ ...prompt, target })
+      entry.paused = paused
+      return entry
+    })
+  }
+
   attach(stream: QueryStream): void {
     for (const entry of this.state.entries) {
       if (entry.native || entry.paused || entry.chain !== this.state.chain || entry.target !== this.state.target || this.reservedBefore(entry)) continue

@@ -1,25 +1,16 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import {
-  closeSync,
-  fsyncSync,
-  linkSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs'
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { lstatSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { validKey } from './devices.js'
 import { machineName } from './machine-name.js'
+import type { MachineIdentity } from './machine-identity.js'
 
 export interface CloudGate {
   origin: string
   unix: string
   admit: (key: unknown, ticket: unknown) => boolean
-  login: (key: string) => string
+  login: (key: string, terminal?: string) => string
 }
 export function ticketGate(env: string, secret: string) {
   const used = new Map<string, number>()
@@ -51,51 +42,22 @@ export function ticketGate(env: string, secret: string) {
     }
   }
 }
-function environmentId(uid: string, secret: string) {
-  return createHash('sha256').update(uid + ':' + secret).digest('hex').slice(0, 32)
-}
-function connectInviteUrl(base: string, env: string) {
+export function connectInviteUrl(base: string, env: string) {
   return base === 'https://auto.evot.ai' ? `https://connect.evot.ai/${env}` : `${base}/connect?env=${env}`
 }
-// A sibling TUI on the same profile can display the same public invite without
-// registering again, obtaining a connector token or changing the live gateway.
-export function sharedConnectInvite(home: string, scope: string, account: string) {
-  const [base, uid] = JSON.parse(account) as [string, string]
-  return connectInviteUrl(base, environmentId(uid, readSecret(join(home, 'remote', scope, 'host.key'))))
-}
-function readSecret(path: string) {
-  const st = lstatSync(path)
-  if (!st.isFile() || st.mode & 0o077 || st.uid !== process.getuid?.()) throw Error('Unsafe host.key.')
-  const value = readFileSync(path, 'utf8')
-  if (!/^[\w-]{43}$/.test(value)) throw Error('Invalid host identity.')
-  return value
+
+export function terminalInvite(address: string, terminal: string) {
+  const url = new URL(address)
+  url.hash = new URLSearchParams({ terminal }).toString()
+  return url.href
 }
 
-function installSecret(dir: string) {
-  const path = join(dir, 'host.key')
-  try {
-    return readSecret(path)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
-  }
-  const tmp = path + '.' + crypto.randomUUID(),
-    fd = openSync(tmp, 'wx', 0o600)
-  try {
-    try {
-      writeFileSync(fd, randomBytes(32).toString('base64url'))
-      fsyncSync(fd)
-    } finally {
-      closeSync(fd)
-    }
-    try {
-      linkSync(tmp, path)
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-    }
-  } finally {
-    unlinkSync(tmp)
-  }
-  return readSecret(path)
+export function machineSocketDirectory(env: string) {
+  const dir = '/tmp/evot-connect-' + env
+  mkdirSync(dir, { mode: 0o700, recursive: true })
+  const st = lstatSync(dir)
+  if (!st.isDirectory() || st.uid !== process.getuid?.() || st.mode & 0o077) throw Error('Unsafe connector directory.')
+  return dir
 }
 function signedIn(account: string) {
   const [base, uid] = JSON.parse(account) as [string, string]
@@ -107,32 +69,39 @@ function signedIn(account: string) {
     typeof auth.cli_token !== 'string'
   )
     throw Error('Account changed. Run /remote again.')
-  return { base, uid, token: auth.cli_token as string }
+  return { base, token: auth.cli_token as string }
 }
 
-export async function allocateCloud(dir: string, account: string, connector: () => Promise<string>) {
-  const { base, uid, token: cliToken } = signedIn(account)
+export class ConnectRetryable extends Error {}
+
+export async function allocateCloud(identity: MachineIdentity, account: string, connector: () => Promise<string>, binding?: string) {
   const bin = await connector()
-  const secret = installSecret(dir),
-    env = environmentId(uid, secret)
-  const res = await fetch(base + '/v1/connect/host', {
+  const { base, token: cliToken } = signedIn(account)
+  const { secret, environment: env } = identity
+  const res = await fetch(base + '/v2/connect/host', {
     method: 'POST',
     redirect: 'error',
     signal: AbortSignal.timeout(45000),
     headers: { authorization: 'Bearer ' + cliToken, 'content-type': 'application/json' },
-    body: JSON.stringify({ secret, label: machineName() }),
-  })
-  if (!res.ok)
-    throw Error(
-      res.status === 401
-        ? 'Sign in again with /login.'
-        : res.status === 503
-        ? ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'evot Connect is unavailable. Retry shortly.'
-        : `Connect registration refused (${res.status}).`,
-    )
+    body: JSON.stringify({ secret, label: machineName(), binding }),
+  }).catch(() => { throw new ConnectRetryable('Could not reach evot Connect.') })
+  if (!res.ok) {
+    if (res.status === 401) throw Error('Sign in again with /login.')
+    if (res.status === 403) throw Error('The account cannot enable Remote.')
+    if (res.status === 409) throw Error('Remote account binding changed. Run /remote to start a new gateway.')
+    if (res.status === 404) throw Error('The account server must be upgraded to support machine addresses.')
+    if (res.status >= 500 || res.status === 429) {
+      const body = await res.json().catch(() => null) as { error?: unknown } | null
+      const message = typeof body?.error === 'string' ? body.error : 'evot Connect is unavailable.'
+      throw new ConnectRetryable(message)
+    }
+    throw Error(`Connect registration refused (${res.status}).`)
+  }
   const data = (await res.json()) as Record<string, unknown>
   if (
-    data.version !== 1 ||
+    data.version !== 2 ||
+    typeof data.binding !== 'string' || !/^[0-9a-f]{32}$/.test(data.binding) ||
+    (binding !== undefined && binding !== data.binding) ||
     data.environment !== env ||
     typeof data.origin !== 'string' ||
     !/^https:\/\/[a-z0-9.-]+$/.test(data.origin) ||
@@ -142,19 +111,16 @@ export async function allocateCloud(dir: string, account: string, connector: () 
     !/^[\w-]{43}$/.test(data.ticket_key)
   )
     throw Error('Invalid Connect allocation.')
-  const socketDir = '/tmp/evot-connect-' + env
-  mkdirSync(socketDir, { mode: 0o700, recursive: true })
-  const st = lstatSync(socketDir)
-  if (!st.isDirectory() || st.uid !== process.getuid?.() || st.mode & 0o077) throw Error('Unsafe connector directory.')
   const gate: CloudGate = {
-    unix: join(socketDir, 'gateway.sock'),
+    unix: join(machineSocketDirectory(env), 'gateway.sock'),
     origin: data.origin,
     admit: ticketGate(env, data.ticket_key),
-    login: (key) => base + '/connect?' + new URLSearchParams({ env, key }),
+    login: (key, terminal) => base + '/connect?' + new URLSearchParams({ env, key, ...(terminal ? { terminal } : {}) }),
   }
   const credential = data.connector
   return {
     gate,
+    binding: data.binding,
     url: connectInviteUrl(base, env),
     start: () =>
       Bun.spawn([bin, 'tunnel', '--no-autoupdate', 'run'], {

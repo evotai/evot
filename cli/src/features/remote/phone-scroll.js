@@ -1,6 +1,7 @@
 // Sending and reading history give space back to the transcript. Latest,
 // momentum, and run updates never reopen the composer.
 const FOLD_DISTANCE = 72;
+const TOUCH_FOLD_DISTANCE = 24;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
@@ -111,31 +112,38 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
     else if (chat.clientHeight !== lastHeight || scrollTop() !== lastTop) rememberPosition();
   }).observe(chat);
 
-  // Leave scrolling to the browser. Measure the actual finger travel so a
-  // scroll that merely arrives at the bottom (or coasts there) stays folded.
+  // Leave native scrolling alone, but fold as soon as the finger drags
+  // toward history. Momentum can't fold the composer or reveal it at the bottom.
   chat.addEventListener('touchstart', event => {
     stopJump();
     touchScroll = true;
     const rail = event.target?.closest('.tool-rail');
     const nestedScroll = rail && rail.scrollHeight > rail.clientHeight;
-    const top = scrollTop();
     touchStart = event.touches.length === 1 && !nestedScroll
-      ? {touch:event.touches[0], top, gap:bottom() - top, folded:shownCompact}
+      ? {touch:event.touches[0], gap:bottom() - scrollTop(), folded:shownCompact}
       : null;
+  }, {passive:true});
+  chat.addEventListener('touchmove', event => {
+    if (event.touches.length !== 1) { touchStart = null; return; }
+    const start = touchStart, touch = event.touches[0];
+    if (!start || start.folded || !canCompact || compact || touch.identifier !== start.touch.identifier) return;
+    const down = touch.clientY - start.touch.clientY;
+    if (down < TOUCH_FOLD_DISTANCE || down <= Math.abs(touch.clientX - start.touch.clientX)) return;
+    // Native scroll events may arrive after touchmove. Stop auto-following
+    // now so a streaming update can't pull the viewport back to the live edge.
+    if (bottom() > 0) following = false;
+    fold();
   }, {passive:true});
   chat.addEventListener('touchend', event => {
     const start = touchStart;
     touchStart = null;
     const end = start && Array.from(event.changedTouches).find(touch => touch.identifier === start.touch.identifier);
     if (!end) return;
-    const down = end.clientY - start.touch.clientY, top = scrollTop(), gap = bottom() - top;
+    const down = end.clientY - start.touch.clientY, gap = bottom() - scrollTop();
     if (Math.abs(down) <= Math.abs(end.clientX - start.touch.clientX)) return;
     if (start.folded && shownCompact && gap <= LATEST_DISTANCE && -down >= start.gap + REVEAL_DISTANCE) {
       compact = false;
       followBottom(); // Reveal without focusing the draft or opening the keyboard.
-    } else if (down >= FOLD_DISTANCE && (start.top <= FOLD_DISTANCE || start.top - top >= LATEST_DISTANCE)) {
-      if (gap > LATEST_DISTANCE) following = false;
-      fold();
     }
   }, {passive:true});
   chat.addEventListener('touchcancel', () => { touchStart = null; }, {passive:true});

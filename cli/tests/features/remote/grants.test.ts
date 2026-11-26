@@ -35,7 +35,7 @@ test('sibling revokes through the live owner; offline revoke never enables shari
     const access = new DeviceAccess(store(), () => {})
     access.store.approve(device.key)
     const { nonce } = access.challenge(device.key)!
-    const proof = access.prove(nonce, await device.sign(nonce))
+    const proof = await access.prove(nonce, await device.sign(nonce))
     if (!proof || !('token' in proof)) throw Error('fixture grant missing')
     const bearer = 'Bearer ' + proof.token
     release = await tryGatewayLease(path, grantHandler(() => access))
@@ -58,7 +58,7 @@ test('sibling revokes through the live owner; offline revoke never enables shari
     // revoke all: through the live owner it also ends current phone sessions; offline it clears the file.
     const other = await testDevice()
     access.store.approve(device.key); access.store.approve(other.key)
-    const { nonce: n } = access.challenge(device.key)!, again = access.prove(n, await device.sign(n), '198.51.100.7')
+    const { nonce: n } = access.challenge(device.key)!, again = await access.prove(n, await device.sign(n), '198.51.100.7')
     if (!again || !('token' in again)) throw Error('fixture grant missing')
     release = await tryGatewayLease(path, grantHandler(() => access))
     expect(await manageGrants(home, scope, undefined, ready)).toMatch(/last connected \d{4}-\d\d-\d\d \d\d:\d\d from 198\.51\.100\.7/)

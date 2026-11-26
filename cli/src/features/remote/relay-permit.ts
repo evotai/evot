@@ -23,7 +23,7 @@ export function relayPermits() {
 export function withRelayChecks(check: (ticket: string, target: string) => boolean, devices: RequestListener): RequestListener {
   return (req, res) => {
     const path = req.url?.replace(/^http:\/\/localhost\//, '/')
-    const match = path?.match(/^\/relay\/([a-f0-9-]{36})\/([a-f0-9-]{36}\/(?:badge|state|action))$/)
+    const match = path?.match(/^\/relay\/([a-f0-9-]{36})\/([a-f0-9-]{36}\/(?:badge|state|action|pairing))$/)
     if (!match) { devices(req, res); return }
     const ok = req.method === 'GET' && req.headers.host === 'localhost' && !req.headers.origin && check(match[1]!, match[2]!)
     res.writeHead(ok ? 204 : 403, {'Cache-Control':'no-store', Connection:'close'}).end()

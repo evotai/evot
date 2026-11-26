@@ -27,6 +27,7 @@ export { checkInstallHealth, installedVersionForThisProcess, isManagedInstall, r
 export type { InstallHealth } from './state.js'
 export { readStaged, clearStaged } from './stage.js'
 export type { StagedUpdate } from './stage.js'
+export { canRestartInPlace, runningOutdatedBuild } from './running-build.js'
 
 import type { RunResult } from './types.js'
 import { reapExitedChildren } from '../native/index.js'
@@ -216,10 +217,10 @@ export function execIntoInstalledUpdate(appliedVersion: string): void {
  *
  * Unlike {@link execIntoInstalledUpdate}, this always re-execs even when the
  * version on disk matches what is already running: that is the point of an
- * in-place restart.
+ * in-place restart. `handoff` adds variables for the next image only.
  */
-export function execIntoInstalledRestart(sessionId?: string | null): void {
-  const env = { ...process.env }
+export function execIntoInstalledRestart(sessionId?: string | null, handoff: Record<string, string> = {}): void {
+  const env = { ...process.env, ...handoff }
   delete env[APPLIED_UPDATE_ENV]
   execIntoInstalledBinary(argvForRestart(process.argv.slice(2), sessionId ?? null), env)
 }

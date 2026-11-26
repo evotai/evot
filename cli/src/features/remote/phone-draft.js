@@ -58,6 +58,24 @@ export function installTouchDraft(textarea, limitReached) {
   return draft;
 }
 
+/** Paint a suffix without touching either native editor's value or selection. */
+export function inlineCommandGhost(draft, layer) {
+  const [prefix, , suffix] = layer.children;
+  function syncScroll() { if (!layer.hidden) layer.scrollTop = draft.scrollTop; }
+  draft.addEventListener('scroll', syncScroll);
+  return function render(hint) {
+    const value = draft.value;
+    // A wrapped ghost must not obscure draft text on a later line.
+    const text = hint && value.indexOf('\n', draft.selectionStart) < 0 ? hint : '';
+    const lead = text ? value : '';
+    if (prefix.textContent !== lead) prefix.textContent = lead;
+    if (suffix.textContent !== text) suffix.textContent = text;
+    layer.hidden = !text;
+    syncScroll();
+    return !!text;
+  };
+}
+
 // Plaintext-only still has DOM carets. WebKit can use BR/block lines and Blink
 // leaves a final BR or LF as a caret placeholder. Map both to textarea UTF-16
 // offsets, without normalizing the live DOM (which would cancel composition/undo).

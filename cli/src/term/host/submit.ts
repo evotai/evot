@@ -182,6 +182,7 @@ export function createSubmitController(st: ReplState, deps: SubmitDeps): SubmitC
   }
 
   function handleLoadingEnter() {
+    if (st.foregroundCommand === 'share') return // keep the draft while the share is in flight
     const displayText = deps.getDisplayText()
     const historyText = deps.getHistoryText()
     const imageResult = deps.buildImageContentBlocks()

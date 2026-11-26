@@ -1,7 +1,9 @@
 import type { Agent } from './native/index.js'
 
 export interface CliOptions {
-  command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami' | 'acp'
+  command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami' | 'acp' | 'restart'
+  /** `evot restart [session] [--cancel] [--list]`: ask an open window to restart in place. */
+  restart?: { target?: string; list: boolean; cancel: boolean }
   /** `--model`: startup model; wins over config, cloud defaults and a resumed session. */
   model?: string
   /** `--thinking-level`: startup effort with the same precedence as `--model`. */
@@ -56,6 +58,22 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
     if (arg === 'update' || arg === '--update') {
       opts.command = 'update'
       continue
+    }
+
+    if (arg === 'restart') {
+      opts.command = 'restart'
+      const restart: NonNullable<CliOptions['restart']> = { list: false, cancel: false }
+      for (const value of argv.slice(i + 1)) {
+        if (value === '--list') restart.list = true
+        else if (value === '--cancel') restart.cancel = true
+        else if (!value.startsWith('-') && restart.target === undefined) restart.target = value
+        else {
+          console.error(`Invalid restart argument: ${value} (expected [session-id] [--cancel] or --list)`)
+          process.exit(1)
+        }
+      }
+      opts.restart = restart
+      break
     }
 
     if (arg === 'acp') { opts.command = 'acp'; continue }
@@ -151,6 +169,10 @@ export async function printHelp() {
   console.log('  serve                  Start HTTP server')
   console.log('  acp                    Serve the Agent Client Protocol (ACP) on stdio')
   console.log('  update                 Update evot to latest version')
+  console.log('  restart [session-id]   Restart an open evot window on the installed build once its')
+  console.log('                         current work is done (default: the session running this command)')
+  console.log('  restart --cancel [id]  Cancel a scheduled restart')
+  console.log('  restart --list         List open windows, their build and restart state')
   console.log()
   console.log('Options:')
   console.log('  -p, --prompt <text>    Run one-shot prompt')

@@ -101,6 +101,7 @@ export function toolActionLabel(toolName: string): string {
     case 'compact_local': return 'Compacting local'
     case 'compact_waiting': return 'Compacting · waiting for summary'
     case 'compact_generating': return 'Compacting · generating summary'
+    case 'session_share': return 'Updating session sharing'
     case 'log_shot_render': return 'Rendering shot'
     case 'log_shot_chrome': return 'Starting Chrome'
     case 'log_shot_capture': return 'Capturing PNG'

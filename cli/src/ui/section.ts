@@ -2,9 +2,8 @@ import chalk from 'chalk'
 import stringWidth from 'string-width'
 
 import { getTheme } from './theme/index.js'
+import { SECTION_CONTENT_INDENT, SECTION_INDENT } from './notice-layout.js'
 
-export const SECTION_INDENT = 2
-export const SECTION_CONTENT_INDENT = 4
 export const SECTION_MUTED = '#808080'
 
 /** Shared bracketed heading used by banner blocks and detailed inventories. */

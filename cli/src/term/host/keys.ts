@@ -72,7 +72,7 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
     if (event.type === 'ctrl' && event.key === 'z') { deps.terminal.suspend(); return }
     // The modal question owns ordinary typing, including slash commands.
     if (event.type === 'ctrl' && event.key === 'r' && st.overlay.kind === 'ask-user' && st.overlay.state.requestId) {
-      deps.remoteCtl.command(st.remoteListener ? 'off' : '')
+      deps.remoteCtl.command(st.remoteListener ? 'hide' : '')
       return
     }
     const ordinary = st.overlay.kind === 'none' && !st.commandWindowPreview

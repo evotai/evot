@@ -603,6 +603,7 @@ export function createCommandWindowController(st: ReplState, deps: CommandWindow
   }
 
   function activateCommandWindow(event: KeyEvent): boolean {
+    if (st.foregroundCommand === 'share') return false
     if (event.type !== 'up' && event.type !== 'down') return false
     if (!st.commandWindowPreview) return false
 

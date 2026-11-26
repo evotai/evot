@@ -23,7 +23,7 @@ export interface CatalogPage { limit: number; query: string }
 
 /** Rank the entire authorized profile before pagination. A live window is
  * followable even before its first session has been saved to disk. A session
- * open in a window that is not sharing (older CLI, or /remote off) is listed
+ * open in a window that is not sharing (older CLI, or /remote hide) is listed
  * from its own saved metadata as status only: it can be neither followed nor resumed.
  * Saved sessions without a completed turn are noise on a phone and stay hidden. */
 export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], page: CatalogPage, occupied = new Set<string>(), text?: Map<string, string>) {
@@ -44,6 +44,7 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
       workspace: meta ? basename(meta.cwd) || '/' : window?.workspace,
       updatedAt, updated: updatedAt ? new Date(updatedAt).toISOString() : '',
       terminal: window?.terminal, phase: parked ? undefined : window?.phase, runState: window?.runState,
+      completed: window?.completed,
       ...(unshared ? { unshared } : {}), ...(parked ? { parked } : {}) }
   }
   const all = liveSessions(online).map(w => {

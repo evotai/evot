@@ -1,0 +1,5 @@
+{
+  "role": "notice",
+  "text": "  ✗ Could not sync",
+  "command": { "styled": true }
+}

@@ -4,6 +4,9 @@
  */
 
 import { createAgent, parseArgs } from './cli.js'
+// Before anything slow: records which binary this process started from, so a
+// later install can be told apart from the image that is running.
+import './update/running-build.js'
 
 async function main() {
   const rawArgs = process.argv.slice(2)
@@ -97,6 +100,12 @@ async function main() {
     case 'whoami': {
       const { runWhoami } = await import('./commands/login.js')
       process.exitCode = await runWhoami()
+      break
+    }
+
+    case 'restart': {
+      const { runRestartCommand } = await import('./features/restart/client.js')
+      process.exitCode = await runRestartCommand(opts.restart ?? { list: false, cancel: false })
       break
     }
 

@@ -1,5 +1,8 @@
 import { stripVTControlCharacters } from 'node:util'
+import { noticeHref } from '../../../ui/notice-layout.js'
 import type { RemoteBlock, RemoteDiffRow, RemoteMessage } from '../../../features/remote/protocol.js'
+import type { OutputLine } from '../../../render/output.js'
+import { statusLineSlot } from '../status-line.js'
 import { colorizeUnifiedDiffRows } from '../../../render/diff.js'
 import { markdownToHtml } from '../../../markdown/render/html.js'
 import type { UIAssistantBlock, UIMessage } from '../../../render/message-types.js'
@@ -108,22 +111,46 @@ function openingTitle(text: string): string {
   return chars.length > 80 ? chars.slice(0, 80).join('') + '...' : head
 }
 
+function commandNotice(lines: readonly OutputLine[]): RemoteMessage | null {
+  const sanitize = (text: string) => displayText(text.replace(/\r\n?/g, '\n'))
+  const text = boundedText(sanitize(lines.map(line => line.text).join('\n')))
+  if (!text.trim()) return null
+  const card = lines[0]?.toolCard
+  if (card) return { role: 'notice', text, blocks: [{ kind: 'tool', state: card.state, text }] }
+  const command: NonNullable<RemoteMessage['command']> = lines[0]?.preStyled ? { styled: true } : {}
+  const spans = lines.length === 1 ? lines[0]?.noticeSpans : undefined
+  if (spans && spans.length <= 128) {
+    const visible = spans.map(({ text: raw, tone, link }) => {
+      const text = sanitize(raw)
+      return { text, ...(tone ? { tone } : {}), ...(link && text === raw && noticeHref(text) ? { link } : {}) }
+    })
+    // Drop styling if the row was truncated or a control sequence straddled
+    // two spans. The browser must never see anything outside the safe text.
+    if (visible.map(span => span.text).join('') === text) {
+      command.spans = visible
+      const link = visible.find(span => span.link)?.text
+      if (link) command.link = link // older browser pages
+    }
+  }
+  return { role: 'notice', text, command }
+}
+
 export class ConversationTail {
   openingTitle = ''
   updatedAt = Date.now()
   outcome: 'Completed' | 'Stopped' | 'Run failed · see the TUI' | null = null
   finishedRound: number | null = null
   offset = 0
-  private rows: { compact: RemoteMessage; expanded: RemoteMessage }[] = []
+  private rows: { compact: RemoteMessage; expanded: RemoteMessage; commandId?: string }[] = []
   get messages() {
     return this.view(false)
   }
   view(expanded: boolean): readonly RemoteMessage[] {
     return this.rows.map((r) => (expanded ? r.expanded : r.compact))
   }
-  private push(compact: RemoteMessage, expanded = compact) {
+  private push(compact: RemoteMessage, expanded = compact, commandId?: string) {
     this.updatedAt = Date.now()
-    this.rows.push({ compact, expanded })
+    this.rows.push({ compact, expanded, commandId })
     if (this.rows.length > MAX_ROWS) {
       this.rows.shift()
       this.offset++
@@ -132,6 +159,21 @@ export class ConversationTail {
   append(role: RemoteMessage['role'], text: string, photoId?: string): void {
     if (role === 'user' && !this.openingTitle) this.openingTitle = openingTitle(text)
     if (text.trim()) this.push({ role, text: boundedText(text), ...(photoId ? {photoId} : {}) })
+  }
+  commitCommand(lines: readonly OutputLine[], replacedStatus = false) {
+    const message = commandNotice(lines)
+    if (!message) return
+    const commandId = lines.length === 1 ? lines[0]?.id : undefined
+    const slot = commandId && statusLineSlot(commandId), last = this.rows.at(-1)
+    if (replacedStatus && slot && last?.commandId && statusLineSlot(last.commandId) === slot) {
+      this.rows[this.rows.length - 1] = { compact: message, expanded: message, commandId }
+    } else this.push(message, message, commandId)
+  }
+  replaceCommand(id: string, text: string, noticeSpans?: OutputLine['noticeSpans']) {
+    const row = this.rows.findLast(r => r.commandId === id)
+    if (!row) return
+    const message = commandNotice([{ id, text, kind: 'system', preStyled: row.compact.command?.styled, noticeSpans }])
+    if (message) Object.assign(row, { compact: message, expanded: message })
   }
   appendNoticeCard(full: string, card: { state: 'error' | 'success'; summary: string }) {
     // Old phones render notice.text. New ones can fold long command/output rows

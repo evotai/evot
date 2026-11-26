@@ -86,10 +86,14 @@ describe('term commands', () => {
     expect(result.restart).toBeUndefined()
   })
 
-  test('/restart restarts in place', () => {
-    const result = handleSlashCommand('/restart', mkCtx())
-    expect(result.restart).toBe(true)
-    expect(result.exit).toBeUndefined()
+  test('/restart is safe by default; now and cancel are explicit, anything else shows usage', () => {
+    expect(handleSlashCommand('/restart', mkCtx()).restart).toBe('safe')
+    expect(handleSlashCommand('/restart now', mkCtx()).restart).toBe('now')
+    expect(handleSlashCommand('/restart cancel', mkCtx()).restart).toBe('cancel')
+    const wrong = handleSlashCommand('/restart later', mkCtx())
+    expect(wrong.restart).toBeUndefined()
+    expect(wrong.systemLines[0]?.text).toContain('Usage: /restart [now | cancel]')
+    expect(handleSlashCommand('/restart', mkCtx()).exit).toBeUndefined()
   })
 
   test('/compact defers to the async app command path', () => {

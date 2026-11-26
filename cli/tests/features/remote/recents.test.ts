@@ -5,6 +5,7 @@ import { phoneCatalog } from '../../../src/features/remote/catalog.js'
 import { directoryGroups, hasOpenWindow, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
+import legacyCatalog from '../../fixtures/contracts/remote-session-list-legacy.json'
 
 test('the drawer keeps live work first, retains the gateway order inside each group, and adds status-only windows outside search', () => {
   const now = Date.UTC(2026, 8, 18, 12), day = 86400000
@@ -32,7 +33,7 @@ test('the drawer preserves live statuses without exposing an older window as a s
   const now = Date.UTC(2026, 8, 18, 12)
   const data = {
     rows: [
-      { terminal:'bg', phase:'working', runState:'waiting-background', updatedAt:now },
+      { terminal:'bg', phase:'working', runState:'waiting-background', updatedAt:now, completed:true },
       { terminal:'retry', phase:'working', runState:'retrying', updatedAt:now },
       { terminal:'ask', phase:'input', updatedAt:now },
       { session:'unshared', unshared:true, updatedAt:now },
@@ -103,6 +104,24 @@ test('an idle window the phone opened reads as a saved session; a busy one and a
   // Still followable: tapping a parked row attaches to its window instead of starting another.
   expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
   expect(page.online).toHaveLength(4)
+})
+
+test('the completion mark is additive to the legacy catalog, including for a parked window', () => {
+  const window = { ...legacyCatalog.online[0]!, phase:'idle' as const }
+  const page = { limit:40, query:'' }
+  expect(windowStatusLabel(legacyCatalog.rows[0])).toBe('Open')
+  expect(JSON.parse(JSON.stringify(phoneCatalog([], [window], page)))).toEqual(legacyCatalog)
+
+  const catalog = phoneCatalog([], [{ ...window, completed:true }], page)
+  expect(windowStatusLabel(catalog.rows[0])).toBe('Completed')
+  // The old drawer still sees an idle, followable window with the same target.
+  const { completed, ...legacyRow } = JSON.parse(JSON.stringify(catalog)).rows[0]
+  expect(completed).toBe(true)
+  expect(legacyRow).toEqual(legacyCatalog.rows[0])
+
+  const parked = phoneCatalog([], [{ ...window, completed:true, phoneCreated:true }], page).rows[0]!
+  expect(parked).toMatchObject({ parked:true, terminal:window.terminal })
+  expect(windowStatusLabel(parked)).toBe('Completed')
 })
 
 test('blank first-run metadata does not hide the live opening title in Sessions or search', () => {

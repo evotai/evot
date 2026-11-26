@@ -1,5 +1,6 @@
 import { pathToken } from '../../ui/path-token.js';
 import { applyEdit } from './phone-editor.js';
+import { phoneSkill } from './phone-commands.js';
 
 // Feedback belongs to the same host snapshot as the candidate, but is never draft text.
 export function inlineSuggestion(view, empty, dismissed) {
@@ -15,7 +16,7 @@ export function draftHintText(empty, view, preview, queuedCount) {
   if (preview) return preview.text;
   if (queuedCount) return `${queuedCount} ${queuedCount === 1 ? 'message' : 'messages'} queued`;
   if (view?.input === 'steer') return 'Steer the active run…';
-  return view?.commands?.length ? 'Ask anything, or type / for commands…' : 'Ask anything about this project…';
+  return view?.slashHints || view?.commands?.length ? 'Ask anything, or type / for commands…' : 'Ask anything about this project…';
 }
 
 export function tabIntent(view, draft, cursor, {choices, photos, ghost}) {
@@ -27,7 +28,7 @@ export function tabIntent(view, draft, cursor, {choices, photos, ghost}) {
   const path = pathToken(line,line.length)?.word;
   if (/(?:^|\s)@\S*$/.test(line) || (path && !/^\d+(?:\/\d+)+$/.test(path))) return null;
   const slash = /^\s*(\/\S+)\s/.exec(draft)?.[1].toLowerCase();
-  const skill = slash && view.commands?.some(c => !c.shortcut && slash.startsWith(c.prefix) && c.name.toLowerCase().startsWith(slash));
+  const skill = slash && phoneSkill(slash, view.commands, view.slashHints);
   return draft.trimStart().startsWith('/') && !skill ? null : 'Send after';
 }
 

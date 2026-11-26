@@ -87,6 +87,10 @@ import {
 import { createModelSelectionController, type ModelSelectionDeps } from './host/model-selection.js'
 import { createActivityController, type ActivityDeps } from './host/activity.js'
 import { createRemoteController, type RemoteDeps } from './host/remote.js'
+import { createRestartController, type RestartDeps } from './host/restart.js'
+import { RESTART_CHECKPOINT_ENV, takeRestartCheckpoint } from './app/restart/checkpoint-file.js'
+import { stateDir } from '../update/paths.js'
+import { canRestartInPlace, runningOutdatedBuild } from '../update/running-build.js'
 import { createReplState } from './host/state.js'
 import { createCommandWindowController, type CommandWindowDeps } from './host/command-window.js'
 import { createScrollbackController, type ScrollbackDeps } from './host/scrollback.js'
@@ -108,6 +112,7 @@ import { createTerminalController, type TerminalDeps } from './host/terminal.js'
 /** Everything the host controllers may ask of `startRepl`. */
 type ReplHost =
   & RemoteDeps
+  & RestartDeps
   & ActivityDeps
   & ModelSelectionDeps
   & CommandWindowDeps
@@ -142,12 +147,21 @@ export interface ReplOptions {
 export async function startRepl(opts: ReplOptions): Promise<void> {
   const { agent } = opts
   const st = createReplState(agent.model, agent.cwd)
+  // What a safe /restart handed to this image. Read once, removed from disk and
+  // from the environment so nothing this process starts inherits it.
+  const restartHandoff = takeRestartCheckpoint(stateDir(), process.env[RESTART_CHECKPOINT_ENV])
+  delete process.env[RESTART_CHECKPOINT_ENV]
+  const installedBuild = { canRestartInPlace, outdated: runningOutdatedBuild }
   // Ports the host controllers call back through. Getters resolve on every
   // use, so a controller sees a later-declared service exactly as a closure would.
   const host: ReplHost = {
     get agent() { return agent },
     get activity() { return activity },
     get remoteCtl() { return remoteCtl },
+    get restartCtl() { return restartCtl },
+    get windowControl() { return restartCtl.control },
+    get installedBuild() { return installedBuild },
+    outdatedBuild: runningOutdatedBuild,
     get readAuthIdentity() { return readAuthIdentity },
     get modelSelection() { return modelSelection },
     get clearAll() { return composer.clearAll },
@@ -246,6 +260,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const modelSelection = createModelSelectionController(st, host)
   const activity = createActivityController(st, host)
   const remoteCtl = createRemoteController(st, host)
+  const restartCtl = createRestartController(st, host)
   const commandWindow = createCommandWindowController(st, host)
   const scrollback = createScrollbackController(st, host)
   const asks = createAskController(st, host)
@@ -305,7 +320,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     getStream: () => st.streamRef,
     preparing: () => st.pendingEnqueue !== null || pendingImages.awaiting,
     editing: () => st.queueEditState !== null,
-    busy: () => st.isLoading || manualCompaction.active || st.destroyed,
+    busy: () => st.isLoading || manualCompaction.active || st.destroyed || restartCtl.holdsQueue(),
     getDispatch: () => st.queueDispatchId,
     setDispatch: id => { st.queueDispatchId = id },
     consumed: entries => {
@@ -481,6 +496,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   const replCommands: ReplCommandContext = {
     agent,
     flushShareNotices: () => shareNotices.flush(),
+    withShareChange: (sid, change) => cloudSessions.withShareChange(sid, change),
     isBusy: () => st.isLoading,
     // `/share` is the sessions list narrowed to cloud rows: one list, one
     // set of keys, rather than a second selector to learn.
@@ -503,7 +519,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     commitSystem: scrollback.commitSystem,
     commitRevealed: scrollback.commitRevealed,
     commitLines: scrollback.commitLines,
-    replaceLine: (id, text) => committer.replaceById(id, text),
+    replaceLine: (id, text, spans) => committer.replaceById(id, text, spans),
     columns: () => renderer.termCols,
     requestRender: () => renderer.requestRender(),
   }
@@ -894,12 +910,15 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   terminal.start()
   st.suggestionsReady = true
   if (st.startupSuggestion) { const trigger = st.startupSuggestion; st.startupSuggestion = null; suggest.requestProductSuggestion(trigger) }
-  remoteCtl.register()
+  remoteCtl.register(restartHandoff.checkpoint?.remote ?? null)
+  restartCtl.restore(restartHandoff)
+  resources.add(backgroundJobs.register({ name: 'remote-gateway', intervalMs: 5_000, run: remoteCtl.maintain }))
   renderer.requestRender()
 
   function cleanup() {
     if (st.destroyed) return
     st.destroyed = true
+    restartCtl.dispose()
     remoteCtl.dispose()
     taskSession.dispose()
     computeSession.dispose()
@@ -936,11 +955,11 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     if (pendingCount > 0) process.stderr.write(`\n  Discarding ${pendingCount} pending prompt${pendingCount === 1 ? '' : 's'}; the queue is not persisted.\n`)
   }
 
-  function restartAfterCleanup(): void {
+  function restartAfterCleanup(handoff: Record<string, string> = {}): void {
     cleanup()
     void sessionHook.close().then(async () => {
       const { execIntoInstalledRestart } = await import('../update/index.js')
-      execIntoInstalledRestart(st.sessionId)
+      execIntoInstalledRestart(st.sessionId, handoff)
       // Handover only returns when execve was impossible (source checkout,
       // Windows, missing binary). Fall back to a normal exit so the user can
       // relaunch from the shell instead of sitting in a dead TUI.

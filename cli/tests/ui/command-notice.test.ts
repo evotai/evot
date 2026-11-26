@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import stripAnsi from 'strip-ansi'
 import chalk from 'chalk'
-import { renderCommandNotice, renderErrorNotice } from '../../src/ui/command-notice.js'
+import { renderCommandNotice, renderErrorNotice, renderNoticeSpans } from '../../src/ui/command-notice.js'
+import { layoutCommandNotice } from '../../src/ui/notice-layout.js'
 import { getTheme } from '../../src/ui/theme/index.js'
 import { createCommandOutput } from '../../src/term/widgets/command-output.js'
 import { handleUpdateCommand, type ReplCommandContext } from '../../src/term/command-handlers.js'
@@ -39,6 +40,17 @@ describe('command notices', () => {
       .toBe('  ⋯ update  checking...')
     expect(stripAnsi(renderCommandNotice({ message: 'result', details: ['', 'detail'] })))
       .toBe('  result\n\n    detail')
+  })
+
+  test('the ANSI adapter preserves portable text and uses theme colors for each role', () => {
+    chalk.level = 3
+    const theme = getTheme()
+    const spans = layoutCommandNotice({state:'success',label:'Sync',message:'Complete',details:['','Follow-up']})
+    const row = renderNoticeSpans(spans)
+    expect(stripAnsi(row)).toBe(spans.map(span => span.text).join(''))
+    expect(row).toContain(theme.brandBold.paint('Sync'))
+    expect(row).toContain(chalk.hex(theme.cursorHex)('✓'))
+    expect(row).toContain(chalk.hex(theme.panelMutedFg)('    Follow-up'))
   })
 
   test('progress slots are independent and recover after clearing history', () => {

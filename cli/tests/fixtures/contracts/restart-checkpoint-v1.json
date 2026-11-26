@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "session": "01a211d9-9702-7ae2-9c11-a24e05926f91",
+  "remote": {
+    "terminal": "d97f1deb-3efd-4124-b055-22f688f82696",
+    "phoneScope": null,
+    "share": "88fe71b01c52125d1f09709e",
+    "gateway": true
+  },
+  "draft": {
+    "text": "half-written follow-up [Image #1]",
+    "cursorLine": 0,
+    "cursorCol": 22,
+    "chunks": [[2, "pasted block"]],
+    "images": [[1, { "id": 1, "base64": "iVBORw0KGgo=", "mediaType": "image/png", "filePath": "/tmp/shot.png" }]]
+  },
+  "queue": [
+    {
+      "queue": "follow_up",
+      "text": "run the tests",
+      "expandedText": "run the tests",
+      "paused": false,
+      "draft": { "text": "run the tests", "cursorLine": 0, "cursorCol": 13, "chunks": [], "images": [] }
+    },
+    {
+      "queue": "steering",
+      "text": "check this",
+      "expandedText": "check this",
+      "contentJson": "[{\"type\":\"text\",\"text\":\"check this\"}]",
+      "phoneDraftId": "draft-7",
+      "paused": true,
+      "draft": { "text": "check this", "cursorLine": 0, "cursorCol": 10, "chunks": [], "images": [] }
+    }
+  ],
+  "futureField": "ignored by version 1 readers"
+}

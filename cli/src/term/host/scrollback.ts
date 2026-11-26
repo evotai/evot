@@ -9,6 +9,7 @@ import { formatMemoryLine, memorySnapshot } from '../diagnostics/memory.js'
 import type { ScreenLog } from '../diagnostics/screen-log.js'
 import type { ReplState } from './state.js'
 import type { Committer } from '../screen/committer.js'
+import { commandOutputLine, type CommandOutputPort } from '../widgets/command-output.js'
 
 /** What this controller needs from the host. Looked up lazily on every use. */
 export interface ScrollbackDeps {
@@ -30,6 +31,8 @@ export interface ScrollbackController {
   commitRevealed(id: string, text: string, erasedText: string, delayMs: number): void
   commitRunFooter(): void
   commitStatusLine(line: OutputLine): void
+  /** Opt in to publishing the command's display output to this paired conversation. */
+  commandOutput(requestRender: () => void, isActive?: () => boolean): CommandOutputPort
   commitSystem(id: string, text: string, kind?: "user" | "assistant" | "thinking" | "tool" | "tool_result" | "verbose" | "error" | "system" | "cancelled"): void
   commitLocalNotice(id: string, text: string): void
   commitSystemLines(outputLines: OutputLine[]): void
@@ -107,7 +110,32 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
    *  stay single-line. Only the trailing line is eligible for replacement, so a
    *  later user message or other output freezes the prior status into history. */
   function commitStatusLine(line: OutputLine) {
-    deps.committer.commitStatus(line)
+    const safe = line.remoteStatusText
+    if (safe === undefined) { deps.committer.commitStatus(line); return }
+    const display = (text: string) => ({ ...line, ...commandOutputLine(line.id, [{ text, tone: 'muted' }]) })
+    const local = display(line.text)
+    const replaced = deps.committer.commitStatus(local)
+    if (!st.logMode) st.conversationTail.commitCommand([safe === line.text ? local : display(safe)], replaced)
+  }
+
+  function commandOutput(requestRender: () => void, isActive = () => true): CommandOutputPort {
+    const session = st.sessionId, epoch = st.remoteEpoch, shared = !st.logMode
+    const current = () => !st.destroyed && isActive()
+    const mirror = () => shared && !st.logMode && st.sessionId === session && st.remoteEpoch === epoch
+    return {
+      commitLines(lines, remoteLines = lines) {
+        if (!current()) return
+        if (remoteLines !== lines) deps.committer.commitUnlogged(lines)
+        else deps.committer.commit(lines)
+        if (mirror()) st.conversationTail.commitCommand(remoteLines)
+      },
+      replaceLine(id, text, spans) {
+        if (!current() || !deps.committer.replaceById(id, text, spans)) return false
+        if (mirror()) st.conversationTail.replaceCommand(id, text, spans)
+        return true
+      },
+      requestRender,
+    }
   }
 
   /** Commit slash-command system lines, collapsing model/thinking status in place. */
@@ -140,5 +168,5 @@ export function createScrollbackController(st: ReplState, deps: ScrollbackDeps):
     commitSystem(`sys-bg-${slot}-${st.nextBackgroundLineId++}`, text)
   }
 
-  return { commitBackgroundLine, commitFlushResult, commitLines, commitPrivacyHappenings, commitRevealed, commitRunFooter, commitStatusLine, commitSystem, commitLocalNotice, commitSystemLines, commitUserMessage, memoryLine, restoreLines }
+  return { commandOutput, commitBackgroundLine, commitFlushResult, commitLines, commitPrivacyHappenings, commitRevealed, commitRunFooter, commitStatusLine, commitSystem, commitLocalNotice, commitSystemLines, commitUserMessage, memoryLine, restoreLines }
 }

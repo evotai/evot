@@ -46,8 +46,11 @@ if (/<\/style\b/i.test(css)) throw Error('Remote browser stylesheet cannot be em
 const sha = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`
 export const phoneScriptHash = `${sha(themeJs)} ${sha(client)}`
 export const phoneStyleHash = sha(css)
+/** Names the page bytes. The gateway sends it with every reply, so an open page
+ * notices that a restarted gateway serves a newer page and reloads itself. */
+export const phoneBuild = createHash('sha256').update(JSON.stringify([String(page), client, css, themeJs])).digest('base64url').slice(0, 16)
 const html = String(page)
-  .replace('class="remote-shell"', `class="remote-shell" data-activity-frames="${spinnerFrames(process.platform, process.env.TERM).join(' ')}"`)
+  .replace('class="remote-shell"', `class="remote-shell" data-build="${phoneBuild}" data-activity-frames="${spinnerFrames(process.platform, process.env.TERM).join(' ')}"`)
   .replace('<link rel="stylesheet" href="/chat.css"><script src="/theme.js"></script>', () => `<style>${css}</style><script data-theme-boot>${themeJs}</script>`)
   .replace('<!-- phone-client -->', () => `<script data-cfasync="false">${client}</script>`)
 if (!html.includes('data-theme-boot')) throw Error('Remote page head changed; inline its assets again')

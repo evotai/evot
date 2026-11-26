@@ -1,5 +1,6 @@
 import chalk from 'chalk'
 import { resolveCommand } from '../../commands/index.js'
+import { currentSessionShareMode } from '../../commands/share.js'
 import { nextModelOption } from '../../features/models/options.js'
 import type { ComputeSession } from '../../features/compute/session.js'
 import type { LoopSession } from '../../features/loop/session.js'
@@ -28,6 +29,7 @@ import type { CloudController } from './cloud.js'
 import type { CompactionController } from './compaction.js'
 import type { FrameController } from './frame.js'
 import type { RemoteController } from './remote.js'
+import type { RestartController } from './restart.js'
 import type { RunController } from './run.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { SessionController } from './session.js'
@@ -64,7 +66,7 @@ export interface SlashDeps {
   readonly renderer: TermRenderer
   readonly rendererTrace: RendererTrace
   readonly replCommands: ReplCommandContext
-  readonly restartAfterCleanup: () => void
+  readonly restartCtl: Pick<RestartController, 'command'>
   readonly resumeCache: ResumeSessionCache
   readonly runCtl: RunController
   readonly runThinking: RunThinking
@@ -226,7 +228,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     }
     if (result.newSession) startNewSession()
     if (result.exit) { deps.exitAfterCleanup(0); return }
-    if (result.restart) { deps.restartAfterCleanup(); return }
+    if (result.restart) { deps.restartCtl.command(result.restart); return }
     if (result.systemLines.length > 0) deps.scrollback.commitSystemLines(result.systemLines)
 
     // Handle async commands that the simple handleSlashCommand can't do
@@ -293,7 +295,9 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
         await handleClipCommand(deps.replCommands)
       }
     } else if (name === '/share') {
-      await handleShareCommand(deps.replCommands, args)
+      // Imports, explicit targets and list navigation belong to the TUI only.
+      const mirror = st.sessionId !== null && !st.logMode && currentSessionShareMode(args) !== null
+      await handleShareCommand(deps.replCommands, args, mirror ? deps.scrollback.commandOutput(deps.replCommands.requestRender) : undefined)
     } else if (name === '/skill') {
       try {
         await handleSkillCommand(deps.replCommands, args)
@@ -304,7 +308,7 @@ export function createSlashController(st: ReplState, deps: SlashDeps): SlashCont
     } else if (name === '/update') {
       await handleUpdateCommand(deps.replCommands)
     } else if (name === '/version') {
-      await handleVersionCommand(deps.replCommands)
+      handleVersionCommand(deps.scrollback.commandOutput(deps.replCommands.requestRender))
     } else if (name === '/login') {
       // Device-code flow in place so free models appear without restarting.
       // Wait for an admin-sign-out cleanup before checking local identity;

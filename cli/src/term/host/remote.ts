@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto'
-import { basename } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, join } from 'node:path'
 import { renderUnicodeCompact } from 'uqr'
+import { REMOTE_USAGE } from '../../commands/index.js'
+import { runSessionShare, type SessionShareContext, type SessionShareMode } from '../../commands/share.js'
 import { getThemeScheme } from '../../ui/theme/index.js'
 import { remoteHome, sharingScope } from '../../features/remote/transport.js'
-import { manageGrants } from '../../features/remote/grants.js'
-import { openEnvironment } from '../../features/remote/environment.js'
-import { sharedConnectInvite } from '../../features/remote/cloud-connect.js'
+import { approvePairing, manageGrants } from '../../features/remote/grants.js'
+import { terminalInvite } from '../../features/remote/cloud-connect.js'
+import { GatewayOccupied, openEnvironment } from '../../features/remote/environment.js'
+import { gatewayPolicy, updateGatewayPolicy } from '../../features/remote/gateway-policy.js'
+import { machineIdentity } from '../../features/remote/machine-identity.js'
 import { sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
@@ -16,17 +21,18 @@ import type { CloudSessionSync } from '../../session/cloud-sessions.js'
 import type { ResumeSessionCache } from '../app/session/resume-cache.js'
 import { currentQueueTarget, pendingEntryState, type PendingQueue } from '../app/queue/pending-queue.js'
 import type { QueueLifecycle } from '../app/queue/queue-lifecycle.js'
-import { phoneCommands, phonePrompt } from '../app/remote/commands.js'
+import { PHONE_SHARE_USAGE, phoneCommandHints, phoneCommands, phoneSubmission } from '../app/remote/commands.js'
+import { RECENT_SESSION_LIMIT } from '../../features/composer/command-arguments.js'
 import { resolveRunInteraction } from '../app/run/run-interaction.js'
 import type { SuggestController } from './suggest.js'
 import { insertText, isEditorEmpty } from '../input/editor.js'
 import { RemoteConflict, type RemoteAction, type RemoteSnapshot } from '../../features/remote/protocol.js'
 import { errorText, formatElapsed, renderBar } from '../../ui/format.js'
-import { renderCommandNotice } from '../../ui/command-notice.js'
+import { layoutCommandNotice } from '../../ui/notice-layout.js'
 import { createCommandOutput, type CommandOutputPort } from '../widgets/command-output.js'
 import type { ActivityController } from './activity.js'
 import { suggestionStatusText } from '../viewmodel/suggestion.js'
-import { spinnerDescription } from '../widgets/spinner.js'
+import { createSpinnerState, setSpinnerPhase, spinnerDescription } from '../widgets/spinner.js'
 import { remoteModels } from '../app/remote/models.js'
 import { assistantRow } from '../app/remote/conversation.js'
 import { PARKED_CHECK_MS, parkedExpired, tmuxAttached } from '../app/remote/parked-exit.js'
@@ -41,15 +47,19 @@ import type { RunController } from './run.js'
 import type { ScrollbackController } from './scrollback.js'
 import type { ReplState } from './state.js'
 import type { SubmitController } from './submit.js'
+import type { RemoteHandoff } from '../app/restart/checkpoint.js'
+import { handleVersionCommand, shareCommandOutput } from '../command-handlers.js'
+import type { WindowControl } from '../../features/restart/protocol.js'
 
 export interface RemoteDeps {
   readonly readAuthIdentity: () => string | null | undefined
+  readonly outdatedBuild?: () => boolean | null
   readonly backgroundTerminals: BackgroundTerminals
   readonly composer: ComposerController
   readonly activity: ActivityController
   readonly agent: Agent
   readonly suggestions: Pick<PromptSuggestion, 'text' | 'feedback' | 'completing' | 'replacing' | 'next' | 'complete'>
-  readonly suggest: Pick<SuggestController, 'suggestionInputReady'>
+  readonly suggest: Pick<SuggestController, 'suggestionInputReady' | 'suggestionInventory'>
   readonly gitInfo: { getBranch(): string | null }
   readonly cloudSessions: Pick<CloudSessionSync, 'remoteFor' | 'forget'>
   readonly resumeCache: Pick<ResumeSessionCache, 'remove'>
@@ -63,9 +73,11 @@ export interface RemoteDeps {
   readonly runOwnership: RunOwnership
   readonly scrollback: ScrollbackController
   readonly submit: SubmitController
-  /** One replaceable status row while /remote starts, like /share's upload row. */
-  readonly replCommands: CommandOutputPort
+  /** Terminal rendering plus the share lifecycle used by both surfaces. */
+  readonly replCommands: CommandOutputPort & Pick<SessionShareContext, 'flushShareNotices' | 'withShareChange' | 'cloudAcknowledged' | 'cloudForgotten'>
   readonly exitAfterCleanup: (code: number) => void
+  /** Restart requests from this user's other evot processes, on the window's private socket. */
+  readonly windowControl: WindowControl
 }
 
 /** `⋯ Remote  Installing cloudflared … ███░░  6.1 / 19.0 MB · 32% · 4s`, rewritten in place. */
@@ -79,7 +91,7 @@ export function remoteStatus(port: CommandOutputPort) {
     const size = !bytes ? '' : bytes.total > 0
       ? `  ${renderBar(bytes.done, bytes.total, 20)}  ${mb(bytes.done)} / ${mb(bytes.total)} MB · ${Math.min(100, Math.floor(bytes.done / bytes.total * 100))}%`
       : ` · ${mb(bytes.done)} MB`
-    line.update(renderCommandNotice({ state: 'progress', label: 'Remote', message: `${text}${size}${ms >= 1000 ? ` · ${formatElapsed(ms)}` : ''}` }))
+    line.update(layoutCommandNotice({ state: 'progress', label: 'Remote', message: `${text}${size}${ms >= 1000 ? ` · ${formatElapsed(ms)}` : ''}` }))
   }
   const timer = setInterval(paint, 1000)
   timer.unref?.()
@@ -99,7 +111,7 @@ export function remoteStatus(port: CommandOutputPort) {
       if (finished) return
       finished = true
       clearInterval(timer)
-      line.finish(renderCommandNotice({ state, label: 'Remote', message }))
+      line.finish(layoutCommandNotice({ state, label: 'Remote', message }))
     },
   }
 }
@@ -174,6 +186,8 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       sessionId: st.sessionId,
       title: sessionTitle(),
       commands: input ? phoneCommands(st.skillEntries) : undefined,
+      slashHints: input ? { catalog: phoneCommandHints(st.skillEntries), forked: st.lastLineage.length > 1,
+        inventory: deps.suggest.suggestionInventory(RECENT_SESSION_LIMIT) } : undefined,
       // Only a next-prompt suggestion; a completion of the TUI's own half-typed draft stays local.
       suggestion: shareSuggestion ? deps.suggestions.text() || undefined : undefined,
       suggestionHint: suggestionStatus === 'quiet' ? 'no suggestion' : suggestionStatusText({ suggestionStatus }).trim() || undefined,
@@ -201,6 +215,40 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       input,
       canStop: running && (!local || !!ask),
       ask,
+    }
+  }
+
+  async function shareCurrentSession(sid: string, mode: SessionShareMode, scope: string) {
+    const epoch = ++st.remoteEpoch // A retry of the same admitted action must not apply again.
+    st.foregroundCommand = 'share'
+    st.isLoading = true
+    st.spinnerState = setSpinnerPhase(createSpinnerState(), 'executing', 'session_share')
+    const owner = deps.runOwnership.owner
+    const inSession = () => !st.destroyed && !st.logMode && st.sessionId === sid && st.remoteEpoch === epoch && deps.runOwnership.owns(owner)
+    const canReport = () => inSession() && currentScope() === scope
+    try {
+      deps.runCtl.startSpinner()
+      deps.replCommands.requestRender()
+      await runSessionShare({
+        ...shareCommandOutput(deps.scrollback.commandOutput(deps.replCommands.requestRender, canReport)),
+        agent: deps.agent,
+        flushShareNotices: async () => {
+          await deps.replCommands.flushShareNotices?.()
+          if (!canReport()) throw new RemoteConflict('The session or account changed. Check and try again.')
+        },
+        withShareChange: deps.replCommands.withShareChange,
+        cloudAcknowledged: deps.replCommands.cloudAcknowledged,
+        cloudForgotten: deps.replCommands.cloudForgotten,
+        requestRender: deps.replCommands.requestRender,
+      }, sid, mode)
+    } finally {
+      if (st.foregroundCommand === 'share') st.foregroundCommand = null
+      if (!st.destroyed && deps.runOwnership.owns(owner)) {
+        st.isLoading = false
+        deps.runCtl.stopSpinner()
+        deps.replCommands.requestRender()
+      }
+      if (!st.destroyed) deps.queueLifecycle.dispatchNext()
     }
   }
 
@@ -267,8 +315,25 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     if (((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) || (action.kind === 'queue' && s.composerKeys?.queue)) {
       if (action.kind !== 'send' && action.draftId && st.pendingQueue.entries.some(e => e.phoneDraftId === action.draftId))
         throw new RemoteConflict('This message is already pending.')
-      const modelText = phonePrompt(action.text, st.skillEntries, action.kind !== 'send', !!action.images?.length)
-      deps.submit.submitConversationText(action.text, action.kind, action.images, modelText, action.draftId)
+      const submission = phoneSubmission(action.text, st.skillEntries, action.kind !== 'send', !!action.images?.length)
+      if (submission.kind === 'version') {
+        handleVersionCommand(deps.scrollback.commandOutput(deps.replCommands.requestRender))
+        return
+      }
+      if (submission.kind === 'share') {
+        if (submission.mode === 'usage') {
+          const port = deps.scrollback.commandOutput(deps.replCommands.requestRender)
+          createCommandOutput(port, 'share').commit('sys-share-usage', layoutCommandNotice({ message: PHONE_SHARE_USAGE }))
+          return
+        }
+        if (!s.sessionId) throw new RemoteConflict('No active session to share.')
+        if (st.queueDispatchId || st.restarting) throw new RemoteConflict('The window is busy. Wait and try again.')
+        const scope = currentScope()
+        if (!scope) throw new RemoteConflict('Cannot verify the profile for this session.')
+        void shareCurrentSession(s.sessionId, submission.mode, scope)
+        return
+      }
+      deps.submit.submitConversationText(action.text, action.kind, action.images, submission.text, action.draftId)
       return
     }
     throw new RemoteConflict('This action is no longer available.')
@@ -279,6 +344,16 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     const home = remoteHome(), account = deps.readAuthIdentity()
     if (account === undefined) throw Error('Cannot verify local account identity.')
     return { home, account, scope: sharingScope(home, st.configInfo.envPath || home, account ?? 'local') }
+  }
+  function gatewayProfile() {
+    const selected = profile()
+    if (!selected.account && process.env.EVOT_REMOTE_LOCAL_TEST !== '1')
+      throw Error('Sign in with /login before enabling Remote access.')
+    // Production uses the same machine-wide root as the Connect identity.
+    return { ...selected, policyHome: selected.account ? join(homedir(), '.evotai') : selected.home }
+  }
+  function allowed(policyHome: string, scope: string) {
+    try { return gatewayPolicy(policyHome) === scope } catch { return false }
   }
   function currentScope(): string | null {
     if (st.destroyed || st.logMode || deps.rendererTrace.isEnabled) return null
@@ -296,11 +371,13 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       default: return { phase: 'working', runState: kind }
     }
   }
-  function register() {
+  function register(handoff: RemoteHandoff | null = null) {
     if (st.terminalBus) return
-    const id = process.env.EVOT_PHONE_TERMINAL,
-      scope = process.env.EVOT_PHONE_SCOPE
-    st.remoteChild ||= id !== undefined || scope !== undefined
+    // A restart hands over the window's identity; otherwise a phone launch names it.
+    const id = handoff ? handoff.terminal : process.env.EVOT_PHONE_TERMINAL,
+      scope = handoff ? handoff.phoneScope ?? undefined : process.env.EVOT_PHONE_SCOPE
+    st.remoteChild ||= handoff ? handoff.phoneScope !== null : id !== undefined || scope !== undefined
+    if (st.remoteChild && scope && /^[0-9a-f]{24}$/.test(scope)) st.remotePhoneScope = scope
     delete process.env.EVOT_PHONE_TERMINAL
     delete process.env.EVOT_PHONE_SCOPE
     try {
@@ -316,6 +393,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           ...windowStatus(),
           updatedAt: st.conversationTail.updatedAt,
           finishedRound: st.conversationTail.finishedRound,
+          ...(st.conversationTail.outcome === 'Completed' ? { completed: true } : {}),
         }),
         validTerminal(id) ? id : undefined,
         {
@@ -324,9 +402,13 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
             const current = currentScope()
             return st.remoteChild && (!validTerminal(id) || current !== scope) ? null : current
           },
+          ...(!st.remoteChild ? { pairing: announcePairing } : {}),
         },
+        deps.windowControl,
       )
       if (validTerminal(id) && scope && /^[0-9a-f]{24}$/.test(scope)) { st.terminalBus.share(scope); parkWhenUnwatched() }
+      if (handoff?.share === 'off') st.terminalBus.share(null)
+      else if (handoff && handoff.share !== 'inherit') st.terminalBus.share(handoff.share)
       st.remoteEpoch = Math.floor(Math.random() * 0x100000000) * 65536
     } catch {
       /* Restricted or non-Unix hosts can still use the ordinary TUI. */
@@ -352,11 +434,13 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     st.remoteAttempt++
     st.remoteOpening = false
     st.remoteEpoch++
-    st.remoteListener?.close()
+    const gateway = st.remoteListener
     st.remoteListener = null
+    gateway?.close()
     st.terminalBus?.route(null)
     if (hide) st.terminalBus?.share(null)
     else st.terminalBus?.endInvite()
+    if (gateway && !st.destroyed) deps.replCommands.requestRender()
   }
   function dispose() {
     if (st.remoteParkTimer) clearInterval(st.remoteParkTimer)
@@ -365,29 +449,26 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     st.terminalBus?.close()
     st.terminalBus = null
   }
+  const notice = (text: string) => deps.scrollback.commitLocalNotice('sys-remote', `  ${text}`)
+  // The fragment chooses the approval window; the phone still picks its session from the list.
+  const showInvite = ({ url, address, windowApproval }: { url: string; address: string; windowApproval?: true }, terminal: string) => {
+    const link = windowApproval ? terminalInvite(address, terminal) : url
+    const qr = renderUnicodeCompact(link, { border: 2, invert: getThemeScheme() === 'light' })
+    notice(`Remote is on for this profile, including new windows. Scan to connect your phone:\n${qr}\n  ${link}\n  Bookmark this computer: ${address}\n  Run /remote off to turn it off. Approve new devices in ${windowApproval ? 'this' : 'the gateway’s'} TUI.`)
+  }
+  function announcePairing(code: string, id: string) {
+    const command = `/remote approve ${code}`
+    const prefill = isEditorEmpty(st.editor) && st.overlay.kind === 'none'
+    notice(`Device ${id} requests history, tool output and control for this profile, including future windows. Match ${code} on your device, then ${prefill ? 'press Enter to approve' : `run ${command}`}. If you didn’t request this, let it expire (2 min).`)
+    // Leave any existing draft alone. Approval is never submitted automatically.
+    if (prefill) deps.composer.mutateEditor(editor => insertText(editor, command))
+  }
   async function command(args: string) {
-    let status: ReturnType<typeof remoteStatus> | undefined
-    const notice = (text: string) => deps.scrollback.commitLocalNotice('sys-remote', `  ${text}`)
-    // The phone picks its session from the list, so the code carries only the computer's
-    // invite: a shorter link is a smaller code. Two modules of quiet zone scan reliably.
-    const showInvite = (url: string, owner: boolean) => {
-      const qr = renderUnicodeCompact(url, { border: 2, invert: getThemeScheme() === 'light' })
-      notice(`Remote is on for this profile, including new windows. Scan to choose a session on your phone:\n${qr}\n  ${url}\n  /remote off hides one window. /remote shutdown in the gateway TUI stops the profile. Approve new devices in ${owner ? 'this' : 'the gateway’s'} TUI.`)
-    }
-    if (args === 'shutdown' && !st.remoteListener && !st.remoteOpening) {
-      notice('No gateway running in this window. Use /remote shutdown in the gateway TUI, or /remote off to hide this window.')
-      return
-    }
-    if (args === 'off') {
+    if (args === 'hide') {
       // The gateway can serve history and future windows even when its own
       // TUI is hidden and no other window is open yet.
       register(); st.terminalBus?.share(null)
-      notice('This window is hidden. Use /remote here to show it again.')
-      return
-    }
-    if (args === 'shutdown') {
-      close(false)
-      notice('Remote off. Profile gateway stopped.')
+      notice('This window is hidden. Run /remote on here to show it again.')
       return
     }
     if (st.remoteChild) {
@@ -403,53 +484,77 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       return
     }
     try {
-      if (args) {
-        const { home, scope } = profile()
-        if (args === 'devices' || args === 'revoke' || args.startsWith('revoke ')) {
-          const current = () => !st.destroyed && !st.remoteChild && profile().scope === scope
-          // Bare revoke is a read-only list, never an implicit choice of device.
-          const message = await manageGrants(home, scope, args.split(' ').slice(1).join(' ') || undefined, current)
-          if (current()) notice(message)
-          return
+      if (!args || args === 'on' || args === 'off') {
+        const p = gatewayProfile(), current = () => currentScope() === p.scope
+        if (args === 'off') {
+          const mayHaveLegacyGateway = !st.remoteListener && gatewayPolicy(p.policyHome) === undefined
+          await updateGatewayPolicy(p.policyHome, p.scope, 'disable', current)
+          if (current()) {
+            close(false)
+            notice(mayHaveLegacyGateway
+              ? 'Automatic takeover is off. If an older gateway is still online, stop it from the window running it.'
+              : 'Remote off. Run /remote on to turn it back on.')
+          }
+        } else {
+          // Save the identity first: a subsequent owner must reuse it, never mint a new address.
+          if (p.account) machineIdentity(homedir(), true)
+          await updateGatewayPolicy(p.policyHome, p.scope, 'enable', current)
+          if (current()) { st.remoteRetryAt = 0; await enable(p, true) }
         }
-        if (!/^(approve|deny) \d{8}$/.test(args))
-          throw Error('Usage: /remote [devices | revoke DEVICE | revoke all | approve CODE | deny CODE | off | shutdown]')
-        const owner = st.remoteListener
-        if (!owner?.active() || owner.scope !== scope) throw Error('Run this in the TUI displaying the matching approval code.')
-        const [op, code] = args.split(' ')
-        notice(owner.access.decide(code!, op === 'approve') ? (op === 'approve' ? 'Device approved.' : 'Device denied.') : 'No matching pending request.')
         return
       }
+      const { home, scope } = profile()
+      if (args === 'devices' || args === 'revoke' || args.startsWith('revoke ')) {
+        const current = () => !st.destroyed && !st.remoteChild && profile().scope === scope
+        // Bare revoke is a read-only list, never an implicit choice of device.
+        const message = await manageGrants(home, scope, args.split(' ').slice(1).join(' ') || undefined, current)
+        if (current()) notice(message)
+        return
+      }
+      const approval = /^approve (\d{8})$/.exec(args)
+      if (!approval) throw Error(`Usage: ${REMOTE_USAGE}. Run /remote devices to manage approvals.`)
+      const terminal = st.terminalBus?.id
+      if (!terminal) throw Error('Run this in the TUI displaying the matching approval code.')
+      const matched = await approvePairing(home, scope, terminal, approval[1]!)
+      notice(matched ? 'Device approved.' : 'No matching pending request in this window. Check the code on your phone.')
+    } catch (err) {
+      notice(`Remote: ${errorText(err)}`)
+    }
+  }
+
+  /** Start or join the gateway. Only an explicit invite shares this window for QR approval. */
+  async function enable({ home, account, scope, policyHome }: ReturnType<typeof gatewayProfile>, invite: boolean) {
+    let status: ReturnType<typeof remoteStatus> | undefined
+    try {
       register()
       if (!st.terminalBus) throw Error('Private terminal socket unavailable.')
-      const { home, account, scope } = profile()
-      if (st.remoteListener && st.remoteListener.scope !== scope) close()
+      if (!allowed(policyHome, scope) || currentScope() !== scope) return
+      if (st.remoteListener && !st.remoteListener.active()) close(false)
       if (!st.remoteListener) {
         if (st.remoteOpening) {
           notice('Connecting…')
           return
         }
-        const attempt = ++st.remoteAttempt,
-          active = () => {
-            if (st.destroyed || deps.rendererTrace.isEnabled || attempt !== st.remoteAttempt) return false
-            try { return profile().scope === scope } catch { return false }
-          }
+        const attempt = ++st.remoteAttempt
+        const active = () => attempt === st.remoteAttempt && currentScope() === scope && allowed(policyHome, scope)
         st.remoteOpening = true
-        status = remoteStatus(deps.replCommands)
+        if (invite) status = remoteStatus(deps.replCommands)
         try {
-          status.phase('Checking for a gateway in this profile…')
-          st.terminalBus.share(scope)
-          const rows = await st.terminalBus.inventory()
-          if (!active()) { status.finish('info', 'Cancelled.'); return }
-          if (rows.gateway) {
-            if (!rows.profileGateway) throw Error('An older window owns the gateway. Run /remote shutdown there, then /remote in an updated TUI to enable the whole profile.')
-            if (!st.terminalBus.shared) { status.finish('info', 'This window stays hidden.'); return } // hidden while discovery was in flight
-            status.finish('success', 'Joined the gateway running in another window.')
-            if (account) showInvite(sharedConnectInvite(home, scope, account), false)
-            else notice('Shared with the active gateway. Use /remote devices here to manage approved devices.')
-            return
+          if (invite) {
+            status?.phase('Checking for a gateway in this profile…')
+            st.terminalBus.share(scope)
+            const rows = await st.terminalBus.inventory(scope)
+            if (!active()) { status?.finish('info', 'Cancelled.'); return }
+            if (rows.gateway) {
+              if (!rows.profileGateway) throw Error('An older window owns the gateway. Stop the gateway from that window, then run /remote in an updated TUI.')
+              if (!st.terminalBus.shared) { status?.finish('info', 'This window stays hidden.'); return } // hidden while discovery was in flight
+              status?.finish('success', 'Joined the gateway running in another window.')
+              if (rows.gatewayInvite) showInvite(rows.gatewayInvite, st.terminalBus.id)
+              else notice('Shared with the active gateway. Open /remote in its TUI to see the address.')
+              return
+            }
           }
-          status.phase(account ? 'Connecting to evot Connect…' : 'Starting device approval…')
+          status?.phase(account ? 'Connecting to evot Connect…' : 'Starting device approval…')
           const gateway = await openEnvironment({
             account,
             home,
@@ -471,57 +576,89 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
                 return deleted
               },
             }, home, deps.agent.cwd, scope, st.configInfo?.envPath),
-            pending: (code, id) => {
-              notice(
-                `Device ${id} requests history, tool output and control for this profile, including future windows. Match ${code} on your device, then press Enter to approve, or run /remote deny ${code} (2 min).`,
-              )
-              // Put the approval in the composer as a draft, never submit it:
-              // the user compares the code with the phone and presses Enter.
-              if (isEditorEmpty(st.editor) && st.overlay.kind === 'none')
-                deps.composer.mutateEditor(editor => insertText(editor, `/remote approve ${code}`))
+            pending: announcePairing,
+            presenceChanged: () => {
+              if (attempt === st.remoteAttempt && st.remoteListener) deps.replCommands.requestRender()
             },
-            exited: () => {
+            exited: reason => {
               if (attempt === st.remoteAttempt) {
-                close()
-                notice('Connector stopped. Run /remote to reconnect.')
+                close(false)
+                notice(`Connector stopped: ${reason} Run /remote to reconnect.`)
               }
             },
             // While starting: the status row. Afterwards (connector restarts): plain notices.
             progress: (text, bytes) => {
               if (attempt !== st.remoteAttempt) return
               if (status?.active) status.phase(text, bytes)
-              else notice(text)
+              else if (st.remoteListener) notice(text)
             },
           })
           if (!active()) {
             gateway.close()
-            status.finish('info', 'Cancelled.')
+            status?.finish('info', 'Cancelled.')
             return
           }
           st.remoteListener = gateway
-          st.terminalBus.route(scope)
-          if (!gateway.cloud) status.finish('success', 'Local approval gateway is on.')
-          else if (gateway.online) status.finish('success', `Online at ${new URL(gateway.address).host}.`)
-          else status.finish('info', `Started, but ${new URL(gateway.address).host} is not answering yet. The QR code works once Cloudflare connects.`)
+          st.terminalBus.route(scope, { url: gateway.url, address: gateway.address, windowApproval: true })
+          deps.replCommands.requestRender()
+          if (!gateway.cloud) status?.finish('success', 'Local approval gateway is on.')
+          else if (gateway.online) status?.finish('success', `Online at ${new URL(gateway.address).host}.`)
+          else status?.finish('info', `Started, but ${new URL(gateway.address).host} is not answering yet. The QR code works once Cloudflare connects.`)
         } catch (e) {
-          if (attempt === st.remoteAttempt) st.terminalBus?.share(null)
-          status.finish('error', errorText(e))
-          throw e
+          const stillActive = active()
+          if (invite && stillActive && !(e instanceof GatewayOccupied)) st.terminalBus?.share(null)
+          if (invite) status?.finish(stillActive ? 'error' : 'info', stillActive ? errorText(e) : 'Cancelled.')
+          // Contention is expected when a sibling is starting or already owns the lease.
+          if (stillActive && !(e instanceof GatewayOccupied)) st.remoteRetryAt = Date.now() + 15_000
+          return
         } finally {
           if (attempt === st.remoteAttempt) st.remoteOpening = false
         }
-      } else st.terminalBus.share(scope)
-      if (!st.terminalBus.shared) {
-        notice('Profile gateway is on. This window remains hidden.')
-        return
-      }
+      } else if (invite) st.terminalBus.share(scope)
+      if (!invite) return
+      if (!st.terminalBus.shared) { notice('Profile gateway is on. This window remains hidden.'); return }
       const g = st.remoteListener
-      if (g.cloud) showInvite(g.url, true)
-      else notice(`Approval gateway: ${g.address} · this profile, including new windows · local test only.`)
+      showInvite({ url: g.url, address: g.address, windowApproval: true }, st.terminalBus.id)
     } catch (err) {
-      // The status row already shows a failure that happened while starting.
-      if (!status || status.active) notice(`Remote: ${errorText(err)}`)
+      if (invite) notice(`Remote: ${errorText(err)}`)
     }
+  }
+
+  /** How this window takes part in Remote, for the next image after a restart. */
+  function handoff(): RemoteHandoff | null {
+    const bus = st.terminalBus
+    if (!bus) return null
+    return { terminal: bus.id, phoneScope: st.remoteChild ? st.remotePhoneScope : null, share: bus.sharing,
+      gateway: !!st.remoteListener?.active() }
+  }
+
+  async function maintain() {
+    if (st.remoteListener) {
+      if (!st.remoteListener.active()) close(false)
+      return
+    }
+    if (!st.terminalBus || st.destroyed || st.restarting || st.restartPending || st.remoteChild || st.remoteOpening ||
+        Date.now() < st.remoteRetryAt) return
+    let p: ReturnType<typeof gatewayProfile>
+    try { p = gatewayProfile() } catch { return }
+    if (allowed(p.policyHome, p.scope) && deps.outdatedBuild?.() !== true) await enable(p, false)
+  }
+
+  /** Migrate an older gateway only when its explicit share pins the same
+   * profile. A hidden legacy owner without a pinned scope must opt in again. */
+  async function resume(previous: RemoteHandoff | null) {
+    if (!previous?.gateway || !currentScope()) return
+    try {
+      const p = gatewayProfile()
+      if (gatewayPolicy(p.policyHome) === undefined) {
+        if (previous.share !== p.scope) {
+          notice('Remote was enabled on an older build. Run /remote once in a window in this profile to enable automatic takeover.')
+          return
+        }
+        await updateGatewayPolicy(p.policyHome, p.scope, 'adopt', () => currentScope() === p.scope)
+      }
+      await maintain()
+    } catch (err) { notice(`Remote: ${errorText(err)}`) }
   }
   return {
     command,
@@ -530,6 +667,9 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       st.remoteEpoch++
     },
     register,
+    handoff,
+    maintain,
+    resume,
     dispose,
     snapshot,
     act,

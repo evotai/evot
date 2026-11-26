@@ -1,4 +1,4 @@
-import { formatModelLabel, modelAvailabilityNotice, selectModelOption } from '../../features/models/options.js'
+import { modelChangeNotice, selectModelOption } from '../../features/models/options.js'
 import type { Agent } from '../../native/index.js'
 import { modelShareEvents } from '../../session/share-events.js'
 import { errorText } from '../../ui/format.js'
@@ -34,7 +34,7 @@ export function createModelSelectionController(st: ReplState, deps: ModelSelecti
         if (applied !== null) { deps.refreshConfigInfo(); effort = applied }
       }
       deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system',
-        text: `  Model → ${formatModelLabel(model, provider, selected?.group_label)}${effort ? ` · thinking ${effort}` : ''}${modelAvailabilityNotice(selected)}`,
+        ...modelChangeNotice(model, provider, effort, selected),
         shareEvents: modelShareEvents(provider, model, effort) })
       return true
     } catch (err) {

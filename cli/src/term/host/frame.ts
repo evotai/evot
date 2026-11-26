@@ -109,7 +109,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       : st.queueEditState ? (st.queueEditState.consumed ? 'Original sent · copy changes or Esc discard' : 'Enter save · Esc discard')
       : st.pendingEnqueue ? 'Preparing images · editing cancels enqueue'
       : tabActionHint(action) ?? (pending.length ? pendingQueueHint(pending.filter(entry => entry.paused).length) : undefined)
-    return { ...prompt, inputHint }
+    return { ...prompt, inputHint, remotePresence: st.remoteListener?.access.onlineDevices }
   }
   function refreshBannerData(): void {
     if (deps.bannerCache.refresh(deps.agent.cwd, deps.agent.skillsDirs())) deps.renderer.requestRender()

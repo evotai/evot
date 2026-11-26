@@ -204,6 +204,32 @@ test('CloudSessionSync pushes once per settle, coalesces, and reports failures s
   expect(pushes).toHaveLength(2)
 })
 
+test('access changes wait for an old push and block newer pushes for that session', async () => {
+  const old = Promise.withResolvers<CloudPushResult>(), edit = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<void>()
+  const calls: string[] = []
+  const sync = new CloudSessionSync({
+    push: async id => { calls.push(id); return id === 'target' ? old.promise : {kind:'not_shared'} },
+    list: async () => [], notify() {},
+  })
+  try {
+    const push = sync.pushNow('target')
+    const change = sync.withShareChange('target', () => { entered.resolve(); calls.push('change'); return edit.promise })
+    expect(await sync.pushNow('target')).toBeNull()
+    expect(calls).toEqual(['target'])
+    old.resolve({kind:'not_shared'})
+    await push; await entered.promise
+    expect(await sync.pushNow('target')).toBeNull()
+    await expect(sync.withShareChange('target', async () => { calls.push('duplicate') })).rejects.toThrow('already in progress')
+    await sync.pushNow('other')
+    expect(calls).toEqual(['target','change','other'])
+    edit.reject(new Error('cloud rejected the change'))
+    await expect(change).rejects.toThrow('cloud rejected')
+    await sync.pushNow('target')
+    expect(calls).toEqual(['target','change','other','target'])
+  } finally { sync.dispose() }
+})
+
 test('local-only pushes stay silent across runs without entering the remote index', async () => {
   const pushes: string[] = []
   const notices: string[] = []

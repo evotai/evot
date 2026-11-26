@@ -1,3 +1,7 @@
+import type { CommandInventory } from '../composer/command-arguments.js'
+import type { SlashHint } from '../composer/slash-completion.js'
+import type { NoticeSpan } from '../../ui/notice-layout.js'
+
 /** Display data from the selected TUI, never the underlying tool/agent DTOs. */
 /** One row of a Write/Edit patch, laid out as the TUI's unified diff on a narrow pane.
  * `word` marks the changed tokens of a single-line edit. Older phones ignore it. */
@@ -16,6 +20,8 @@ export interface RemoteMessage {
   role: 'user' | 'assistant' | 'footer' | 'notice'
   text: string
   blocks?: RemoteBlock[]
+  /** Optional presentation; earlier phones use `text`, `styled` and `link`. */
+  command?: { styled?: true; link?: string; spans?: NoticeSpan[] }
 }
 export interface RemoteQuestion {
   header: string
@@ -51,9 +57,16 @@ export interface RemoteCommand {
   /** When present, run the phone-native equivalent rather than a terminal overlay. */
   shortcut?: 'sessions' | 'new' | 'model' | 'help'
 }
+export interface RemoteSlashHints {
+  catalog: readonly SlashHint[]
+  forked: boolean
+  inventory: CommandInventory
+}
 export interface RemoteSnapshot {
-  /** Older windows don't advertise command completion. */
+  /** Legacy runnable catalog, also describes phone-native shortcuts. */
   commands?: readonly RemoteCommand[]
+  /** The followed window's TUI hints. May include commands that only run locally. */
+  slashHints?: RemoteSlashHints
   models: RemoteModels
   sessionId: string | null
   /** Older windows omit it. */

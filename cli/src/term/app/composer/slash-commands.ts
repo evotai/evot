@@ -4,7 +4,7 @@ import type { OutputLine } from '../../../render/output.js'
 import type { OverlayState } from '../selector/overlay-state.js'
 import { resolveCommand } from '../../../commands/index.js'
 import { modelShareEvents } from '../../../session/share-events.js'
-import { formatModelLabel, modelAvailabilityNotice, nextModelOption } from '../../../features/models/options.js'
+import { modelChangeNotice, nextModelOption } from '../../../features/models/options.js'
 
 export interface CommandModelClient {
   model: string
@@ -24,7 +24,7 @@ export interface CommandResult {
   clearContext?: boolean
   newSession?: boolean
   exit?: boolean
-  restart?: boolean
+  restart?: 'safe' | 'now' | 'cancel'
   systemLines: OutputLine[]
 }
 
@@ -64,7 +64,8 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
       return { ...baseResult(ctx), exit: true }
 
     case '/restart':
-      return { ...baseResult(ctx), restart: true }
+      if (args === '' || args === 'now' || args === 'cancel') return { ...baseResult(ctx), restart: args || 'safe' }
+      return { ...baseResult(ctx), systemLines: [{ id: 'sys-restart-usage', kind: 'system', text: '  Usage: /restart [now | cancel]' }] }
 
     case '/model': {
       if (args === 'n') {
@@ -79,7 +80,7 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
         return {
           ...baseResult(ctx),
           appState,
-          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(next.model, next.provider, next.group_label)}${modelAvailabilityNotice(next)}`, shareEvents }],
+          systemLines: [{ id: 'sys-model', kind: 'system', ...modelChangeNotice(next.model, next.provider, config.thinkingLevel, next), shareEvents }],
         }
       }
       if (args) {
@@ -99,7 +100,7 @@ export function handleSlashCommand(text: string, ctx: CommandContext): CommandRe
         return {
           ...baseResult(ctx),
           appState,
-          systemLines: [{ id: 'sys-model', kind: 'system', text: `  Model → ${formatModelLabel(model, provider, selected?.group_label)}${modelAvailabilityNotice(selected)}`, shareEvents }],
+          systemLines: [{ id: 'sys-model', kind: 'system', ...modelChangeNotice(model, provider, config.thinkingLevel, selected), shareEvents }],
         }
       }
       // No arg — return empty result; handleSlashInput will show selector overlay

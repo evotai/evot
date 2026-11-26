@@ -146,7 +146,8 @@ export function createComposerController(st: ReplState, deps: ComposerDeps): Com
     }
     deps.refreshConfigInfo()
     const label = level === 'off' ? 'off' : level
-    deps.scrollback.commitStatusLine({ id: 'sys-think', kind: 'system', text: `  Thinking level → ${label}`,
+    const text = `  Thinking level → ${label}`
+    deps.scrollback.commitStatusLine({ id: 'sys-think', kind: 'system', text, remoteStatusText: text,
       shareEvents: [{ kind: 'thinking_level_change', data: { thinking_level: level } }],
     })
     deps.renderer.requestRender()

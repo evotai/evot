@@ -49,7 +49,7 @@ test('only /action takes a photo-sized body; enrollment and other routes keep th
   const l = listenRemote({ snapshot() { throw Error('unused') }, act(a) { received.push(a) } }, access)
   try {
     const pending = await pendingDevice(l.address)
-    access.decide(code, true)
+    access.approve(code)
     const auth = 'Bearer ' + (await pending.poll()).token
     const post = (path: string, body: string) => fetch(l.address + path, { method: 'POST', body,
       headers: { origin: l.address, 'content-type': 'application/json', authorization: auth } })

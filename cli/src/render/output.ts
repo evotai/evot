@@ -310,6 +310,10 @@ export interface OutputLine {
   /** System text that already carries its own ANSI styling (e.g. `/skill`).
    *  Rendered verbatim instead of being flattened to one dim gray. */
   preStyled?: boolean
+  /** Device-neutral presentation of a pre-styled command row. */
+  noticeSpans?: readonly import('../ui/notice-layout.js').NoticeSpan[]
+  /** Explicitly safe counterpart of a transient local status line. */
+  remoteStatusText?: string
   /** Tool line that is one row of a rendered diff; added/removed rows get
    *  their own fill inside the card. */
   /** Width-aware compact command budget; expanded cards have no row limit. */

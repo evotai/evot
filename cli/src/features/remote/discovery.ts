@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { readdir, unlink } from 'node:fs/promises'
+import { unlinkSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { confirmRelay, relayPermits } from './relay-permit.js'
 import { gatewaySocket, privateSocketDirectory, reapDeadSocket } from './socket-directory.js'
 import { parseRemoteAction, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
+import { parseRestartRequest, type WindowControl } from '../restart/protocol.js'
 export { profileKey, privateSocketDirectory, reapDeadSocket } from './socket-directory.js'
 
 export type Phase = 'working' | 'input' | 'idle' | 'busy'
@@ -21,6 +23,8 @@ export interface SessionBadge {
   runState?: RunBadge
   /** Last non-interrupted agent round to settle. Older terminals omit this. */
   finishedRound?: number | null
+  /** Latest agent round completed successfully. Absence does not imply completion. */
+  completed?: true
   title: string
 }
 export type WindowPresence = { phase: Phase; updatedAt: number }
@@ -35,15 +39,16 @@ export const validTerminal = (value: unknown): value is string =>
  * Only a running profile gateway requests inherited access; device credentials
  * stay at its ingress. Older gateways can only follow explicitly shared windows. */
 export function registerTerminal(home: string, host: RemoteHost, badge: () => SessionBadge, id: string = randomUUID(),
-  membership?: { session(): string; currentScope(): string | null }) {
+  membership?: { session(): string; currentScope(): string | null; pairing?(code: string, device: string): void }, control?: WindowControl) {
   if (!validTerminal(id)) throw new Error('Cannot register this terminal.')
   const dir = privateSocketDirectory(home)
   const socket = (terminal: string) => join(dir, terminal + '.sock')
   // Pin the profile that owns the window. A login/config switch must not
   // implicitly publish its old conversation to a different profile.
   const inheritedScope = membership?.currentScope() ?? null, permits = relayPermits()
-  let scope: string | null | undefined // undefined: inherit; null: /remote off; string: explicit invite
+  let scope: string | null | undefined // undefined: inherit; null: hidden; string: explicit invite
   let routerScope: string | null = null, closed = false
+  let invitation: { url: string; address: string; windowApproval?: true } | undefined
   const matches = (requested: string | null, inherit: boolean) => !closed && !!requested &&
     requested === (scope === undefined && inherit ? inheritedScope : scope) &&
     (!membership || membership.currentScope() === requested)
@@ -53,8 +58,29 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
     maxRequestBodySize: REMOTE_IMAGE_LIMITS.base64Total + 64 * 1024, // a relayed /action can carry photos
     async fetch(req) {
       const path = new URL(req.url).pathname, requested = req.headers.get('x-evot-scope')
-      if (path !== '/badge' && path !== '/state' && path !== '/action') return new Response(null, { status: 404 })
+      // Window control is for this user's own processes; the 0700 directory is
+      // its boundary. The gateway's relay cannot name this path.
+      if (path === '/restart') {
+        if (!control) return new Response(null, { status: 404 })
+        if (req.method === 'GET') return Response.json(control.status())
+        if (req.method !== 'POST') return new Response(null, { status: 405 })
+        const request = parseRestartRequest(await req.json().catch(() => null))
+        return request ? Response.json(control.request(request)) : new Response(null, { status: 400 })
+      }
       const ticket = req.headers.get('x-evot-relay')
+      if (path === '/pairing') {
+        if (req.method !== 'POST' || !membership?.pairing || !requested || !validTerminal(ticket) || req.headers.has('origin'))
+          return new Response(null, { status: 403 })
+        const { code, device } = await req.json().catch(() => ({})) ?? {}
+        if (typeof code !== 'string' || !/^\d{8}$/.test(code) || typeof device !== 'string' || !/^[a-f0-9]{20}$/.test(device))
+          return new Response(null, { status: 400 })
+        // Only a window explicitly shared by /remote can receive a QR prompt.
+        if (!matches(requested, false) || !await confirmRelay(gatewaySocket(dir, requested), ticket, id, path) || !matches(requested, false))
+          return new Response(null, { status: 403 })
+        membership.pairing(code, device)
+        return new Response(null, { status: 204 })
+      }
+      if (path !== '/badge' && path !== '/state' && path !== '/action') return new Response(null, { status: 404 })
       const inherited = scope === undefined && requested && validTerminal(ticket) && matches(requested, true)
         && await confirmRelay(gatewaySocket(dir, requested), ticket, id, path)
       const allowed = () => matches(requested, !!inherited)
@@ -62,7 +88,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         const gateway = !!routerScope && requested === routerScope
         // Even a hidden gateway must be discoverable, without revealing its row.
         const row = allowed() ? badge() : { session: membership ? membership.session() : badge().session }
-        return Response.json({ ...row, gateway, profileGateway: gateway })
+        return Response.json({ ...row, gateway, profileGateway: gateway, invitation: gateway ? invitation : undefined })
       }
       if (!allowed()) return new Response(null, { status: 403 })
       if (req.method === 'GET' && path === '/state')
@@ -82,13 +108,16 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       }),
   })
   async function request(terminal: string, path: '/badge' | '/state' | '/action', body?: unknown, background?: string) {
+    return requestInScope(terminal, path, routerScope || scope || '', body, background)
+  }
+  async function requestInScope(terminal: string, path: '/badge' | '/state' | '/action' | '/pairing', requestedScope: string, body?: unknown, background?: string) {
     if (!validTerminal(terminal)) throw new RemoteConflict('Invalid terminal.')
     const ticket = routerScope ? permits.issue(terminal, path) : null
     try {
       return await fetch('http://localhost' + path, {
         unix: socket(terminal),
         headers: {
-          'x-evot-scope': routerScope || scope || '',
+          'x-evot-scope': requestedScope,
           ...(ticket ? { 'x-evot-relay': ticket } : {}),
           ...(background ? { 'x-evot-background': background } : {}),
         },
@@ -100,23 +129,29 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       throw new RemoteConflict('Terminal is no longer available. Select a session again.')
     } finally { if (ticket) permits.forget(ticket) }
   }
-  async function inventory() {
+  async function inventory(profileScope = routerScope || scope || '') {
     const files = await readdir(dir, { withFileTypes: true }),
       online: OnlineTerminal[] = [],
       privateWindows: WindowPresence[] = [], occupied = new Set<string>()
     let unavailable = false, gateway = false, profileGateway = false
+    let gatewayInvite: typeof invitation
     await Promise.all(
       files.map(async (f) => {
         const terminal = f.name.replace(/\.sock$/, '')
         if (!validTerminal(terminal) || !f.isSocket()) return
         try {
-          const r = await request(terminal, '/badge')
+          const r = await requestInScope(terminal, '/badge', profileScope)
           if (!r.ok) {
             unavailable = true
             return
           }
-          const row = (await r.json()) as Partial<SessionBadge> & { session: string; presence?: WindowPresence; profileGateway?: boolean }
-          if (row.gateway) { gateway = true; if (row.profileGateway) profileGateway = true }
+          const { invitation: invite, ...row } = (await r.json()) as Partial<SessionBadge> & {
+            session: string; presence?: WindowPresence; profileGateway?: boolean; invitation?: typeof invitation
+          }
+          if (row.gateway) {
+            gateway = true
+            if (row.profileGateway) { profileGateway = true; gatewayInvite = invite }
+          }
           if (row.session) occupied.add(row.session)
           if (row.phase && row.workspace && typeof row.title === 'string')
             online.push({ ...(row as SessionBadge), terminal })
@@ -128,25 +163,35 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       }),
     )
     online.sort((a, b) => a.terminal.localeCompare(b.terminal))
-    return { online, occupied, unavailable, gateway, profileGateway, privateWindows }
+    return { online, occupied, unavailable, gateway, profileGateway, gatewayInvite, privateWindows }
   }
   return {
     id,
     inventory,
     request,
+    async notifyPairing(terminal: string, code: string, device: string) {
+      if (!routerScope) return false
+      try { return (await requestInScope(terminal, '/pairing', routerScope, { code, device })).status === 204 }
+      catch { return false }
+    },
     get shared() {
       return matches(routerScope ?? scope ?? null, true)
     },
+    /** How this window was last shared: inherited from the profile, hidden, or an explicit scope. */
+    get sharing(): 'inherit' | 'off' | string {
+      return scope === undefined ? 'inherit' : scope === null ? 'off' : scope
+    },
     consumeRelay: permits.consume,
-    route(value: string | null) {
+    route(value: string | null, invite?: typeof invitation) {
       permits.clear()
       routerScope = value
+      invitation = value ? invite : undefined
     },
     share(value: string | null) {
       scope = value
     },
     endInvite() {
-      if (scope !== null) scope = undefined // stop the gateway without undoing an explicit /remote off
+      if (scope !== null) scope = undefined // stop the gateway without unhiding this window
     },
     close() {
       closed = true
@@ -154,7 +199,9 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       routerScope = null
       scope = null
       void server.stop(true)
-      void unlink(socket(id)).catch(() => {})
+      // Synchronous: a restart execs right after cleanup, and the next image
+      // binds this same path for the same window.
+      try { unlinkSync(socket(id)) } catch { /* already gone */ }
     },
   }
 }

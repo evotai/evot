@@ -1,5 +1,5 @@
 import { questionPanel } from './phone-ask.js';
-import { installTouchDraft } from './phone-draft.js';
+import { inlineCommandGhost, installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
 import { registerActivityMarks } from './phone-activity.js';
 import { completionReminder } from './phone-reminder.js';
@@ -14,7 +14,8 @@ import { conversationScroll } from './phone-scroll.js';
 import { fitConversationViewport } from './phone-viewport.js';
 import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
-import { commandMenu, phoneShortcut } from './phone-commands.js';
+import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
+import { draftCarry, pageUpdates } from './phone-update.js';
 
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
@@ -29,6 +30,7 @@ let timer,
   levelsKey = '';
 registerActivityMarks(document, document.documentElement.dataset.activityFrames.split(' '));
 const messageField = installTouchDraft($('draft'), max => notice(`Message limit: ${max} characters.`));
+const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
@@ -40,6 +42,13 @@ const pickStart = new WeakMap();
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
+// The draft typed for this window survives a page update, a sign-in redirect and re-pairing.
+const drafts = draftCarry(sessionStorage);
+let draftCarried = true;
+const keepDraft = () => drafts.keep(terminal, $('draft').value);
+const pageUpdated = pageUpdates(document.documentElement.dataset.build, sessionStorage, () => {
+  keepDraft(); leaving = true; location.reload();
+});
 // Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
 let dismissed = '';
 function selectTarget(id, session) {
@@ -154,7 +163,7 @@ function paired(yes) {
 function controls() {
   const input = connected ? view?.input : null,
     switchable = connected && !!(input || view?.ask) && !busy;
-  commands.render(input && !busy ? view.commands : null, view?.models.options);
+  commands.render(input && !busy && !tab.composing ? view : null);
   drawer.lock(busy);
   $('openSessions').disabled = $('browseSessions').disabled = busy;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
@@ -173,10 +182,11 @@ function controls() {
   if (hint.textContent !== text) hint.textContent = text;
   hint.hidden = !text;
   hint.toggleAttribute('data-preview', !!preview);
+  const commandHint = renderCommandGhost(commands.hint);
   const pending = lastDraft(view);
   shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count || photos.busy,
     pending && outbox.some(item => item.draftId === pending) ? pending : null,
-    !!input && (!$('commandMenu').hidden || !!preview));
+    !!input && (commandHint || !$('commandMenu').hidden || !!preview));
   tab.render(connected ? view : null, busy || photos.busy, photos.count, candidate);
   $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
   background.setConnected(connected);
@@ -229,6 +239,11 @@ function render(s, mode) {
   }
   connected = true;
   $('chatLoading').hidden = true;
+  if (draftCarried) {
+    draftCarried = false;
+    const kept = $('draft').value ? '' : drafts.take(terminal);
+    if (kept) { $('draft').value = kept; resize(); }
+  }
   if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
   $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
@@ -304,6 +319,7 @@ function scheduleReconnect() {
 }
 function unpair() {
   ++epoch; liveRequest?.abort(); clearTimeout(timer);
+  keepDraft(); draftCarried = true;
   connected = false;
   token = null;
   sessionStorage.removeItem('evot.remote');
@@ -314,10 +330,15 @@ function unpair() {
   reconnectFailures++;
   scheduleReconnect();
 }
+// iPadOS in desktop mode describes itself as a Mac in its user agent.
+const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
 async function api(path, body, extra = {}, signal) {
   const credential = token;
   const headers = { ...extra };
-  if (token) headers.Authorization = 'Bearer ' + token;
+  if (token) {
+    headers.Authorization = 'Bearer ' + token;
+    if (touchMac) headers['X-Evot-Touch-Mac'] = '1';
+  }
   if (terminal && (path === '/state' || path === '/action' || path.startsWith('/sessions?limit='))) headers['X-Evot-Terminal'] = terminal;
   if (path === '/state' && background.selected) headers['X-Evot-Background'] = background.selected;
   if (body) headers['Content-Type'] = 'application/json';
@@ -329,6 +350,7 @@ async function api(path, body, extra = {}, signal) {
     signal: signal ?? AbortSignal.timeout(path.startsWith('/sessions?limit=') ? 30000 : path === '/open' ? 15000 : 8000),
   });
   if (res.status === 401 && token === credential) unpair();
+  pageUpdated(res.headers.get('x-evot-build'));
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
 }
@@ -463,13 +485,15 @@ async function pair(auto = false) {
         $('deviceStatus').textContent = 'Checking whether the computer already knows this browser…';
       } else {
         button.textContent = 'Waiting for approval…';
-        $('deviceStatus').textContent = `In the TUI that received the request, check the code, then run /remote approve ${code}.`;
+        $('deviceStatus').textContent = invitedTerminal
+          ? `In the terminal that displayed the QR, match this code and run /remote approve ${code}.`
+          : `In the TUI that received the request, check the code, then run /remote approve ${code}.`;
         $('approvalCode').hidden = $('approvalClock').hidden = false;
         $('approvalCode').textContent = code;
         const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s · this page updates automatically`; };
         tick(); countdown = setInterval(tick, 1000);
       }
-    }, url => { nav.redirect(); location.assign(url); leaving = true; });
+    }, url => { keepDraft(); nav.redirect(); location.assign(url); leaving = true; });
     if (!result) return;
     sessionStorage.setItem('evot.remote', result.token);
     token = result.token;
@@ -498,13 +522,12 @@ async function pair(auto = false) {
     if (!leaving) { button.disabled = false; form.removeAttribute('aria-busy'); }
   }
 }
-async function action(payload, done, failed) {
+async function action(payload, done, failed, command = false) {
   if (!connected || !view || busy) return;
   busy = true;
   if (payload.kind === 'suggest') dismissed = ''; // an explicit retry may return the same candidate
   controls();
-  const feedback = {
-    send: ['Sending message…', 'Message sent.'],
+  const feedback = command ? ['Running command…', ''] : {
     'cancel-ask': ['Cancelling question…', 'Question cancelled.'], 'interrupt-ask': ['Stopping this run…', 'Stop requested.'],
     answer: ['Sending answers…', 'Answers sent.'], stop: ['Stopping this run…', 'Stop requested.'],
     'pull-draft': ['Pulling back pending message…', 'Pulled back · not sent.'],
@@ -613,8 +636,22 @@ function submitMessage(kind) {
   const text = $('draft').value;
   if (!connected || !kind || tab.composing || messageField.readOnly || (!text.trim() && !photos.count) || photos.busy || busy) return;
   if (text.length > messageField.maxLength) { notice(`Message is too long (${text.length}/${messageField.maxLength}). Shorten it before sending.`); return; }
-  const shortcut = phoneShortcut(text, view.commands);
+  const shortcut = phoneShortcut(text, view.commands, view.slashHints);
   if (shortcut) { if (kind !== 'queue') runShortcut(shortcut); return; }
+  const command = phoneLocalCommand(text, view.slashHints);
+  if (command) {
+    if (photos.count) { notice('Remove the photos before running this command.'); return; }
+    if (kind !== 'send') { notice(`Wait for the current run to finish before running ${command}.`); return; }
+    const target = terminal, session = view.sessionId;
+    // A local command yields notices, not a user-message bubble. Retain the
+    // draft on rejection, or if the user starts typing again while admission is pending.
+    void action({kind, text: text.trim()}, () => {
+      if (terminal === target && view?.sessionId === session && $('draft').value === text) {
+        $('draft').value = ''; resize();
+      }
+    }, undefined, true);
+    return;
+  }
   if (text && text === view.suggestion) dismissed = text; // sent: do not offer it again
   const taken = photos.take(), n = taken.images.length;
   // The computer records the turn as text plus this label; match it to retire the pending bubble.
@@ -650,7 +687,7 @@ function runShortcut({kind, args}) {
   if (kind === 'new') { if (args) { notice('Usage: /new'); return; } void showFolders(); }
   if (kind === 'help') {
     setDraft(args ? '/' + args.replace(/^\//, '') : '/'); $('draft').focus();
-    if ($('commandMenu').hidden) notice('No matching command in this window. Type / to browse.');
+    if (!commands.browse() && !commands.hint) notice('No matching command in this window. Type / to browse.');
   }
   if (kind === 'model') {
     const select = $('models');

@@ -238,7 +238,8 @@ describe('sub-command completion', () => {
     for (const [input, expected] of [
       ['/skill inst', 'install '],
       ['/remote dev', 'devices '],
-      ['/remote rev', 'revoke '],
+      ['/remote on', 'on '],
+      ['/remote of', 'off '],
       ['/log sh', 'shot '],
       ['/env li', 'list '],
       ['/clip a', 'all '],
@@ -247,6 +248,15 @@ describe('sub-command completion', () => {
       const result = complete(input, input.length)
       expect(result, input).not.toBeNull()
       expect(result!.replacement, input).toBe(expected)
+    }
+  })
+
+  test('Remote advertises only the normal controls; infrequent actions are contextual', () => {
+    const prefix = '/remote '
+    expect(getGhostHint(prefix, prefix.length)).toBe('  [on  off  devices]')
+    for (const subcommand of ['approve', 'deny', 'shutdown', 'hide', 'revoke']) {
+      const input = prefix + subcommand
+      expect(complete(input, input.length), input).toBeNull()
     }
   })
 

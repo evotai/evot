@@ -1,5 +1,6 @@
 import type { RequestListener } from 'node:http'
 import { join } from 'node:path'
+import { validTerminal } from './discovery.js'
 import { DeviceStore } from './devices.js'
 import { leasePath, tryGatewayLease } from './lease.js'
 import type { DeviceAccess } from './pairing.js'
@@ -22,25 +23,46 @@ function describe(store: DeviceStore) {
 const result = (removed: boolean) => removed ? 'Device revoked.' : 'Device not found. Use /remote devices to list current IDs.'
 const cleared = (count: number) => count ? `Revoked ${count} device${count === 1 ? '' : 's'}. Every phone must be approved again.` : 'No approved devices.'
 
-/** Only the private lease socket serves this two-operation protocol. In
- * particular there is no approve, shell, share, or arbitrary command route. */
-export function grantHandler(owner: () => DeviceAccess | null): RequestListener {
+/** Only the private per-profile lease serves these device operations. The
+ * public gateway cannot forward a decision or a general command here. */
+export function grantHandler(owner: () => DeviceAccess | null, gatewayTerminal?: string): RequestListener {
   return (req, res) => {
     // Bun's node:http adapter uses absolute-form on Unix sockets; Node
     // normally uses origin-form. Accept the same exact local resource in both.
     const path = req.url?.replace(/^http:\/\/localhost\//, '/')
     const id = path?.match(/^\/devices\/([a-f0-9]{20}|all)$/)?.[1]
     const list = req.method === 'GET' && path === '/devices'
-    if (req.headers.host !== 'localhost' || req.headers.origin !== undefined || (!list && !(id && req.method === 'DELETE'))) {
+    const match = path?.match(/^\/pairing\/([^/]+)\/approve\/(\d{8})$/)
+    const approval = req.method === 'POST' && match && validTerminal(match[1]) ? match : null
+    if (req.headers.host !== 'localhost' || req.headers.origin !== undefined || (!approval && !list && !(id && req.method === 'DELETE'))) {
       res.writeHead(403).end(); return
     }
     try {
       const access = owner()
       if (!access) { res.writeHead(503).end(); return }
+      if (approval) {
+        const [, terminal, code] = approval
+        const matched = access.approve(code!, terminal) ||
+          (terminal === gatewayTerminal && access.approve(code!))
+        res.writeHead(matched ? 204 : 404, { 'Cache-Control': 'no-store' }).end()
+        return
+      }
       const text = id === ALL_DEVICES ? cleared(access.revokeAll()) : id ? result(access.revoke(id)) : describe(access.store)
       res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end(text)
     } catch { res.writeHead(500).end() }
   }
+}
+
+export async function approvePairing(home: string, scope: string, terminal: string, code: string) {
+  let response: Response
+  try {
+    response = await fetch(`http://localhost/pairing/${terminal}/approve/${code}`, {
+      unix: leasePath(home, scope), headers: { host: 'localhost' }, method: 'POST', redirect: 'error', signal: AbortSignal.timeout(2000),
+    })
+  } catch { throw Error('Could not confirm the approval with the Remote gateway in this profile.') }
+  if (response.status === 204) return true
+  if (response.status === 404) return false
+  throw Error('Could not confirm the approval. If the gateway is on an older build, approve in its TUI.')
 }
 
 /** Never write beside a live gateway's cached grants. If no owner exists,

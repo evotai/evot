@@ -8,6 +8,7 @@
  */
 
 import stringWidth from 'string-width'
+import type { RemotePresence } from '../../features/remote/presence.js'
 import { confirmationHint } from './confirmation-hint.js'
 import { line, block, plain, dim, colored, type ViewBlock, type StyledLine, type StyledSpan } from './types.js'
 import { finiteSize, spansWidth, truncateTailToWidth, truncateToWidth } from './width.js'
@@ -31,6 +32,7 @@ export interface PromptFooterVM {
   modelAvailability?: string
   logMode: boolean
   dashboardUrl: string | null
+  remotePresence?: RemotePresence
   cwd: string
   /** Fork ancestry titles, root → current; empty or absent for non-forks. */
   forkTrail?: string[]
@@ -101,7 +103,8 @@ function buildForkTrail(trail: readonly string[], columns: number): StyledLine |
  *
  *   dim      facts that rarely change: cwd, model, context figures, dashboard
  *   runtime  things evot itself is doing right now: loop wait, background
- *            shells. One hue, the brand, so they read as one family
+ *            shells, connected Remote devices. One hue, the brand, so they
+ *            read as one family
  *   warn     what needs the user: context pressure (yellow/red), loop about to
  *            wake (yellow), the next model reported unavailable (yellow)
  *
@@ -168,6 +171,26 @@ function buildBackgroundChip(
 }
 
 
+function remoteStatus(presence: RemotePresence | undefined, columns: number): StyledSpan[] {
+  if (!presence) return []
+  const { phone, tablet, desktop, unknown } = presence
+  const total = phone + tablet + desktop + unknown
+  if (!total) return []
+  const label = `Remote · ${total} online`
+  const breakdown = [
+    phone ? `${phone} phone${phone === 1 ? '' : 's'}` : '',
+    tablet ? `${tablet} tablet${tablet === 1 ? '' : 's'}` : '',
+    desktop ? `${desktop} PC${desktop === 1 ? '' : 's'}` : '',
+    unknown ? `${unknown} unknown` : '',
+  ].filter(Boolean).join(' · ')
+  const detail = ` · ${breakdown}`
+  const room = columns - 3 // one cell for the location and two for separation
+  if (stringWidth(label + detail) <= room) return [runtime(label), dim(detail)]
+  if (stringWidth(label) <= room) return [runtime(label)]
+  const compact = `Remote ${total}`
+  return stringWidth(compact) <= room ? [runtime(compact)] : []
+}
+
 function buildFooter(input: PromptFooterVM, columns: number, modeShownAbove: boolean): ViewBlock {
   const cloud = input.cloudBadge ? `${input.cloudBadge} ` : ''
   const modeWords = !modeShownAbove && input.logMode ? '[log] ' : ''
@@ -176,10 +199,11 @@ function buildFooter(input: PromptFooterVM, columns: number, modeShownAbove: boo
   const contextPercent = input.contextWindow > 0
     ? input.contextTokens / input.contextWindow * 100
     : 0
+  const remote = remoteStatus(input.remotePresence, columns)
 
   for (const layout of FOOTER_LAYOUTS) {
     if (layout.nextOnly && !input.nextModel) continue
-    const candidate = buildFooterCandidate(input, mode, cwd, contextPercent, layout, columns)
+    const candidate = buildFooterCandidate(input, mode, cwd, contextPercent, layout, columns, remote)
     if (footerCandidateWidth(candidate) <= columns) return block([renderFooterCandidate(candidate, columns)])
   }
 
@@ -213,7 +237,7 @@ const FOOTER_LAYOUTS: FooterLayout[] = [
 
 interface FooterCandidate {
   left: StyledSpan[]
-  dashboard: StyledSpan[] | null
+  right: StyledSpan[]
 }
 
 function buildFooterCandidate(
@@ -223,13 +247,15 @@ function buildFooterCandidate(
   contextPercent: number,
   layout: FooterLayout,
   columns: number,
+  remote: StyledSpan[],
 ): FooterCandidate {
   const dashboard = layout.dashboard && input.dashboardUrl
     ? [
         { text: 'dashboard ', dim: true } satisfies StyledSpan,
         { text: layout.dashboard === 'port' ? dashboardPort(input.dashboardUrl) : input.dashboardUrl, dim: true, link: input.dashboardUrl } satisfies StyledSpan,
       ]
-    : null
+    : []
+  const right = dashboard.length && remote.length ? [...dashboard, dim(' │ '), ...remote] : [...dashboard, ...remote]
 
   const buildLeft = (location: string): StyledSpan[] => {
     const groups: StyledSpan[][] = [[dim(location)]]
@@ -268,15 +294,12 @@ function buildFooterCandidate(
 
   const branch = layout.branch && input.gitBranch ? ` (${input.gitBranch})` : ''
   const fullLocation = `${mode}${cwd}${branch}`
-  let left = buildLeft(fullLocation)
-  let candidate = { left, dashboard }
+  const candidate = { left: buildLeft(fullLocation), right }
   if (!layout.truncateCwd || footerCandidateWidth(candidate) <= columns) return candidate
 
   const fixedWidth = footerCandidateWidth(candidate) - stringWidth(fullLocation)
   const availableLocationWidth = Math.max(1, columns - fixedWidth)
-  left = buildLeft(truncateTailToWidth(`${mode}${cwd}`, availableLocationWidth))
-  candidate = { left, dashboard }
-  return candidate
+  return { left: buildLeft(truncateTailToWidth(`${mode}${cwd}`, availableLocationWidth)), right }
 }
 
 /** `◼◼◼◼ medium`: the same ramp-lit ladder as the /model picker, so shift+tab
@@ -300,13 +323,13 @@ function thinkingBadge(level: string, levels: readonly string[] | undefined): St
 
 function footerCandidateWidth(candidate: FooterCandidate): number {
   const left = spansWidth(candidate.left)
-  return candidate.dashboard ? left + 2 + spansWidth(candidate.dashboard) : left
+  return candidate.right.length ? left + 2 + spansWidth(candidate.right) : left
 }
 
 function renderFooterCandidate(candidate: FooterCandidate, columns: number): StyledLine {
-  if (!candidate.dashboard) return line(...candidate.left)
-  const padding = columns - spansWidth(candidate.left) - spansWidth(candidate.dashboard)
-  return line(...candidate.left, plain(' '.repeat(Math.max(2, padding))), ...candidate.dashboard)
+  if (!candidate.right.length) return line(...candidate.left)
+  const padding = columns - spansWidth(candidate.left) - spansWidth(candidate.right)
+  return line(...candidate.left, plain(' '.repeat(Math.max(2, padding))), ...candidate.right)
 }
 
 function dashboardPort(address: string): string {

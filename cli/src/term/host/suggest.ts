@@ -1,6 +1,7 @@
 import type { LoopSession } from '../../features/loop/session.js'
 import { formatModelOptionLabel, modelOptions } from '../../features/models/options.js'
 import type { Agent } from '../../native/index.js'
+import { isInteractiveSession, sessionLineTitle } from '../../session/resume.js'
 import type { BackgroundTerminals } from '../app/background/background-terminals.js'
 import { type ComposerGuidance, type SuggestionTrigger, resolveComposerGuidance } from '../app/composer/composer-guidance.js'
 import type { PendingImages } from '../app/composer/pending-images.js'
@@ -31,7 +32,7 @@ export interface SuggestController {
   liveWorkflowRuntime(): WorkflowRuntime
   requestProductSuggestion(trigger: SuggestionTrigger): void
   suggestionInputReady(): boolean
-  suggestionInventory(): CommandInventory
+  suggestionInventory(sessionLimit?: number): CommandInventory
 }
 
 /** Policy inputs for inline suggestions: composer guidance, eligibility, command inventory, live workflow facts. */
@@ -54,12 +55,16 @@ export function createSuggestController(st: ReplState, deps: SuggestDeps): Sugge
     // A loop between its timer and its run is neither parked nor waiting.
     return (st.isLoading || !deps.loopSession.active || deps.loopSession.waiting) && composerPolicy().allowSuggestion
   }
-  function suggestionInventory(): CommandInventory {
-    return {
-      models: modelOptions(st.configInfo, deps.agent.model).map(model => ({ value: model.spec, label: formatModelOptionLabel(model) })),
-      sessions: (deps.resumeCache.metadata ?? []).filter(session => session.session_id !== st.sessionId)
-        .map(session => ({ value: session.session_id, label: session.title || session.session_id })),
+  function suggestionInventory(sessionLimit = Infinity): CommandInventory {
+    const sessions: CommandInventory['sessions'][number][] = []
+    for (const session of deps.resumeCache.metadata ?? []) {
+      if (sessions.length >= sessionLimit) break
+      // Match Remote's session picker visibility, not the raw history store.
+      if (session.session_id === st.sessionId || session.turns === 0 || !isInteractiveSession(session)) continue
+      sessions.push({ value: session.session_id, label: sessionLineTitle(session) })
     }
+    return { sessions, models: modelOptions(st.configInfo, deps.agent.model)
+      .map(model => ({ value: model.spec, label: formatModelOptionLabel(model) })) }
   }
   function requestProductSuggestion(trigger: SuggestionTrigger): void {
     if (!st.suggestionsReady) { st.startupSuggestion = trigger; return }

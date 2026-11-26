@@ -1,28 +1,37 @@
 import { expect, test } from 'bun:test'
-import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { createHmac, randomBytes } from 'node:crypto'
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { sharedConnectInvite, ticketGate } from '../../../src/features/remote/cloud-connect.js'
+import { connectInviteUrl, ticketGate } from '../../../src/features/remote/cloud-connect.js'
+import { machineIdentity } from '../../../src/features/remote/machine-identity.js'
 import { DeviceStore, deviceId } from '../../../src/features/remote/devices.js'
 import { DeviceAccess } from '../../../src/features/remote/pairing.js'
 import { listenRemote } from '../../../src/features/remote/server.js'
 import { testDevice } from '../../helpers/remote-device.js'
 
-test('QR links select a computer, never carry login credentials, and respect custom account servers', () => {
-  const home = mkdtempSync(join(tmpdir(), 'evot-invite-'))
+test('a machine identity persists without an account, differs on a fresh install, and refuses a copied identity', () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-machine-'))
+  const other = mkdtempSync(join(tmpdir(), 'evot-machine-'))
+  const fixture = () => 'linux:1234'
   try {
-    const dir = join(home, 'remote', 'profile'), secret = randomBytes(32).toString('base64url')
-    const id = createHash('sha256').update(`owner:${secret}`).digest('hex').slice(0, 32)
-    const invite = (base: string) => sharedConnectInvite(home, 'profile', JSON.stringify([base, 'owner']))
-    mkdirSync(dir, { recursive: true })
-    expect(() => invite('https://auto.evot.ai')).toThrow() // must not allocate from a sibling
-    writeFileSync(join(dir, 'host.key'), secret, { mode: 0o600 })
-    expect(invite('https://auto.evot.ai')).toBe(`https://connect.evot.ai/${id}`)
-    expect(invite('https://self.example')).toBe(`https://self.example/connect?env=${id}`)
+    expect(() => machineIdentity(home, false, fixture)).toThrow()
+    const original = machineIdentity(home, true, fixture)
+    expect(machineIdentity(home, true, fixture)).toEqual(original)
+    expect(machineIdentity(other, true, () => 'linux:4321').environment).not.toBe(original.environment)
+    const path = '.evotai/remote/machine.json'
+    copyFileSync(join(home, path), join(other, path))
+    expect(() => machineIdentity(other, true, () => 'linux:4321')).toThrow('belongs to another machine')
+    expect(machineIdentity(other, false, fixture)).toEqual(original) // full clones with the same platform ID look alike
   } finally {
-    rmSync(home, { recursive: true, force: true })
+    for (const dir of [home, other]) rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('QR links select a computer, never carry login credentials, and respect custom account servers', () => {
+  const id = '1'.repeat(32)
+  expect(connectInviteUrl('https://auto.evot.ai', id)).toBe(`https://connect.evot.ai/${id}`)
+  expect(connectInviteUrl('https://self.example', id)).toBe(`https://self.example/connect?env=${id}`)
 })
 
 test('managed Unix ingress requires exact public origin, an account ticket, device possession AND local approval', async () => {
@@ -84,7 +93,7 @@ test('managed Unix ingress requires exact public origin, an account ticket, devi
     }
     expect(await (await post('/device/poll', { receipt })).json()).toEqual({ pending: true })
     expect((await post('/action', {})).status).toBe(401)
-    expect(access.decide(code, true)).toBe(true)
+    expect(access.approve(code)).toBe(true)
     const { token } = (await (await post('/device/poll', { receipt })).json()) as { token: string }
     expect((await post('/action', { kind: 'stop', generation: 1 }, token)).status).toBe(204)
     expect(actions).toBe(1)

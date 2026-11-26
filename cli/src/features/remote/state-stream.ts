@@ -1,5 +1,7 @@
 import type { RemoteSnapshot } from './protocol.js'
 
+const KEEPALIVE_MS = 4_000
+
 // A pull-driven SSE stream: at most one local snapshot in flight, no queue of
 // intermediate frames for a slow phone. A reconnect always starts with a complete view.
 export function stateStream(
@@ -7,9 +9,10 @@ export function stateStream(
   status: () => number,
   signal: AbortSignal,
   release: () => void,
+  heartbeat: () => void,
 ) {
   const encoder = new TextEncoder(), fields = new Map<string, string>()
-  let first = true, stopped = false, lastWrite = 0
+  let first = true, stopped = false, lastWrite = 0, lastHeartbeat = -Infinity
   function stop() {
     if (!stopped) { stopped = true; release() }
   }
@@ -34,9 +37,10 @@ export function stateStream(
             if (fields.get(key) !== serialized) { patch[key] = v; fields.set(key, serialized) }
           }
           const now = Date.now()
-          if (Object.keys(patch).length || now - lastWrite >= 4000) {
+          if (Object.keys(patch).length || now - lastWrite >= KEEPALIVE_MS) {
             const frame = Object.keys(patch).length ? 'data: ' + JSON.stringify(first ? { view } : { patch }) : ': alive'
             controller.enqueue(encoder.encode(frame + '\n\n'))
+            if (now - lastHeartbeat >= KEEPALIVE_MS) { heartbeat(); lastHeartbeat = now }
             first = false; lastWrite = now
             // Leave backpressure and cadence to the next pull, including for a constantly changing view.
             await Bun.sleep(200)

@@ -1,28 +1,32 @@
 import type { Agent, CloudPushProgress, CloudPushResult, SessionMeta } from '../native/index.js'
 import { resolveSessionByPrefix } from '../session/resume.js'
-import { createHyperlink } from '../ui/hyperlink.js'
 import { buildPrivacyCard, type OutputLine } from '../render/output.js'
 import { parsePrivacyStop } from '../render/privacy-notice.js'
 import { describeShareResult, shareAccess } from '../session/cloud-sessions.js'
 import type { ProgressBar, ProgressBarOptions } from '../ui/progress-bar.js'
 
-export interface ShareContext {
-  agent: Pick<Agent, 'listSessions' | 'cloudShareSession' | 'cloudUnshareSession' | 'cloudPushSession' | 'cloudForkRemoteSession' | 'importSharedSession'>
+export interface SessionShareContext {
+  agent: Pick<Agent, 'cloudShareSession' | 'cloudUnshareSession'>
   /** One in-place progress row for a long upload; absent in hosts without a terminal. */
   progressBar?(options: ProgressBarOptions): ProgressBar
-  openShareList(): Promise<void>
-  /** Legacy one-shot share links, kept so they can still be revoked. */
-  openShareLinks?(): Promise<void>
-  getSessionId(): string | null
   flushShareNotices?(): Promise<void>
-  isBusy?(): boolean
-  commitSystem(id: string, text: string): void
+  withShareChange?(sessionId: string, change: () => Promise<void>): Promise<void>
+  commitSystem(id: string, text: string, remoteText?: string): void
   /** Committed cards (a privacy stop); absent hosts fall back to a line. */
-  commitLines?(lines: OutputLine[]): void
+  commitLines?(lines: OutputLine[], remoteLines?: OutputLine[]): void
   requestRender(): void
   /** The list caches remote state; tell it what just happened. */
   cloudAcknowledged?(sessionId: string, result: CloudPushResult): void
   cloudForgotten?(sessionId: string): void
+}
+
+export interface ShareContext extends SessionShareContext {
+  agent: SessionShareContext['agent'] & Pick<Agent, 'listSessions' | 'cloudPushSession' | 'cloudForkRemoteSession' | 'importSharedSession'>
+  openShareList(): Promise<void>
+  /** Legacy one-shot share links, kept so they can still be revoked. */
+  openShareLinks?(): Promise<void>
+  getSessionId(): string | null
+  isBusy?(): boolean
   /** `/share cloud` and `/share <url>` land in the fetched copy. */
   resumeSession?(session: SessionMeta): Promise<void>
 }
@@ -34,11 +38,11 @@ const USAGE = 'Usage: /share [public | team | private | off | list] [session-id 
  * with no terminal) the notice is shown once and the result follows it.
  */
 async function withUploadProgress(
-  ctx: ShareContext,
+  ctx: SessionShareContext,
   show: (text: string) => void,
   label: string,
   upload: (onProgress: (progress: CloudPushProgress) => void) => Promise<CloudPushResult>,
-): Promise<{ result: CloudPushResult; finish: (text: string) => void }> {
+): Promise<{ result: CloudPushResult; finish: ProgressBar['finish'] }> {
   const bar = ctx.progressBar?.({ label, unit: 'entries', pending: 'preparing…' })
   if (!bar) {
     show(label)
@@ -48,7 +52,7 @@ async function withUploadProgress(
   }
   try {
     const result = await upload(progress => paintUploadProgress(bar, progress))
-    return { result, finish: text => bar.finish(text) }
+    return { result, finish: bar.finish }
   } catch (error) {
     // The row must not stay at 40% forever; the error line follows it.
     bar.finish(`${label} — failed`)
@@ -89,7 +93,72 @@ function formatMegabytes(bytes: number): string {
 export function isShareLink(arg: string): boolean {
   return /^(https?:\/\/)?[^\s/]+\/(?:share|team)\/[A-Za-z0-9_-]{22}(?:\/(?:content|session\.json))?(?:[?#][^\s]*)?$/.test(arg)
 }
+export type SessionShareMode = 'public' | 'team' | 'private' | 'off'
+
+/** The exact commands that change visibility of the followed session. */
+export function currentSessionShareMode(args: string): SessionShareMode | null {
+  const mode = args.trim()
+  switch (mode) {
+    case 'public': case 'team': case 'private': case 'off': return mode
+    default: return null
+  }
+}
+
 const WORDS = new Set(['public', 'team', 'private', 'off', 'list', 'links', 'cloud', 'local'])
+
+function shareFailure(ctx: SessionShareContext, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const stop = parsePrivacyStop(message)
+  if (stop?.kind === 'blocked' && ctx.commitLines) {
+    ctx.commitLines(buildPrivacyCard({ ...stop, target: 'share' }))
+  } else if (stop?.kind === 'unavailable' && ctx.commitLines) {
+    ctx.commitLines(buildPrivacyCard(stop), buildPrivacyCard({ ...stop, reason: 'Check privacy configuration in the TUI.' }))
+  } else {
+    // An arbitrary native/network error may include local paths or credentials.
+    const denied = /Public sharing is (?:disabled|not enabled) for this account\./.exec(message)
+    const remoteMessage = denied ? `${denied[0]} Use Team sharing or ask an administrator to enable Public sharing.` : 'See the TUI for details.'
+    ctx.commitSystem('sys-share-error', `Share failed: ${message}`, `Share failed: ${remoteMessage}`)
+  }
+}
+
+/** A text-only share surface, with no session lookup, import or list commands. */
+export async function runSessionShare(ctx: SessionShareContext, sid: string, mode: SessionShareMode) {
+  try { await changeSessionShare(ctx, sid, mode) }
+  catch (error) { shareFailure(ctx, error) }
+}
+
+function changeSessionShare(ctx: SessionShareContext, sid: string, mode: SessionShareMode | 'keep') {
+  const change = () => writeSessionShare(ctx, sid, mode)
+  return ctx.withShareChange ? ctx.withShareChange(sid, change) : change()
+}
+
+async function writeSessionShare(ctx: SessionShareContext, sid: string, mode: SessionShareMode | 'keep') {
+  await ctx.flushShareNotices?.()
+  const show = (text: string) => ctx.commitSystem('sys-share', text)
+  if (mode === 'off') {
+    await ctx.agent.cloudUnshareSession(sid)
+    ctx.cloudForgotten?.(sid)
+    show('Removed from cloud · local copy kept')
+    return
+  }
+  // Turning visibility back to private hides the page, not what was already read.
+  if (mode === 'public') {
+    ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — anyone with the link can read it')
+  } else if (mode === 'team') {
+    ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — members of your group who sign in can read it')
+  }
+  const label = mode === 'public' ? 'Publishing' : mode === 'team' ? 'Sharing with your team' : 'Syncing to the cloud'
+  const { result, finish } = await withUploadProgress(ctx, show, label,
+    onProgress => ctx.agent.cloudShareSession(sid, mode, onProgress))
+  ctx.cloudAcknowledged?.(sid, result)
+  const visibility = result.kind === 'synced' ? shareAccess(result.cloud) : mode === 'keep' ? 'private' : mode
+  const line = describeShareResult(result, visibility)
+  const url = result.kind !== 'synced' ? null
+    : visibility === 'public' ? result.cloud.public_url
+    : visibility === 'team' ? result.cloud.team_url : null
+  finish(line, url ?? undefined)
+  if (visibility === 'private' && result.kind === 'synced') show('  Page for your team or anyone? /share team · /share public')
+}
 
 /**
  * `/share` opens the cloud session list without changing the current session.
@@ -139,15 +208,8 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
       sid = resolved.session.session_id
     }
     if (!sid) throw new Error('No active session to share.')
-    await ctx.flushShareNotices?.()
-
-    if (word === 'off') {
-      await ctx.agent.cloudUnshareSession(sid)
-      ctx.cloudForgotten?.(sid)
-      show('Removed from cloud · local copy kept')
-      return
-    }
     if (word === 'cloud') {
+      await ctx.flushShareNotices?.()
       // Divergence, cloud side: the server copy becomes a fresh local session
       // and the diverged local one stays as it is.
       show('Fetching the cloud copy…')
@@ -158,6 +220,7 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
       return
     }
     if (word === 'local') {
+      await ctx.flushShareNotices?.()
       // Divergence, local side: overwrite the server copy wholesale.
       const { result, finish } = await withUploadProgress(ctx, show, 'Replacing the cloud copy',
         onProgress => ctx.agent.cloudPushSession(sid, true, onProgress))
@@ -166,32 +229,6 @@ export async function runShareCommand(ctx: ShareContext, args: string): Promise<
       return
     }
 
-    const requested = word as 'public' | 'team' | 'private' | 'keep'
-    // Say what leaves the machine before it does: the page is public-by-link,
-    // and turning it private later hides the page, not what was already read.
-    if (requested === 'public') {
-      ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — anyone with the link can read it')
-    } else if (requested === 'team') {
-      ctx.commitSystem('sys-share-scope', '  transcript, system prompt and tool output go up — members of your group who sign in can read it')
-    }
-    const label = requested === 'public' ? 'Publishing' : requested === 'team' ? 'Sharing with your team' : 'Syncing to the cloud'
-    // A long session uploads in batches and can take minutes; one row shows
-    // how far it has got, then becomes the result.
-    const { result, finish } = await withUploadProgress(ctx, show, label,
-      onProgress => ctx.agent.cloudShareSession(sid, requested, onProgress))
-    ctx.cloudAcknowledged?.(sid, result)
-    const visibility = result.kind === 'synced' ? shareAccess(result.cloud) : requested === 'keep' ? 'private' : requested
-    const line = describeShareResult(result, visibility)
-    const url = result.kind !== 'synced' ? null
-      : visibility === 'public' ? result.cloud.public_url
-      : visibility === 'team' ? result.cloud.team_url : null
-    finish(url ? line.replace(url, createHyperlink(url)) : line)
-    if (visibility === 'private' && result.kind === 'synced') show('  Page for your team or anyone? /share team · /share public')
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const stop = parsePrivacyStop(message)
-    // A share uploads through sync; either way the user asked to share.
-    if (stop && ctx.commitLines) ctx.commitLines(buildPrivacyCard(stop.kind === 'blocked' ? { ...stop, target: 'share' } : stop))
-    else ctx.commitSystem('sys-share-error', `Share failed: ${message}`)
-  }
+    await changeSessionShare(ctx, sid, word as SessionShareMode | 'keep')
+  } catch (error) { shareFailure(ctx, error) }
 }

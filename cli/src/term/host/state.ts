@@ -61,7 +61,7 @@ export interface ReplState {
   loginInFlight: boolean
   // Local foreground commands reuse the animated status row without pretending
   // they are abortable agent streams or showing stale LLM usage.
-  foregroundCommand: 'log-shot' | null
+  foregroundCommand: 'log-shot' | 'share' | null
   streamRef: QueryStream | null
   pendingModelHandoff: { spec: string; effort: string | undefined; submitted: boolean } | null
   runStartedAt: number | null
@@ -155,7 +155,15 @@ export interface ReplState {
   remoteEpoch: number
   remoteAttempt: number
   remoteOpening: boolean
+  remoteRetryAt: number
   remoteListener: SharedEnvironment | null
+  /** Scope of the phone that opened this window; kept so a restart reopens it the same way. */
+  remotePhoneScope: string | null
+  /** A safe /restart is waiting for its moment; `restartPoll` re-checks it. */
+  restartPending: boolean
+  restartPoll: ReturnType<typeof setInterval> | null
+  /** The checkpoint is written and the process is handing over. */
+  restarting: boolean
   readonly conversationTail: ConversationTail
   // Dashboard state
   serverState: ServerState | null
@@ -264,7 +272,8 @@ export function createReplState(model: string, cwd: string): ReplState {
     liveContentMaxHeight: 0,
     liveContentWidth: 0,
     liveRegionStartRow: 0,
-    terminalBus:null, remoteChild:false, remoteWatchedAt:0, remoteParkTimer:null, remoteAttempt:0, remoteOpening:false, remoteEpoch:0, remoteListener: null,
+    terminalBus:null, remoteChild:false, remoteWatchedAt:0, remoteParkTimer:null, remoteAttempt:0, remoteOpening:false, remoteRetryAt:0, remoteEpoch:0, remoteListener: null,
+    remotePhoneScope: null, restartPending: false, restartPoll: null, restarting: false,
     remoteTitle: null,
     conversationTail: new ConversationTail(),
     serverState: null,

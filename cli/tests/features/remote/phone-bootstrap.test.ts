@@ -22,14 +22,20 @@ test('the public pairing page ships one complete client allowed by its CSP, with
   try {
     const r = await fetch(gateway.address), html = await r.text(), client = embeddedClient(html)
     expect(r.status).toBe(200)
+    // Every reply names the page build, so an open page can tell a restarted gateway serves a newer one.
+    const build = html.match(/class="remote-shell" data-build="([\w-]{16})"/)?.[1]
+    expect(build).toBeTruthy()
+    expect(r.headers.get('x-evot-build')).toBe(build!)
+    expect((await fetch(gateway.address + '/state')).headers.get('x-evot-build')).toBe(build!)
     expect([...html.matchAll(/aria-keyshortcuts="([^"]+)"/g)].map(m => m[1])).toEqual(['Tab','Escape','Escape'])
     expect(html).toContain('id="compactComposer" inert')
     const draft = html.match(/<textarea id="draft"[^>]*>/)?.[0] ?? ''
     for (const attr of ['autocomplete="off"','autocorrect="off"','autocapitalize="none"','spellcheck="false"','writingsuggestions="false"']) expect(draft).toContain(attr)
     expect(draft).not.toContain('readonly')
     expect(draft).not.toContain('placeholder=') // fallback must not paint behind the shared hint
-    expect(draft).toContain('aria-describedby="draftHint"')
+    expect(draft).toContain('aria-describedby="draftHint draftCommandHint"')
     expect(html.match(/id="draftHint"/g)).toHaveLength(1)
+    expect(html).toMatch(/<\/textarea><span id="draftHint"[^>]*><\/span><div id="draftGhost" hidden><span[^>]*aria-hidden="true"[^>]*><\/span><wbr><span id="draftCommandHint"><\/span><\/div>/)
     expect(html).toContain('<section class="composer-card" id="compose"')
     expect(html).toContain('<button id="send" type="button"')
     expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*>Message…/)

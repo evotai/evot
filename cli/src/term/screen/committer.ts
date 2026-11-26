@@ -93,12 +93,13 @@ export class Committer {
     this.deps.notices?.(lines)
   }
 
-  commitStatus(line: OutputLine): void {
+  commitStatus(line: OutputLine): boolean {
     const replaced = replaceOrPushStatusLine(this.deps.compactLines, line)
     replaceOrPushStatusLine(this.deps.expandedLines, line)
     if (replaced) this.deps.invalidateHistory()
     this.deps.notices?.([line])
     this.paint([line], this.deps.compactLines.at(-2))
+    return replaced
   }
 
   system(id: string, text: string, kind: OutputLine['kind'] = 'system'): void {
@@ -127,14 +128,14 @@ export class Committer {
    * here does erase it from the screen. Returns false when the line is gone,
    * which is the normal outcome after `/clear`.
    */
-  replaceById(id: string, text: string): boolean {
+  replaceById(id: string, text: string, noticeSpans?: OutputLine['noticeSpans']): boolean {
     let found = false
     for (const list of [this.deps.compactLines, this.deps.expandedLines]) {
       const index = list.findIndex((line) => line.id === id)
       if (index === -1) continue
       const existing = list[index]
       if (!existing) continue
-      list[index] = { ...existing, text }
+      list[index] = { ...existing, text, noticeSpans }
       found = true
     }
     if (!found) return false

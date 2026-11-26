@@ -1,7 +1,8 @@
-import { phonePage, phoneScriptHash, phoneStyleHash } from './assets.js'
+import { phoneBuild, phonePage, phoneScriptHash, phoneStyleHash } from './assets.js'
 import { stateStream } from './state-stream.js'
 import { validTerminal } from './discovery.js'
-import { DeviceAccess } from './pairing.js'
+import type { DeviceAccess } from './pairing.js'
+import { remoteDeviceKind } from './presence.js'
 import type { CloudGate } from './cloud-connect.js'
 import { validKey } from './devices.js'
 import { parseRemoteAction, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
@@ -26,6 +27,7 @@ export function listenRemote(
     'Cache-Control': 'no-store, no-transform',
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
+    'X-Evot-Build': phoneBuild,
     'Content-Security-Policy': `default-src 'none'; script-src ${phoneScriptHash}; connect-src 'self'; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
@@ -76,6 +78,7 @@ export function listenRemote(
             count: 0, more: false, rows: [], online: [], privateWindows: [], unavailable: false, failed: false,
           }
           if (!authorized()) return unauthorized()
+          access.observe(auth, remoteDeviceKind(req.headers))
           // Format on the phone for its locale, but in this computer's time zone.
           const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
           return Response.json(catalog, { headers: { ...headers, 'X-Evot-Time-Zone': timeZone } })
@@ -85,7 +88,9 @@ export function listenRemote(
           online: [],
           history: [],
         }
-        return authorized() ? Response.json(rows, { headers }) : unauthorized()
+        if (!authorized()) return unauthorized()
+        access.observe(auth, remoteDeviceKind(req.headers))
+        return Response.json(rows, { headers })
       }
       if (path === '/folders' && req.method === 'GET') {
         const rows = (await workspace?.folders()) ?? []
@@ -94,6 +99,7 @@ export function listenRemote(
       if (path === '/state' && req.method === 'GET') {
         const bg = req.headers.get('x-evot-background') ?? undefined
         if (bg && bg !== 'list' && !validTerminal(bg)) return fail(400, 'Invalid task.')
+        const kind = remoteDeviceKind(req.headers)
         if (req.headers.get('accept') === 'text/event-stream') {
           if (streams >= 16) return fail(429, 'Too many live views.')
           streams++
@@ -102,13 +108,14 @@ export function listenRemote(
             const r = await workspace!.bus.request(other, '/state', undefined, bg)
             if (!r.ok) throw new RemoteConflict('Terminal no longer shared.')
             return r.json() as Promise<ReturnType<typeof host.snapshot>>
-          }, () => !authorized() ? 401 : shared() ? 200 : 409, req.signal, () => { streams-- })
+          }, () => !authorized() ? 401 : shared() ? 200 : 409, req.signal, () => { streams-- }, () => access.observe(auth, kind))
           return new Response(body, { headers: { ...headers, 'Cache-Control': 'no-store, no-transform', 'Content-Type': 'text/event-stream', 'X-Accel-Buffering': 'no' } })
         }
         const response = other ? await workspace!.bus.request(other, '/state', undefined, bg) : Response.json(host.snapshot(bg))
         const body = await response.text()
         if (!authorized() || !shared()) return unauthorized()
         if (!response.ok) return fail(response.status, body)
+        access.observe(auth, kind)
         const etag = `"${Bun.hash(body).toString(16)}"`
         return req.headers.get('if-none-match') === etag
           ? new Response(null, { status: 304, headers: { ...headers, etag } })
@@ -132,18 +139,27 @@ export function listenRemote(
       if (enrollment) {
         if (!body || typeof body !== 'object') return fail(400, 'Invalid device request.')
         const b = body as Record<string, unknown>
+        // The invite is only a notification destination, never an access grant.
+        // Bind it to the challenge; neither proof nor poll may change it.
+        let terminal: string | undefined
+        if (path === '/device/challenge' && b.terminal !== undefined) {
+          if (!workspace || !validTerminal(b.terminal)) return fail(400, 'Invalid approval window.')
+          terminal = b.terminal
+        }
         if (cloud && path === '/device/challenge') {
           if (!validKey(b.key)) return fail(400, 'Invalid device key.')
-          if (!b.ticket) return Response.json({ login: cloud.login(b.key) }, { headers })
+          if (!b.ticket) return Response.json({ login: cloud.login(b.key, terminal) }, { headers })
           if (!cloud.admit(b.key, b.ticket)) return fail(403, 'Account sign-in expired. Connect again.')
         }
         const result =
           path === '/device/challenge'
-            ? access.challenge(b.key)
+            ? access.challenge(b.key, terminal)
             : path === '/device/prove'
             // Cloudflare adds the visitor address; the loopback gateway sees only its peer.
-            ? access.prove(b.nonce, b.signature, (cloud ? req.headers.get('cf-connecting-ip') : peer) ?? undefined)
+            ? await access.prove(b.nonce, b.signature, (cloud ? req.headers.get('cf-connecting-ip') : peer) ?? undefined)
             : access.poll(b.receipt)
+        if (closed || options.active?.() === false) return fail(410, 'Remote closed')
+        if (result && 'unavailable' in result) return fail(409, 'The window that showed this QR is no longer available. Run /remote there and scan the new code.')
         if (!result) return fail(403, 'Device request denied, expired or busy.')
         return Response.json(
           'token' in result ? { ...result, current: workspace?.bus.shared ? workspace.bus.id : null } : result,

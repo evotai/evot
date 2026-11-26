@@ -13,11 +13,8 @@
  * clock. One instance per operation; nothing here is shared state.
  */
 
-import chalk from 'chalk'
-
-import { renderCommandNotice } from './command-notice.js'
 import { formatElapsed, renderBar } from './format.js'
-import { SECTION_MUTED } from './section.js'
+import { layoutCommandNotice, noticeResult, type NoticeSpan } from './notice-layout.js'
 import type { ProgressLine } from './progress-line.js'
 
 export interface ProgressBarOptions {
@@ -48,7 +45,7 @@ export interface ProgressBar {
   /** Report `done` of `total` units. `total <= 0` draws an empty bar. */
   set: (done: number, total: number, detail?: ProgressDetail) => void
   /** Replace the row with the result and stop the clock. */
-  finish: (text: string) => void
+  finish: (text: string, link?: string) => void
 }
 
 /** `12,000 / 32,000 entries · 37%`; omits the unit when there is none. */
@@ -58,30 +55,29 @@ export function formatProgressCount(done: number, total: number, unit?: string, 
   return `${count ?? `${fmt(done)} / ${fmt(total)}${unit ? ` ${unit}` : ''}`} · ${percent}%`
 }
 
-/** The row text for one state. Exported so the rendering can be tested without a clock. */
-export function renderProgressBar(
+/** The shared row for one state, independent of a clock or output device. */
+export function layoutProgressBar(
   options: Pick<ProgressBarOptions, 'label' | 'unit' | 'pending' | 'width'>,
   state: { done: number; total: number; detail?: ProgressDetail } | null,
   elapsedMs: number,
-): string {
-  const muted = (text: string): string => chalk.hex(SECTION_MUTED)(text)
+): NoticeSpan[] {
   const width = options.width ?? 20
   const elapsed = elapsedMs >= 1000 ? ` · ${formatElapsed(elapsedMs)}` : ''
   const note = typeof state?.detail?.note === 'function' ? state.detail.note() : state?.detail?.note
   const body = state === null
     ? `${options.pending ?? 'preparing…'}${elapsed}`
     : `${renderBar(state.done, state.total, width)}  ${formatProgressCount(state.done, state.total, options.unit, state.detail?.count)}${note ? ` · ${note}` : ''}${elapsed}`
-  return renderCommandNotice({ state: 'progress', message: `${options.label}  ${muted(body)}` })
+  return layoutCommandNotice({ state: 'progress', label: options.label, message: body })
 }
 
-export function createProgressBar(line: ProgressLine, options: ProgressBarOptions): ProgressBar {
+export function createProgressBar(line: ProgressLine<readonly NoticeSpan[]>, options: ProgressBarOptions): ProgressBar {
   const now = options.now ?? Date.now
   const startedAt = now()
   let state: { done: number; total: number; detail?: ProgressDetail } | null = null
   let finished = false
   const paint = (): void => {
     if (finished) return
-    line.update(renderProgressBar(options, state, now() - startedAt))
+    line.update(layoutProgressBar(options, state, now() - startedAt))
   }
   paint()
   const tickMs = options.tickMs ?? 1000
@@ -94,10 +90,10 @@ export function createProgressBar(line: ProgressLine, options: ProgressBarOption
       state = { done, total, detail }
       paint()
     },
-    finish: text => {
+    finish: (text, link) => {
       finished = true
       if (timer) clearInterval(timer)
-      line.finish(text)
+      line.finish(noticeResult(text, link))
     },
   }
 }

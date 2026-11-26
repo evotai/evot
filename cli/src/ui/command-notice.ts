@@ -1,36 +1,28 @@
 import chalk from 'chalk'
-import { SECTION_INDENT, SECTION_CONTENT_INDENT, SECTION_MUTED } from './section.js'
+import { wrapHyperlink } from './hyperlink.js'
+import { layoutCommandNotice, noticeHref, type CommandNotice, type NoticeSpan } from './notice-layout.js'
 import { getTheme } from './theme/index.js'
 
-export interface CommandNotice {
-  message: string
-  state?: 'info' | 'progress' | 'success' | 'error'
-  label?: string
-  /** Unindented detail rows; empty rows retain paragraph spacing. */
-  details?: string[]
+/** TUI adapter for the same spans the browser paints with its CSS theme. */
+export function renderNoticeSpans(spans: readonly NoticeSpan[]): string {
+  const theme = getTheme()
+  return spans.map(({ text, tone, link }) => {
+    const href = link ? noticeHref(text) : undefined
+    if (href) return wrapHyperlink(href, theme.brand.paint(text))
+    switch (tone) {
+      case 'muted': return chalk.hex(theme.panelMutedFg)(text)
+      case 'label': return theme.brandBold.paint(text)
+      case 'success': return chalk.hex(theme.cursorHex)(text)
+      case 'error': return chalk.hex(theme.errorHex)(text)
+      default: return text
+    }
+  }).join('')
 }
 
-/**
- * Shared presentation for command status and results. Commit as pre-styled.
- *
- * An error notice spends its colour on the `✗` alone; the message stays in
- * the terminal's default ink so it reads as text, not as an alarm.
- */
 export function renderCommandNotice(notice: CommandNotice): string {
-  const muted = (text: string): string => chalk.hex(SECTION_MUTED)(text)
-  const state = notice.state ?? 'info'
-  const marker = state === 'progress' ? muted('⋯')
-    : state === 'success' ? chalk.green('✓')
-      : state === 'error' ? chalk.hex(getTheme().errorHex)('✗') : ''
-  const label = notice.label ? `${getTheme().brandBold.paint(notice.label)}  ` : ''
-  const message = state === 'error' ? notice.message : muted(notice.message)
-  return [
-    `${' '.repeat(SECTION_INDENT)}${marker ? `${marker} ` : ''}${label}${message}`,
-    ...(notice.details ?? []).map(row => row ? `${' '.repeat(SECTION_CONTENT_INDENT)}${muted(row)}` : ''),
-  ].join('\n')
+  return renderNoticeSpans(layoutCommandNotice(notice))
 }
 
-/** A one-line failure notice: `  ✗ <message>`. The only way to paint an error row. */
 export function renderErrorNotice(message: string): string {
   return renderCommandNotice({ state: 'error', message })
 }

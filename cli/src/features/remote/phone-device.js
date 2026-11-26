@@ -33,9 +33,9 @@ async function identity() {
 }
 const fragment = new URLSearchParams(location.hash.slice(1));
 export const returnTicket = fragment.get('ticket');
-// Codes printed by older CLIs name a window; it only means "start pairing now".
-export const invitedTerminal = fragment.get('terminal');
-if (location.hash) history.replaceState(history.state, '', location.pathname);
+// The QR selects where to show approval, not which conversation to open.
+export const invitedTerminal = location.hash ? fragment.get('terminal') : window.history?.state?.evotPairingWindow ?? null;
+if (location.hash) history.replaceState({...history.state, evotPairingWindow: invitedTerminal}, '', location.pathname);
 // A second invite opened in the same tab can be a fragment-only navigation:
 // the browser does not run the module again unless we reload that entry.
 window.addEventListener('hashchange', () => {
@@ -56,7 +56,7 @@ export async function connectDevice(post, progress, redirect) {
   const key = encode(await crypto.subtle.exportKey('raw', pair.publicKey));
   const attestation = ticket;
   ticket = null;
-  const { nonce, login } = await post('/device/challenge', { key, ticket: attestation });
+  const { nonce, login } = await post('/device/challenge', { key, ticket: attestation, terminal: invitedTerminal ?? undefined });
   if (login) {
     progress('signin');
     redirect(login);
@@ -81,7 +81,7 @@ export async function connectDevice(post, progress, redirect) {
       try {
         reply = await post('/device/poll', { receipt });
       } catch (error) {
-        if (error.status === 403) throw Error('Approval was denied or expired. Connect again when ready.');
+        if (error.status === 403) throw Error('Approval is no longer pending. Connect again to request a new code.');
         if (error.status && error.status < 500) throw error;
         reply = {pending:true}; // network loss: keep the same pending request
       }

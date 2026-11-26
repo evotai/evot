@@ -1,23 +1,15 @@
-import type { Agent } from '../native/index.js'
-import type { ConfigInfo } from '../native/index.js'
+import { version, type Agent, type ConfigInfo } from '../native/index.js'
 import { findLastAssistantMarkdown, findLastAssistantTurn } from '../session/assistant-markdown.js'
-import { runShareCommand } from '../commands/share.js'
+import { runShareCommand, type ShareContext } from '../commands/share.js'
 import type { OutputLine } from '../render/output.js'
 import { defaultDeps, loginDeniedMessage, type LoginDeps } from '../commands/login-flow.js'
-import { createCommandOutput } from './widgets/command-output.js'
-import { renderCommandNotice, renderErrorNotice } from '../ui/command-notice.js'
+import { commandOutputLine, createCommandOutput, type CommandOutputPort } from './widgets/command-output.js'
+import { layoutCommandNotice } from '../ui/notice-layout.js'
+import { renderErrorNotice } from '../ui/command-notice.js'
 import type { RunResult } from '../update/types.js'
 
-export interface ReplCommandContext {
+export interface ReplCommandContext extends Omit<ShareContext, 'progressBar'> {
   agent: Agent
-  flushShareNotices?: () => Promise<void>
-  isBusy?: () => boolean
-  openShareList: () => Promise<void>
-  openShareLinks?: () => Promise<void>
-  cloudAcknowledged?: (sessionId: string, result: import('../native/index.js').CloudPushResult) => void
-  cloudForgotten?: (sessionId: string) => void
-  resumeSession?: (session: import('../native/index.js').SessionMeta) => Promise<void>
-  getSessionId: () => string | null
   getCompactLines: () => import('../render/output.js').OutputLine[]
   getConfigInfo: () => ConfigInfo | null
   commitSystem: (id: string, text: string, kind?: OutputLine['kind']) => void
@@ -25,7 +17,7 @@ export interface ReplCommandContext {
   commitRevealed: (id: string, text: string, erasedText: string, delayMs: number) => void
   commitLines: (lines: OutputLine[]) => void
   /** Rewrite an already-committed line, found by id. False when it is gone. */
-  replaceLine: (id: string, text: string) => boolean
+  replaceLine: CommandOutputPort['replaceLine']
   /** Current terminal width, for commands that lay out their own columns. */
   columns: () => number
   requestRender: () => void
@@ -116,9 +108,25 @@ export async function handleClipCommand(ctx: ReplCommandContext): Promise<void> 
   }
 }
 
-export async function handleShareCommand(ctx: ReplCommandContext, args: string): Promise<void> {
-  const output = createCommandOutput(ctx, 'share')
-  await runShareCommand({ ...ctx, progressBar: options => output.bar(options) }, args)
+/** The same progress row and diagnostics on either surface; private details are
+ * supplied separately by the share operation, not guessed by the renderer. */
+export function shareCommandOutput(port: CommandOutputPort) {
+  const output = createCommandOutput(port, 'share')
+  return {
+    commitLines: port.commitLines,
+    commitSystem(id: string, text: string, remoteText?: string) {
+      const line = (message: string): OutputLine => id === 'sys-share-error'
+        ? commandOutputLine(id, layoutCommandNotice({ state: 'error', message }))
+        : commandOutputLine(id, [{ text: message, tone: 'muted' }])
+      port.commitLines([line(text)], remoteText === undefined ? undefined : [line(remoteText)])
+      port.requestRender()
+    },
+    progressBar: output.bar,
+  }
+}
+
+export async function handleShareCommand(ctx: ReplCommandContext, args: string, port: CommandOutputPort = ctx): Promise<void> {
+  await runShareCommand({ ...ctx, ...shareCommandOutput(port) }, args)
 }
 
 /**
@@ -161,7 +169,7 @@ export async function handleSkillCommand(ctx: ReplCommandContext, args: string):
         'view' in outcome ? skill.renderOperation(outcome.view) : skill.renderNotice(outcome.notice),
       )
     } catch (err) {
-      status.finish(renderCommandNotice({ state: 'error', message: `install failed: ${(err as { message?: string })?.message ?? err}` }))
+      status.finish(layoutCommandNotice({ state: 'error', message: `install failed: ${(err as { message?: string })?.message ?? err}` }))
     }
     return
   }
@@ -178,7 +186,7 @@ export async function handleSkillCommand(ctx: ReplCommandContext, args: string):
         'view' in outcome ? skill.renderOperation(outcome.view) : skill.renderNotice(outcome.notice),
       )
     } catch (err) {
-      status.finish(renderCommandNotice({ state: 'error', message: `update failed: ${(err as { message?: string })?.message ?? err}` }))
+      status.finish(layoutCommandNotice({ state: 'error', message: `update failed: ${(err as { message?: string })?.message ?? err}` }))
     }
     return
   }
@@ -288,9 +296,8 @@ export async function handleLogoutCommand(
   }
 }
 
-export async function handleVersionCommand(ctx: ReplCommandContext): Promise<void> {
-  const { version } = await import('../native/index.js')
-  ctx.commitSystem('sys-version', `  evot v${version()}`)
+export function handleVersionCommand(port: CommandOutputPort): void {
+  createCommandOutput(port, 'version').commit('sys-version', layoutCommandNotice({ message: `evot v${version()}` }))
 }
 
 export async function handleUpdateCommand(
@@ -298,16 +305,16 @@ export async function handleUpdateCommand(
   run?: () => Promise<RunResult>,
 ): Promise<void> {
   const status = createCommandOutput(ctx, 'update').progress()
-  status.update(renderCommandNotice({ state: 'progress', label: 'update', message: 'checking for updates...' }))
+  status.update(layoutCommandNotice({ state: 'progress', label: 'update', message: 'checking for updates...' }))
   try {
     const result = await (run ?? (async () => {
       const { runUpdate } = await import('../update/index.js')
       const { version } = await import('../native/index.js')
-      return runUpdate(version(), { onProgress: message => status.update(renderCommandNotice({ state: 'progress', label: 'update', message })) })
+      return runUpdate(version(), { onProgress: message => status.update(layoutCommandNotice({ state: 'progress', label: 'update', message })) })
     }))()
     switch (result.kind) {
       case 'up_to_date':
-        status.finish(renderCommandNotice({
+        status.finish(layoutCommandNotice({
           state: 'success',
           message: result.staleReason
             ? `evot is up to date, per the last successful check (${result.staleReason}).`
@@ -316,7 +323,7 @@ export async function handleUpdateCommand(
         }))
         break
       case 'updated':
-        status.finish(renderCommandNotice({
+        status.finish(layoutCommandNotice({
           state: 'success',
           message: `updated ${result.from} → ${result.to}. /restart to apply.`,
           details: result.notes?.length
@@ -325,14 +332,14 @@ export async function handleUpdateCommand(
         }))
         break
       case 'error':
-        status.finish(renderCommandNotice({
+        status.finish(layoutCommandNotice({
           state: 'error', message: result.message,
           details: result.proxy ? [result.proxy] : [],
         }))
         break
     }
   } catch (err) {
-    status.finish(renderCommandNotice({
+    status.finish(layoutCommandNotice({
       state: 'error', message: `update failed: ${(err as { message?: string })?.message ?? err}`,
     }))
   }

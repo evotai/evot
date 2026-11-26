@@ -6,7 +6,10 @@ import { sharingScope } from '../../../src/features/remote/transport.js'
 import { DeviceStore } from '../../../src/features/remote/devices.js'
 import { testDevice } from '../../helpers/remote-device.js'
 import { privateSocketDirectory } from '../../../src/features/remote/discovery.js'
-import type { SessionMeta } from '../../../src/native/index.js'
+import type { CloudPushProgress, CloudPushResult, SessionMeta } from '../../../src/native/index.js'
+import type { OutputLine } from '../../../src/render/output.js'
+import { Committer } from '../../../src/term/screen/committer.js'
+import { createScrollbackController, type ScrollbackDeps } from '../../../src/term/host/scrollback.js'
 import type { PhoneWorkspace } from '../../../src/features/remote/workspace.js'
 import { windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { createReplState } from '../../../src/term/host/state.js'
@@ -19,7 +22,7 @@ import { RunOwnership } from '../../../src/term/app/run/run-ownership.js'
 import { createModelSelectionController, type ModelSelectionDeps } from '../../../src/term/host/model-selection.js'
 import { PendingQueue, currentQueueTarget } from '../../../src/term/app/queue/pending-queue.js'
 import { draft, queueFixture } from '../../helpers/prompt-queue.js'
-import { ConversationTail } from '../../../src/term/app/remote/conversation.js'
+import { ConversationTail, displayText } from '../../../src/term/app/remote/conversation.js'
 import { commandChoices, phoneShortcut } from '../../../src/features/remote/phone-commands.js'
 import type { RemoteSnapshot } from '../../../src/features/remote/protocol.js'
 import legacyComposer from '../../fixtures/contracts/remote-composer-legacy.json'
@@ -32,7 +35,15 @@ import { inlineSuggestion } from '../../../src/features/remote/phone-composer-ke
 
 function harness(findSession: (id: string) => Promise<SessionMeta | null> = async () => null, listSessions: () => Promise<SessionMeta[]> = async () => []) {
   const st = createReplState('fixture','/fixture')
-  const runOwnership = new RunOwnership(), calls: string[] = []
+  const runOwnership = new RunOwnership(), calls: string[] = [], notices: string[] = []
+  const compactLines: OutputLine[] = [], expandedLines: OutputLine[] = []
+  const committer = new Committer({ compactLines, expandedLines, columns: () => 100, isExpanded: () => false,
+    requestRender() {}, invalidateHistory() {}, logLines() {} })
+  const scrollback = createScrollbackController(st, {committer} as ScrollbackDeps)
+  const share = {
+    push: async (_sid: string, _mode: string, _progress: (value: CloudPushProgress) => void): Promise<CloudPushResult> => ({kind:'not_shared'}),
+    off: async (_sid: string): Promise<void> => {},
+  }
   let request = Promise.withResolvers<SuggestionOutcome>()
   const suggestions = new PromptSuggestion({
     key: () => 'fixture', eligible: () => true, draft: () => getEditorText(st.editor), context: suggestionContext, changed() {},
@@ -53,27 +64,138 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
   const modelSelection = createModelSelectionController(st, {
     agent:{setProvider(){}, setThinkingLevel:(level:string) => { st.configInfo!.thinkingLevel = level; return level }},
     runCtl:{requestModelHandoff:(spec:string,effort?:string) => { st.pendingModelHandoff = {spec,effort,submitted:true}; return true }},
-    renderer:{requestRender(){}}, refreshConfigInfo(){}, scrollback:{commitStatusLine(){}},
+    renderer:{requestRender(){}}, refreshConfigInfo(){}, scrollback,
   } as unknown as ModelSelectionDeps)
   const pendingQueue = new PendingQueue(st.pendingQueue)
   const shells = { target:'["fixture",["a"]]', afterRefresh:'' }
   const runInteractionInput = () => ({active:st.isLoading, phase:st.spinnerState.phase, owner:1,
+    localOperation:st.foregroundCommand !== null,
     backgroundTasks:st.backgroundWaitSince !== null ? 1 : 0, backgroundOwner:shells.target})
   const activity = createActivityController(st, {manualCompaction:{active:false},loopSession:{waiting:false},runInteraction:new RunInteraction(),
     awaitedTaskSummary:()=>undefined, runInteractionInput,
   } as unknown as ActivityDeps)
-  const remote = createRemoteController(st, { activity, asks, pendingQueue, suggest:{suggestionInputReady:()=>true}, queueLifecycle:{reconcile(){ if (st.streamRef) pendingQueue.reconcile(st.streamRef) }}, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,cloudUnshareSession:async()=>{}}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{commitLocalNotice(){}}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined,
+  const remote = createRemoteController(st, { activity, asks, pendingQueue, suggest:{suggestionInputReady:()=>true,suggestionInventory:()=>({models:[],sessions:[]})}, queueLifecycle:{reconcile(){ if (st.streamRef) pendingQueue.reconcile(st.streamRef) }, dispatchNext:() => calls.push('dispatch')}, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,
+    cloudShareSession:(sid:string,mode:string,progress:(value:CloudPushProgress)=>void) => share.push(sid,mode,progress), cloudUnshareSession:(sid:string) => share.off(sid)}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{...scrollback, commitLocalNotice:(_key:string,text:string) => notices.push(text)}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined,
       stopTarget:()=>shells.target,
       refresh:()=>{if (shells.afterRefresh) shells.target = shells.afterRefresh}, stopAll:(target:string)=>calls.push('stop:'+target)},composer:{cycleThinkingLevel(){calls.push('cycle'); return true}, toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
     exitAfterCleanup:(code:number) => calls.push('exit:'+code),
     submit:{ submitConversationText:(...args: Parameters<RemoteDeps['submit']['submitConversationText']>) => {
       submissions.push(args); calls.push(args[1] + ':' + args[0])
     } },
-    runCtl:{ runInteractionInput, interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); st.isLoading = false; st.streamMachine = null; calls.push('stop') } },
+    runCtl:{ runInteractionInput, startSpinner() {}, stopSpinner() {}, interruptStream:() => { runOwnership.revoke(); asks.resolvePendingAsk(); st.isLoading = false; st.streamMachine = null; calls.push('stop') } },
   } as unknown as RemoteDeps)
   function run() { st.isLoading = true; st.streamMachine = createStreamMachineState(st.appState,st.spinnerState); return runOwnership.begin() }
-  return {st,remote,asks,run,calls,submissions,shells,pendingQueue,suggestions,finishSuggestion}
+  return {st,remote,asks,run,calls,notices,share,submissions,shells,pendingQueue,suggestions,finishSuggestion,compactLines,scrollback}
 }
+
+test('Remote /share only changes the followed saved session, with text results and no model turn', async () => {
+  const {st,remote,submissions,share,calls,pendingQueue,compactLines} = harness()
+  const send = (text: string, generation = remote.snapshot().generation) => remote.act({kind:'send',text,generation})
+  send('/share')
+  expect(remote.snapshot().messages.at(-1)?.text.trim()).toBe('Usage on Remote: /share team | private | off | public (current session only)')
+  expect(() => send('/share team')).toThrow('No active session')
+  st.sessionId = 'current'
+  st.editor = insertText(st.editor,'local draft')
+  pendingQueue.accept({queue:'follow_up',target:'current',text:'saved queue',expandedText:'saved queue',snapshot:draft('saved queue')})
+  const initialQueue = remote.snapshot().promptQueue
+  const upload = Promise.withResolvers<CloudPushResult>(), entered = Promise.withResolvers<void>()
+  share.push = (sid, mode, progress) => {
+    calls.push(`${sid}:${mode}`)
+    progress({uploaded_entries:1,total_entries:2,batch:1,batches:2})
+    entered.resolve(); return upload.promise
+  }
+  const observed = remote.snapshot().generation
+  send('/share team', observed)
+  await entered.promise
+  const progress = remote.snapshot().messages
+  expect(progress.at(-1)?.text).toContain('1 / 2 entries · 50%')
+  expect(progress.at(-1)?.text).toBe(displayText(compactLines.at(-1)?.text ?? ''))
+  expect(progress.at(-1)?.command?.spans).toEqual(compactLines.at(-1)?.noticeSpans)
+  expect(progress.at(-1)?.command?.spans).toContainEqual({text:'Sharing with your team',tone:'label'})
+  expect(remote.snapshot()).toMatchObject({input:null,active:true,canStop:false})
+  expect(() => send('/share off', observed)).toThrow('changed')
+  expect(() => send('/share off')).toThrow('no longer available')
+  const url = 'https://example.test/team/abcdefghijklmnopqrstuv'
+  upload.resolve({kind:'synced',pushed:2,cloud:{visibility:'private',team:true,team_url:url,synced_at:'now',synced_seq:2}})
+  await Bun.sleep(0)
+  expect(remote.snapshot().messages).toHaveLength(progress.length)
+  expect(remote.snapshot().messages.at(-1)).toMatchObject({role:'notice',text:`👥 Team · ${url}  (members sign in to read it; live: the page follows this session)`,command:{link:url}})
+  expect(remote.snapshot().messages.at(-1)?.text).toBe(displayText(compactLines.at(-1)?.text ?? ''))
+  expect(remote.snapshot().messages.at(-1)?.command?.spans).toContainEqual({text:url,link:true})
+  expect(remote.snapshot()).toMatchObject({input:'send',active:false,promptQueue:initialQueue})
+  expect(calls).toEqual(['current:team','dispatch'])
+  expect(getEditorText(st.editor)).toBe('local draft')
+  expect(st.overlay.kind).toBe('none')
+  expect(submissions).toEqual([])
+
+  share.push = async (sid, mode) => { calls.push(`${sid}:${mode}`); throw new Error('Public sharing is not enabled for this account.') }
+  send('/share public')
+  await Bun.sleep(0)
+  expect(remote.snapshot().messages.at(-1)?.text).toContain('✗ Share failed: Public sharing is not enabled for this account.')
+  share.off = async sid => { calls.push(`${sid}:off`) }
+  send('/share off')
+  await Bun.sleep(0)
+  expect(remote.snapshot().messages.at(-1)?.text).toBe('Removed from cloud · local copy kept')
+  expect(calls).toEqual(['current:team','dispatch','current:public','dispatch','current:off','dispatch'])
+  expect(() => send('/share private aaaaaaaa')).toThrow('current session only')
+  expect(submissions).toEqual([])
+})
+
+test('Remote version uses the same output row as the TUI without a prompt or a draft change', () => {
+  const {st,remote,compactLines,submissions} = harness()
+  st.editor = insertText(st.editor,'terminal draft')
+  remote.act({kind:'send',text:'/version',generation:remote.snapshot().generation})
+  expect(remote.snapshot().messages).toEqual([{ role:'notice', text:displayText(compactLines[0]?.text ?? ''),
+    command:{styled:true,spans:compactLines[0]?.noticeSpans} }])
+  expect(compactLines[0]?.text).toMatch(/evot v\d+\.\d+/)
+  expect(getEditorText(st.editor)).toBe('terminal draft')
+  expect(submissions).toEqual([])
+})
+
+test('Remote share omits raw diagnostics and keeps the privacy card layout', async () => {
+  const {st,remote,share,compactLines} = harness()
+  st.sessionId = 'current'
+  const send = () => remote.act({kind:'send',text:'/share private',generation:remote.snapshot().generation})
+  const secret = 'fake-credential-never-in-a-snapshot'
+  share.push = async () => { throw new Error(`transport failed: ${secret}`) }
+  send(); await Bun.sleep(0)
+  expect(compactLines.at(-1)?.text).toContain(secret)
+  expect(JSON.stringify(remote.snapshot())).not.toContain(secret)
+  expect(remote.snapshot().messages.at(-1)?.text).toContain('✗ Share failed: See the TUI for details.')
+
+  share.push = async () => { throw new Error('privacy blocked this share: it contains PRIVATE_KEY. Nothing was sent') }
+  send(); await Bun.sleep(0)
+  const card = remote.snapshot().messages.at(-1)
+  expect(card).toMatchObject({role:'notice',blocks:[{kind:'tool',state:'error',text:expect.stringContaining('nothing was uploaded · PRIVATE_KEY')}]})
+  expect(card?.text).toBe(compactLines.slice(-3).map(line => displayText(line.text)).join('\n'))
+})
+
+test('paired output is opt-in and scoped to the observed conversation', () => {
+  const {st,remote,scrollback,compactLines} = harness()
+  const first = scrollback.commandOutput(() => {})
+  scrollback.commitRevealed('reveal', 'fake-secret', '••••', 0)
+  scrollback.commitLocalNotice('pair', 'private pairing code')
+  expect(remote.snapshot().messages).toEqual([])
+  first.commitLines([{id:'progress',kind:'system',text:'starting'}])
+  remote.sessionChanged()
+  st.conversationTail.replace([])
+  expect(first.replaceLine('progress','the old result')).toBe(true)
+  expect(compactLines.at(-1)?.text).toBe('the old result')
+  expect(remote.snapshot().messages).toEqual([])
+})
+
+test('Remote share cannot be steered or queued while a model turn runs', () => {
+  const {st,remote,run,calls,submissions} = harness()
+  st.sessionId = 'current'
+  const generation = run()
+  for (const kind of ['steer','queue'] as const) {
+    expect(() => remote.act({kind,text:'/share off',generation})).toThrow('finish before sharing')
+  }
+  expect(remote.snapshot()).toMatchObject({generation,input:'steer',canStop:true})
+  expect(calls).toEqual([])
+  expect(submissions).toEqual([])
+  expect(st.pendingQueue.entries).toEqual([])
+})
 
 test('three open sessions retain their picker titles/order as each terminal changes state or closes', async () => {
   const rows = ['alpha','beta','gamma'].map((session_id,i) => ({session_id, cwd:'/fixture', title:`First ${i} … latest ${i}`, turns:1,
@@ -95,24 +217,47 @@ test('three open sessions retain their picker titles/order as each terminal chan
     const post = (path:string, body:unknown) => fetch(address+path,{method:'POST',headers:{origin:address,'Content-Type':'application/json'},body:JSON.stringify(body)})
     expect((await fetch(address+'/sessions?catalog')).status).toBe(401)
     // A new phone's request lands in the gateway composer as a draft; a draft in progress is left alone.
-    const stranger = await testDevice(), knock = async () => {
+    const knock = async () => {
+      const stranger = await testDevice()
       const c = await (await post('/device/challenge',{key:stranger.key})).json() as {nonce:string}
-      return await (await post('/device/prove',{nonce:c.nonce,signature:await stranger.sign(c.nonce)})).json() as {code:string}
+      return await (await post('/device/prove',{nonce:c.nonce,signature:await stranger.sign(c.nonce)})).json() as {code:string;receipt:string}
     }
     const first = await knock()
     expect(getEditorText(a.st.editor)).toBe(`/remote approve ${first.code}`)
     expect(a.st.editor.cursorCol).toBe(`/remote approve ${first.code}`.length)
     a.st.editor = insertText({...a.st.editor, lines:[''], cursorLine:0, cursorCol:0}, 'my draft')
-    expect(a.remote.snapshot().title).toBeDefined(); await a.remote.command(`deny ${first.code}`)
     const second = await knock(); expect(second.code).not.toBe(first.code)
     expect(getEditorText(a.st.editor)).toBe('my draft')
-    await a.remote.command(`deny ${second.code}`); a.st.editor = {...a.st.editor, lines:[''], cursorLine:0, cursorCol:0}
+    expect(a.notices.at(-1)).toContain('let it expire')
+    expect(await (await post('/device/poll',{receipt:second.receipt})).json()).toEqual({pending:true})
+    a.st.editor = {...a.st.editor, lines:[''], cursorLine:0, cursorCol:0}
     const challenge = await (await post('/device/challenge',{key:device.key})).json() as {nonce:string}
     const proof = await (await post('/device/prove',{nonce:challenge.nonce,signature:await device.sign(challenge.nonce)})).json() as {token:string}
     expect(typeof proof.token).toBe('string')
     const headers = {authorization:`Bearer ${proof.token}`}
     const state = (peer:typeof a) => fetch(address+'/state',{headers:{...headers,'X-Evot-Terminal':peer.st.terminalBus!.id}})
-    for (const p of peers) expect(await (await state(p)).json()).toMatchObject({sessionId:p.st.sessionId, place:{name:'fixture', path:'/fixture', branch:'main'}})
+    b.st.skillEntries = [{name:'review',dir:'/private/other-window',command:{description:'Review the problem'}}]
+    b.st.editor = insertText(b.st.editor, 'private peer draft')
+    for (const p of peers) {
+      const snapshot = await (await state(p)).json() as RemoteSnapshot
+      expect(snapshot).toMatchObject({sessionId:p.st.sessionId, place:{name:'fixture', path:'/fixture', branch:'main'}})
+      expect(snapshot.slashHints?.catalog.some(c => c.name === '/review')).toBe(p === b)
+      expect(snapshot.slashHints?.catalog.find(c => c.name === '/share')?.arguments).toEqual(['public','team','private','off','list'])
+      expect(JSON.stringify(snapshot)).not.toMatch(/private peer draft|\/private\/other-window/)
+    }
+    // Route the slash through the gateway to the paired device's selected window, not the gateway session.
+    b.share.off = async sid => { b.calls.push(`unshared:${sid}`) }
+    const postShare = (auth: Record<string, string>, generation: number) => fetch(address+'/action', {method:'POST',
+      headers:{...auth, origin:address, 'Content-Type':'application/json', 'X-Evot-Terminal':b.st.terminalBus!.id},
+      body:JSON.stringify({kind:'send',text:'/share off',generation})})
+    const observed = b.remote.snapshot().generation
+    expect((await postShare({}, observed)).status).toBe(401)
+    expect((await postShare(headers, observed)).status).toBe(204)
+    expect((await postShare(headers, observed)).status).toBe(409)
+    expect(b.calls).toEqual(['unshared:beta','dispatch'])
+    expect(a.calls).toEqual([])
+    expect((await (await state(b)).json() as RemoteSnapshot).messages.at(-1)?.text).toBe('Removed from cloud · local copy kept')
+
     // Folder picker: the gateway cwd and every saved session's cwd, by opaque id; a phone cannot name a path.
     const folders = await (await fetch(address+'/folders',{headers})).json() as {folders:{id:string,name:string,path:string}[]}
     expect(folders.folders.map(f=>[f.name,f.path,f.id.length])).toEqual([['fixture','/fixture',20]])
@@ -134,6 +279,13 @@ test('three open sessions retain their picker titles/order as each terminal chan
     expect(before.online).toHaveLength(3)
     expect(byTitle(before)).toEqual({'First 0 … latest 0':'Open', 'Renamed session':'Running', 'First 2 … latest 2':'Needs input'})
     expect(before.rows.map(windowStatusLabel)[2]).toBe('Open')
+    const firstWindowLabel = async () => (await list()).rows.filter(r => r.session === 'alpha').map(windowStatusLabel)
+    a.st.conversationTail.outcome = 'Completed'
+    expect(await firstWindowLabel()).toEqual(['Completed'])
+    a.st.conversationTail.outcome = 'Run failed · see the TUI'
+    expect(await firstWindowLabel()).toEqual(['Open'])
+    a.st.conversationTail.outcome = 'Stopped'
+    expect(await firstWindowLabel()).toEqual(['Open'])
     b.st.conversationTail.append('user','Not my title'); expect(b.remote.snapshot().title).toBe('Renamed session')
     c.asks.resolvePendingAsk(); await answer; c.st.overlay = {kind:'none'}
     b.st.spinnerState.phase = 'retrying'; a.st.overlay = {kind:'help'}
@@ -144,8 +296,8 @@ test('three open sessions retain their picker titles/order as each terminal chan
     const closed = await list()
     expect(closed.rows.map(r=>[r.title,windowStatusLabel(r)])).toEqual([['First 2 … latest 2','Background task'], ['First 0 … latest 0','Open'], ['Renamed session','Saved']])
     expect(closed.online).toHaveLength(2)
-    await c.remote.command('off'); expect((await state(c)).status).toBe(403)
-    await a.remote.command('off'); expect((await state(a)).status).toBe(409)
+    await c.remote.command('hide'); expect((await state(c)).status).toBe(403)
+    await a.remote.command('hide'); expect((await state(a)).status).toBe(409)
     const hidden = await list(); expect(hidden.online).toHaveLength(0)
     // Windows that stopped sharing stay listed from saved metadata, status only, ahead of plain history.
     expect(hidden.rows.map(r=>[r.session, windowStatusLabel(r), r.unshared ?? false, r.terminal])).toEqual([['alpha','Open, not shared',true,undefined],['gamma','Open, not shared',true,undefined],['beta','Saved',false,undefined]])
@@ -153,7 +305,7 @@ test('three open sessions retain their picker titles/order as each terminal chan
     expect(open.status).toBe(409) // hidden session cannot be resumed as a second process
     b.remote.register(); expect((await state(b)).status).toBe(200) // hidden gateway still serves new windows
     await c.remote.command(''); expect((await state(c)).status).toBe(200)
-    await a.remote.command('shutdown'); expect(a.st.remoteListener).toBeNull()
+    await a.remote.command('off'); expect(a.st.remoteListener).toBeNull()
     expect(gateway.active()).toBe(false)
     expect(gateway.access.authorized(headers.authorization)).toBe(false)
     expect((await a.st.terminalBus!.request(b.st.terminalBus!.id,'/state')).status).toBe(403)
@@ -346,19 +498,35 @@ test('composer commands, suggestions and task shortcuts are additive for old win
 })
 
 test('paired picker selects only advertised models and tiers, synchronizes both ways and distinguishes a pending handoff', () => {
-  const {st,remote,run} = harness()
+  const {st,remote,run,compactLines,scrollback} = harness()
   const start = remote.snapshot().models
   expect(start.next).toBe('local:another')
   const change = {kind:'select-model' as const, generation:0, spec:'local:another', effort:'high', revision:start.revision}
   expect(() => remote.act({...change,spec:'unknown:route'})).toThrow()
   expect(() => remote.act({...change,effort:'not-a-tier'})).toThrow()
   remote.act(change); expect(st.appState.model).toBe('another'); expect(st.configInfo?.thinkingLevel).toBe('high')
+  expect(remote.snapshot().messages.at(-1)?.text).toBe(displayText(compactLines.at(-1)?.text ?? ''))
+  expect(remote.snapshot().messages.at(-1)?.text).toContain('Model →')
+  scrollback.commitStatusLine({id:'sys-think',kind:'system',text:'  Thinking level → low',remoteStatusText:'  Thinking level → low'})
+  expect(remote.snapshot().messages.map(m => m.text)).toEqual(['  Thinking level → low'])
   expect(() => remote.act(change)).toThrow(); expect(JSON.stringify(start)).not.toContain('private')
   // Local TUI picks and live model/effort changes feed the same snapshot.
   st.appState.model = 'fixture'; st.configInfo!.thinkingLevel = 'low'
   const before = remote.snapshot().models; expect(before.active).toBe('local:fixture')
   const generation = run(); remote.act({...change, generation, revision:before.revision})
   expect(remote.snapshot().models).toMatchObject({active:'local:fixture',pending:{spec:'local:another',effort:'high'}})
+})
+
+test('model picker notices never expose a free-form provider diagnostic', () => {
+  const {st,remote,compactLines} = harness()
+  const option = st.configInfo?.availableModels[1]
+  if (!option) throw Error('missing fixture model')
+  option.availability = {state:'upstream',message:'private-provider-diagnostic'}
+  const view = remote.snapshot()
+  remote.act({kind:'select-model',generation:view.generation,spec:option.spec,revision:view.models.revision})
+  expect(compactLines.at(-1)?.text).toContain('private-provider-diagnostic')
+  expect(remote.snapshot().messages.at(-1)?.text).toContain('⚠ unavailable')
+  expect(JSON.stringify(remote.snapshot())).not.toContain('private-provider-diagnostic')
 })
 
 test('status mirrors the spinner even while input is locked; waits do not pretend to generate', () => {
@@ -442,6 +610,210 @@ test('only a phone-opened window arms the idle exit; following it keeps it alive
     expect(cleared).toHaveLength(1)
   } finally {
     globalThis.setInterval = realSet; globalThis.clearInterval = realClear
+    for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key]
+    Object.assign(process.env, prev)
+    rmSync(privateSocketDirectory(home), {recursive:true, force:true}); rmSync(home, {recursive:true, force:true})
+  }
+})
+
+test('a QR routes approval to its own TUI, while bookmarks and device grants stay on the gateway', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-pair-window-'))
+  const previous = process.env.EVOT_HOME, local = process.env.EVOT_REMOTE_LOCAL_TEST
+  const owner = harness(), a = harness(), b = harness(), hidden = harness()
+  try {
+    process.env.EVOT_HOME = home; process.env.EVOT_REMOTE_LOCAL_TEST = '1'
+    await owner.remote.command('')
+    await a.remote.command('')
+    await b.remote.command('')
+    hidden.remote.register()
+    const address = owner.st.remoteListener!.address
+    const scan = (p: typeof a) => {
+      const url = new URL(p.notices.join('\n').match(/http:\/\/127\.0\.0\.1:\d+\/#terminal=[0-9a-f-]+/)![0])
+      expect(url.origin).toBe(address)
+      expect(p.notices.join('\n')).toContain(`Bookmark this computer: ${address}`)
+      return new URLSearchParams(url.hash.slice(1)).get('terminal')!
+    }
+    const aWindow = scan(a), bWindow = scan(b)
+    expect(aWindow).not.toBe(bWindow)
+    const post = (path: string, body: unknown) => fetch(address + path, { method:'POST',
+      headers:{origin:address,'Content-Type':'application/json'}, body:JSON.stringify(body) })
+    const phone = await testDevice()
+    const prove = async (terminal?: string, device = phone) => {
+      const response = await post('/device/challenge', { key:device.key, terminal })
+      expect(response.status).toBe(200)
+      const {nonce} = await response.json() as {nonce:string}
+      // An attempted target change during proof must be ignored.
+      return post('/device/prove', {nonce, signature: await device.sign(nonce), terminal: owner.st.terminalBus!.id})
+    }
+    const approval = async (terminal?: string, device = phone) => {
+      const response = await prove(terminal, device)
+      expect(response.status).toBe(200)
+      return response.json() as Promise<{code:string; receipt:string}>
+    }
+    expect((await prove(hidden.st.terminalBus!.id)).status).toBe(409)
+    expect((await prove(crypto.randomUUID())).status).toBe(409)
+    b.st.editor = insertText(b.st.editor, 'an existing draft')
+    const first = await approval(aWindow), second = await approval(bWindow)
+    expect(first.code).not.toBe(second.code)
+    expect(getEditorText(a.st.editor)).toBe(`/remote approve ${first.code}`)
+    expect(getEditorText(b.st.editor)).toBe('an existing draft')
+    expect(b.notices.at(-1)).toContain(`run /remote approve ${second.code}`)
+    expect(getEditorText(owner.st.editor)).toBe('')
+    await owner.remote.command(`approve ${first.code}`)
+    await b.remote.command(`approve ${first.code}`)
+    expect(owner.notices.at(-1)).toContain('No matching pending request')
+    expect(b.notices.at(-1)).toContain('No matching pending request')
+    expect((await post(`/pairing/${aWindow}/approve/${first.code}`, {})).status).toBe(404)
+    expect(await (await post('/device/poll', {receipt:first.receipt})).json()).toEqual({pending:true})
+    expect(await (await post('/device/poll', {receipt:second.receipt})).json()).toEqual({pending:true})
+    await a.remote.command(`approve ${first.code}`)
+    expect(a.notices.at(-1)).toContain('Device approved.')
+    expect(await (await post('/device/poll', {receipt:first.receipt})).json()).toHaveProperty('token')
+    expect(await (await prove(bWindow)).json()).toHaveProperty('token') // previously approved device skips the prompt
+
+    const direct = await approval(undefined, await testDevice())
+    expect(getEditorText(owner.st.editor)).toBe(`/remote approve ${direct.code}`)
+    await owner.remote.command(`approve ${direct.code}`)
+    expect(await (await post('/device/poll', {receipt:direct.receipt})).json()).toHaveProperty('token')
+  } finally {
+    for (const p of [owner,a,b,hidden]) p.remote.dispose()
+    if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
+    if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
+    rmSync(privateSocketDirectory(home), { recursive:true, force:true }); rmSync(home, { recursive:true, force:true })
+  }
+})
+
+test('a hidden gateway owner restarts the profile without exposing its own session or asking for approval again', async () => {
+  const home = mkdtempSync(join(tmpdir(),'evot-hidden-gateway-')), previous = process.env.EVOT_HOME, local = process.env.EVOT_REMOTE_LOCAL_TEST
+  const owner = harness(), next = harness(), peer = harness()
+  try {
+    process.env.EVOT_HOME = home; process.env.EVOT_REMOTE_LOCAL_TEST = '1'
+    const scope = sharingScope(home, '/private/settings', 'local')
+    const device = await testDevice()
+    new DeviceStore(join(home,'remote',scope)).approve(device.key)
+    await owner.remote.command('')
+    await owner.remote.command('hide')
+    const handoff = owner.remote.handoff()!
+    expect(handoff).toMatchObject({gateway:true,share:'off'})
+    const address = owner.st.remoteListener!.address
+    owner.remote.dispose()
+    peer.st.sessionId = 'peer'; peer.remote.register()
+    next.remote.register(handoff)
+    await next.remote.resume(handoff)
+    expect(next.st.remoteListener?.address).toBe(address)
+    expect(next.st.terminalBus?.sharing).toBe('off')
+    const post = (path: string, body: unknown) => fetch(address + path, {method:'POST',
+      headers:{origin:address,'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    const {nonce} = await (await post('/device/challenge',{key:device.key})).json() as {nonce:string}
+    const prove = await (await post('/device/prove',{nonce,signature:await device.sign(nonce)})).json() as {token:string;current:string|null}
+    expect(prove.token).toBeString()
+    expect(prove.current).toBeNull()
+    const headers = {authorization:`Bearer ${prove.token}`}
+    expect((await fetch(address+'/state',{headers})).status).toBe(409)
+    const fromPeer = await fetch(address+'/state',{headers:{...headers,'X-Evot-Terminal':peer.st.terminalBus!.id}})
+    expect(fromPeer.status).toBe(200)
+    expect((await fromPeer.json() as RemoteSnapshot).sessionId).toBe('peer')
+  } finally {
+    for (const p of [owner,next,peer]) p.remote.dispose()
+    if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
+    if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
+    rmSync(privateSocketDirectory(home), {recursive:true,force:true}); rmSync(home, {recursive:true,force:true})
+  }
+})
+
+test('only an opted-in profile elects a gateway; /remote off from a sibling stops takeover without touching local work', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-gateway-election-')), previous = process.env.EVOT_HOME, local = process.env.EVOT_REMOTE_LOCAL_TEST
+  const a = harness(), b = harness(), c = harness(), other = harness()
+  try {
+    process.env.EVOT_HOME = home; process.env.EVOT_REMOTE_LOCAL_TEST = '1'
+    other.st.configInfo = {...other.st.configInfo!, envPath:'/other/profile'}
+    for (const p of [a,b,c,other]) p.remote.register()
+    await b.remote.maintain()
+    expect(b.st.remoteListener).toBeNull()
+    await a.remote.command('')
+    const original = a.st.remoteListener!
+    expect(original).not.toBeNull()
+    const address = original.address, scope = original.scope, device = await testDevice()
+    original.access.store.approve(device.key)
+    await b.remote.command('hide')
+    await b.remote.maintain()
+    expect(b.st.remoteListener).toBeNull()
+    expect(a.st.remoteListener).toBe(original)
+    a.remote.dispose()
+    await other.remote.maintain()
+    expect(other.st.remoteListener).toBeNull()
+    await Promise.all([b.remote.maintain(), c.remote.maintain()])
+    const owners = [b,c].filter(p => p.st.remoteListener)
+    expect(owners).toHaveLength(1)
+    const owner = owners[0]!, replacement = owner.st.remoteListener!
+    expect([replacement.address, replacement.scope]).toEqual([address, scope])
+    expect(replacement.access.store.has(device.key)).toBe(true)
+    expect(b.st.terminalBus?.sharing).toBe('off')
+    expect((await fetch(address)).status).toBe(200)
+
+    const handoff = owner.remote.handoff()
+    const sibling = owner === b ? c : b
+    owner.run()
+    owner.st.editor = insertText(owner.st.editor, 'unsent local draft')
+    const queued = owner.pendingQueue.accept({ queue:'follow_up', target:currentQueueTarget(owner.st), text:'queued', expandedText:'queued', snapshot:draft('queued') })
+    const stream = owner.st.streamMachine
+
+    await sibling.remote.command('off')
+    expect(sibling.notices.at(-1)).toContain('Remote off. Run /remote on')
+    expect(replacement.active()).toBe(false) // Fail closed before the owner's next scheduler tick.
+    expect((await fetch(address)).status).toBe(403)
+    await Promise.all([b.remote.maintain(), c.remote.maintain()])
+    expect([b,c].every(p => p.st.remoteListener === null)).toBe(true)
+    await owner.remote.resume(handoff)
+    expect(owner.st.remoteListener).toBeNull()
+    expect(owner.st.isLoading).toBe(true)
+    expect(owner.st.streamMachine).toBe(stream)
+    expect(getEditorText(owner.st.editor)).toBe('unsent local draft')
+    expect(owner.st.pendingQueue.entries).toEqual([queued])
+
+    await c.remote.command('on')
+    expect(c.st.remoteListener?.address).toBe(address)
+    expect(c.st.remoteListener?.access.store.has(device.key)).toBe(true)
+    await other.remote.command('off')
+    expect(c.st.remoteListener?.active()).toBe(true)
+  } finally {
+    for (const p of [a,b,c,other]) p.remote.dispose()
+    if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
+    if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
+    rmSync(privateSocketDirectory(home), {recursive:true,force:true}); rmSync(home, {recursive:true,force:true})
+  }
+})
+
+test('a restart hands the window identity, sharing and phone role to the next image', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-handoff-')), prev = { ...process.env }
+  try {
+    process.env.EVOT_HOME = home
+    const local = harness(); local.remote.register()
+    const id = local.st.terminalBus!.id
+    expect(local.remote.handoff()).toEqual({ terminal: id, phoneScope: null, share: 'inherit', gateway: false })
+    await local.remote.command('hide')
+    const hidden = local.remote.handoff()!
+    expect(hidden.share).toBe('off')
+    local.remote.dispose()
+    const next = harness(); next.remote.register(hidden)
+    expect(next.st.terminalBus!.id).toBe(id) // the phone keeps following the same window
+    expect(next.st.terminalBus!.sharing).toBe('off')
+    expect(next.st.remoteChild).toBe(false)
+    next.remote.dispose()
+
+    const scope = 'a'.repeat(24), phoneId = crypto.randomUUID()
+    process.env.EVOT_PHONE_TERMINAL = phoneId; process.env.EVOT_PHONE_SCOPE = scope
+    const phone = harness(); phone.remote.register()
+    const role = phone.remote.handoff()!
+    expect(role).toEqual({ terminal: phoneId, phoneScope: scope, share: scope, gateway: false })
+    phone.remote.dispose()
+    const reopened = harness(); reopened.remote.register(role)
+    expect([reopened.st.terminalBus!.id, reopened.st.remoteChild, reopened.st.remotePhoneScope]).toEqual([phoneId, true, scope])
+    reopened.remote.dispose()
+    // Only a window that ran the gateway starts it again.
+    await reopened.remote.resume({ ...role, gateway: false })
+    expect(reopened.st.remoteListener).toBeNull()
+  } finally {
     for (const key of Object.keys(process.env)) if (!(key in prev)) delete process.env[key]
     Object.assign(process.env, prev)
     rmSync(privateSocketDirectory(home), {recursive:true, force:true}); rmSync(home, {recursive:true, force:true})

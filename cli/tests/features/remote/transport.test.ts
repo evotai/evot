@@ -7,15 +7,15 @@ import { DeviceAccess, REQUEST_TTL } from '../../../src/features/remote/pairing.
 import { GRANT_IDLE_TTL } from '../../../src/features/remote/devices.js'
 import { testDevice } from '../../helpers/remote-device.js'
 
-test('proving a pending device in two tabs reuses one TUI prompt, deadline and decision', async () => {
+test('two tabs share one TUI prompt and deadline; ignored approvals expire for both', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'evot-pending-'))
   try {
     let now = 0, notifications = 0
-    const access = new DeviceAccess(new DeviceStore(dir), () => { notifications++ }, () => now)
+    const access = new DeviceAccess(new DeviceStore(dir), () => { notifications++ }, { now: () => now })
     const d = await testDevice()
     const prove = async () => {
       const { nonce } = access.challenge(d.key)!
-      const result = access.prove(nonce, await d.sign(nonce))
+      const result = await access.prove(nonce, await d.sign(nonce))
       if (!result || !('receipt' in result)) throw Error('expected a pending approval')
       return result
     }
@@ -26,11 +26,15 @@ test('proving a pending device in two tabs reuses one TUI prompt, deadline and d
     expect(next.code).toBe(first.code)
     expect(next.receipt).not.toBe(first.receipt)
     expect(next.remainingMs).toBe(first.remainingMs - 4000)
-    expect(access.decide(first.code, false)).toBe(true)
+    expect(access.poll(first.receipt)).toEqual({ pending: true })
+    expect(access.poll(next.receipt)).toEqual({ pending: true })
+    expect(access.store.has(d.key, now)).toBe(false)
+    now += next.remainingMs
+    expect(access.approve(first.code)).toBe(false)
     expect(access.poll(first.receipt)).toBeNull()
     expect(access.poll(next.receipt)).toBeNull()
     const one = await prove(), two = await prove()
-    expect(access.decide(two.code, true)).toBe(true)
+    expect(access.approve(two.code)).toBe(true)
     expect(access.poll(one.receipt)).toHaveProperty('token')
     expect(access.poll(two.receipt)).toHaveProperty('token')
     expect(access.poll(two.receipt)).toBeNull()
@@ -39,7 +43,7 @@ test('proving a pending device in two tabs reuses one TUI prompt, deadline and d
   }
 })
 
-test('expired, denied, impersonated and replayed device proofs do not grant access; grants survive restart and revoke individually', async () => {
+test('expired, impersonated and replayed device proofs do not grant access; grants survive restart and revoke individually', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'evot-device-'))
   let now = 1000
   try {
@@ -47,7 +51,7 @@ test('expired, denied, impersonated and replayed device proofs do not grant acce
       new DeviceAccess(
         new DeviceStore(dir),
         () => {},
-        () => now,
+        { now: () => now },
       )
     let a = create()
     const phone = await testDevice(),
@@ -57,17 +61,15 @@ test('expired, denied, impersonated and replayed device proofs do not grant acce
       return a.prove(nonce, await d.sign(nonce))
     }
     const nonce = a.challenge(phone.key)!.nonce
-    expect(a.prove(nonce, await other.sign(nonce))).toBeNull()
-    expect(a.prove(nonce, await phone.sign(nonce))).toBeNull()
+    expect(await a.prove(nonce, await other.sign(nonce))).toBeNull()
+    expect(await a.prove(nonce, await phone.sign(nonce))).toBeNull()
     const expired = (await enroll(phone)) as { code: string; receipt: string }
     now += REQUEST_TTL
-    expect(a.decide(expired.code, true)).toBe(false)
-    const denied = (await enroll(phone)) as typeof expired
-    expect(a.decide(denied.code, false)).toBe(true)
-    expect(a.poll(denied.receipt)).toBeNull()
+    expect(a.approve(expired.code)).toBe(false)
+    expect(a.poll(expired.receipt)).toBeNull()
     for (const d of [phone, other]) {
       const p = (await enroll(d)) as typeof expired
-      expect(a.decide(p.code, true)).toBe(true)
+      expect(a.approve(p.code)).toBe(true)
       expect(a.poll(p.receipt)).toHaveProperty('token')
       expect(a.poll(p.receipt)).toBeNull()
     }
@@ -83,10 +85,10 @@ test('expired, denied, impersonated and replayed device proofs do not grant acce
     // visit refreshes its clock; after 30 idle days it is a new device again.
     now += GRANT_IDLE_TTL - 86_400_000
     const { nonce: n1 } = a.challenge(phone.key)!
-    expect(a.prove(n1, await phone.sign(n1), '203.0.113.9')).toHaveProperty('token')
+    expect(await a.prove(n1, await phone.sign(n1), '203.0.113.9')).toHaveProperty('token')
     expect(JSON.parse(readFileSync(f, 'utf8')).devices.find((d: { key: string }) => d.key === phone.key)).toMatchObject({lastSeenAt: now, lastSeenFrom: '203.0.113.9'})
     const { nonce: n2 } = a.challenge(phone.key)!
-    expect(a.prove(n2, await phone.sign(n2), 'not an address')).toHaveProperty('token')
+    expect(await a.prove(n2, await phone.sign(n2), 'not an address')).toHaveProperty('token')
     expect(JSON.parse(readFileSync(f, 'utf8')).devices.find((d: { key: string }) => d.key === phone.key).lastSeenFrom).toBe('203.0.113.9')
     expect(a.store.list(now).find(d => d.id === deviceId(phone.key))?.lastSeenFrom).toBe('203.0.113.9')
     now += GRANT_IDLE_TTL - 1
@@ -94,7 +96,7 @@ test('expired, denied, impersonated and replayed device proofs do not grant acce
     expect(a.authorized('Bearer ' + token2)).toBe(false) // other sat idle for 60 days
     const again = (await enroll(other)) as { code: string; receipt: string }
     expect(again).toHaveProperty('code')
-    expect(a.decide(again.code, true)).toBe(true)
+    expect(a.approve(again.code)).toBe(true)
     const token3 = (a.poll(again.receipt) as { token: string }).token
     expect(JSON.parse(readFileSync(f, 'utf8')).devices.filter((d: { key: string }) => d.key === other.key)).toHaveLength(1)
     expect(a.store.list(now).map(d => d.expired)).toEqual([false, false])

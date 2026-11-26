@@ -1,0 +1,7 @@
+[
+  { "name": "/help", "description": "Show help information", "usage": "/help [command]", "prefix": "/h", "shortcut": "help" },
+  { "name": "/resume", "description": "Resume a session (task runs in /task)", "usage": "/resume [id | <what you worked on, with an optional time range> | --all]", "prefix": "/r", "shortcut": "sessions" },
+  { "name": "/sessions", "description": "Resume a session (task runs in /task)", "usage": "/resume [id | <what you worked on, with an optional time range> | --all]", "prefix": "/se", "shortcut": "sessions" },
+  { "name": "/new", "description": "Start a new session", "prefix": "/n", "shortcut": "new" },
+  { "name": "/model", "description": "Show or change model", "usage": "/model [name]", "prefix": "/m", "shortcut": "model" }
+]

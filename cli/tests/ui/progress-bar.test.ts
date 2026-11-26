@@ -1,16 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createProgressBar, formatProgressCount, renderProgressBar } from '../../src/ui/progress-bar.js'
+import { createProgressBar, formatProgressCount, layoutProgressBar } from '../../src/ui/progress-bar.js'
+import type { NoticeSpan } from '../../src/ui/notice-layout.js'
 import type { ProgressLine } from '../../src/ui/progress-line.js'
 
-const strip = (text: string): string => text.replace(/\x1b\[[0-9;]*m/g, '')
+const plain = (spans: readonly NoticeSpan[]): string => spans.map(span => span.text).join('')
 
-function recordingLine(): { line: ProgressLine; updates: string[]; finished: string[] } {
+function recordingLine(): { line: ProgressLine<readonly NoticeSpan[]>; updates: string[]; finished: string[] } {
   const updates: string[] = []
   const finished: string[] = []
   return {
     updates, finished,
-    line: { update: text => { updates.push(strip(text)) }, finish: text => { finished.push(strip(text)) } },
+    line: { update: spans => { updates.push(plain(spans)) }, finish: spans => { finished.push(plain(spans)) } },
   }
 }
 
@@ -22,15 +23,17 @@ describe('formatProgressCount', () => {
   })
 })
 
-describe('renderProgressBar', () => {
+describe('layoutProgressBar', () => {
   test('shows the pending phrase before the first count and hides sub-second elapsed', () => {
-    const row = strip(renderProgressBar({ label: 'Sharing', pending: 'preparing…' }, null, 400))
+    const spans = layoutProgressBar({ label: 'Sharing', pending: 'preparing…' }, null, 400)
+    expect(spans).toContainEqual({text:'Sharing',tone:'label'})
+    const row = plain(spans)
     expect(row).toContain('⋯ Sharing  preparing…')
     expect(row).not.toContain(' · 0s')
   })
 
   test('draws a bar sized to the ratio, then the count and elapsed time', () => {
-    const row = strip(renderProgressBar({ label: 'Sharing', unit: 'entries', width: 10 }, { done: 5, total: 10 }, 14_000))
+    const row = plain(layoutProgressBar({ label: 'Sharing', unit: 'entries', width: 10 }, { done: 5, total: 10 }, 14_000))
     expect(row).toContain('█████░░░░░  5 / 10 entries · 50% · 14s')
   })
 })
@@ -71,7 +74,7 @@ describe('createProgressBar', () => {
 describe('progress detail', () => {
   test('a custom count replaces the units and a note follows the percentage', () => {
     expect(formatProgressCount(1, 4, 'entries', '3.1 / 12.4 MB')).toBe('3.1 / 12.4 MB · 25%')
-    const row = strip(renderProgressBar({ label: 'Sharing', unit: 'entries' },
+    const row = plain(layoutProgressBar({ label: 'Sharing', unit: 'entries' },
       { done: 1, total: 4, detail: { count: '3.1 / 12.4 MB', note: 'waiting for the server' } }, 0))
     expect(row).toContain('3.1 / 12.4 MB · 25% · waiting for the server')
   })

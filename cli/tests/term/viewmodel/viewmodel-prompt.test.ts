@@ -910,6 +910,21 @@ describe('prompt footer', () => {
     expect(footer).toEndWith('dashboard http://127.0.0.1:8082')
   })
 
+  test('puts the gateway device counts last, fixes their alignment and sheds detail at narrow widths', () => {
+    const remotePresence = { phone: 1, tablet: 1, desktop: 1, unknown: 1 }
+    const footer = (columns: number, presence = remotePresence) => blocksToLines(buildPromptFooterBlocks(defaultInput({
+      columns, remotePresence: presence, dashboardUrl: 'http://127.0.0.1:8082',
+    }))).map(stripAnsi)[0]!
+    const full = footer(140)
+    expect(stringWidth(full)).toBe(140)
+    expect(full).toContain('dashboard http://127.0.0.1:8082')
+    expect(full).toEndWith('Remote · 4 online · 1 phone · 1 tablet · 1 PC · 1 unknown')
+    expect(footer(36)).toEndWith('Remote · 4 online')
+    expect(footer(14)).toEndWith('Remote 4')
+    expect(footer(100, { phone: 0, tablet: 0, desktop: 0, unknown: 0 })).not.toContain('Remote')
+    for (let width = 1; width <= 140; width++) expect(stringWidth(footer(width))).toBeLessThanOrEqual(width)
+  })
+
   test('matches the full context footer format from the terminal', () => {
     const home = process.env.HOME || process.env.USERPROFILE || '/tmp/home'
     const footer = blocksToLines(buildPromptFooterBlocks(defaultInput({

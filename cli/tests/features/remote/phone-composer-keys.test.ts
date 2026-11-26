@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
 import { enterIntent } from '../../../src/features/remote/phone-editor.js'
-import { completionGesture } from '../../../src/features/remote/phone-commands.js'
+import { commandMenu, phoneCompletion } from '../../../src/features/remote/phone-commands.js'
 import { composerTab, draftHintText, inlineSuggestion, tabIntent } from '../../../src/features/remote/phone-composer-keys.js'
+import { phoneCommandHints } from '../../../src/term/app/remote/commands.js'
 import old from '../../fixtures/contracts/remote-composer-legacy.json'
 
 const running = {...old,input:'steer',composerKeys:{queue:true},commands:[{name:'/review',prefix:'/rev'}]}
@@ -39,6 +40,16 @@ test('Tab never submits an idle/legacy draft, an unfinished command or a file co
   expect(tabIntent(running,'',0,{...plain,photos:1})).toBe('Send after')
 })
 
+test('showing builtins in the shared hint catalog does not let them queue', () => {
+  const catalog = phoneCommandHints([{name:'harden',dir:'/private/fixture',command:{description:'Review a plan'}}])
+  const view = {...running,slashHints:{catalog,forked:false,inventory:{models:[],sessions:[]}}}
+  for (const text of ['/share team', '/restart now', '/remote off', '/remote hide', '/skill list']) {
+    expect(tabIntent(view,text,text.length,plain)).toBeNull()
+  }
+  const task = '/ha check edge cases'
+  expect(tabIntent(view,task,task.length,plain)).toBe('Send after')
+})
+
 test('only unmodified Tab is intercepted by the accessory; typing, Shift+Tab and IME stay native', () => {
   const calls:string[] = [], button = {hidden:false,disabled:false,lastElementChild:{textContent:''},onclick(){}},
     draft = {value:'later',selectionStart:5,addEventListener(){},focus(){}}
@@ -51,12 +62,55 @@ test('only unmodified Tab is intercepted by the accessory; typing, Shift+Tab and
   expect(calls).toEqual(['queue','queue'])
 })
 
-test('command menu navigation is scoped to visible candidates', () => {
-  expect(completionGesture('ArrowUp',3,0,false,false)).toEqual({index:2})
-  expect(completionGesture('ArrowDown',3,2,true,false)).toEqual({index:0})
-  for (const key of ['Enter','Tab']) expect(completionGesture(key,3,1,true,true)).toEqual({accept:true})
-  expect(completionGesture('Enter',2,0,false,true)).toBeNull()
-  expect(completionGesture('ArrowDown',0,0,false,false)).toBeNull()
+test('slash hints stay inline; only explicit completion opens a menu or edits the draft', () => {
+  const doc = {createElement: (tag: string) => new Element(tag)}
+  class Element {
+    ownerDocument = doc
+    children: Element[] = []
+    hidden = true
+    textContent = ''
+    onclick?: () => void
+    constructor(readonly tag: string) {}
+    addEventListener() {}
+    append(child: Element) { this.children.push(child) }
+    replaceChildren() { this.children.length = 0 }
+    querySelectorAll(tag: string) { return this.children.filter(child => child.tag === tag) }
+    toggleAttribute() {}
+    scrollIntoView() {}
+  }
+  const panel = new Element('panel')
+  const draft = {value:'',selectionStart:0,selectionEnd:0,maxLength:8192,ownerDocument:doc,
+    focus(){},setAttribute(){},removeAttribute(){},
+    setSelectionRange(start:number,end:number) { this.selectionStart = start; this.selectionEnd = end },
+    setRangeText(text:string,start:number,end:number) {
+      this.value = this.value.slice(0,start) + text + this.value.slice(end)
+      this.setSelectionRange(start+text.length,start+text.length)
+    }}
+  const view = {slashHints:{catalog:phoneCommandHints([]),forked:false,inventory:{models:[],sessions:[]}}}
+  const commands = commandMenu(draft,panel,() => commands.render(view))
+  const type = (text: string) => { draft.value = text; draft.setSelectionRange(text.length,text.length); commands.render(view) }
+  const press = (key:string) => commands.keydown({key,target:draft,preventDefault(){}})
+  type('/share pu')
+  expect(commands.hint).toBe('blic'); expect(panel.hidden).toBe(true)
+  expect(press('Enter')).toBe(false); expect(press('ArrowDown')).toBe(false)
+  expect(draft.value).toBe('/share pu')
+  commands.complete()
+  expect(draft.value).toBe('/share public '); expect(panel.hidden).toBe(true)
+  type('/share ')
+  expect(commands.hint).toBe('  [public  team  private  off  list]'); expect(panel.hidden).toBe(true)
+  commands.complete()
+  expect(panel.hidden).toBe(false); expect(commands.hint).toBe(''); expect(draft.value).toBe('/share ')
+  expect(press('ArrowDown')).toBe(true); expect(press('Enter')).toBe(true)
+  expect(draft.value).toBe('/share team '); expect(panel.hidden).toBe(true)
+  type('/share pr'); expect(commands.dismiss()).toBe(true); expect(commands.hint).toBe('')
+  expect(draft.value).toBe('/share pr')
+  type('/share p'); expect(commands.hint).toContain('private')
+})
+
+test('selected text and unavailable views suppress inline completion; old windows still work', () => {
+  expect(phoneCompletion('/share pu',7,9,running)).toBeNull()
+  expect(phoneCompletion('/review',7,7,null)).toBeNull()
+  expect(phoneCompletion('/rev',4,4,running)?.hint).toBe('iew')
 })
 
 test('ordinary desktop Enter keeps continuation, software Return and modified Enter stay native', () => {

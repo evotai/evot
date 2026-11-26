@@ -1,3 +1,5 @@
+import { paintCommandNotice } from './phone-notice.js';
+
 // A window from before the computer sent rendered Markdown: show its text as written.
 function plainHtml(text) {
   const esc = String(text ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
@@ -128,11 +130,13 @@ export function renderHistory(root, s, photos, thumbnail) {
     }
     if (m.role !== 'assistant' && !(m.role === 'notice' && m.blocks?.length)) {
       const images = m.role === 'user' && photos?.get(m.photoId);
-      if (el.source === m.text && el.photos === images) return;
-      el.photos = images;
+      const source = m.command ? JSON.stringify([m.text, m.command]) : m.text;
+      if (el.source === source && el.photos === images) return;
+      el.photos = images; el.source = source;
       const body = document.createElement('div');
       body.className = m.role === 'user' ? 'bubble' : m.role === 'notice' ? 'terminal-notice' : 'turn-footer';
-      body.textContent = el.source = m.text;
+      if (m.role === 'notice' && m.command) paintCommandNotice(body, m.text, m.command);
+      else body.textContent = m.text;
       if (images) {
         const strip = document.createElement('div'); strip.className = 'bubble-images';
         strip.append(...images.map(thumbnail)); body.append(strip);
@@ -140,6 +144,7 @@ export function renderHistory(root, s, photos, thumbnail) {
       el.replaceChildren(body);
       return;
     }
+    el.source = null; // A later plain notice at the same index must paint again.
     const blocks = m.blocks ?? [{ kind: 'text', text: m.text }];
     while (el.childElementCount > blocks.length) el.lastElementChild.remove();
     blocks.forEach((b, j) => {

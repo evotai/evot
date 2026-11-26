@@ -88,6 +88,16 @@ export function modelAvailabilityNotice(option: ModelOption | undefined): string
   return reason ? ` · ⚠ ${reason}` : ''
 }
 
+/** Share the selection layout, not a provider's free-form outage details. */
+export function modelChangeNotice(model: string, provider: string, effort?: string, option?: ModelOption) {
+  const status = `  Model → ${formatModelLabel(model, provider, option?.group_label)}${effort ? ` · thinking ${effort}` : ''}`
+  const warning = modelAvailabilityLabel(option)
+  return {
+    text: status + modelAvailabilityNotice(option),
+    remoteStatusText: status + (warning ? ` · ⚠ ${warning}` : ''),
+  }
+}
+
 /** Rank a provider: server-ordered cloud groups first, then BYOK providers. */
 function cloudRank(option: ModelOption): number {
   return isCloudModel(option) ? (option.group_order ?? 0) : Number.MAX_SAFE_INTEGER

@@ -50,3 +50,10 @@ test('text and image prompts route only to an available execution owner', () => 
   expect(busySubmissionAction({ ...base, compacting: true, expandedText: '  ' })).toBe('none')
   expect(busySubmissionAction({ ...base, expandedText: '/' })).toBe('steer')
 })
+
+test('/restart is accepted during a run so it can be scheduled for the turn end', () => {
+  for (const command of ['/restart', '/restart now', '/restart cancel']) {
+    expect(busySubmissionAction({ ...base, expandedText: command })).toBe('run_local_command')
+    expect(busySubmissionAction({ ...base, expandedText: command, compacting: true })).toBe('blocked_compaction_command')
+  }
+})

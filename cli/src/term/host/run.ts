@@ -165,7 +165,9 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
       st.pendingModelHandoff = { spec: target, effort, submitted: true }
       const selected = selectModelOption(st.configInfo, target)
       const label = selected ? formatModelLabel(selected.model, selected.provider, selected.group_label) : target
-      deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model queued → ${label} · next request` })
+      const text = `  Model queued → ${label} · next request`
+      deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text,
+        remoteStatusText: selected ? text : '  Model queued · next request' })
       // Release only the wait. The existing shell/task and its output keep running.
       deps.backgroundTerminals.reclaimTurn()
     } catch (err) {
@@ -292,11 +294,13 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
             st.pendingModelHandoff = null
             const selected = selectModelOption(st.configInfo, selectedSpec)
             const label = formatModelLabel(st.appState.model, st.configInfo?.provider ?? '', selected?.group_label)
-            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}` })
+            const text = `  Model → ${label}${effort ? ` · thinking ${effort}` : ''}`
+            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text, remoteStatusText: text })
             deps.suggestions.credentialsChanged()
           } else if (event.kind === 'run_finished') {
             st.pendingModelHandoff = null
-            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model switch not applied → ${requested.spec}` })
+            deps.scrollback.commitStatusLine({ id: 'sys-model', kind: 'system', text: `  Model switch not applied → ${requested.spec}`,
+              remoteStatusText: '  Model switch not applied' })
           }
         } else if (pendingSwitch && pendingSwitch.turn === undefined
             && ['llm_call_started', 'run_finished', 'error'].includes(event.kind)) {

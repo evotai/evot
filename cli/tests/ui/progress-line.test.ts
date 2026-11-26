@@ -7,7 +7,7 @@ interface Recorded {
   replaces: Array<{ id: string; text: string }>
 }
 
-function port(options: { replaceSucceeds?: boolean } = {}): { port: ProgressLinePort; log: Recorded } {
+function port(options: { replaceSucceeds?: boolean } = {}): { port: ProgressLinePort<string>; log: Recorded } {
   const log: Recorded = { commits: [], replaces: [] }
   return {
     log,

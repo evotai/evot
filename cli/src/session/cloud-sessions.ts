@@ -128,6 +128,7 @@ const PUSH_DELAY_MS = 800
 export class CloudSessionSync {
   private remote = new Map<string, RemoteSession>()
   private inflight = new Map<string, Promise<CloudPushResult | null>>()
+  private changingShare = new Set<string>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private indexLoad: Promise<void> | null = null
   private privacyTold = new Map<string, string>()
@@ -182,9 +183,20 @@ export class CloudSessionSync {
     }, this.delayMs))
   }
 
-  /** Immediate single-flight push; resolves null when a push for this session is already running. */
+  /** An old auto-push must not undo an access change or re-create an unshared copy. */
+  async withShareChange(sessionId: string, change: () => Promise<void>): Promise<void> {
+    if (this.changingShare.has(sessionId)) throw new Error('A share change is already in progress for this session.')
+    this.changingShare.add(sessionId)
+    try {
+      await this.inflight.get(sessionId)
+      if (this.disposed) throw new Error('Session sync has shut down.')
+      await change()
+    } finally { this.changingShare.delete(sessionId) }
+  }
+
+  /** Immediate single-flight push, unless a manual share change owns the session. */
   pushNow(sessionId: string, force = false): Promise<CloudPushResult | null> {
-    if (this.disposed) return Promise.resolve(null)
+    if (this.disposed || this.changingShare.has(sessionId)) return Promise.resolve(null)
     const running = this.inflight.get(sessionId)
     if (running) return running
     const attempt = this.deps.push(sessionId, force).then(result => {

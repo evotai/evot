@@ -1,0 +1,10 @@
+{
+  "rows": [
+    { "session": "s1", "title": "Check the logs", "workspace": "fixture", "updatedAt": 1789732800000, "updated": "2026-09-18T12:00:00.000Z", "terminal": "live", "phase": "idle" }
+  ],
+  "count": 1,
+  "more": false,
+  "online": [
+    { "session": "s1", "title": "Check the logs", "workspace": "fixture", "updatedAt": 1789732800000, "terminal": "live", "phase": "idle", "finishedRound": 4 }
+  ]
+}
