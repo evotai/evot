@@ -97,18 +97,10 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
       } else badge.textContent = label;
       heading.append(badge);
     }
-    const open = hasOpenWindow(r) ? 'Open in evot' : '';
-    if (open) {
-      const badge = document.createElement('span');
-      badge.className = 'terminal-open';
-      badge.setAttribute('aria-hidden', 'true'); // Included in the row's accessible name.
-      badge.textContent = open;
-      heading.append(badge);
-    }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
-    const status = r.unshared ? 'Not shared' : open && phase === 'idle' ? '' : label;
-    button.setAttribute('aria-label', [title.textContent, open, status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
+    const status = r.unshared ? 'Not shared' : hasOpenWindow(r) && phase === 'idle' ? '' : label;
+    button.setAttribute('aria-label', [title.textContent, status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.

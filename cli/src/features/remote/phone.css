@@ -296,7 +296,6 @@ div.terminal-row { cursor:default; opacity:.7; }
 .terminal-status { flex:none; font-size:11.5px; font-weight:600; color:var(--amber); }
 .terminal-status:is([data-state=working],[data-state=completed]) { min-width:16px; text-align:center; font-size:14px; }
 .terminal-status[data-state=completed] { color:var(--green); }
-.terminal-open { flex:none; padding:1px 7px; border-radius:999px; color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent); font-size:11px; font-weight:650; line-height:1.5; white-space:nowrap; }
 .session-row { display:flex; align-items:center; border-radius:10px; }
 .session-row .terminal-row { flex:1; min-width:0; }
 .session-row[aria-busy=true] { opacity:.5; }
