@@ -388,6 +388,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         { snapshot, act },
         () => ({
           phoneCreated: st.remoteChild,
+          ...(st.remoteChild || deps.insideTmux?.() ? { tmux: true as const } : {}),
           workspace: basename(deps.agent.cwd) || 'Terminal',
           project: profileKey(deps.agent.cwd),
           session: st.sessionId ?? '',

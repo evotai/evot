@@ -44,7 +44,7 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
       workspace: meta ? basename(meta.cwd) || '/' : window?.workspace,
       updatedAt, updated: updatedAt ? new Date(updatedAt).toISOString() : '',
       terminal: window?.terminal, phase: parked ? undefined : window?.phase, runState: window?.runState,
-      completed: window?.completed,
+      completed: window?.completed, ...(window?.tmux && !parked ? { tmux: true } : {}),
       ...(unshared ? { unshared } : {}), ...(parked ? { parked } : {}) }
   }
   const all = liveSessions(online).map(w => {

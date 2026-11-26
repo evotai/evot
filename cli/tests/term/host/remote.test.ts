@@ -837,6 +837,10 @@ test('a tmux window never adopts the gateway on its own, but /remote on and its 
     for (const p of [owner, tmux, visible]) p.remote.register()
     await owner.remote.command('')
     const address = owner.st.remoteListener!.address
+    // Sessions shows a tmux icon only for the window that runs there.
+    const rows = (await owner.st.terminalBus!.inventory()).online
+    expect(rows.find(r => r.terminal === tmux.st.terminalBus!.id)?.tmux).toBe(true)
+    expect(rows.find(r => r.terminal === visible.st.terminalBus!.id)?.tmux).toBeUndefined()
     owner.remote.dispose()
     await tmux.remote.maintain()
     expect(tmux.st.remoteListener).toBeNull()

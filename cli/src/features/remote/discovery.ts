@@ -18,6 +18,8 @@ export interface SessionBadge {
   session: string
   gateway?: boolean
   phoneCreated?: boolean
+  /** Runs inside tmux rather than a visible terminal app. Older windows omit it. */
+  tmux?: true
   updatedAt?: number
   phase: Phase
   runState?: RunBadge

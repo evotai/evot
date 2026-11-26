@@ -63,6 +63,14 @@ export function windowStatusLabel(r) {
 export function hasOpenWindow(r) {
   return !r.parked && (!!r.terminal || !!r.unshared || r.kind === 'private');
 }
+const placeIcons = {
+  desktop: ['Open on this computer', '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'],
+  tmux: ['Open in tmux', '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M12 12h9"/>'],
+};
+/** Where an open row runs, shown as an icon only: in tmux, or a visible terminal. */
+export function openPlace(r) {
+  return hasOpenWindow(r) ? (r.tmux ? 'tmux' : 'desktop') : null;
+}
 export function sessionDrawer({ api, selected, choose, create, createIn, host, ask }) {
   const el = id => document.getElementById(id), dialog = el('sessionsDrawer');
   let timer, timeZone, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
@@ -97,10 +105,18 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
       } else badge.textContent = label;
       heading.append(badge);
     }
+    const place = openPlace(r);
+    if (place) {
+      const [name, paths] = placeIcons[place], icon = document.createElement('span');
+      icon.className = 'terminal-open'; icon.dataset.place = place; icon.title = name;
+      icon.setAttribute('aria-hidden', 'true'); // Named in the row's accessible label.
+      icon.innerHTML = `<svg viewBox="0 0 24 24">${paths}</svg>`;
+      heading.append(icon);
+    }
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
-    const status = r.unshared ? 'Not shared' : hasOpenWindow(r) && phase === 'idle' ? '' : label;
-    button.setAttribute('aria-label', [title.textContent, status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
+    const status = r.unshared ? 'Not shared' : place && phase === 'idle' ? '' : label;
+    button.setAttribute('aria-label', [title.textContent, place && placeIcons[place][0], status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.

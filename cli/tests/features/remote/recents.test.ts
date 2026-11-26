@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { SessionMeta, SessionWithText } from '../../../src/native/index.js'
 import { startFixtureRelay } from '../../helpers/remote-relay.js'
 import { phoneCatalog } from '../../../src/features/remote/catalog.js'
-import { directoryGroups, hasOpenWindow, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
+import { directoryGroups, hasOpenWindow, openPlace, windowStatusLabel } from '../../../src/features/remote/phone-directory.js'
 import { profileKey, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 import legacyCatalog from '../../fixtures/contracts/remote-session-list-legacy.json'
@@ -122,6 +122,23 @@ test('the completion mark is additive to the legacy catalog, including for a par
   const parked = phoneCatalog([], [{ ...window, completed:true, phoneCreated:true }], page).rows[0]!
   expect(parked).toMatchObject({ parked:true, terminal:window.terminal })
   expect(windowStatusLabel(parked)).toBe('Completed')
+})
+
+test('open rows carry only an icon place: tmux when the window says so, a visible terminal otherwise', () => {
+  const window = { ...legacyCatalog.online[0]!, phase:'idle' as const }
+  const page = { limit:40, query:'' }
+  // A legacy window without the field renders exactly as before, as an ordinary open window.
+  expect(openPlace(legacyCatalog.rows[0])).toBe('desktop')
+  const tmux = phoneCatalog([], [{ ...window, tmux:true }], page).rows[0]!
+  const { tmux: flag, ...legacyRow } = JSON.parse(JSON.stringify(tmux))
+  expect(flag).toBe(true)
+  expect(legacyRow).toEqual(legacyCatalog.rows[0])
+  expect(openPlace(tmux)).toBe('tmux')
+  // An idle phone-opened window is listed as saved: no icon, and no stale tmux flag.
+  const parked = phoneCatalog([], [{ ...window, tmux:true, phoneCreated:true }], page).rows[0]!
+  expect([parked.tmux, openPlace(parked)]).toEqual([undefined, null])
+  expect(openPlace({ session:'saved', updated:'2026-09-18T12:00:00.000Z' })).toBeNull()
+  expect(openPlace({ kind:'private' })).toBe('desktop')
 })
 
 test('blank first-run metadata does not hide the live opening title in Sessions or search', () => {
