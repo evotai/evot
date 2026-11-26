@@ -12,8 +12,10 @@ export function queueRows(s, outbox) {
     state: local.has(draftId) ? stateFor(local.get(draftId)) : s.pendingSteers?.includes(draftId) ? 'now' : 'after'})))
     .map(({state,draftId}) => ({state, item:local.get(draftId)}));
   const represented = new Set(rows.map(r => r.item));
-  for (const item of queued) if (!represented.has(item) && (item.sending || !pendingDrafts(s) && !s?.promptQueue))
-    rows.push({state:item.sending ? 'sending' : stateFor(item), item});
+  for (const item of queued) {
+    if (represented.has(item) || (item.sending && item.el)) continue; // photo transfer has its own chat bubble
+    if (item.sending || !pendingDrafts(s) && !s?.promptQueue) rows.push({state:item.sending ? 'sending' : stateFor(item), item});
+  }
   return rows;
 }
 

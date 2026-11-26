@@ -53,6 +53,8 @@ evot-activity[data-running] { color:var(--accent); }
 #promptQueue .photo-thumb { pointer-events:auto; flex:none; width:32px; height:32px; border-radius:6px; }
 #promptQueue img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
 .outbox-state { display:block; font-size:11px; color:var(--faint); text-align:end; }
+#outbox progress { width:7rem; height:4px; accent-color:var(--accent); }
+#outbox .failed .outbox-state { color:var(--red); }
 .send-btn[aria-busy=true] { cursor:progress; }
 .remote-page .text-content :not(pre)>code { color:var(--accent); }
 /* The TUI's Markdown (markdown-css.ts colours it). Links underline so they read as tappable. */
@@ -73,6 +75,14 @@ evot-activity[data-running] { color:var(--accent); }
 .remote-page .message-assistant :is(pre,code),.pair-card input { font-family:ui-monospace,Menlo,monospace; }
 .remote-page .code-copy { width:44px; height:40px; }
 .remote-page .composer-seat { position:relative; flex:0 1 auto; min-height:0; padding:5px max(12px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)); }
+/* Keyboard open on a phone: keep the whole draft, its shortcuts and send row in view.
+   The transcript may shrink to nothing first; the status line returns with the keyboard. */
+.remote-page .conversation[data-tight] .chat-scroll { min-height:0; padding-block:6px; }
+.remote-page .conversation[data-tight] .run-line { display:none; }
+.remote-page .conversation[data-tight] .composer-seat { padding-top:2px; padding-bottom:6px; }
+.remote-page .conversation[data-tight] .composer-card :is(#draft,#draftGhost) { max-height:max(36px,calc(var(--remote-viewport-height,100dvh) * .25)); }
+.remote-page .conversation[data-tight] .command-menu { max-height:calc(var(--remote-viewport-height,100dvh) * .3); }
+.remote-page .conversation[data-tight] .question-card { max-height:calc(var(--remote-viewport-height,100dvh) * .5); }
 .remote-page .composer-card { border-radius:20px; box-shadow:none; padding:4px 6px 2px; }
 .remote-page .composer-card :is(#draft,#draftGhost) {
   font:inherit; font-size:16px; line-height:1.4; min-height:36px; max-height:20dvh;

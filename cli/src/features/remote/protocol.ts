@@ -182,6 +182,11 @@ export function parseRemoteAction(value: unknown): RemoteAction | null {
 }
 
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+/** One photo uploaded ahead of its message, checked as strictly as an inline one. */
+export function parseRemoteImage(value: unknown): RemoteImage | null {
+  return parseImages([value])?.[0] ?? null
+}
+
 /** `[]` when absent, `null` when present but not acceptable. */
 function parseImages(value: unknown): RemoteImage[] | null {
   if (value === undefined) return []

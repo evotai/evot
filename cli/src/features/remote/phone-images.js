@@ -1,6 +1,6 @@
-// Photos for the next message. Scaled on the phone so a 12 MP picture is a few
-// hundred KB on the wire; the computer's engine resizes again if a model needs it.
-const MAX_SIDE = 2000, QUALITY = 0.85, MAX_IMAGES = 4;
+// Work starts at selection. The tray and each submitted message own separate batches:
+// moving a photo into the conversation never waits for a decoder or a network reply.
+const MAX_SIDE = 1600, QUALITY = 0.76, MAX_IMAGES = 4;
 
 async function shrink(file) {
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -10,60 +10,97 @@ async function shrink(file) {
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((ok, fail) => canvas.toBlob(b => b ? ok(b) : fail(Error('encode')), 'image/jpeg', QUALITY));
-    const data = await new Promise((ok, fail) => {
-      const reader = new FileReader();
-      reader.onload = () => ok(String(reader.result).split(',')[1] ?? '');
-      reader.onerror = () => fail(reader.error);
-      reader.readAsDataURL(blob);
-    });
-    return { mimeType: 'image/jpeg', data, blob, url: URL.createObjectURL(blob) };
+    return await new Promise((ok, fail) => canvas.toBlob(b => b ? ok(b) : fail(Error('encode')), 'image/jpeg', QUALITY));
   } finally { bitmap.close?.(); }
 }
 
-export function imageTray({ tray, input, button, thumbnail, changed, notice }) {
-  let items = [], adding = 0, epoch = 0;
+async function inline({ blob }) {
+  const data = await new Promise((ok, fail) => {
+    const reader = new FileReader();
+    reader.onload = () => ok(String(reader.result).split(',')[1]);
+    reader.onerror = () => fail(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  return { mimeType: blob.type, data };
+}
+
+export function imageTray({ tray, input, button, thumbnail, changed, notice, upload, prepare = shrink }) {
+  const document = tray.ownerDocument;
+  let items = [], decoder = Promise.resolve();
+  function release(item) {
+    item.abort.abort();
+    if (item.preview) URL.revokeObjectURL(item.preview.url);
+  }
   function paint() {
-    tray.hidden = !items.length && !adding;
+    tray.hidden = !items.length;
     tray.replaceChildren(...items.map((item, index) => {
       const cell = document.createElement('div'); cell.className = 'attachment';
-      const preview = thumbnail(item,index);
+      if (item.preview) cell.append(thumbnail(item.preview,index));
+      else cell.textContent = item.error ? '!' : '…';
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'remove-photo'; remove.textContent = '×';
       remove.setAttribute('aria-label', `Remove photo ${index + 1}`);
-      remove.onclick = () => { URL.revokeObjectURL(item.url); items.splice(index, 1); paint(); };
-      cell.append(preview, remove);
-      return cell;
-    }), ...(adding ? [Object.assign(document.createElement('div'), { className: 'attachment loading', textContent: '…' })] : []));
-    button.disabled = items.length + adding >= MAX_IMAGES;
+      remove.onclick = () => { release(item); items.splice(index, 1); paint(); };
+      cell.append(remove); return cell;
+    }));
+    button.disabled = items.length >= MAX_IMAGES;
     changed();
   }
-  async function add(files) {
-    const room = MAX_IMAGES - items.length - adding, picked = [...files].filter(f => f.type.startsWith('image/'));
+  function add(files) {
+    const room = MAX_IMAGES - items.length, picked = [...files].filter(f => f.type.startsWith('image/'));
     if (picked.length > room) notice(`Up to ${MAX_IMAGES} photos per message.`);
-    const batch = picked.slice(0, Math.max(0, room)), mine = epoch;
-    adding += batch.length; paint();
-    for (const file of batch) {
-      if (epoch !== mine) break;
-      try {
-        const item = await shrink(file);
-        if (epoch === mine) items.push(item); else URL.revokeObjectURL(item.url);
-      } catch { if (epoch === mine) notice(`Could not read ${file.name || 'that photo'}. Try another format.`); }
-      finally { if (epoch === mine) { adding--; paint(); } }
+    for (const file of picked.slice(0, Math.max(0, room))) {
+      const item = { abort:new AbortController(), loaded:0 };
+      items.push(item);
+      // Decode one full camera image at a time; uploads can overlap the next decode.
+      decoder = decoder.then(async () => {
+        if (item.abort.signal.aborted) return;
+        try {
+          const blob = await prepare(file);
+          if (!item.abort.signal.aborted) item.preview = { blob, url:URL.createObjectURL(blob) };
+        } catch { item.error = `Could not read ${file.name || 'photo'}. Remove it or choose another format.`; }
+        if (items.includes(item)) paint();
+        item.notify?.();
+      });
+      item.ready = decoder.then(async () => {
+        if (!item.preview || item.abort.signal.aborted) return;
+        try {
+          item.ref = await upload(item.preview.blob, loaded => { item.loaded = loaded; item.notify?.(); }, item.abort.signal);
+        } catch { /* An older gateway or a lost receipt: keep the JPEG for an inline send. */ }
+        item.notify?.();
+      });
     }
+    paint();
   }
   button.onclick = () => input.click();
-  input.onchange = () => { void add(input.files ?? []); input.value = ''; };
+  input.onchange = () => { add(input.files ?? []); input.value = ''; };
   return {
-    add,
-    get busy() { return adding > 0; },
-    get count() { return items.length; },
-    /** Hand the photos to a send; `restore` puts them back if it fails. */
+    add, get count() { return items.length; },
     take() {
       const taken = items; items = []; paint();
-      return { images: taken.map(({ mimeType, data }) => ({ mimeType, data })), previews: taken.map(({blob,url}) => ({blob,url})),
+      const previews = () => taken.flatMap(i => i.preview ? [i.preview] : []);
+      return { count:taken.length, previews,
+        async ready(update) {
+          const report = () => {
+            const ready = previews(), total = ready.reduce((sum,p) => sum + p.blob.size, 0);
+            const loaded = taken.reduce((sum,i) => sum + (i.ref ? i.preview.blob.size : i.loaded), 0);
+            if (ready.length < taken.length) update(ready, `Preparing photos · ${ready.length}/${taken.length}`, null);
+            else if (loaded >= total) update(ready, 'Waiting for upload receipt…', null);
+            else {
+              const percent = Math.floor(100 * loaded / total);
+              update(ready, `Uploading · ${percent}%`, percent);
+            }
+          };
+          for (const i of taken) i.notify = report;
+          try {
+            report(); await Promise.all(taken.map(i => i.ready));
+            const unreadable = taken.find(i => i.error);
+            if (unreadable) throw Error(unreadable.error);
+          } finally { for (const i of taken) i.notify = null; }
+        },
+        images: allInline => Promise.all(taken.map(i => i.ref && !allInline ? { ref:i.ref } : inline(i.preview))),
         restore() { items = [...taken, ...items]; paint(); },
-        release() { for (const i of taken) URL.revokeObjectURL(i.url); } };
+        release() { taken.forEach(release); } };
     },
-    clear() { epoch++; adding = 0; for (const i of items) URL.revokeObjectURL(i.url); items = []; paint(); },
+    clear() { items.forEach(release); items = []; paint(); },
   };
 }

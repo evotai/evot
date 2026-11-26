@@ -5,9 +5,11 @@ import type { DeviceAccess } from './pairing.js'
 import { remoteDeviceKind } from './presence.js'
 import type { CloudGate } from './cloud-connect.js'
 import { validKey } from './devices.js'
-import { parseRemoteAction, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
+import { parseRemoteAction, parseRemoteImage, RemoteConflict, REMOTE_IMAGE_LIMITS, type RemoteHost } from './protocol.js'
+import { PHOTO_EXPIRED, PhotoStash } from './photo-stash.js'
 
 export const ACTION_BODY_LIMIT = REMOTE_IMAGE_LIMITS.base64Total + 64 * 1024
+const PHOTO_BODY_LIMIT = REMOTE_IMAGE_LIMITS.base64Each + 64 * 1024
 import type { PhoneWorkspace } from './workspace.js'
 
 /** Always loopback; no trust in forwarded headers. Device management has no HTTP routes. */
@@ -23,6 +25,7 @@ export function listenRemote(
 ) {
   const { workspace, cloud } = options
   let closed = false, streams = 0
+  const photos = new PhotoStash()
   const headers = {
     'Cache-Control': 'no-store, no-transform',
     'Referrer-Policy': 'no-referrer',
@@ -58,7 +61,7 @@ export function listenRemote(
         return new Response(gzip ? phonePage.gzip : phonePage.html, { headers: { ...page, 'Content-Type': 'text/html; charset=utf-8', ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) } })
       }
       const enrollment = ['/device/challenge', '/device/prove', '/device/poll'].includes(path)
-      if (!enrollment && !['/state', '/action', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
+      if (!enrollment && !['/state', '/action', '/photos', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
       const auth = req.headers.get('authorization'),
         authorized = () => !closed && (!options.active || options.active()) && access.authorized(auth)
       const unauthorized = () => fail(401, 'Pair again on the computer.')
@@ -122,15 +125,25 @@ export function listenRemote(
           : new Response(body, { headers: { ...headers, etag, 'Content-Type': 'application/json' } })
       }
       if (req.method !== 'POST' || path === '/state' || path === '/sessions' || path === '/folders') return fail(405, 'Method not allowed')
-      if (origin !== expected || req.headers.get('content-type')?.split(';')[0] !== 'application/json')
+      const type = req.headers.get('content-type')?.split(';')[0]
+      if (path === '/photos' && type === 'image/jpeg' && origin === expected) {
+        const limit = Math.floor(REMOTE_IMAGE_LIMITS.base64Each / 4) * 3
+        if (Number(req.headers.get('content-length')) > limit) return fail(413, 'Photo too large.')
+        const bytes = Buffer.from(await req.arrayBuffer())
+        if (!authorized()) return unauthorized()
+        if (bytes.length > limit) return fail(413, 'Photo too large.')
+        if (bytes.length < 3 || bytes.readUIntBE(0, 3) !== 0xffd8ff) return fail(400, 'Invalid JPEG.')
+        return Response.json({ id: photos.put(auth!, { mimeType: 'image/jpeg', data: bytes.toString('base64') }) }, { headers })
+      }
+      if (origin !== expected || type !== 'application/json')
         return fail(403, 'Expected a same-origin JSON request')
-      const limit = path === '/action' ? ACTION_BODY_LIMIT : 64 * 1024
+      const limit = path === '/action' ? ACTION_BODY_LIMIT : path === '/photos' ? PHOTO_BODY_LIMIT : 64 * 1024
       if (Number(req.headers.get('content-length') ?? 0) > limit)
-        return fail(413, path === '/action' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
+        return fail(413, path === '/action' || path === '/photos' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
       let body: unknown
       try {
         const raw = await req.text() // a chunked body has no length header: measure what arrived
-        if (raw.length > limit) return fail(413, path === '/action' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
+        if (raw.length > limit) return fail(413, path === '/action' || path === '/photos' ? 'Images are too large. Send fewer or smaller photos.' : 'Request too large.')
         body = JSON.parse(raw)
       } catch {
         return fail(400, 'Invalid JSON')
@@ -167,6 +180,11 @@ export function listenRemote(
         )
       }
       if (!authorized()) return unauthorized()
+      if (path === '/photos') {
+        const image = parseRemoteImage(body)
+        if (!image) return fail(400, 'Unsupported photo.')
+        return Response.json({ id: photos.put(auth!, image) }, { headers })
+      }
       if (path === '/open') {
         if (
           !workspace ||
@@ -190,12 +208,15 @@ export function listenRemote(
         return deleted ? new Response(null, { status: 204, headers }) : fail(404, 'Session no longer exists in this profile.')
       }
       if (!shared()) return fail(409, 'Terminal no longer shared.')
-      const action = parseRemoteAction(body)
+      const stashed = photos.resolve(auth!, body)
+      if (!stashed) return fail(412, PHOTO_EXPIRED)
+      const action = parseRemoteAction(stashed.body)
       if (!action) return fail(400, 'Invalid action')
       if (other) {
         const r = await workspace!.bus.request(other, '/action', action)
         if (!r.ok) return fail(r.status, await r.text())
       } else host.act(action)
+      photos.release(stashed.refs)
       return new Response(null, { status: 204, headers })
     },
     error: (e: Error) =>
@@ -209,6 +230,7 @@ export function listenRemote(
     access,
     close() {
       closed = true
+      photos.clear()
       access.close()
       void server.stop(true)
     },

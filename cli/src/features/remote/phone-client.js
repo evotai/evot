@@ -14,6 +14,7 @@ import { conversationScroll } from './phone-scroll.js';
 import { fitConversationViewport } from './phone-viewport.js';
 import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
+import { CONFIRM_MS, delivered, photoExpired, refused, requestTimeout, uploadRequest } from './phone-send.js';
 import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
 import { draftCarry, pageUpdates } from './phone-update.js';
 
@@ -62,7 +63,7 @@ const background = backgroundPanel(document, () => {
 function clearDraft() { $('draft').value = ''; photos.clear(); resize(); }
 function draftEmpty() { return !messageField.value && !tab.composing; }
 function currentSuggestion(empty = draftEmpty()) {
-  return inlineSuggestion(connected ? view : null, empty && !photos.count && !photos.busy, dismissed);
+  return inlineSuggestion(connected ? view : null, empty && !photos.count, dismissed);
 }
 function dismissHint() {
   if (commands.dismiss()) return;
@@ -77,7 +78,8 @@ const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue
 const viewer = photoViewer($('photoPreview')), sentPhotos = messagePhotos();
 const outbox = [], renderQueue = queueStrip($('promptQueue'),viewer.thumbnail);
 const photos = imageTray({ thumbnail:viewer.thumbnail, tray: $('attachments'), input: $('imageInput'), button: $('attach'),
-  changed: () => controls(), notice: (text) => notice(text) });
+  changed: () => controls(), notice: (text) => notice(text),
+  upload: async (blob,progress,signal) => token ? (await (await api('/photos',blob,{},signal,progress)).json()).id : null });
 const drawer = sessionDrawer({ api, selected: () => connected ? terminal : null, choose, create: () => choose(null, null),
   createIn: () => showFolders(), host: () => view?.place?.host,
   ask: { available: () => connected && view?.input === 'send' && !busy, submit: (text) => { $('draft').value = text; resize(); submitMessage(view?.input); } } });
@@ -167,7 +169,7 @@ function controls() {
   drawer.lock(busy);
   $('openSessions').disabled = $('browseSessions').disabled = busy;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
-  $('send').disabled = busy || !input || photos.busy || (!$('draft').value.trim() && !photos.count && !candidate);
+  $('send').disabled = busy || !input || (!$('draft').value.trim() && !photos.count && !candidate);
   $('attach').disabled = busy || !input || photos.count >= 4;
   const queuedCount = renderQueue(view, outbox), queueSummary = $('queueSummary');
   const queueLabel = queuedCount ? `${queuedCount} queued` : '';
@@ -184,17 +186,17 @@ function controls() {
   hint.toggleAttribute('data-preview', !!preview);
   const commandHint = renderCommandGhost(commands.hint);
   const pending = lastDraft(view);
-  shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count || photos.busy,
+  shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count,
     pending && outbox.some(item => item.draftId === pending) ? pending : null,
     !!input && (commandHint || !$('commandMenu').hidden || !!preview));
-  tab.render(connected ? view : null, busy || photos.busy, photos.count, candidate);
+  tab.render(connected ? view : null, busy, photos.count, candidate);
   $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
   background.setConnected(connected);
   $('models').disabled = !switchable || !view.models.options.length;
   $('effort').disabled = !switchable || !!view.models.pending;
   $('compose').hidden = !!view?.ask;
   askPanel.render(view?.ask, view?.generation, busy || !connected);
-  transcript.update(!!view && !view.ask, !empty || !!photos.count || photos.busy);
+  transcript.update(!!view && !view.ask, !empty || !!photos.count);
 }
 function models(m) {
   const key = JSON.stringify(m.options),
@@ -332,7 +334,7 @@ function unpair() {
 }
 // iPadOS in desktop mode describes itself as a Mac in its user agent.
 const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
-async function api(path, body, extra = {}, signal) {
+async function api(path, body, extra = {}, signal, progress) {
   const credential = token;
   const headers = { ...extra };
   if (token) {
@@ -341,13 +343,16 @@ async function api(path, body, extra = {}, signal) {
   }
   if (terminal && (path === '/state' || path === '/action' || path.startsWith('/sessions?limit='))) headers['X-Evot-Terminal'] = terminal;
   if (path === '/state' && background.selected) headers['X-Evot-Background'] = background.selected;
-  if (body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(path, {
+  const binary = body instanceof Blob;
+  if (body) headers['Content-Type'] = binary ? body.type : 'application/json';
+  const payload = binary ? body : body ? JSON.stringify(body) : undefined;
+  const timeout = requestTimeout(path, binary ? body.size : payload?.length);
+  const res = progress ? await uploadRequest(path,payload,headers,timeout,progress,signal) : await fetch(path, {
     method: body ? 'POST' : 'GET',
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: payload,
     cache: 'no-store',
-    signal: signal ?? AbortSignal.timeout(path.startsWith('/sessions?limit=') ? 30000 : path === '/open' ? 15000 : 8000),
+    signal: signal ?? AbortSignal.timeout(timeout),
   });
   if (res.status === 401 && token === credential) unpair();
   pageUpdated(res.headers.get('x-evot-build'));
@@ -522,7 +527,7 @@ async function pair(auto = false) {
     if (!leaving) { button.disabled = false; form.removeAttribute('aria-busy'); }
   }
 }
-async function action(payload, done, failed, command = false) {
+async function action(payload, done, failed, command = false, dispatch = message => api('/action',message)) {
   if (!connected || !view || busy) return;
   busy = true;
   if (payload.kind === 'suggest') dismissed = ''; // an explicit retry may return the same candidate
@@ -537,12 +542,12 @@ async function action(payload, done, failed, command = false) {
   // The queue strip is the feedback for a steer/follow-up. HTTP admission is not consumption.
   notice(feedback?.[0] ?? '', true);
   try {
-    await api('/action', { generation: view.generation, ...payload });
+    await dispatch({ generation: view.generation, ...payload });
     done?.();
     notice(feedback?.[1] ?? '');
   } catch (e) {
-    failed?.();
-    notice(e.status === 409 ? e.message : e.message + ' Check before retrying.', true);
+    // A send whose fate is unknown checks the transcript before saying anything.
+    if (!failed?.(e)) notice(e.status === 409 ? e.message : e.message + ' Check before retrying.', true);
   } finally {
     etag = '';
     await refresh();
@@ -592,6 +597,17 @@ function settleOutbox(s) {
     else spoken.set(m.text, (s.messageOffset ?? 0) + i);
   });
   for (const item of outbox.splice(0)) {
+    if (item.sending && item.draftId && delivered(s,item.draftId)) {
+      item.confirmBy = 0; item.sending = false;
+      if (item.el) item.el.lastElementChild.textContent = 'Sent';
+      if (item.kind !== 'send') item.el?.remove();
+    }
+    if (item.confirmBy) {
+      if (Date.now() < item.confirmBy) { outbox.push(item); continue; }
+      if (item.el && item.previews.length) failPhoto(item,'Delivery not confirmed.');
+      else { item.el?.remove(); item.restore(); transcript.openComposer(); notice('Delivery not confirmed. Draft restored.',true); }
+      continue;
+    }
     // A repeated message can already be in history. The host queue, not the text or a timeout,
     // decides whether the original draft and its photos must stay recoverable.
     if (item.sending || item.pulling || (item.draftId && pendingDrafts(s)?.includes(item.draftId))) outbox.push(item);
@@ -612,7 +628,7 @@ function removeBubble(item) {
 function pullDraft(draftId) {
   const item = outbox.find(i => i.draftId === draftId);
   if (!item || draftId !== lastDraft(view)) return;
-  if ($('draft').value || photos.count || photos.busy) { notice('Clear the current draft before pulling back a pending message.'); return; }
+  if ($('draft').value || photos.count) { notice('Clear the current draft before pulling back a pending message.'); return; }
   // Keep the insertion point empty while the host atomically removes the native queue entry.
   $('draft').readOnly = true; item.pulling = true;
   void action({kind:view.pendingDrafts ? 'pull-draft' : 'pull-steer', draftId}, () => {
@@ -621,20 +637,31 @@ function pullDraft(draftId) {
     .finally(() => { item.pulling = false; $('draft').readOnly = false; $('draft').focus({preventScroll:true}); });
 }
 $('send').onclick = () => { if (currentSuggestion()?.candidate) tab.accept(); else submitMessage(view?.input); };
+function bubblePhotos(bubble, previews) {
+  bubble.querySelector('.bubble-images')?.remove();
+  if (!previews.length) return;
+  const strip = document.createElement('div'); strip.className = 'bubble-images';
+  strip.append(...previews.map(viewer.thumbnail)); bubble.append(strip);
+}
+function failPhoto(item, reason) {
+  removeBubble(item);
+  item.el.classList.add('failed'); item.el.querySelector('.bubble-images')?.remove();
+  item.el.querySelector('progress')?.remove();
+  item.el.lastElementChild.textContent = `${reason} Draft restored.`;
+  $('outbox').append(item.el); item.restore(); transcript.openComposer();
+}
 function sendingBubble(text, previews) {
   const el = document.createElement('article'), bubble = document.createElement('div'), state = document.createElement('small');
   el.className = 'message message-user pending'; bubble.className = 'bubble'; bubble.textContent = text;
-  if (previews.length) {
-    const strip = document.createElement('div'); strip.className = 'bubble-images';
-    strip.append(...previews.map(viewer.thumbnail)); bubble.append(strip);
-  }
+  bubblePhotos(bubble,previews);
   state.className = 'outbox-state'; state.textContent = previews.length ? 'Uploading…' : 'Sending…';
   el.append(bubble,state); $('outbox').append(el); return el;
 }
 function submitMessage(kind) {
   if (kind === 'queue' && !view?.composerKeys?.queue) return;
   const text = $('draft').value;
-  if (!connected || !kind || tab.composing || messageField.readOnly || (!text.trim() && !photos.count) || photos.busy || busy) return;
+  if (!connected || !kind || tab.composing || messageField.readOnly || busy) return;
+  if (!text.trim() && !photos.count) return;
   if (text.length > messageField.maxLength) { notice(`Message is too long (${text.length}/${messageField.maxLength}). Shorten it before sending.`); return; }
   const shortcut = phoneShortcut(text, view.commands, view.slashHints);
   if (shortcut) { if (kind !== 'queue') runShortcut(shortcut); return; }
@@ -653,12 +680,14 @@ function submitMessage(kind) {
     return;
   }
   if (text && text === view.suggestion) dismissed = text; // sent: do not offer it again
-  const taken = photos.take(), n = taken.images.length;
+  const taken = photos.take(), n = taken.count, target = terminal, session = view.sessionId, credential = token;
+  $('outbox').querySelector('.failed')?.remove();
   // The computer records the turn as text plus this label; match it to retire the pending bubble.
   const shown = [text.trim(), n ? `[${n === 1 ? 'Image' : `${n} images`} from phone]` : ''].filter(Boolean).join('\n');
-  const el = kind === 'send' ? sendingBubble(shown,taken.previews) : null;
+  const previews = taken.previews();
+  const el = kind === 'send' || n ? sendingBubble(shown,previews) : null;
   const draftId = (n > 0 || (kind !== 'send' && pendingDrafts(view))) ? requestId() : undefined;
-  const item = {kind, text:shown, el, draftId, firstRow:(view.messageOffset ?? 0) + view.messages.length, previews:taken.previews, sending:true, expires:Date.now()+30000, release:taken.release, restore() {
+  const item = {kind, text:shown, el, draftId, firstRow:(view.messageOffset ?? 0) + view.messages.length, previews, sending:true, expires:Date.now()+30000, release:taken.release, restore() {
     taken.restore();
     const d = $('draft');
     // A failed HTTP request can race typing the next draft. Restore both, keep the
@@ -671,12 +700,52 @@ function submitMessage(kind) {
   }};
   outbox.push(item);
   $('draft').value = ''; resize(); $('welcome').hidden = true;
-  transcript.submitted({followLatest:kind === 'send'});
-  void action({ kind, text: text.trim(), draftId, ...(n ? { images: taken.images } : {}) }, () => {
-    item.sending = false; if (el) el.lastElementChild.textContent = 'Sent';
-  }, () => {
-    if (!outbox.includes(item)) return;
-    removeBubble(item); item.restore(); transcript.openComposer();
+  transcript.submitted({followLatest:!!el});
+  const meter = n ? document.createElement('progress') : null;
+  if (meter) { meter.max = 100; meter.setAttribute('aria-label','Photo upload'); el.insertBefore(meter,el.lastElementChild); }
+  const status = (text, percent = null) => {
+    if (el && el.lastElementChild.textContent !== text) el.lastElementChild.textContent = text;
+    if (meter) { meter.hidden = percent === null; if (percent !== null) meter.value = percent; }
+  };
+  let attempted = false;
+  void action({kind, text:text.trim(), draftId}, () => {
+    item.sending = false; status('Sent');
+    item.expires = Date.now() + 30000;
+    if (kind !== 'send') el?.remove(); // admitted; the host queue owns the status now
+  }, e => {
+    if (!outbox.includes(item) || !item.sending) return true;
+    if (attempted && draftId && !refused(e)) {
+      item.confirmBy = Date.now() + CONFIRM_MS; status('Checking delivery…'); return true;
+    }
+    if (n) { failPhoto(item,e.message); return true; }
+    removeBubble(item); item.restore(); transcript.openComposer(); return false;
+  }, false, async message => {
+    if (n) await taken.ready((ready, label, percent) => {
+      if (!outbox.includes(item)) return;
+      if (ready.length !== item.previews.length) {
+        item.previews = ready;
+        bubblePhotos(el.firstElementChild,ready); transcript.keepLatest();
+      }
+      status(label,percent);
+    });
+    async function post(allInline) {
+      if (!outbox.includes(item)) return;
+      const images = n ? await taken.images(allInline) : [];
+      if (!outbox.includes(item) || terminal !== target || token !== credential || view?.sessionId !== session)
+        throw Error('Conversation changed.');
+      const inline = images.some(i => i.data);
+      const progress = (loaded,total) => {
+        const percent = Math.floor(100 * loaded / total);
+        if (loaded === total) status('Waiting for computer…'); else status(`Uploading · ${percent}%`,percent);
+      };
+      if (inline) progress(0,1); else status('Waiting for computer…');
+      attempted = true;
+      await api('/action',{...message,...(n ? {images} : {})},{},undefined,inline ? progress : undefined);
+    }
+    try { await post(false); } catch (e) {
+      if (!n || !photoExpired(e)) throw e;
+      attempted = false; await post(true); // 412 means the first action never ran
+    }
   });
 }
 // These commands already have native phone controls. Never open an invisible overlay in the followed TUI.
