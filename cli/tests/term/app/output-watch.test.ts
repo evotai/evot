@@ -13,23 +13,29 @@ test('output subscription receives writes and replacement without a polling time
   let rejectChange: ((error: Error) => void) | undefined
   let latest = ''
   const close = watchOutputFile(path, () => { latest = readOutputTail(path); resolveChange?.() }, error => rejectChange?.(error))
-  const change = async (write: () => void) => {
+  const change = async (expected: string, write: () => void) => {
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
       await new Promise<void>((resolve, reject) => {
-        resolveChange = resolve
+        resolveChange = () => { if (latest === expected) resolve() }
         rejectChange = reject
-        timeout = setTimeout(() => reject(new Error('filesystem output event missing')), 1500)
+        timeout = setTimeout(() => reject(new Error(`waiting for ${expected}; last notification read ${JSON.stringify(latest)}`)), 1500)
         write()
       })
     } finally { clearTimeout(timeout); resolveChange = undefined; rejectChange = undefined }
   }
   try {
-    await change(() => appendFileSync(path, 'hello'))
-    expect(latest).toBe('hello')
-    await change(() => { writeFileSync(join(root, 'new'), 'replacement'); renameSync(join(root, 'new'), path) })
+    // fs.watch has no ready event. On macOS its first notification may be
+    // missed during startup. Establish readiness through the watcher itself;
+    // none of the writes under test are repeated or read by a polling loop.
+    const prime = () => writeFileSync(path, 'ready')
+    const priming = setInterval(prime, 25)
+    try { await change('ready', prime) } finally { clearInterval(priming) }
+    await change('ready hello', () => appendFileSync(path, ' hello'))
+    expect(latest).toBe('ready hello')
+    await change('replacement', () => { writeFileSync(join(root, 'new'), 'replacement'); renameSync(join(root, 'new'), path) })
     expect(latest).toBe('replacement')
-    await change(() => writeFileSync(path, 'truncated'))
+    await change('truncated', () => writeFileSync(path, 'truncated'))
     expect(latest).toBe('truncated')
   } finally { close(); rmSync(root, { recursive: true, force: true }) }
 })

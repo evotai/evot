@@ -71,7 +71,9 @@ test('a photo uploaded while typing travels by id; the window still receives ord
   try {
     const pair = async () => { const pending = await pendingDevice(l.address); access.approve(code); return 'Bearer ' + (await pending.poll()).token }
     const auth = await pair(), other = await pair()
-    const post = (path: string, body: unknown, authorization = auth) => fetch(l.address + path, { method: 'POST', body: JSON.stringify(body),
+    // Exercise each HTTP rejection independently. In particular, a 413 can
+    // arrive before Bun has finished writing the previous request body.
+    const post = (path: string, body: unknown, authorization = auth) => fetch(l.address + path, { method: 'POST', keepalive: false, body: JSON.stringify(body),
       headers: { origin: l.address, 'content-type': 'application/json', authorization } })
     const big = photo('A'.repeat(2 * 1024 * 1024))
     const upload = await post('/photos', big)

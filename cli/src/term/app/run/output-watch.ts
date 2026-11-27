@@ -1,38 +1,56 @@
 /** Filesystem-driven output updates. No polling timer; notifications coalesce per event-loop turn. */
-import { watch, type FSWatcher } from 'node:fs'
+import { statSync, watch, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
 
 export function watchOutputFile(path: string, changed: () => void, failed: (error: Error) => void): () => void {
   let closed = false
   let pending: ReturnType<typeof setImmediate> | undefined
   let file: FSWatcher | undefined
-  const notify = () => {
-    if (closed || pending) return
-    pending = setImmediate(() => {
-      pending = undefined
-      if (!closed) changed()
-    })
-  }
-  const bindFile = () => {
-    file?.close()
-    file = undefined
+  let identity: {dev: number; ino: number} | undefined
+  let dirty = false
+  const name = basename(path)
+  function reconcile() {
+    if (closed) return
     try {
-      file = watch(path, { persistent: false }, notify)
-      file.on('error', error => { if (!closed) failed(error) })
+      const stat = statSync(path, { throwIfNoEntry: false })
+      if (stat && (!file || stat.dev !== identity?.dev || stat.ino !== identity?.ino)) {
+        // A file and its parent can both signal the same write. Don't tear down
+        // the inode subscription unless the directory entry actually changed.
+        const next = watch(path, { persistent: false }, () => notify(true))
+        next.on('error', error => { if (!closed && file === next) failed(error) })
+        file?.close()
+        file = next
+        identity = stat
+        return true
+      } else if (!stat && file) {
+        file.close(); file = undefined; identity = undefined
+        return true
+      }
     } catch (error) {
-      // Replacement can briefly remove the path. The directory subscription
-      // will bind the new file when it appears.
+      // The file may disappear between stat and watch; the parent stays subscribed.
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
   }
-  // macOS directory watches report entry changes, not every write to a file.
-  // Watch the inode for writes and its directory for replacement/deletion.
-  const directory = watch(dirname(path), { persistent: false }, (_event, name) => {
-    if (closed || (name !== null && name.toString() !== basename(path))) return
-    try { bindFile(); notify() } catch (error) { failed(error instanceof Error ? error : new Error(String(error))) }
+  function notify(targetChanged: boolean) {
+    dirty ||= targetChanged
+    if (closed || pending) return
+    pending = setImmediate(() => {
+      pending = undefined
+      if (closed) return
+      let rebound
+      try { rebound = reconcile() } catch (error) { failed(error instanceof Error ? error : new Error(String(error))); return }
+      const refresh = rebound || dirty
+      dirty = false
+      if (refresh) changed()
+    })
+  }
+  const directory = watch(dirname(path), { persistent: false }, (_event, entry) => {
+    // A coalesced rename on macOS can name only the source (a sibling).
+    // Check the target inode even then; unrelated writes don't redraw it.
+    notify(entry === null || entry.toString() === name)
   })
   directory.on('error', error => { if (!closed) failed(error) })
-  try { bindFile() } catch (error) { directory.close(); throw error }
+  try { reconcile() } catch (error) { directory.close(); throw error }
   return () => {
     closed = true
     if (pending) clearImmediate(pending)
