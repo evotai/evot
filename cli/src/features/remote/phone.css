@@ -80,7 +80,8 @@ evot-activity[data-running] { color:var(--accent); }
 /* Keyboard open on a phone: keep the whole draft, its shortcuts and send row in view.
    The transcript may shrink to nothing first; the status line returns with the keyboard. */
 .remote-page .conversation[data-tight] .chat-scroll { min-height:0; padding-block:6px; }
-.remote-page .conversation[data-tight] .run-line { display:none; }
+.remote-page .conversation[data-tight] .run-line:not([data-active]) { display:none; }
+.remote-page .conversation[data-tight] .run-line[data-active] { min-height:20px; padding-block:0; }
 .remote-page .conversation[data-tight] .composer-seat { padding-top:2px; padding-bottom:6px; }
 .remote-page .conversation[data-tight] .composer-card :is(#draft,#draftGhost) { max-height:max(36px,calc(var(--remote-viewport-height,100dvh) * .25)); }
 .remote-page .conversation[data-tight] .command-menu { max-height:calc(var(--remote-viewport-height,100dvh) * .3); }

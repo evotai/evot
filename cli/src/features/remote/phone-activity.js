@@ -40,8 +40,10 @@ export function registerActivityMarks(document, frames) {
     }
     attributeChangedCallback() {
       if (!this.isConnected) return;
-      if (this.hasAttribute('data-running')) running.add(this);
-      else {
+      if (this.hasAttribute('data-running')) {
+        if (!running.has(this)) this.textContent = frames[0];
+        running.add(this);
+      } else {
         running.delete(this);
         this.textContent = '·';
       }

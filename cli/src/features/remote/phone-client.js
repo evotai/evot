@@ -2,6 +2,7 @@ import { reviewNavigation } from './phone-review.js';
 import { questionPanel } from './phone-ask.js';
 import { inlineCommandGhost, installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
+import { turnStartFeedback } from './phone-turn-start.js';
 import { registerActivityMarks } from './phone-activity.js';
 import { completionReminder } from './phone-reminder.js';
 import { applyEdit, enterIntent } from './phone-editor.js';
@@ -44,6 +45,7 @@ const pickStart = new WeakMap();
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
+const starting = turnStartFeedback(paintRunStatus);
 const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
 // The draft typed for this window survives a page update, a sign-in redirect and re-pairing.
 const drafts = draftCarry(sessionStorage);
@@ -55,6 +57,7 @@ const pageUpdated = pageUpdates(document.documentElement.dataset.build, sessionS
 // Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
 let dismissed = '';
 function selectTarget(id, session) {
+  starting.clear();
   nav.select(id, session);
   terminal = nav.target?.terminal ?? null;
 }
@@ -234,6 +237,14 @@ function models(m) {
   $('effort').value = m.effort;
   $('effortLabel').textContent = titleCase(m.effort) || 'Thinking';
 }
+function paintRunStatus() {
+  if (!view) return;
+  const label = starting.label ?? view.status;
+  if ($('status').textContent !== label) $('status').textContent = label;
+  $('statusDetail').textContent = starting.label ? '' : view.statusDetail ?? '';
+  $('activity').toggleAttribute('data-running', !!starting.label || (!!view.active && !view.ask));
+  document.querySelector('.run-line').toggleAttribute('data-active', !!starting.label || !!view.active);
+}
 function render(s, mode) {
   if (nav.target?.session && nav.target.session !== s.sessionId)
     throw Object.assign(Error('This window changed sessions. Choose the session again.'), {status:409});
@@ -259,13 +270,11 @@ function render(s, mode) {
   $('threadTitle').textContent = s.title || (s.sessionId ? `Session ${s.sessionId.slice(-8)}` : 'New conversation');
   const pending = s.models.pending,
     next = pending && s.models.options.find((o) => o.spec === pending.spec);
-  if ($('status').textContent !== s.status) $('status').textContent = s.status;
-  $('statusDetail').textContent = s.statusDetail ?? '';
+  starting.observe(s);
+  paintRunStatus();
   $('nextModel').textContent = pending
     ? `next: ${next?.label || pending.spec}${pending.effort ? ' · ' + pending.effort : ''}`
     : '';
-  $('activity').toggleAttribute('data-running', !!s.active && !s.ask);
-  document.querySelector('.run-line').toggleAttribute('data-active', !!s.active);
   models(s.models);
   place(s.place);
   background.render(s.background);
@@ -333,6 +342,7 @@ function showPairScreen() {
   }
 }
 function reconnecting() {
+  starting.clear();
   connected = false;
   $('connection').removeAttribute('data-online');
   $('connection').textContent = 'Reconnecting…';
@@ -604,6 +614,7 @@ $('pair').onsubmit = (e) => {
 // An idle send has an optimistic bubble; steers/follow-ups live only in the queue strip.
 // The host owns the transcript. A rejected request stays recoverable in this page.
 function clearOutbox() {
+  starting.clear();
   dismissed = ''; viewer.close(); sentPhotos.prune([]);
   for (const item of outbox.splice(0)) item.release();
   $('outbox').replaceChildren(); renderQueue(null, outbox);
@@ -719,6 +730,7 @@ function submitMessage(kind) {
     resize();
   }};
   outbox.push(item);
+  const feedback = kind === 'send' && !view.active ? starting.begin(view, n > 0) : null;
   $('draft').value = ''; resize(); $('welcome').hidden = true;
   transcript.submitted({followLatest:!!el});
   const meter = n ? document.createElement('progress') : null;
@@ -729,10 +741,11 @@ function submitMessage(kind) {
   };
   let attempted = false;
   void action({kind, text:text.trim(), draftId}, () => {
-    item.sending = false; status('Sent');
+    item.sending = false; status('Sent'); feedback?.accepted();
     item.expires = Date.now() + 30000;
     if (kind !== 'send') el?.remove(); // admitted; the host queue owns the status now
   }, e => {
+    feedback?.failed();
     if (!outbox.includes(item) || !item.sending) return true;
     if (attempted && draftId && !refused(e)) {
       item.confirmBy = Date.now() + CONFIRM_MS; status('Checking delivery…'); return true;
