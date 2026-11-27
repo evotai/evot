@@ -9,6 +9,7 @@ use evot::conf::Protocol;
 use evot::conf::ProviderProfile;
 use evot::observability::TranscriptStats;
 use evot::session::storage::MemoryStorage;
+use evot::session::storage::Storage;
 use evot::surface::acp::AcpOptions;
 use evot_engine::provider::MockProvider;
 use evot_engine::provider::ProviderError;
@@ -56,7 +57,7 @@ pub(super) struct Client {
 }
 
 impl Client {
-    fn start(
+    pub(super) fn start(
         tmp: &TempDir,
         mode: ToolMode,
         provider: impl StreamProvider + 'static,
@@ -80,10 +81,28 @@ impl Client {
         ask_permission: bool,
         provider: impl StreamProvider + 'static,
     ) -> Result<(Self, Arc<Agent>), Box<dyn std::error::Error>> {
+        Self::start_with_storage(
+            tmp,
+            config,
+            mode,
+            ask_permission,
+            Arc::new(MemoryStorage::new()),
+            provider,
+        )
+    }
+
+    pub(super) fn start_with_storage(
+        tmp: &TempDir,
+        config: Config,
+        mode: ToolMode,
+        ask_permission: bool,
+        storage: Arc<dyn Storage>,
+        provider: impl StreamProvider + 'static,
+    ) -> Result<(Self, Arc<Agent>), Box<dyn std::error::Error>> {
         let agent = Agent::new_with_provider_for_test(
             &config,
             tmp.path().to_string_lossy(),
-            Arc::new(MemoryStorage::new()),
+            storage,
             provider,
         )?;
         let (input, server_input) = tokio::io::duplex(1 << 20);
@@ -179,7 +198,7 @@ impl Client {
         }
     }
 
-    async fn new_session(
+    pub(super) async fn new_session(
         &mut self,
         cwd: &std::path::Path,
     ) -> Result<String, Box<dyn std::error::Error>> {
@@ -219,7 +238,7 @@ async fn prompt_admission_precedes_immediate_cancel_in_the_same_wire_batch() -> 
 }
 
 /// Every update must be a valid ACP v1 `session/update` notification.
-fn updates(
+pub(super) fn updates(
     notifications: &[Value],
 ) -> Result<Vec<acp::SessionNotification>, Box<dyn std::error::Error>> {
     notifications
@@ -231,7 +250,7 @@ fn updates(
         .collect()
 }
 
-fn message_text(updates: &[acp::SessionNotification]) -> String {
+pub(super) fn message_text(updates: &[acp::SessionNotification]) -> String {
     updates
         .iter()
         .filter_map(|update| match &update.update {
@@ -265,9 +284,13 @@ async fn initialize_reports_v1_capabilities_and_version() -> TestResult {
         (info.name.as_str(), info.version.as_str()),
         ("evot", "9.9.9-test")
     );
-    assert!(!result.agent_capabilities.load_session);
-    let sessions = &result.agent_capabilities.session_capabilities;
+    let capabilities = &result.agent_capabilities;
+    assert!(capabilities.load_session);
+    assert!(capabilities.prompt_capabilities.image);
+    assert!(capabilities.prompt_capabilities.embedded_context);
+    let sessions = &capabilities.session_capabilities;
     assert!(sessions.list.is_some() && sessions.resume.is_some() && sessions.close.is_some());
+    assert!(sessions.delete.is_some());
     client.close().await
 }
 
@@ -478,8 +501,8 @@ async fn sessions_can_be_listed_resumed_and_closed() -> TestResult {
     client.close().await
 }
 
-struct WaitingProvider {
-    started: CancellationToken,
+pub(super) struct WaitingProvider {
+    pub(super) started: CancellationToken,
 }
 
 #[async_trait::async_trait]

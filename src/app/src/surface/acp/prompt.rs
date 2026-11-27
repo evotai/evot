@@ -12,12 +12,13 @@ const IMAGE_WORKER: &str = "acp images";
 
 /// Convert a `session/prompt` content array into evot input.
 ///
-/// Text and resource links are baseline ACP content. Text resources are
-/// accepted as quoted context even though `embeddedContext` is not advertised.
-/// Images are advertised (`promptCapabilities.image`) and become user image
-/// input, as pasted images do in the terminal UI. Audio and binary resources
-/// are refused instead of being dropped silently. Image bytes are prepared
-/// separately, after synchronous admission reserves the session in wire order.
+/// Text and resource links are baseline ACP content. Embedded resources
+/// (`promptCapabilities.embeddedContext`) become quoted context when they are
+/// text, and image input when they are image files. Images are advertised
+/// (`promptCapabilities.image`) and become user image input, as pasted images
+/// do in the terminal UI. Audio and other binary resources are refused instead
+/// of being dropped silently. Image bytes are prepared separately, after
+/// synchronous admission reserves the session in wire order.
 pub(super) fn prompt_input(
     blocks: &[acp::ContentBlock],
 ) -> Result<Vec<evot_engine::Content>, acp::Error> {
@@ -40,7 +41,24 @@ pub(super) fn prompt_input(
                     "<resource uri=\"{}\">\n{}\n</resource>",
                     contents.uri, contents.text
                 ),
-                _ => return Err(unsupported("binary embedded resources")),
+                // An attached image file is an image, checked and resized like one.
+                acp::EmbeddedResourceResource::BlobResourceContents(contents) => {
+                    let mime = contents
+                        .mime_type
+                        .as_ref()
+                        .filter(|mime| mime.starts_with("image/"))
+                        .ok_or_else(|| {
+                            unsupported("binary embedded resources other than images")
+                        })?;
+                    input.push(Content::Image {
+                        mime_type: mime.clone(),
+                        source: ImageSource::Base64 {
+                            data: contents.blob.clone(),
+                        },
+                    });
+                    continue;
+                }
+                _ => return Err(unsupported("this embedded resource type")),
             },
             acp::ContentBlock::Audio(_) => return Err(unsupported("audio content")),
             _ => return Err(unsupported("this content type")),

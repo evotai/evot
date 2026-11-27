@@ -7,6 +7,7 @@
 
 mod config_reload;
 mod connection;
+mod history;
 mod models;
 mod options;
 mod permission;

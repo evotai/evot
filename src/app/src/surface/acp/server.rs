@@ -24,6 +24,7 @@ use super::connection::to_value;
 use super::connection::write_frames;
 use super::connection::Connection;
 use super::connection::Inbound;
+use super::history::history_updates;
 use super::models::model_options;
 use super::permission::AcpApprover;
 use super::projection::TurnProjection;
@@ -129,8 +130,13 @@ struct SessionState {
     selection: Arc<ModelSelection>,
     /// Tools the client chose to always allow in this session.
     always_allowed: Arc<Mutex<HashSet<String>>>,
-    /// Cancel signal of the prompt running in this session, if any.
-    prompt: Option<Arc<CancellationToken>>,
+    prompt: Option<Arc<ActivePrompt>>,
+}
+
+#[derive(Default)]
+struct ActivePrompt {
+    cancel: CancellationToken,
+    finished: CancellationToken,
 }
 
 /// Reserved synchronously in wire order, before spawning or waiting on reload.
@@ -192,9 +198,11 @@ impl Server {
             "initialize" => to_value(self.initialize(parse(params)?)),
             "authenticate" => to_value(acp::AuthenticateResponse::new()),
             "session/new" => to_value(self.new_session(parse(params)?).await?),
+            "session/load" => to_value(self.load_session(parse(params)?).await?),
             "session/resume" => to_value(self.resume_session(parse(params)?).await?),
             "session/list" => to_value(self.list_sessions(parse(params)?).await?),
-            "session/close" => to_value(self.close_session(parse(params)?)?),
+            "session/close" => to_value(self.close_session(parse(params)?).await?),
+            "session/delete" => to_value(self.delete_session(parse(params)?).await?),
             "session/set_config_option" => to_value(self.set_config_option(parse(params)?).await?),
             _ => Err(acp::Error::method_not_found()),
         }
@@ -206,13 +214,18 @@ impl Server {
         acp::InitializeResponse::new(ProtocolVersion::V1)
             .agent_capabilities(
                 acp::AgentCapabilities::new()
-                    .load_session(false)
-                    .prompt_capabilities(acp::PromptCapabilities::new().image(true))
+                    .load_session(true)
+                    .prompt_capabilities(
+                        acp::PromptCapabilities::new()
+                            .image(true)
+                            .embedded_context(true),
+                    )
                     .session_capabilities(
                         acp::SessionCapabilities::new()
                             .list(acp::SessionListCapabilities::new())
                             .resume(acp::SessionResumeCapabilities::new())
-                            .close(acp::SessionCloseCapabilities::new()),
+                            .close(acp::SessionCloseCapabilities::new())
+                            .delete(acp::SessionDeleteCapabilities::new()),
                     ),
             )
             .agent_info(acp::Implementation::new(
@@ -249,14 +262,52 @@ impl Server {
         &self,
         request: acp::ResumeSessionRequest,
     ) -> RpcResult<acp::ResumeSessionResponse> {
-        let session_id = request.session_id.0.to_string();
-        let meta = self
-            .agent
-            .sessions()
-            .find(&session_id)
+        let options = self.reopen(&request.session_id.0, false).await?;
+        Ok(acp::ResumeSessionResponse::new().config_options(options))
+    }
+
+    /// Like `session/resume`, after replaying the stored conversation as
+    /// `session/update` notifications. They share the reply's channel, so
+    /// the client receives all of them before the response.
+    async fn load_session(
+        &self,
+        request: acp::LoadSessionRequest,
+    ) -> RpcResult<acp::LoadSessionResponse> {
+        let options = self.reopen(&request.session_id.0, true).await?;
+        Ok(acp::LoadSessionResponse::new().config_options(options))
+    }
+
+    /// Registers a stored session on this connection, back on its saved model.
+    async fn reopen(
+        &self,
+        session_id: &str,
+        replay: bool,
+    ) -> RpcResult<Vec<acp::SessionConfigOption>> {
+        // Dispatch admits prompts in wire order. No new prompt can start on this
+        // connection between this check and registration.
+        if self
+            .sessions
+            .lock()
+            .get(session_id)
+            .is_some_and(|state| state.prompt.is_some())
+        {
+            return Err(prompt_running());
+        }
+        let sessions = self.agent.sessions();
+        let meta = sessions
+            .find(session_id)
             .await
             .map_err(internal)?
             .ok_or_else(|| acp::Error::resource_not_found(None))?;
+        if replay {
+            let transcript = sessions
+                .resume_transcript(session_id)
+                .await
+                .map_err(internal)?;
+            for update in history_updates(&transcript) {
+                self.connection.update(session_id, update);
+            }
+        }
         self.refresh_config().await;
         let config = self.config.read();
         let selection = Arc::new(ModelSelection::new(self.agent.llm()));
@@ -269,8 +320,8 @@ impl Server {
             }
         }
         let options = Self::config_options(&config, &selection);
-        self.register(&session_id, selection);
-        Ok(acp::ResumeSessionResponse::new().config_options(options))
+        self.register(session_id, selection);
+        Ok(options)
     }
 
     async fn list_sessions(
@@ -296,20 +347,36 @@ impl Server {
         Ok(acp::ListSessionsResponse::new(sessions))
     }
 
-    fn close_session(
+    async fn close_session(
         &self,
         request: acp::CloseSessionRequest,
     ) -> RpcResult<acp::CloseSessionResponse> {
         let session_id = request.session_id.0.to_string();
-        let state = self
-            .sessions
+        self.stop_prompt(&session_id).await?;
+        self.sessions
             .lock()
             .remove(&session_id)
             .ok_or_else(|| acp::Error::resource_not_found(None))?;
-        if let Some(prompt) = state.prompt {
-            self.abort(&session_id, &prompt);
-        }
         Ok(acp::CloseSessionResponse::new())
+    }
+
+    /// Removes a session from storage, so `session/list` no longer shows it.
+    /// A prompt running in it on this connection is stopped first.
+    async fn delete_session(
+        &self,
+        request: acp::DeleteSessionRequest,
+    ) -> RpcResult<acp::DeleteSessionResponse> {
+        let session_id = request.session_id.0.to_string();
+        self.stop_prompt(&session_id).await?;
+        let stored = self
+            .agent
+            .delete_session(&session_id)
+            .await
+            .map_err(internal)?;
+        if self.sessions.lock().remove(&session_id).is_none() && !stored {
+            return Err(acp::Error::resource_not_found(None));
+        }
+        Ok(acp::DeleteSessionResponse::new())
     }
 
     async fn set_config_option(
@@ -344,17 +411,16 @@ impl Server {
         let request: acp::PromptRequest = parse(params)?;
         let session_id = request.session_id.0.to_string();
         let input = prompt_input(&request.prompt)?;
-        let cancel = Arc::new(CancellationToken::new());
+        let active = Arc::new(ActivePrompt::default());
         let (selection, always_allowed) = {
             let mut sessions = self.sessions.lock();
             let state = sessions
                 .get_mut(&session_id)
                 .ok_or_else(|| acp::Error::resource_not_found(None))?;
             if state.prompt.is_some() {
-                return Err(acp::Error::invalid_request()
-                    .data(Value::from("a prompt is already running in this session")));
+                return Err(prompt_running());
             }
-            state.prompt = Some(cancel.clone());
+            state.prompt = Some(active.clone());
             (state.selection.clone(), state.always_allowed.clone())
         };
         Ok(AdmittedPrompt {
@@ -364,7 +430,7 @@ impl Server {
             finished: PromptFinished {
                 server: self.clone(),
                 session_id,
-                cancel,
+                active,
             },
         })
     }
@@ -377,7 +443,7 @@ impl Server {
             finished,
         } = prompt;
         let session_id = finished.session_id.clone();
-        let cancel = finished.cancel.clone();
+        let cancel = finished.active.cancel.clone();
         let _finished = finished;
         // Admission reserved this prompt before dispatch read another frame.
         // Keep expensive image work off that path so cancel/close/disconnect
@@ -454,8 +520,28 @@ impl Server {
         }
     }
 
-    fn abort(&self, session_id: &str, prompt: &CancellationToken) {
-        prompt.cancel();
+    /// Wait for admission as well as the engine run: a prompt inside submit()
+    /// can still write session state before the engine registers a run to abort.
+    async fn stop_prompt(&self, session_id: &str) -> RpcResult<()> {
+        let prompt = self
+            .sessions
+            .lock()
+            .get(session_id)
+            .and_then(|s| s.prompt.clone());
+        if let Some(prompt) = prompt {
+            self.abort(session_id, &prompt);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                prompt.finished.cancelled(),
+            )
+            .await
+            .map_err(|_| acp::Error::internal_error().data(Value::from("prompt did not stop")))?;
+        }
+        Ok(())
+    }
+
+    fn abort(&self, session_id: &str, prompt: &ActivePrompt) {
+        prompt.cancel.cancel();
         self.agent.abort_run(session_id);
     }
 
@@ -544,23 +630,21 @@ impl Server {
 struct PromptFinished {
     server: Arc<Server>,
     session_id: String,
-    cancel: Arc<CancellationToken>,
+    active: Arc<ActivePrompt>,
 }
 
 impl Drop for PromptFinished {
     fn drop(&mut self) {
         if let Some(state) = self.server.sessions.lock().get_mut(&self.session_id) {
-            // Closing/resuming a session can admit a successor before this
-            // task finishes. A stale guard must not clear its cancellation.
-            if state
-                .prompt
-                .as_ref()
-                .is_some_and(|prompt| Arc::ptr_eq(prompt, &self.cancel))
-            {
-                state.prompt = None;
-            }
+            // Reopening is refused while active; close and delete wait for us.
+            state.prompt = None;
         }
+        self.active.finished.cancel();
     }
+}
+
+fn prompt_running() -> acp::Error {
+    acp::Error::invalid_request().data(Value::from("a prompt is already running in this session"))
 }
 
 fn parse<T: DeserializeOwned>(params: Value) -> RpcResult<T> {

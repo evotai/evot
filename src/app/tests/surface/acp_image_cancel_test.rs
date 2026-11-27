@@ -31,6 +31,7 @@ async fn image_admission_precedes_immediate_cancel_in_the_same_wire_batch() -> T
 enum Stop {
     Cancel,
     Close,
+    Delete,
     Disconnect,
 }
 
@@ -42,6 +43,11 @@ fn queued_image_preparation_can_be_cancelled_and_session_reused() -> TestResult 
 #[test]
 fn queued_image_preparation_can_be_closed() -> TestResult {
     runtime()?.block_on(blocked_preparation(Stop::Close))
+}
+
+#[test]
+fn queued_image_preparation_cannot_recreate_a_deleted_session() -> TestResult {
+    runtime()?.block_on(blocked_preparation(Stop::Delete))
 }
 
 #[test]
@@ -102,9 +108,14 @@ async fn blocked_preparation(stop: Stop) -> TestResult {
         Stop::Cancel => {
             client.send(json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session}})).await?;
         }
-        Stop::Close => {
+        Stop::Close | Stop::Delete => {
+            let method = if matches!(stop, Stop::Delete) {
+                "session/delete"
+            } else {
+                "session/close"
+            };
             // Both responses are collected explicitly below, in either order.
-            client.send(json!({"jsonrpc": "2.0", "id": "close", "method": "session/close", "params": {"sessionId": session}})).await?;
+            client.send(json!({"jsonrpc": "2.0", "id": "stop", "method": method, "params": {"sessionId": session}})).await?;
         }
         Stop::Disconnect => {
             // The occupied pool is not released until serve() has exited.
@@ -116,21 +127,30 @@ async fn blocked_preparation(stop: Stop) -> TestResult {
         }
     }
     let mut image_finished = false;
-    let mut close_finished = !matches!(stop, Stop::Close);
-    while !image_finished || !close_finished {
+    let mut stop_finished = matches!(stop, Stop::Cancel);
+    while !image_finished || !stop_finished {
         let response = client.frame().await?;
         if response["id"] == "image" {
             assert_eq!(response["result"]["stopReason"], "cancelled", "{response}");
             image_finished = true;
-        } else if response["id"] == "close" {
+        } else if response["id"] == "stop" {
             assert!(response.get("result").is_some(), "{response}");
-            close_finished = true;
+            stop_finished = true;
         }
     }
     assert!(calls.lock().is_empty());
     drop(release);
     blocker.await??;
 
+    if matches!(stop, Stop::Delete) {
+        let (response, _) = client
+            .request(
+                "session/load",
+                json!({"sessionId": session, "cwd": tmp.path(), "mcpServers": []}),
+            )
+            .await?;
+        assert_eq!(response["error"]["code"], -32002, "{response}");
+    }
     if matches!(stop, Stop::Cancel) {
         let (response, _) = client
             .request("session/prompt", image_prompt(&session, PNG))

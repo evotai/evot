@@ -84,9 +84,40 @@ async fn initialize_advertises_image_prompts() -> TestResult {
         .await?;
     let result: acp::InitializeResponse = serde_json::from_value(response["result"].clone())?;
     let prompt = &result.agent_capabilities.prompt_capabilities;
-    assert!(prompt.image, "{response}");
-    // Only images are added; audio and embedded binaries stay unadvertised.
-    assert!(!prompt.audio && !prompt.embedded_context, "{response}");
+    assert!(prompt.image && prompt.embedded_context, "{response}");
+    assert!(!prompt.audio, "{response}");
+    client.close().await
+}
+
+#[tokio::test]
+async fn embedded_image_file_reaches_the_model_and_other_binaries_are_refused() -> TestResult {
+    let tmp = TempDir::new()?;
+    let (mut client, calls) = start(&tmp).await?;
+    let session_id = new_session(&mut client, &tmp).await?;
+    let resource = |mime: &str| json!({"type": "resource", "resource": {"uri": "file:///tmp/a", "mimeType": mime, "blob": PNG}});
+    let (response, _) = client
+        .request(
+            "session/prompt",
+            json!({"sessionId": session_id, "prompt": [resource("application/pdf")]}),
+        )
+        .await?;
+    assert_eq!(response["error"]["code"], -32602, "{response}");
+    assert!(calls.lock().is_empty());
+
+    let (response, _) = client
+        .request(
+            "session/prompt",
+            json!({"sessionId": session_id, "prompt": [resource("image/png")]}),
+        )
+        .await?;
+    assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
+    let forwarded = calls.lock().first().is_some_and(|messages| {
+        messages.iter().any(|message| {
+            matches!(message, Message::User { content, .. }
+                if content.iter().any(|block| matches!(block, Content::Image { .. })))
+        })
+    });
+    assert!(forwarded, "image resource was not forwarded");
     client.close().await
 }
 

@@ -9,6 +9,8 @@ mod acp_image_cancel_test;
 mod acp_image_test;
 #[path = "surface/acp_models_test.rs"]
 mod acp_models_test;
+#[path = "surface/acp_session_lifecycle_test.rs"]
+mod acp_session_lifecycle_test;
 #[path = "surface/acp_test.rs"]
 mod acp_test;
 #[path = "agent/agent_prompt_test.rs"]

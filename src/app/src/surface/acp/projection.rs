@@ -138,7 +138,7 @@ pub(super) fn tool_kind(name: &str) -> acp::ToolKind {
     }
 }
 
-fn bounded(text: &str) -> String {
+pub(super) fn bounded(text: &str) -> String {
     if text.len() <= MAX_TOOL_TEXT_BYTES {
         return text.to_string();
     }

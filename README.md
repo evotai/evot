@@ -87,7 +87,7 @@ evot acp --tools readonly           # read and search only
 evot acp --tools none --ephemeral   # answer-only, sessions kept in memory
 ```
 
-Supported methods: `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/list`, `session/resume`, `session/close`, and `session/set_config_option` for the per-session `model` selector. Tools run inside evot; it does not send `session/request_permission`. `--tools none` offers the model no tools, skills, or project instructions. `--ephemeral` writes no sessions to disk.
+Supported methods: `initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/list`, `session/load`, `session/resume`, `session/close`, `session/delete`, and `session/set_config_option` for the per-session `model` selector. `session/load` replays the visible conversation; `session/resume` reopens it without replay. Closing a session keeps its history; deleting it stops its prompt and removes the stored session. Prompts accept text, images, resource links, and embedded text or image resources. Tools run inside evot; `--permission ask` requests client approval. `--tools none` offers the model no tools, skills, or project instructions. `--ephemeral` writes no sessions to disk.
 
 </details>
 
