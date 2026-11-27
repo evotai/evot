@@ -275,12 +275,13 @@ test('three open sessions retain their picker titles/order as each terminal chan
       expect(r.status).toBe(200)
       return await r.json() as Awaited<ReturnType<PhoneWorkspace['catalog']>>
     }
-    // Work in progress leads, idle windows follow, saved history ends the list; titles come from metadata.
+    // Order is strictly chronological, independent of the changing status badges.
+    a.st.conversationTail.updatedAt = 300; b.st.conversationTail.updatedAt = 200; c.st.conversationTail.updatedAt = 100
     const byTitle = (page: Awaited<ReturnType<typeof list>>) => Object.fromEntries(page.rows.map(r=>[r.title, windowStatusLabel(r)]))
     const before = await list()
     expect(before.online).toHaveLength(3)
     expect(byTitle(before)).toEqual({'First 0 … latest 0':'Open', 'Renamed session':'Running', 'First 2 … latest 2':'Needs input'})
-    expect(before.rows.map(windowStatusLabel)[2]).toBe('Open')
+    expect(before.rows.map(windowStatusLabel)[0]).toBe('Open')
     const firstWindowLabel = async () => (await list()).rows.filter(r => r.session === 'alpha').map(windowStatusLabel)
     a.st.conversationTail.outcome = 'Completed'
     expect(await firstWindowLabel()).toEqual(['Completed'])
@@ -296,13 +297,13 @@ test('three open sessions retain their picker titles/order as each terminal chan
     expect(after.rows[0]!.title).toBe('Renamed session') // latest activity among active windows
     b.remote.dispose(); a.st.overlay = {kind:'none'}; c.st.isLoading = false; c.st.backgroundWaitSince = Date.now()
     const closed = await list()
-    expect(closed.rows.map(r=>[r.title,windowStatusLabel(r)])).toEqual([['First 2 … latest 2','Background task'], ['First 0 … latest 0','Open'], ['Renamed session','Saved']])
+    expect(closed.rows.map(r=>[r.title,windowStatusLabel(r)])).toEqual([['First 0 … latest 0','Open'], ['First 2 … latest 2','Background task'], ['Renamed session','Saved']])
     expect(closed.online).toHaveLength(2)
     await c.remote.command('hide'); expect((await state(c)).status).toBe(403)
     await a.remote.command('hide'); expect((await state(a)).status).toBe(409)
     const hidden = await list(); expect(hidden.online).toHaveLength(0)
-    // Windows that stopped sharing stay listed from saved metadata, status only, ahead of plain history.
-    expect(hidden.rows.map(r=>[r.session, windowStatusLabel(r), r.unshared ?? false, r.terminal])).toEqual([['alpha','Open, not shared',true,undefined],['gamma','Open, not shared',true,undefined],['beta','Saved',false,undefined]])
+    // Unshared sessions use saved metadata, with a stable session-id tie breaker.
+    expect(hidden.rows.map(r=>[r.session, windowStatusLabel(r), r.unshared ?? false, r.terminal])).toEqual([['alpha','Open, not shared',true,undefined],['beta','Saved',false,undefined],['gamma','Open, not shared',true,undefined]])
     const open = await fetch(address+'/open',{method:'POST',headers:{...headers,origin:address,'Content-Type':'application/json'},body:JSON.stringify({session:'gamma',requestId:crypto.randomUUID()})})
     expect(open.status).toBe(409) // hidden session cannot be resumed as a second process
     b.remote.register(); expect((await state(b)).status).toBe(200) // hidden gateway still serves new windows

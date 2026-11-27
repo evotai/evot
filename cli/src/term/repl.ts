@@ -46,7 +46,8 @@ import {
   parsePasteRefs,
 } from './input/paste_refs.js'
 import { InputImageHistory } from './input/image-history.js'
-import { tryStartServer, registerDashboard, stopOwnedServer, ownedDashboardPort } from './app/server.js'
+import { createServiceController } from './host/services.js'
+import { ownedDashboardPort } from './app/server.js'
 import { BackgroundScheduler } from './app/background/scheduler.js'
 import { inspectConsole } from '../features/channels/console-client.js'
 import { findPreviousSession, shouldPreloadStartupSessions, type StartupSelection } from '../session/session-view.js'
@@ -141,6 +142,7 @@ export interface ReplOptions {
   forkFrom?: { sessionId?: string }
   /** `--model` / `--thinking-level`; they win over the startup session's saved selection. */
   startupSelection?: StartupSelection
+  host?: boolean
   serverPort?: number
   envFile?: string
 }
@@ -163,6 +165,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     get windowControl() { return restartCtl.control },
     get installedBuild() { return installedBuild },
     outdatedBuild: runningOutdatedBuild,
+    coordinatedHost: true,
     insideTmux,
     get readAuthIdentity() { return readAuthIdentity },
     get modelSelection() { return modelSelection },
@@ -882,9 +885,9 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
       if (!st.destroyed) cloudCtl.noteOfficialSkillSync(outcome.kind === 'synced' ? outcome.result : undefined)
     },
   }))
-  resources.add(registerDashboard(backgroundJobs, {
-    attempt: () => tryStartServer(opts.serverPort, st.configInfo?.envPath ?? opts.envFile),
-    stop: stopOwnedServer,
+  const services = createServiceController(st, {
+    remote: remoteCtl, port: opts.serverPort, insideTmux, outdated: runningOutdatedBuild,
+    notice: text => scrollback.commitLocalNotice('sys-host', `  ${text}`),
     publish: state => {
       const changed = st.serverState?.address !== state?.address || st.serverState?.owned !== state?.owned
       st.serverState = state
@@ -894,7 +897,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
         renderer.requestRender()
       }
     },
-  }))
+  }, !!opts.host && !restartHandoff.checkpoint)
 
   st.authWatcher = new AuthWatcher(() => cloudCtl.adoptExternalAuthChange())
 
@@ -914,13 +917,15 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   if (st.startupSuggestion) { const trigger = st.startupSuggestion; st.startupSuggestion = null; suggest.requestProductSuggestion(trigger) }
   remoteCtl.register(restartHandoff.checkpoint?.remote ?? null)
   restartCtl.restore(restartHandoff)
-  resources.add(backgroundJobs.register({ name: 'remote-gateway', intervalMs: 5_000, run: remoteCtl.maintain }))
+  resources.add(backgroundJobs.register({ name: 'dashboard', intervalMs: 1000, run: services.tick,
+    onError: err => scrollback.commitLocalNotice('sys-host', `  Service host: ${errorText(err)}`) }))
   renderer.requestRender()
 
-  function cleanup() {
+  function cleanup(reserveHost = false) {
     if (st.destroyed) return
     st.destroyed = true
     restartCtl.dispose()
+    void st.serviceHost?.controller.dispose(reserveHost).catch(() => { /* Exit releases the kernel lease. */ })
     remoteCtl.dispose()
     taskSession.dispose()
     computeSession.dispose()
@@ -958,7 +963,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
   }
 
   function restartAfterCleanup(handoff: Record<string, string> = {}): void {
-    cleanup()
+    cleanup(!!handoff[RESTART_CHECKPOINT_ENV])
     void sessionHook.close().then(async () => {
       const { execIntoInstalledRestart } = await import('../update/index.js')
       execIntoInstalledRestart(st.sessionId, handoff)

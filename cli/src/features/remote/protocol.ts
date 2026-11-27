@@ -125,6 +125,8 @@ export type RemoteAction = { generation: number } & (
 )
 export interface RemoteHost {
   snapshot(backgroundView?: string): RemoteSnapshot
+  /** Only on explicit review; older terminals have no working-tree endpoint. */
+  changes?(): Promise<import('./worktree-review.js').WorktreeReview>
   /** Synchronous admission: never await completion of the run in an HTTP request. */
   act(action: RemoteAction): void
 }

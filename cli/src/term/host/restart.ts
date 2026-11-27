@@ -74,6 +74,7 @@ export function createRestartController(st: ReplState, deps: RestartDeps) {
     return {
       pid: process.pid, session: st.sessionId, terminal: st.terminalBus?.id ?? '', outdated: deps.installedBuild.outdated(),
       restart: st.restarting ? 'restarting' : st.restartPending ? 'pending' : 'none',
+      ...(st.serviceHost?.controller.owner ? {hosting:true as const} : {}),
       ...(wait ? { waitingFor: wait } : {}),
     }
   }

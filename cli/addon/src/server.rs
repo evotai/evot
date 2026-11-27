@@ -21,6 +21,12 @@ fn load_config(
     Ok(config)
 }
 
+/// Resolve the actual configured Console port for local discovery and handoff preflight.
+#[napi]
+pub fn console_port(port: Option<u16>, env_file: Option<String>) -> Result<u16> {
+    Ok(load_config(port, None, None, env_file)?.server.port)
+}
+
 /// Version string for the native addon.
 #[napi]
 pub fn version() -> String {
@@ -74,6 +80,7 @@ pub async fn run_acp(
 
 struct EmbeddedServer {
     info: String,
+    requests: std::sync::Arc<tokio::sync::RwLock<()>>,
     cancel: tokio_util::sync::CancellationToken,
     handle: tokio::task::JoinHandle<()>,
 }
@@ -96,6 +103,30 @@ pub async fn stop_server_background() -> Result<()> {
             server.handle.abort();
             let _ = server.handle.await;
         }
+    }
+    Ok(())
+}
+
+/// Unlike process exit, handoff may not abort an active Console response. A
+/// writer closes admission and waits for the last response body, including SSE.
+#[napi]
+pub async fn drain_server_background() -> Result<()> {
+    let mut slot = embedded_server().lock().await;
+    let Some(server) = slot.as_ref() else {
+        return Ok(());
+    };
+    let _admission = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        server.requests.clone().write_owned(),
+    )
+    .await
+    .map_err(|_| Error::from_reason("Console is serving an active request; retry --host later."))?;
+    if let Some(server) = slot.take() {
+        server.cancel.cancel();
+        server
+            .handle
+            .await
+            .map_err(|e| Error::from_reason(e.to_string()))?;
     }
     Ok(())
 }
@@ -148,8 +179,28 @@ pub async fn start_server_background(
 
     let server = evot::api::Server::new(agent, config.clone());
     let shutdown = cancel.clone();
+    let requests = std::sync::Arc::new(tokio::sync::RwLock::new(()));
+    let admission = requests.clone();
+    let router = server.router().layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: axum::middleware::Next| {
+            let permit = admission.clone().try_read_owned();
+            async move {
+                use axum::response::IntoResponse;
+                use futures::StreamExt;
+                let Ok(permit) = permit else {
+                    return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                };
+                next.run(request).await.map(|body| {
+                    axum::body::Body::from_stream(body.into_data_stream().map(move |chunk| {
+                        let _hold_until_body_dropped = &permit;
+                        chunk
+                    }))
+                })
+            }
+        },
+    ));
     let handle = tokio::spawn(async move {
-        let _ = axum::serve(listener, server.router())
+        let _ = axum::serve(listener, router)
             .with_graceful_shutdown(shutdown.cancelled_owned())
             .await;
         runtime.shutdown(std::time::Duration::from_secs(5)).await;
@@ -165,6 +216,7 @@ pub async fn start_server_background(
         serde_json::to_string(&info).map_err(|e| Error::from_reason(format!("serialize: {e}")))?;
     *slot = Some(EmbeddedServer {
         info: info.clone(),
+        requests,
         cancel,
         handle,
     });

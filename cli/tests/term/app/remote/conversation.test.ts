@@ -5,6 +5,19 @@ import { layoutCommandNotice, noticeResult } from '../../../../src/ui/notice-lay
 import { ConversationTail } from '../../../../src/term/app/remote/conversation.js'
 import legacyNotice from '../../../fixtures/contracts/remote-notice-legacy.json'
 
+test('only conversation content counts: restart notices and replay do not bump recency', () => {
+  const tail = new ConversationTail()
+  tail.append('notice','Hosting Console and Remote')
+  expect([tail.hasConversation,tail.updatedAt]).toEqual([false,0])
+  tail.replace([{id:'1',role:'user',text:'Earlier prompt',timestamp:0}],1234)
+  tail.append('notice','Restored')
+  expect([tail.hasConversation,tail.updatedAt]).toEqual([true,1234])
+  tail.append('assistant','A new reply')
+  expect(tail.updatedAt).toBeGreaterThan(1234)
+  tail.replace([])
+  expect([tail.hasConversation,tail.updatedAt]).toEqual([false,0])
+})
+
 test('plain notices are unchanged and older phones still see a clickable result', () => {
   const history = new ConversationTail()
   const legacy = legacyNotice as RemoteMessage

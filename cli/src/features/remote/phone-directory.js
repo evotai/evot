@@ -1,52 +1,36 @@
 // Same-origin, paired computer only. The gateway ranks windows and sessions before pagination.
-function calendarStamp(now, timeZone) {
-  const calendar = zone => Intl.DateTimeFormat('en-US', {
-    timeZone:zone, calendar:'gregory', numberingSystem:'latn', year:'numeric', month:'numeric', day:'numeric',
-  });
-  let dayFormat;
-  try { dayFormat = calendar(timeZone); }
-  catch (error) {
-    if (!(error instanceof RangeError)) throw error;
-    dayFormat = calendar(undefined); // Older browsers may not recognize the host's zone name.
-  }
-  const zone = dayFormat.resolvedOptions().timeZone;
-  const clock = Intl.DateTimeFormat(undefined, {timeZone:zone, hour:'2-digit', minute:'2-digit'});
-  const date = Intl.DateTimeFormat(undefined, {timeZone:zone, year:'numeric', month:'short', day:'numeric'});
-  // Treat the host's calendar date as a UTC day number for comparison only.
-  // Subtracting 24 hours from the real instant would mislabel days around DST.
-  function dayOf(instant) {
-    const parts = dayFormat.formatToParts(instant);
-    const number = type => Number(parts.find(part => part.type === type)?.value);
-    return Date.UTC(number('year'), number('month') - 1, number('day'));
-  }
-  const today = dayOf(now), yesterday = today - 86400000;
+function calendarStamp(now) {
+  const clock = Intl.DateTimeFormat(undefined, {hour:'2-digit', minute:'2-digit', hourCycle:'h23'});
+  const date = Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric'});
+  // Compare calendar days on the phone, even when a DST day isn't 24 hours long.
+  const today = new Date(now), yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const todayKey = today.toDateString(), yesterdayKey = yesterday.toDateString();
   return time => {
-    if (!time || !Number.isFinite(new Date(time).getTime())) return { day:'other', text:'' };
-    const day = dayOf(time);
-    if (day === today) return { day:'today', text:clock.format(time) };
-    if (day === yesterday) return { day:'yesterday', text:clock.format(time) };
-    return { day:'earlier', text:date.format(time) };
+    const instant = new Date(time);
+    if (!time || !Number.isFinite(instant.getTime())) return { day:'other', text:'' };
+    const day = instant.toDateString();
+    if (day === todayKey) return { day:'today', text:clock.format(time) };
+    if (day === yesterdayKey) return { day:'yesterday', text:clock.format(time) };
+    return { day:'earlier', text:`${date.format(time)} · ${clock.format(time)}` };
   };
 }
-const groupTitles = { active:'In progress', today:'Today', yesterday:'Yesterday', earlier:'Earlier', other:'Other' };
+const groupTitles = { today:'Today', yesterday:'Yesterday', earlier:'Earlier', other:'Other' };
 function directoryPhase(r) {
   if (r.unshared) return 'unshared';
   const phase = r.parked || (!r.terminal && r.kind !== 'private') ? 'history' : r.phase ?? 'idle';
   return r.completed === true && (phase === 'idle' || phase === 'history') ? 'completed' : phase;
 }
-/** Keep running windows visible, then group the ranked page by host date. */
-export function directoryGroups(data, query, {now = Date.now(), timeZone = undefined} = {}) {
+/** Keep the gateway's chronological order; status badges don't affect rank. */
+export function directoryGroups(data, query, {now = Date.now()} = {}) {
   if (!data) return [];
-  const stamp = calendarStamp(now, timeZone);
-  const groups = { active:[], today:[], yesterday:[], earlier:[], other:[] };
-  function add(row) {
+  const stamp = calendarStamp(now);
+  const groups = { today:[], yesterday:[], earlier:[], other:[] };
+  for (const row of data.rows ?? []) {
     const { day, text } = stamp(row.updatedAt || Date.parse(row.updated));
-    const active = ['working','input','busy'].includes(directoryPhase(row));
     const timeLabel = day === 'today' || day === 'yesterday' ? `${groupTitles[day]} · ${text}` : text;
-    groups[active ? 'active' : day].push({ ...row, age:active ? timeLabel : text, timeLabel });
+    groups[day].push({ ...row, age:text, timeLabel });
   }
-  for (const row of data.rows ?? []) add(row);
-  if (!query) for (const row of data.privateWindows ?? []) add({...row, kind:'private', title:'Older evot window'});
   return Object.entries(groups).filter(([,rows]) => rows.length).map(([key, rows]) => ({ key, title:groupTitles[key], rows }));
 }
 // This is state, not an action: a window can be running even while it is
@@ -73,7 +57,7 @@ export function openPlace(r) {
 }
 export function sessionDrawer({ api, selected, choose, create, createIn, host, ask }) {
   const el = id => document.getElementById(id), dialog = el('sessionsDrawer');
-  let timer, timeZone, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
+  let timer, version = 0, data = null, limit = 40, locked = false, painted = '', error = '', loadingMore = false;
   function row(r) {
     const live = !!r.terminal, statusOnly = r.kind === 'private' || !!r.unshared;
     const button = document.createElement(statusOnly ? 'div' : 'button');
@@ -167,7 +151,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
   }
   function paint() {
     const q = el('sessionSearch').value.trim().toLowerCase();
-    const groups = directoryGroups(data, q, {timeZone});
+    const groups = directoryGroups(data, q);
     el('drawerHost').textContent = host() ?? '';
     el('moreSessions').hidden = !data || !data.more;
     el('moreSessions').disabled = loadingMore; el('moreSessions').textContent = loadingMore ? 'Loading…' : 'Load more';
@@ -190,7 +174,6 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     try {
       const response = await api('/sessions?' + params), result = await response.json();
       if (!current(mine)) return;
-      timeZone = response.headers.get('X-Evot-Time-Zone') ?? undefined;
       data = result; error = ''; loadingMore = false;
     } catch {
       loadingMore = false;

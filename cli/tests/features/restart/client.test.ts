@@ -4,7 +4,16 @@ import { join } from 'node:path'
 import { privateSocketDirectory, registerTerminal, type SessionBadge } from '../../../src/features/remote/discovery.js'
 import type { RemoteHost } from '../../../src/features/remote/protocol.js'
 import { ancestors, formatWindows, listWindows, pickWindow, type WindowRow } from '../../../src/features/restart/client.js'
-import type { RestartRequest, RestartStatus, WindowControl } from '../../../src/features/restart/protocol.js'
+import { parseRestartStatus, type RestartRequest, type RestartStatus, type WindowControl } from '../../../src/features/restart/protocol.js'
+import legacyStatus from '../../fixtures/contracts/restart-status-v0.json'
+
+test('hosting is additive to private window status; older readers keep every v0 field unchanged', () => {
+  expect(parseRestartStatus(legacyStatus)).toEqual(legacyStatus)
+  const current = parseRestartStatus({...legacyStatus, hosting:true})!
+  expect(formatWindows([{terminal:current.terminal,session:current.session,status:current}])).toContain('· service host')
+  const {pid,session,terminal,outdated,restart,waitingFor} = current
+  expect({pid,session,terminal,outdated,restart,waitingFor}).toEqual(legacyStatus)
+})
 
 const host: RemoteHost = { snapshot() { throw Error('unexpected snapshot') }, act() { throw Error('unexpected action') } }
 const badge = (session: string): (() => SessionBadge) => () => ({ workspace: 'fixture', session, title: 'private title', phase: 'working' })

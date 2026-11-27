@@ -89,6 +89,13 @@ export function registerDashboard(scheduler: BackgroundScheduler, host: Dashboar
   }
 }
 
+export async function drainOwnedServer(): Promise<void> {
+  const { drainServerBackground } = await import('../../native/index.js')
+  if (!drainServerBackground) throw Error('This build cannot drain the Console safely. Update the host first.')
+  await drainServerBackground()
+  activePort = ownedSince = null
+}
+
 export async function stopOwnedServer(): Promise<void> {
   activePort = null
   ownedSince = null

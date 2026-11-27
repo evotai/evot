@@ -7,6 +7,7 @@
   <header class="conversation-head">
     <button id="openSessions" class="icon-button" type="button" aria-label="Open sessions" aria-haspopup="dialog" aria-controls="sessionsDrawer" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
     <div class="identity"><h1 id="threadTitle" class="conversation-title">evot remote</h1><span class="connection" id="connection" role="status">Not connected</span></div>
+    <button class="icon-button" type="button" id="openChanges" aria-label="Changes" title="Changes" aria-haspopup="dialog" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="17" rx="3"/><path d="M8 9h6m-3-3v6m-3 4h7"/></svg></button>
     <button type="button" id="bgChip" aria-controls="bgPanel" aria-haspopup="dialog" hidden><evot-activity id="bgActivity" aria-hidden="true"></evot-activity><span id="bgCount"></span></button>
     <button id="completionSound" class="icon-button" type="button" aria-label="Round-end sound" title="Round-end sound" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></button>
     <button id="newSession" class="icon-button" type="button" aria-label="New session" title="New session" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M11 13l1-4 7-7 3 3-7 7z"/></svg></button>
@@ -51,6 +52,7 @@
   </div>
   <div id="notice" role="status" hidden></div>
 </main>
+<dialog id="changesPage" aria-label="Working tree changes"></dialog>
 <dialog id="photoPreview" aria-label="Photo preview"><img alt=""><button class="icon-button" type="button" aria-label="Close photo preview" autofocus>×</button></dialog>
 <dialog id="folderPanel" aria-labelledby="folderTitle"><div class="drawer-head"><h2 id="folderTitle" tabindex="-1" autofocus>New session in</h2><button id="closeFolders" class="icon-button" aria-label="Close">×</button></div><div id="folderList" role="list"></div><p id="folderMessage" role="status"></p></dialog>
 <dialog id="bgPanel" aria-labelledby="bgTitle"><div class="drawer-head"><h2><evot-activity id="bgOutputActivity" aria-hidden="true" hidden></evot-activity><span id="bgTitle">Background</span></h2><button id="closeBg" class="icon-button" aria-label="Close background panel">×</button></div><p id="bgSubtitle"></p><button id="allTasks" type="button" hidden>‹ All tasks</button><div id="bgTasks"></div><pre id="bgOutput" tabindex="0" aria-label="Task output" hidden></pre></dialog>

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -249,9 +249,12 @@ async function startEvot(
   }
   if (seedPreviewCacheMiss) seedResumePreviewCacheMiss(stateHome)
   setup?.(stateHome)
+  // A private EVOT_HOME must not contest a real developer Console's TCP port.
+  const local = Bun.serve({hostname:'127.0.0.1',port:0,fetch:() => new Response()})
+  const consolePort = String(local.port); await local.stop(true)
   const child = spawn('python3', ['-c', PTY_RELAY, EVOT_BIN, ...startupArgs], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...smokeEnvironment(isolatedHome), ...environment?.(stateHome), EVOT_TEST_RESIZE_CONTROL: '1' },
+    env: { ...smokeEnvironment(isolatedHome), EVOT_SERVER_PORT:consolePort, ...environment?.(stateHome), EVOT_TEST_RESIZE_CONTROL: '1' },
   })
   let all = ''
   let seen = 0
@@ -2033,6 +2036,62 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       server.closeAllConnections()
     }
   }, 20_000)
+
+  test('--host moves the real Console and enabled gateway together and leaves the original TUI running', async () => {
+    const root = mkdtempSync(join(tmpdir(),'evot-host-pair-')), home = seedSmokeHome(root)
+    const {privateSocketDirectory} = await import('../../src/features/remote/socket-directory.js')
+    const {listWindows} = await import('../../src/features/restart/client.js')
+    const dir = privateSocketDirectory(home), sessions: Session[] = []
+    const running = Promise.withResolvers<void>(), finish = Promise.withResolvers<void>()
+    const provider = Bun.serve({hostname:'127.0.0.1',port:0,async fetch() {
+      running.resolve(); await finish.promise
+      const frame = {id:'fixture',model:'smoke-model',choices:[{index:0,delta:{role:'assistant',content:'Original turn survived.'},finish_reason:'stop'}]}
+      return new Response(`data: ${JSON.stringify(frame)}\n\ndata: [DONE]\n\n`,{headers:{'content-type':'text/event-stream'}})
+    }})
+    const config = join(home,'evot.env')
+    writeFileSync(config,readFileSync(config,'utf8').replace('127.0.0.1:1/',`127.0.0.1:${provider.port}/`))
+    const free = Bun.serve({hostname:'127.0.0.1',port:0,fetch:() => new Response()})
+    const port = free.port!; await free.stop(true)
+    const launch = (args: string[]) => startEvot(false,false,false,undefined,undefined,
+      ['--port',String(port),...args], () => ({HOME:root,EVOT_HOME:home,EVOT_STORAGE_FS_ROOT_DIR:home}))
+    try {
+      const a = await launch([]); sessions.push(a)
+      const address = await startLocalRemote(a)
+      const original = (await listWindows(dir)).find(row => row.status?.hosting)
+      expect(original).toBeDefined()
+      a.write('Keep working through the handoff.\r')
+      await Promise.race([running.promise, Bun.sleep(DEFAULT_WAIT_MS).then(() => { throw Error('Original turn never started.') })])
+      const b = await launch(['--host']); sessions.push(b)
+      await b.waitFor('Hosting Console and Remote in this window.')
+      const rows = await listWindows(dir)
+      expect(rows).toHaveLength(2)
+      expect(rows.filter(row => row.status?.hosting)).toHaveLength(1)
+      expect(rows.find(row => row.status?.hosting)?.terminal).not.toBe(original!.terminal)
+      expect((await fetch(address)).status).toBe(200)
+      const snapshot = await (await fetch(`http://127.0.0.1:${port}/api/channels/feishu`)).json()
+      expect(snapshot.env_file_path).toBe(config)
+      finish.resolve(); await a.waitFor('Original turn survived.')
+
+      // An incomplete request body pins a real native handler. Handoff must
+      // refuse rather than abort that request or give away just Remote.
+      const request = httpRequest(`http://127.0.0.1:${port}/api/models`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+      })
+      request.on('error', () => {}) // We deliberately discard this invalid request below.
+      request.write('{')
+      try {
+        const c = await launch(['--host']); sessions.push(c)
+        await c.waitFor('Console is serving an active request')
+        const remaining = (await listWindows(dir)).filter(row => row.status?.hosting)
+        expect(remaining.map(row => row.terminal)).toEqual(rows.filter(row => row.status?.hosting).map(row => row.terminal))
+        expect((await fetch(address)).status).toBe(200)
+      } finally { request.destroy() }
+    } finally {
+      finish.resolve(); await provider.stop(true)
+      for (const session of sessions.reverse()) await session.kill()
+      rmSync(dir,{recursive:true,force:true}); rmSync(root,{recursive:true,force:true})
+    }
+  }, 60_000)
 
   test('/remote answers the original run, creates an independent TUI and resumes local history with one pairing', async () => {
     let asked = false, answered = false

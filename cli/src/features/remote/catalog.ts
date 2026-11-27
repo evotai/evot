@@ -34,7 +34,11 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
   })
   const matched = new Set<string>()
   function row(meta?: SessionMeta, window?: OnlineTerminal) {
-    const updatedAt = Math.max(Date.parse(meta?.updated_at ?? '') || 0, window?.updatedAt || 0)
+    const savedAt = Date.parse(meta?.updated_at ?? '') || 0
+    // Older idle windows timestamped transcript replay at startup. Prefer the saved
+    // instant for those peers rather than bumping history on every restart.
+    const liveAt = window?.hasConversation === undefined && window?.phase === 'idle' && savedAt ? 0 : window?.updatedAt || 0
+    const updatedAt = Math.max(savedAt, liveAt)
     const unshared = !window && !!meta && occupied.has(meta.session_id)
     // A window the phone opened runs hidden in tmux. Idle, it is nothing the user can see
     // on the computer: list it as a saved session. Tapping it still follows that window.
@@ -47,15 +51,23 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
       completed: window?.completed, ...(window?.tmux && !parked ? { tmux: true } : {}),
       ...(unshared ? { unshared } : {}), ...(parked ? { parked } : {}) }
   }
-  const all = liveSessions(online).map(w => {
-    matched.add(w.session)
-    return row(byId.get(w.session), w)
+  const nonempty = live.filter(w => {
+    if ((byId.get(w.session)?.turns ?? 0) > 0) return true
+    if (w.hasConversation !== undefined) return w.hasConversation
+    // Legacy badges only have a display title. Exclude their known empty
+    // placeholders, but retain the opening prompt before the first save.
+    return !!w.title.trim() && w.title !== 'New conversation' && w.title !== `Session ${w.session.slice(-8)}`
   })
-  for (const m of visible) if (!matched.has(m.session_id) && (m.turns > 0 || occupied.has(m.session_id))) all.push(row(m))
+  const all = liveSessions(nonempty).map(w => {
+    matched.add(w.session)
+    const meta = byId.get(w.session)
+    return row(meta, meta ? {...w, title:sessionLineTitle(meta, w.title)} : w)
+  })
+  for (const m of visible) if (!matched.has(m.session_id) && m.turns > 0) all.push(row(m))
   // Every word must appear somewhere in the title, id, project or transcript text.
   const words = page.query.split(/\s+/).filter(Boolean)
   const filtered = all.filter(r => !words.length || words.every(word =>
     [r.title, r.session, r.workspace, byId.get(r.session)?.title, text?.get(r.session)].some(value => value?.toLowerCase().includes(word))))
-  filtered.sort((a, b) => compareActivity(a, b) || a.session.localeCompare(b.session) || (a.terminal ?? '').localeCompare(b.terminal ?? ''))
+  filtered.sort((a, b) => b.updatedAt - a.updatedAt || a.session.localeCompare(b.session) || (a.terminal ?? '').localeCompare(b.terminal ?? ''))
   return { rows: filtered.slice(0, page.limit), count: filtered.length, more: filtered.length > page.limit, online: [...online].sort(compareActivity) }
 }

@@ -516,6 +516,9 @@ export async function runAcp(opts: { model?: string; thinkingLevel?: string; env
 import type { ServerInfo, LoginCodeResponse, AuthPollResult, CloudUser, AuthRefreshResult, CloudNotice } from './contracts/results.js'
 export type { ServerInfo, LoginCodeResponse, AuthPollResult, CloudUser, AuthRefreshStatus, AuthRefreshResult, CloudNotice } from './contracts/results.js'
 
+// @ts-ignore — generated native bindings
+export { consolePort, drainServerBackground } from './binding.js'
+
 export async function startServerBackground(port?: number, model?: string, envFile?: string): Promise<ServerInfo | null> {
   const json = await rawStartServerBackground(port ?? null, model ?? null, envFile ?? null)
   if (json === null) return null

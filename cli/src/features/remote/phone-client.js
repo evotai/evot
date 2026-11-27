@@ -1,3 +1,4 @@
+import { reviewNavigation } from './phone-review.js';
 import { questionPanel } from './phone-ask.js';
 import { inlineCommandGhost, installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
@@ -43,6 +44,7 @@ const pickStart = new WeakMap();
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
+const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
 // The draft typed for this window survives a page update, a sign-in redirect and re-pairing.
 const drafts = draftCarry(sessionStorage);
 let draftCarried = true;
@@ -143,6 +145,8 @@ function paired(yes) {
     $('deviceStatus').textContent = 'Connect to request device access.';
   }
   $('pair-screen').hidden = yes;
+  $('openChanges').hidden = !yes || !terminal;
+  syncReview();
   $('pickSession').hidden = !yes || !!terminal;
   $('chat').hidden = $('seat').hidden = !yes || !terminal;
   $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected' : 'Not connected';
@@ -166,8 +170,9 @@ function controls() {
   const input = connected ? view?.input : null,
     switchable = connected && !!(input || view?.ask) && !busy;
   commands.render(input && !busy && !tab.composing ? view : null);
-  drawer.lock(busy);
-  $('openSessions').disabled = $('browseSessions').disabled = busy;
+  $('openChanges').disabled = !connected || !token;
+  drawer.lock(busy || !token);
+  $('openSessions').disabled = $('browseSessions').disabled = busy || !token;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
   $('send').disabled = busy || !input || (!$('draft').value.trim() && !photos.count && !candidate);
   $('attach').disabled = busy || !input || photos.count >= 4;
@@ -239,6 +244,7 @@ function render(s, mode) {
     background.render(null);
     transcript.latest();
   }
+  missingTarget = null;
   connected = true;
   $('chatLoading').hidden = true;
   if (draftCarried) {
@@ -319,14 +325,26 @@ function scheduleReconnect() {
   if (token || !approvedBefore() || document.hidden) return;
   reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 1000 * 2 ** Math.min(reconnectFailures, 4)));
 }
+function showPairScreen() {
+  if ($('pair-screen').hidden) {
+    keepDraft(); draftCarried = true;
+    view = null;
+    paired(false);
+  }
+}
+function reconnecting() {
+  connected = false;
+  $('connection').removeAttribute('data-online');
+  $('connection').textContent = 'Reconnecting…';
+  controls();
+}
 function unpair() {
   ++epoch; liveRequest?.abort(); clearTimeout(timer);
-  keepDraft(); draftCarried = true;
-  connected = false;
   token = null;
   sessionStorage.removeItem('evot.remote');
-  view = null; etag = '';
-  paired(false);
+  etag = '';
+  reconnecting();
+  if (!approvedBefore()) showPairScreen();
   $('deviceStatus').textContent = 'Your connection expired or access was revoked. Reconnect to check this browser’s approval.';
   $('pair').querySelector('button').textContent = 'Reconnect';
   reconnectFailures++;
@@ -354,11 +372,12 @@ async function api(path, body, extra = {}, signal, progress) {
     cache: 'no-store',
     signal: signal ?? AbortSignal.timeout(timeout),
   });
-  if (res.status === 401 && token === credential) unpair();
+  if (res.status === 401 && credential && token === credential) unpair();
   pageUpdated(res.headers.get('x-evot-build'));
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
 }
+let missingTarget = null;
 let liveRequest, pollUntil = 0, nextOwnerCheck = 0, checkingOwner = false, failures = 0;
 const inventory = async () => (await api('/sessions?online')).json();
 function followOwner(owner, session) {
@@ -434,7 +453,7 @@ async function synchronize(ready) {
     void checkIdleOwner(mine);
   } catch (e) {
     if (mine !== epoch) return;
-    failures++; connected = false; etag = ''; controls();
+    failures++; etag = ''; reconnecting();
     if (e.status === 409 || e.status === 403) {
       // Never silently resume a copy or send a draft to a different session.
       // If the conversation moved to another shared TUI, follow that same session only.
@@ -448,20 +467,17 @@ async function synchronize(ready) {
         return;
       }
       if (rows && !rows.unavailable && !owner && (session || !rows.online.some(row => row.terminal === terminal))) {
-        selectTarget(null, null); view = null; paired(true); notice('');
-        drawer.open('That window has closed or stopped sharing. Tap the session to resume it.');
-        return;
+        // A restarting window can briefly disappear from the directory.
+        if (missingTarget?.id !== terminal) missingTarget = {id:terminal, since:Date.now()};
+        if (e.status === 403 || Date.now() - missingTarget.since >= 8000) {
+          missingTarget = null;
+          selectTarget(null, null); view = null; paired(true); notice('');
+          drawer.open('That window has closed or stopped sharing. Tap the session to resume it.');
+          return;
+        }
       }
     }
     if (live) pollUntil = Date.now() + 10000;
-    $('connection').removeAttribute('data-online');
-    $('connection').textContent = 'Reconnecting…';
-    $('activity').removeAttribute('data-running');
-    $('statusDetail').textContent = $('nextModel').textContent = '';
-    $('status').textContent = token
-      ? 'Waiting for the computer. Reconnecting automatically…'
-      : 'Pair again on the computer.';
-    if (!token) notice(e.message, true);
   } finally {
     clearTimeout(watchdog);
     ctrl.abort(); ready();
@@ -482,6 +498,7 @@ async function pair(auto = false) {
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
+      if (step !== 'verify') showPairScreen();
       if (step === 'signin') {
         button.textContent = 'Opening sign-in…';
         $('deviceStatus').textContent = 'Continue with your evot account. You’ll return here automatically.';
@@ -506,11 +523,14 @@ async function pair(auto = false) {
     etag = '';
     $('deviceStatus').textContent = 'This device is approved.';
     notice('');
-    paired(true);
-    if (terminal) await refresh(); else drawer.open();
+    // Silent renewal is not navigation: paired() would reset the reader's scroll.
+    if (!$('pair-screen').hidden) paired(true);
+    controls();
+    if (terminal) await refresh(); else if (!$('sessionsDrawer').open) drawer.open();
   } catch (e) {
     const storage = e.name === 'SecurityError' || e.name === 'QuotaExceededError';
     const unreachable = e.name === 'TimeoutError' || e instanceof TypeError || e.status >= 500;
+    if (!unreachable || !approvedBefore()) showPairScreen();
     if (!storage && !unreachable) rememberApproval(false); // denied, expired or revoked: wait for the user
     $('deviceStatus').textContent = storage
       ? 'Browser storage is blocked. Open the invite in Safari or Chrome with site data enabled.'
@@ -844,8 +864,19 @@ $('history').onclick = async (e) => {
     notice('Code selected · use Copy.');
   }
 };
-document.addEventListener('visibilitychange', () => { refresh(); scheduleReconnect(); });
-window.addEventListener('online', () => { refresh(); scheduleReconnect(); });
+function refreshOnReturn() {
+  if (!document.hidden && token && terminal && view) {
+    connected = false;
+    etag = ''; // Request a snapshot even when polling: render restores the live controls.
+    $('connection').textContent = 'Syncing messages…';
+    $('connection').removeAttribute('data-online');
+    controls();
+  }
+  void refresh(); // When hidden, this just cancels the current stream and poll timer.
+  scheduleReconnect();
+}
+document.addEventListener('visibilitychange', refreshOnReturn);
+window.addEventListener('online', refreshOnReturn);
 $('browseSessions').onclick = drawer.open;
 window.addEventListener('pageshow', event => {
   if (event.persisted && leaving) {
@@ -854,7 +885,8 @@ window.addEventListener('pageshow', event => {
     $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
   }
 });
-paired(!!token);
+// A reload of a previously approved chat can also need a fresh credential.
+paired(!!token || (!!terminal && approvedBefore() && !returnTicket && !invitedTerminal));
 const connectButton = $('pair').querySelector('button');
 connectButton.textContent = 'Connect';
 connectButton.disabled = false;

@@ -137,7 +137,8 @@ function commandNotice(lines: readonly OutputLine[]): RemoteMessage | null {
 
 export class ConversationTail {
   openingTitle = ''
-  updatedAt = Date.now()
+  updatedAt = 0
+  hasConversation = false
   outcome: 'Completed' | 'Stopped' | 'Run failed · see the TUI' | null = null
   finishedRound: number | null = null
   offset = 0
@@ -149,7 +150,10 @@ export class ConversationTail {
     return this.rows.map((r) => (expanded ? r.expanded : r.compact))
   }
   private push(compact: RemoteMessage, expanded = compact, commandId?: string) {
-    this.updatedAt = Date.now()
+    if (compact.role === 'user' || compact.role === 'assistant') {
+      this.updatedAt = Date.now()
+      this.hasConversation = true
+    }
     this.rows.push({ compact, expanded, commandId })
     if (this.rows.length > MAX_ROWS) {
       this.rows.shift()
@@ -186,8 +190,8 @@ export class ConversationTail {
     const row = assistantRow(content)
     if (row) this.push(row, row.blocks?.some((b) => b.kind === 'tool') ? assistantRow(content, true) ?? row : row)
   }
-  replace(messages: readonly UIMessage[]): void {
-    this.updatedAt = Date.now()
+  replace(messages: readonly UIMessage[], savedAt = 0): void {
+    this.hasConversation = false
     this.offset += this.rows.length + 1
     this.rows = []
     this.outcome = null
@@ -205,5 +209,7 @@ export class ConversationTail {
       if (this.rows.length === MAX_ROWS) break
     }
     this.rows.reverse()
+    // Replaying old messages (or opening an empty window) is not new activity.
+    this.updatedAt = savedAt
   }
 }

@@ -31,7 +31,7 @@ export function argvForRestart(argv: string[], sessionId: string | null): string
   const next: string[] = []
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!
-    if (arg === '-c' || arg === '--continue') continue
+    if (arg === '--host' || arg === '-c' || arg === '--continue') continue
     const hasValue = Boolean(argv[i + 1] && !argv[i + 1]!.startsWith('-'))
     if (SESSION_REPLACED_FLAGS.has(arg) || (sessionId && SELECTION_FLAGS.has(arg))) {
       if (hasValue) i++

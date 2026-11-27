@@ -83,7 +83,7 @@ const restartText = (status: RestartStatus) => status.restart === 'pending' && s
 export function formatWindows(rows: WindowRow[]): string {
   if (!rows.length) return 'No open evot windows in this profile.'
   const lines = rows.map(row => row.status
-    ? `  ${shortId(row).padEnd(9)} pid ${String(row.status.pid).padEnd(7)} ${build(row.status).padEnd(13)} restart: ${restartText(row.status)}`
+    ? `  ${shortId(row).padEnd(9)} pid ${String(row.status.pid).padEnd(7)} ${build(row.status).padEnd(13)} restart: ${restartText(row.status)}${row.status.hosting ? ' · service host' : ''}`
     : `  ${shortId(row).padEnd(9)} older evot without restart control; restart it once by hand`)
   return ['Open evot windows:', ...lines].join('\n')
 }

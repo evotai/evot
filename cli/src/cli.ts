@@ -2,6 +2,7 @@ import type { Agent } from './native/index.js'
 
 export interface CliOptions {
   command: 'repl' | 'serve' | 'prompt' | 'update' | 'login' | 'logout' | 'whoami' | 'acp' | 'restart'
+  host?: boolean
   /** `evot restart [session] [--cancel] [--list]`: ask an open window to restart in place. */
   restart?: { target?: string; list: boolean; cancel: boolean }
   /** `--model`: startup model; wins over config, cloud defaults and a resumed session. */
@@ -95,6 +96,7 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
       opts.acpPermission = permission
       continue
     }
+    if (arg === '--host') { opts.host = true; continue }
     if (arg === '--ephemeral') { opts.ephemeral = true; continue }
     if (arg === 'login') { opts.command = 'login'; continue }
     if (arg === 'logout') { opts.command = 'logout'; continue }
@@ -144,6 +146,10 @@ export async function parseArgs(argv: string[]): Promise<CliOptions> {
     }
   }
 
+  if (opts.host && opts.command !== 'repl' && opts.command !== 'login') {
+    console.error('--host requires an interactive evot window.')
+    process.exit(1)
+  }
   return opts
 }
 
@@ -182,6 +188,7 @@ export async function printHelp() {
   console.log('  --thinking-level <level>')
   console.log('                         off | minimal | low | medium | high | xhigh | max')
   console.log('  --env-file <path>      Path to evot.env file')
+  console.log('  --host                 Take over Console and enabled Remote together in this window')
   console.log('  --port <number>        Dashboard port (default: 8082)')
   console.log('  -r, --resume <id>      Resume or create a session by ID')
   console.log('  -c, --continue         Resume the latest session in the current directory')

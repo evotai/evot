@@ -8,6 +8,12 @@ describe('parseArgs', () => {
     expect(opts.files).toEqual(['a.ts', 'b.ts'])
   })
 
+  test('--host takes over once, never again through restart argv', async () => {
+    expect(await parseArgs(['--host','--resume','sid'])).toMatchObject({host:true, resume:'sid'})
+    expect(argvForRestart(['--host','--port','8083'],null)).toEqual(['--port','8083'])
+    expect(argvForRestart(['--resume','old','--host'],'sid')).toEqual(['--resume','sid'])
+  })
+
   test('-r is short alias for --resume', async () => {
     const opts = await parseArgs(['-p', 'hello', '-r', 'my-session'])
     expect(opts.resume).toBe('my-session')

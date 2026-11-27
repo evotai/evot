@@ -7,26 +7,25 @@ import { profileKey, registerTerminal, type SessionBadge } from '../../../src/fe
 import { phoneWorkspace } from '../../../src/features/remote/workspace.js'
 import legacyCatalog from '../../fixtures/contracts/remote-session-list-legacy.json'
 
-test('the drawer keeps live work first, retains the gateway order inside each group, and adds status-only windows outside search', () => {
-  const now = Date.UTC(2026, 8, 18, 12), day = 86400000
+test('the drawer keeps chronological groups even for running work and omits anonymous window placeholders', () => {
+  const now = new Date(2026, 8, 18, 12).getTime(), day = 86400000
   const data = {
     rows: [
       {session:'working', terminal:'live', phase:'working', updatedAt:now - day},
       {session:'yesterday', terminal:'idle', phase:'idle', updatedAt:now - day},
-      {session:'open', terminal:'open', phase:'idle', updatedAt:now - 60000},
       {session:'saved', updatedAt:now},
+      {session:'open', terminal:'open', phase:'idle', updatedAt:now - 60000},
     ],
     privateWindows:[{phase:'idle', updatedAt:now}],
   }
-  const options = {now, timeZone:'UTC'}
+  const options = {now}
   const groups = directoryGroups(data, '', options)
   expect(groups.map(({title, rows}) => [title, rows.map(r => r.session)])).toEqual([
-    ['In progress', ['working']], ['Today', ['open', 'saved', undefined]], ['Yesterday', ['yesterday']],
+    ['Today', ['saved', 'open']], ['Yesterday', ['working', 'yesterday']],
   ])
-  expect(groups[0].rows[0].age).toBe(`Yesterday · ${localClock(now - day, 'UTC')}`)
-  expect(groups[1].rows[2]).toMatchObject({kind:'private', title:'Older evot window', age:localClock(now, 'UTC')})
+  expect(groups[1].rows[0].timeLabel).toBe(`Yesterday · ${localClock(now - day)}`)
   expect(directoryGroups(data, 'work', options).flatMap(group => group.rows.map(row => row.session)))
-    .toEqual(['working', 'open', 'saved', 'yesterday'])
+    .toEqual(['saved', 'open', 'working', 'yesterday'])
 })
 
 test('the drawer preserves live statuses without exposing an older window as a selectable session', () => {
@@ -40,55 +39,39 @@ test('the drawer preserves live statuses without exposing an older window as a s
     ],
     privateWindows: [{ phase:'working', updatedAt:now }],
   }
-  const [active, today] = directoryGroups(data, '', {now, timeZone:'UTC'})
-  expect(active.key).toBe('active')
-  expect(active.rows.map(windowStatusLabel)).toEqual(['Background task', 'Retrying', 'Needs input', 'Running'])
-  expect(active.rows.at(-1)).toMatchObject({ kind:'private', title:'Older evot window' })
-  expect(active.rows.at(-1)?.terminal).toBeUndefined()
-  expect(today.rows.map(windowStatusLabel)).toEqual(['Open, not shared'])
-  expect([...active.rows, ...today.rows].every(hasOpenWindow)).toBe(true)
+  const [today] = directoryGroups(data, '', {now})
+  expect(today.key).toBe('today')
+  expect(today.rows.map(windowStatusLabel)).toEqual(['Background task', 'Retrying', 'Needs input', 'Open, not shared'])
+  expect(today.rows.every(hasOpenWindow)).toBe(true)
 })
 
-const localClock = (instant: number, timeZone?: string) =>
-  Intl.DateTimeFormat(undefined, {timeZone, hour:'2-digit', minute:'2-digit'}).format(instant)
+const localClock = (instant: number) =>
+  Intl.DateTimeFormat(undefined, {hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).format(instant)
 
-test('session times and day labels use the host zone for live, saved, and status-only windows', () => {
-  const timeZone = 'Asia/Shanghai', now = Date.parse('2026-12-31T16:02:00Z') // Jan 1, 00:02 on the host.
-  const recent = now - 5 * 60000, older = Date.parse('2026-12-29T20:00:00Z') // Dec 30 on the host.
+test('session times and day labels follow midnight on the phone for epoch and ISO timestamps', () => {
+  const now = new Date(2027, 0, 1, 0, 2).getTime()
+  const recent = now - 5 * 60000, older = new Date(2026, 11, 30, 12).getTime()
   const data = {
     rows: [{updatedAt:now}, {updated:new Date(recent).toISOString()}, {updatedAt:older}, {updated:'unknown'}],
     privateWindows: [{updatedAt:recent}],
   }
-  const groups = directoryGroups(data, '', {now, timeZone})
+  const groups = directoryGroups(data, '', {now})
   expect(groups.map(({title,rows}) => [title, rows.map(r => r.age)])).toEqual([
-    ['Today', [localClock(now, timeZone)]],
-    ['Yesterday', [localClock(recent, timeZone), localClock(recent, timeZone)]],
-    ['Earlier', [Intl.DateTimeFormat(undefined, {timeZone,year:'numeric',month:'short',day:'numeric'}).format(older)]],
+    ['Today', ['00:02']],
+    ['Yesterday', ['23:57']],
+    ['Earlier', [`${Intl.DateTimeFormat(undefined, {year:'numeric',month:'short',day:'numeric'}).format(older)} · 12:00`]],
     ['Other', ['']],
   ])
-  expect(groups[1].rows[0].timeLabel).toBe(`Yesterday · ${localClock(recent, timeZone)}`)
-  const utc = directoryGroups(data, 'search', {now, timeZone:'UTC'})
-  expect(utc[0].title).toBe('Today')
-  expect(utc[0].rows.map(r => r.age)).toEqual([localClock(now, 'UTC'), localClock(recent, 'UTC')])
+  expect(groups[1].rows[0].timeLabel).toBe(`Yesterday · ${localClock(recent)}`)
 })
 
-test('yesterday is a calendar day across the host’s spring DST transition', () => {
-  const timeZone = 'America/Los_Angeles', now = Date.parse('2026-03-09T07:30:00Z') // Mar 9, 00:30 PDT.
-  const yesterday = Date.parse('2026-03-08T19:00:00Z')
+test('yesterday is a local calendar day even after the spring DST transition', () => {
+  const now = new Date(2026, 2, 9, 0, 30).getTime()
+  const yesterday = new Date(2026, 2, 8, 12).getTime()
   const rows = [{updatedAt:yesterday}]
-  expect(directoryGroups({rows}, '', {now, timeZone})).toEqual([
-    {key:'yesterday', title:'Yesterday', rows:[expect.objectContaining({age:localClock(yesterday, timeZone)})]},
+  expect(directoryGroups({rows}, '', {now})).toEqual([
+    {key:'yesterday', title:'Yesterday', rows:[expect.objectContaining({age:localClock(yesterday)})]},
   ])
-})
-
-test('a catalog from an older gateway without a timezone still uses browser time', () => {
-  const now = new Date(2027,0,1,0,2).getTime(), recent = now - 5 * 60000
-  const catalog = { rows:[{updated:new Date(recent).toISOString()}], privateWindows:[] }
-  for (const timeZone of [undefined, 'Unknown/Zone']) {
-    expect(directoryGroups(catalog, '', {now, timeZone})[0]).toMatchObject({
-      title:'Yesterday', rows:[expect.objectContaining({age:localClock(recent)})],
-    })
-  }
 })
 
 test('an idle window the phone opened reads as a saved session; a busy one and a local one stay open', () => {
@@ -99,7 +82,7 @@ test('an idle window the phone opened reads as a saved session; a busy one and a
   const saved = { session_id: 'saved', cwd: '/w', updated_at: new Date(stamp(30)).toISOString(), turns: 2 } as SessionMeta
   const page = phoneCatalog([saved], live, { limit: 10, query: '' })
   expect(page.rows.map(r => [r.session, windowStatusLabel(r)])).toEqual([
-    ['phone-running', 'Running'], ['local', 'Open'], ['parked', 'Saved'], ['viewed', 'Saved'], ['saved', 'Saved']])
+    ['parked', 'Saved'], ['viewed', 'Saved'], ['phone-running', 'Running'], ['local', 'Open'], ['saved', 'Saved']])
   expect(page.rows.filter(hasOpenWindow).map(r => r.session)).toEqual(['phone-running', 'local'])
   // Still followable: tapping a parked row attaches to its window instead of starting another.
   expect(page.rows.find(r => r.session === 'parked')?.terminal).toBe(live[0]!.terminal)
@@ -141,6 +124,30 @@ test('open rows carry only an icon place: tmux when the window says so, a visibl
   expect(openPlace({ kind:'private' })).toBe('desktop')
 })
 
+test('empty windows stay discoverable but do not take slots; a first real prompt counts even before save', () => {
+  const old = {...legacyCatalog.online[0]!,phase:'idle' as const}
+  const live = [
+    {...old,terminal:'fresh',session:'',title:'New conversation'},
+    {...old,terminal:'placeholder',title:`Session ${old.session}`},
+    {...old,terminal:'hosting',hasConversation:false,title:'Hosting services',phase:'busy' as const},
+    {...old,terminal:'first-turn',session:'',hasConversation:true,title:'New conversation'},
+  ]
+  const empty = {session_id:'occupied-empty',turns:0,cwd:'/fixture'} as SessionMeta
+  const page = phoneCatalog([empty],live,{limit:1,query:''},new Set([empty.session_id]))
+  expect(page.online).toHaveLength(4)
+  expect(page).toMatchObject({count:1,more:false,rows:[{terminal:'first-turn'}]})
+  expect(phoneCatalog([empty],live,{limit:1,query:'Hosting'}).count).toBe(0)
+  const {hasConversation,...legacyBadge} = phoneCatalog([],[{...old,hasConversation:true}],{limit:1,query:''}).online[0]!
+  expect(hasConversation).toBe(true); expect(legacyBadge).toEqual(old)
+})
+
+test('a legacy idle window replaying old history does not outrank a newer saved conversation', () => {
+  const w = {...legacyCatalog.online[0]!,phase:'idle' as const}
+  const saved = {session_id:w.session,turns:1,cwd:'/test',updated_at:'2026-01-01T00:00:00Z'} as SessionMeta
+  const newer = {...saved,session_id:'newer',updated_at:'2026-01-02T00:00:00Z'}
+  expect(phoneCatalog([saved,newer],[w],{limit:2,query:''}).rows.map(r=>r.session)).toEqual(['newer',w.session])
+})
+
 test('blank first-run metadata does not hide the live opening title in Sessions or search', () => {
   const window = { terminal: 'phone', session: 's', workspace: 'w', phase: 'working' as const, title: 'Plan the migration' }
   const saved = { session_id: 's', cwd: '/w', turns: 0 } as SessionMeta
@@ -161,7 +168,7 @@ test('sorts saved metadata before taking the first page', async () => {
   } finally { bus.close() }
 })
 
-test('one profile-wide list puts live sessions first, shows unshared windows as status only, hides unused drafts and paginates after ranking', async () => {
+test('one profile-wide list sorts all sessions by activity, hides unused drafts and paginates after ranking', async () => {
   const home = '/fixture/' + crypto.randomUUID(), cwd = '/code/a/project', other = '/code/b/project'
   const rows = [
     {session_id:'elsewhere', cwd:other, title:'Outside', turns:3},
@@ -169,7 +176,7 @@ test('one profile-wide list puts live sessions first, shows unshared windows as 
     {session_id:'branch', parent_session_id:'parent', cwd, title:'Fork title', turns:1, updated_at:'2026-01-03T00:00:00Z'},
     {session_id:'active', cwd, title:'Automatic title', custom_title:'  Renamed\n  session  ', turns:0},
     {session_id:'parent', cwd, title:'Original … latest', turns:2, updated_at:'2026-01-01T00:00:00Z'},
-    {session_id:'private', cwd:'/secret', title:'hidden title', turns:0},
+    {session_id:'private', cwd:'/secret', title:'hidden title', turns:1},
     {session_id:'task', cwd, source:'automation'},
   ] as SessionMeta[]
   const host = {snapshot(){throw Error('unexpected transcript read')},act(){}}
@@ -184,11 +191,11 @@ test('one profile-wide list puts live sessions first, shows unshared windows as 
       listSessionsWithText:async () => { scans.push(1); return [{...rows.find(r=>r.session_id==='parent')!, search_text:'Explain the Original planner bug', user_prompts:['why does the planner choke']} as SessionWithText] }}, home, cwd, 'scope')
     const page = { limit:40, query:'' }
     const result = await ws.catalog(page)
-    expect(result.rows[0]).toMatchObject({session:'active',title:'Renamed session',phase:'working',terminal:owner.id})
+    expect(result.rows[2]).toMatchObject({session:'active',title:'Renamed session',phase:'working',terminal:owner.id})
     expect(result.online.filter(w=>w.session === 'active').map(w=>w.title)).toEqual(['Renamed session','Renamed session'])
-    expect(result.rows.map(r=>r.session)).toEqual(['active','elsewhere','private','branch','parent'])
-    expect(result.rows[2]).toMatchObject({session:'private', title:'hidden title', unshared:true})
-    expect(result.rows[2]!.terminal).toBeUndefined()
+    expect(result.rows.map(r=>r.session)).toEqual(['branch','parent','active','elsewhere','private'])
+    expect(result.rows[4]).toMatchObject({session:'private', title:'hidden title', unshared:true})
+    expect(result.rows[4]!.terminal).toBeUndefined()
     const first = await ws.catalog({...page,limit:2}); expect(first.count).toBe(5); expect(first.more).toBe(true); expect(first.rows).toEqual(result.rows.slice(0,2))
     expect(result.more).toBe(false)
     expect(asked).toEqual([80]) // the first page reads a bounded number of newest sessions, once; a smaller page reuses it
@@ -200,19 +207,19 @@ test('one profile-wide list puts live sessions first, shows unshared windows as 
     // A page that read as many rows as it asked for may hide more on disk, even when filtering emptied it.
     const tiny = await phoneWorkspace(owner, {listSessions:async limit => rows.slice(0, limit || undefined), deleteSession:async()=>true, listSessionsWithText:async()=>[]}, home, cwd, 'scope').catalog({limit:1, query:''})
     expect(tiny.more).toBe(true)
-    expect((await ws.catalog({...page,query:'outside'})).rows).toEqual([result.rows[1]!])
+    expect((await ws.catalog({...page,query:'outside'})).rows).toEqual([result.rows[3]!])
     expect(JSON.stringify(result)).not.toMatch(/Stale snippet|never used/)
     expect(JSON.stringify(result.online)).not.toMatch(/secret|hidden/)
   } finally { owner.close(); sibling.close(); hidden.close(); mirror.close() }
 })
 
-test('unsaved windows appear immediately and newer activity wins within each tier', () => {
+test('unsaved conversations appear immediately and newer activity wins before pagination', () => {
   const w = (terminal:string, phase:'working'|'idle', updatedAt:number) => ({terminal, phase, updatedAt, session:'', workspace:'scratch', title:terminal})
   const live = [w('open-new', 'idle', 90), w('run-old', 'working', 1), w('open-old', 'idle', 80), w('run-new', 'working', 2)]
   const page = {limit:3, query:''}
   const first = phoneCatalog([], live, page)
   expect(first.count).toBe(4)
-  expect(first.rows.map(r=>r.terminal)).toEqual(['run-new','run-old','open-new'])
+  expect(first.rows.map(r=>r.terminal)).toEqual(['open-new','open-old','run-new'])
   expect(first.online.map(w=>w.terminal)).toEqual(['run-new','run-old','open-new','open-old'])
   expect(phoneCatalog([], live, {...page, query:'open'}).rows.map(r=>r.terminal)).toEqual(['open-new','open-old'])
 })

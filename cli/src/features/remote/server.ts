@@ -1,4 +1,5 @@
 import { phoneBuild, phonePage, phoneScriptHash, phoneStyleHash } from './assets.js'
+import { reviewPage } from './review-page.js'
 import { stateStream } from './state-stream.js'
 import { validTerminal } from './discovery.js'
 import type { DeviceAccess } from './pairing.js'
@@ -31,7 +32,7 @@ export function listenRemote(
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Evot-Build': phoneBuild,
-    'Content-Security-Policy': `default-src 'none'; script-src ${phoneScriptHash}; connect-src 'self'; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    'Content-Security-Policy': `default-src 'none'; frame-src 'self'; script-src ${phoneScriptHash}; connect-src 'self'; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
   const handler = {
@@ -60,8 +61,12 @@ export function listenRemote(
         const gzip = /\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')
         return new Response(gzip ? phonePage.gzip : phonePage.html, { headers: { ...page, 'Content-Type': 'text/html; charset=utf-8', ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) } })
       }
+      // Public shell only. The snapshot is separately device- and terminal-authorized.
+      if (path === '/changes' && req.method === 'GET') return new Response(reviewPage.html, { headers: {
+        ...headers, 'Content-Type':'text/html; charset=utf-8', 'Content-Security-Policy':reviewPage.csp,
+      } })
       const enrollment = ['/device/challenge', '/device/prove', '/device/poll'].includes(path)
-      if (!enrollment && !['/state', '/action', '/photos', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
+      if (!enrollment && !['/state', '/action', '/photos', '/changes/snapshot', '/sessions', '/sessions/delete', '/folders', '/open'].includes(path)) return fail(404, 'Not found')
       const auth = req.headers.get('authorization'),
         authorized = () => !closed && (!options.active || options.active()) && access.authorized(auth)
       const unauthorized = () => fail(401, 'Pair again on the computer.')
@@ -71,6 +76,17 @@ export function listenRemote(
       const other = workspace && target && target !== workspace.bus.id ? target : null
       const shared = () => !workspace || !!other || workspace.bus.shared
       if ((path === '/state' || path === '/action') && !shared()) return fail(409, 'Terminal no longer shared.')
+      if (path === '/changes/snapshot') {
+        if (req.method !== 'GET') return fail(405,'Method not allowed')
+        if (!target || !workspace || !shared()) return fail(409,'Window no longer shared.')
+        const response = other ? await workspace.bus.request(other,'/changes') : host.changes ? Response.json(await host.changes()) : null
+        if (!authorized() || !shared()) return unauthorized()
+        if (!response || response.status === 404) return fail(404,'Update the selected evot window to review changes.')
+        if (!response.ok) return fail(response.status,'Window no longer available.')
+        const gzip = /\bgzip\b/.test(req.headers.get('accept-encoding') ?? '')
+        const data = gzip && response.body ? response.body.pipeThrough(new CompressionStream('gzip')) : response.body
+        return new Response(data,{headers:{...headers,'Content-Type':'application/json',Vary:'Accept-Encoding',...(gzip ? {'Content-Encoding':'gzip'} : {})}})
+      }
       if (path === '/sessions' && req.method === 'GET') {
         const page = url.searchParams.has('limit') ? {
           limit: Math.max(1, Math.min(10000, Number(url.searchParams.get('limit')) || 40)),

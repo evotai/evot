@@ -8,6 +8,7 @@ import { createEditorState, createHistoryState } from '../input/editor.js'
 import { createAdSlotState } from '../viewmodel/ad-slot.js'
 import type { AskUserAnswer } from '../../features/host-tools.js'
 import type { TaskModelSelection } from '../../features/task/model-picker.js'
+import type { ServiceHost } from '../../features/remote/service-host.js'
 import type { ConfigInfo, ForkedAgent, QueryStream, SessionMeta } from '../../native/index.js'
 import type { UIAssistantBlock } from '../../render/message-types.js'
 import type { AuthWatcher } from '../app/auth/auth-watch.js'
@@ -166,6 +167,7 @@ export interface ReplState {
   restarting: boolean
   readonly conversationTail: ConversationTail
   // Dashboard state
+  serviceHost: { scope: string; port: number; controller: ServiceHost } | null
   serverState: ServerState | null
   // Update info
   updateAvailable: { version: string } | null
@@ -276,7 +278,7 @@ export function createReplState(model: string, cwd: string): ReplState {
     remotePhoneScope: null, restartPending: false, restartPoll: null, restarting: false,
     remoteTitle: null,
     conversationTail: new ConversationTail(),
-    serverState: null,
+    serviceHost: null, serverState: null,
     updateAvailable: null,
     updateStatus: 'idle',
     updateVersion: null,

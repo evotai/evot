@@ -47,6 +47,8 @@ pub use privacy::privacy_session_tags;
 pub use privacy::privacy_status;
 pub use run::NapiRun;
 pub use run::NapiSubmitOutcome;
+pub use server::console_port;
+pub use server::drain_server_background;
 pub use server::run_acp;
 pub use server::start_server;
 pub use server::start_server_background;

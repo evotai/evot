@@ -20,6 +20,7 @@ export interface RestartStatus {
    * was not started from an installed evot and cannot restart in place. */
   outdated: boolean | null
   restart: 'none' | 'pending' | 'restarting'
+  hosting?: true
   waitingFor?: RestartWait
 }
 
@@ -54,7 +55,7 @@ export function parseRestartStatus(value: unknown): RestartStatus | null {
   const waitingFor = WAITS.find(wait => wait === row.waitingFor)
   return {
     pid: row.pid as number, session: row.session as string | null, terminal: row.terminal,
-    outdated: row.outdated as boolean | null, restart: row.restart, ...(waitingFor ? { waitingFor } : {}),
+    outdated: row.outdated as boolean | null, restart: row.restart, ...(row.hosting === true ? {hosting:true} : {}), ...(waitingFor ? { waitingFor } : {}),
   }
 }
 

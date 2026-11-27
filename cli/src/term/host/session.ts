@@ -185,7 +185,7 @@ export function createSessionController(st: ReplState, deps: SessionDeps): Sessi
       const messages = transcriptToMessages(transcript)
       // Reject phone input based on the pre-resume snapshot.
       deps.remoteCtl.sessionChanged()
-      st.conversationTail.replace(messages)
+      st.conversationTail.replace(messages, Date.parse(session.updated_at) || 0)
       st.sessionId = session.session_id
       deps.sessionHook.startSession(session.session_id, deps.agent.cwd)
       deps.sessionHook.state('idle')

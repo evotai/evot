@@ -11,6 +11,7 @@ import { terminalInvite } from '../../features/remote/cloud-connect.js'
 import { GatewayOccupied, openEnvironment } from '../../features/remote/environment.js'
 import { gatewayPolicy, updateGatewayPolicy } from '../../features/remote/gateway-policy.js'
 import { machineIdentity } from '../../features/remote/machine-identity.js'
+import { worktreeReview } from '../../features/remote/worktree-review.js'
 import { sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
 import { phoneWorkspace } from '../../features/remote/workspace.js'
@@ -56,6 +57,8 @@ export interface RemoteDeps {
   readonly outdatedBuild?: () => boolean | null
   /** A tmux window may be detached and unseen; it never takes the gateway on its own. */
   readonly insideTmux?: () => boolean
+  /** Present when the paired service election controls starts. */
+  readonly coordinatedHost?: boolean
   readonly backgroundTerminals: BackgroundTerminals
   readonly composer: ComposerController
   readonly activity: ActivityController
@@ -373,6 +376,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       default: return { phase: 'working', runState: kind }
     }
   }
+  const remoteHost = { snapshot, act, changes: () => worktreeReview(deps.agent.cwd) }
   function register(handoff: RemoteHandoff | null = null) {
     if (st.terminalBus) return
     // A restart hands over the window's identity; otherwise a phone launch names it.
@@ -385,7 +389,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     try {
       st.terminalBus = registerTerminal(
         remoteHome(),
-        { snapshot, act },
+        remoteHost,
         () => ({
           phoneCreated: st.remoteChild,
           ...(st.remoteChild || deps.insideTmux?.() ? { tmux: true as const } : {}),
@@ -395,6 +399,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           title: sessionTitle(),
           ...windowStatus(),
           updatedAt: st.conversationTail.updatedAt,
+          hasConversation: st.conversationTail.hasConversation,
           finishedRound: st.conversationTail.finishedRound,
           ...(st.conversationTail.outcome === 'Completed' ? { completed: true } : {}),
         }),
@@ -513,7 +518,25 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           // Save the identity first: a subsequent owner must reuse it, never mint a new address.
           if (p.account) machineIdentity(homedir(), true)
           await updateGatewayPolicy(p.policyHome, p.scope, 'enable', current)
-          if (current()) { st.remoteRetryAt = 0; await enable(p, true) }
+          if (current()) {
+            st.remoteRetryAt = 0
+            const services = st.serviceHost?.controller
+            if (deps.coordinatedHost && services) {
+              if (services.invite()) await services.tick()
+              else {
+                // The owning window observes the policy change on its maintenance tick.
+                const status = remoteStatus(deps.replCommands), until = Date.now() + 60_000
+                status.phase('Waiting for the service host…')
+                try {
+                  while (current() && allowed(p.policyHome,p.scope) && Date.now() < until) {
+                    if ((await st.terminalBus?.inventory(p.scope))?.gateway) break
+                    await Bun.sleep(500)
+                  }
+                } finally { status.finish('info', 'Checked service host.') }
+              }
+            }
+            if (current()) await enable(p, true)
+          }
         }
         return
       }
@@ -537,7 +560,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
   }
 
   /** Start or join the gateway. Only an explicit invite shares this window for QR approval. */
-  async function enable({ home, account, scope, policyHome }: ReturnType<typeof gatewayProfile>, invite: boolean) {
+  async function enable({ home, account, scope, policyHome }: ReturnType<typeof gatewayProfile>, invite: boolean, current?: () => boolean) {
     let status: ReturnType<typeof remoteStatus> | undefined
     try {
       register()
@@ -550,7 +573,8 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           return
         }
         const attempt = ++st.remoteAttempt
-        const active = () => attempt === st.remoteAttempt && currentScope() === scope && allowed(policyHome, scope)
+        let installed = false
+        const active = () => attempt === st.remoteAttempt && (installed || !current || current()) && currentScope() === scope && allowed(policyHome, scope)
         st.remoteOpening = true
         if (invite) status = remoteStatus(deps.replCommands)
         try {
@@ -568,13 +592,17 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
               return
             }
           }
+          if (deps.coordinatedHost && !current) {
+            status?.finish('info', 'Remote enabled. Waiting for the service host; run /remote again for the QR code.')
+            return
+          }
           status?.phase(account ? 'Connecting to evot Connect…' : 'Starting device approval…')
           const gateway = await openEnvironment({
             account,
             home,
             scope,
             active,
-            host: { snapshot, act },
+            host: remoteHost,
             workspace: phoneWorkspace(st.terminalBus, {
               listSessions: limit => deps.agent.listSessions(limit),
               listSessionsWithText: limit => deps.agent.listSessionsWithText(limit),
@@ -612,6 +640,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
             status?.finish('info', 'Cancelled.')
             return
           }
+          installed = true
           st.remoteListener = gateway
           st.terminalBus.route(scope, { url: gateway.url, address: gateway.address, windowApproval: true })
           deps.replCommands.requestRender()
@@ -622,6 +651,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           const stillActive = active()
           if (invite && stillActive && !(e instanceof GatewayOccupied)) st.terminalBus?.share(null)
           if (invite) status?.finish(stillActive ? 'error' : 'info', stillActive ? errorText(e) : 'Cancelled.')
+          if (current) throw e
           // Contention is expected when a sibling is starting or already owns the lease.
           if (stillActive && !(e instanceof GatewayOccupied)) st.remoteRetryAt = Date.now() + 15_000
           return
@@ -634,6 +664,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       const g = st.remoteListener
       showInvite({ url: g.url, address: g.address, windowApproval: true }, st.terminalBus.id)
     } catch (err) {
+      if (current) throw err
       if (invite) notice(`Remote: ${errorText(err)}`)
     }
   }
@@ -644,6 +675,18 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     if (!bus) return null
     return { terminal: bus.id, phoneScope: st.remoteChild ? st.remotePhoneScope : null, share: bus.sharing,
       gateway: !!st.remoteListener?.active() }
+  }
+
+  async function ensureHosted(current: () => boolean) {
+    if (st.remoteListener && !st.remoteListener.active()) close(false)
+    const p = profile()
+    const policyHome = p.account ? join(homedir(), '.evotai') : p.home
+    if (gatewayPolicy(policyHome) !== p.scope) return false
+    if (currentScope() !== p.scope || st.remoteChild || (!st.remoteListener && deps.outdatedBuild?.() === true))
+      throw Error('This window cannot serve the enabled Remote profile.')
+    if (!st.remoteListener) await enable(gatewayProfile(), false, current)
+    if (!st.remoteListener?.online) throw Error('Remote gateway did not become ready.')
+    return true
   }
 
   async function maintain() { await takeOver(false) }
@@ -676,7 +719,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
         }
         await updateGatewayPolicy(p.policyHome, p.scope, 'adopt', () => currentScope() === p.scope)
       }
-      await takeOver(true)
+      if (!deps.coordinatedHost) await takeOver(true)
     } catch (err) { notice(`Remote: ${errorText(err)}`) }
   }
   return {
@@ -688,6 +731,10 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     register,
     handoff,
     maintain,
+    ensureHosted,
+    hostScope: () => profile().scope,
+    idleForHost: () => windowStatus().phase === 'idle' && !st.remoteChild && !st.restarting && !st.restartPending && !st.logMode,
+    releaseHost: () => { if (st.remoteListener || st.remoteOpening) close(false) },
     resume,
     dispose,
     snapshot,

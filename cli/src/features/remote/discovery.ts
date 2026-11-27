@@ -21,6 +21,8 @@ export interface SessionBadge {
   /** Runs inside tmux rather than a visible terminal app. Older windows omit it. */
   tmux?: true
   updatedAt?: number
+  /** Actual chat content, not window startup, local commands or a generated title. */
+  hasConversation?: boolean
   phase: Phase
   runState?: RunBadge
   /** Last non-interrupted agent round to settle. Older terminals omit this. */
@@ -90,7 +92,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         membership.pairing(code, device)
         return new Response(null, { status: 204 })
       }
-      if (path !== '/badge' && path !== '/state' && path !== '/action') return new Response(null, { status: 404 })
+      if (path !== '/badge' && path !== '/state' && path !== '/action' && path !== '/changes') return new Response(null, { status: 404 })
       const inherited = scope === undefined && requested && validTerminal(ticket) && matches(requested, true)
         && await confirmRelay(gatewaySocket(dir, requested), ticket, id, path)
       const allowed = () => matches(requested, !!inherited)
@@ -101,6 +103,10 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         return Response.json({ ...row, gateway, profileGateway: gateway, invitation: gateway ? invitation : undefined })
       }
       if (!allowed()) return new Response(null, { status: 403 })
+      if (req.method === 'GET' && path === '/changes' && host.changes) {
+        const review = await host.changes()
+        return allowed() ? Response.json(review) : new Response(null,{status:403})
+      }
       if (req.method === 'GET' && path === '/state')
         return Response.json(host.snapshot(req.headers.get('x-evot-background') ?? undefined))
       if (req.method === 'POST' && path === '/action') {
@@ -117,10 +123,10 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         status: e instanceof RemoteConflict ? 409 : 503,
       }),
   })
-  async function request(terminal: string, path: '/badge' | '/state' | '/action', body?: unknown, background?: string) {
+  async function request(terminal: string, path: '/badge' | '/state' | '/changes' | '/action', body?: unknown, background?: string) {
     return requestInScope(terminal, path, routerScope || scope || '', body, background)
   }
-  async function requestInScope(terminal: string, path: '/badge' | '/state' | '/action' | '/pairing' | '/park', requestedScope: string, body?: unknown, background?: string) {
+  async function requestInScope(terminal: string, path: '/badge' | '/state' | '/changes' | '/action' | '/pairing' | '/park', requestedScope: string, body?: unknown, background?: string) {
     if (!validTerminal(terminal)) throw new RemoteConflict('Invalid terminal.')
     const ticket = routerScope ? permits.issue(terminal, path) : null
     try {
@@ -133,7 +139,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
         },
         method: body ? 'POST' : 'GET',
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(1800),
+        signal: AbortSignal.timeout(path === '/changes' ? 15000 : 1800),
       })
     } catch {
       throw new RemoteConflict('Terminal is no longer available. Select a session again.')
@@ -144,7 +150,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       online: OnlineTerminal[] = [],
       privateWindows: WindowPresence[] = [], occupied = new Set<string>()
     let unavailable = false, gateway = false, profileGateway = false
-    let gatewayInvite: typeof invitation
+    let gatewayTerminal: string | undefined, gatewayInvite: typeof invitation
     await Promise.all(
       files.map(async (f) => {
         const terminal = f.name.replace(/\.sock$/, '')
@@ -159,7 +165,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
             session: string; presence?: WindowPresence; profileGateway?: boolean; invitation?: typeof invitation
           }
           if (row.gateway) {
-            gateway = true
+            gateway = true; gatewayTerminal = terminal
             if (row.profileGateway) { profileGateway = true; gatewayInvite = invite }
           }
           if (row.session) occupied.add(row.session)
@@ -173,7 +179,7 @@ export function registerTerminal(home: string, host: RemoteHost, badge: () => Se
       }),
     )
     online.sort((a, b) => a.terminal.localeCompare(b.terminal))
-    return { online, occupied, unavailable, gateway, profileGateway, gatewayInvite, privateWindows }
+    return { online, occupied, unavailable, gateway, profileGateway, gatewayTerminal, gatewayInvite, privateWindows }
   }
   return {
     id,

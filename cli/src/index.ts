@@ -86,6 +86,7 @@ async function main() {
         forkFrom: opts.fork,
         startupSelection: { model: opts.model, thinkingLevel: opts.thinkingLevel },
         serverPort: opts.port,
+        host: opts.host,
         envFile: opts.envFile,
       })
       break
@@ -170,6 +171,7 @@ async function main() {
         forkFrom: opts.fork,
         startupSelection: { model: opts.model, thinkingLevel: opts.thinkingLevel },
         serverPort: opts.port,
+        host: opts.host,
         envFile: opts.envFile,
       })
       break

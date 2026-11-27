@@ -1,0 +1,54 @@
+* { box-sizing:border-box }
+[hidden], #message:empty, nav:not(:has(#count:not(:empty))) { display:none !important }
+html { min-height:100%; background:var(--page-gradient) fixed var(--page); color:var(--ink); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; --head:calc(56px + env(safe-area-inset-top)) }
+body,h1,p { margin:0 }
+button,select { font:inherit; color:inherit }
+button { border:0; background:transparent; cursor:pointer }
+:where(button,summary,select):focus-visible,.picker:has(select:focus-visible) { outline:2px solid var(--accent); outline-offset:2px }
+header { height:var(--head); padding:env(safe-area-inset-top) max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left)); display:flex; align-items:center; justify-content:space-between; gap:8px; position:sticky; top:0; z-index:3; background:var(--side-bg); border-bottom:1px solid var(--line) }
+header button { display:grid; place-items:center; width:44px; height:44px; flex:none; border-radius:12px }
+header button:hover,header button:active { background:var(--fill) }
+header button:disabled { color:var(--faint); cursor:progress }
+header svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round }
+.identity { text-align:center; min-width:0 } h1 { font-size:15px; line-height:1.4; letter-spacing:-.01em; font-weight:600 }
+#folder { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+main { max-width:1200px; margin:auto; padding:8px max(12px,env(safe-area-inset-right)) 32px max(12px,env(safe-area-inset-left)) }
+nav { display:flex; justify-content:space-between; align-items:center; min-height:44px; gap:8px }
+.picker { position:relative; color:var(--muted); display:inline-flex; align-items:center; gap:6px; min-height:44px; padding-inline:4px; font-size:13px; font-weight:600 }
+.picker:has(select:not([hidden]))::after,summary::before { content:''; width:6px; height:6px; border:solid var(--muted); border-width:0 1.5px 1.5px 0; transform:rotate(45deg); margin-top:-3px }
+.picker select { position:absolute; inset:0; width:100%; opacity:0; cursor:pointer }
+#layout { display:flex; background:var(--fill); border-radius:10px; padding:3px }
+#layout button { padding:4px 11px; border-radius:8px; color:var(--muted); font-size:12px; font-weight:600 }
+#layout button[aria-pressed=true] { color:var(--ink); background:var(--bg); box-shadow:0 0 0 1px var(--line) }
+#message,.note { color:var(--muted); padding:14px; font-size:13px }
+details { overflow:clip; border:1px solid var(--line); border-radius:12px; margin:8px 0 14px; background:var(--bg); scroll-margin-top:calc(var(--head) + 8px) }
+summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:10px; padding:10px 12px; min-height:44px; position:sticky; top:var(--head); z-index:1; background:var(--bg) }
+summary::-webkit-details-marker { display:none } summary::before { flex:none; margin:0; transform:rotate(-45deg) } details[open]>summary::before { transform:rotate(45deg); margin-top:-3px } details[open]>summary { border-bottom:1px solid var(--line) }
+.filename { flex:1; font:600 13px/1.45 var(--mono); overflow-wrap:anywhere }
+.status { color:var(--muted); font-size:11px; font-weight:600 }.status:is([data-kind='?'],[data-kind='A']) { color:var(--diff-add-fg) }.status[data-kind='D'] { color:var(--diff-remove-fg) }
+/* diff2html supplies the semantics and two table layouts. Paint both with the same tokens as an inline Remote patch. */
+.d2h-wrapper { background:var(--fill); color:var(--diff-context); font:12px/19px var(--mono); tab-size:4 }
+.d2h-files-diff { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)) }.d2h-file-side-diff + .d2h-file-side-diff { border-inline-start:1px solid var(--line) }
+.d2h-file-diff,.d2h-code-wrapper { overflow-x:auto; overscroll-behavior-x:contain }
+.d2h-diff-table { border-spacing:0; width:100%; font:inherit }
+.d2h-diff-table td { padding:0 6px; white-space:nowrap; vertical-align:top }
+.d2h-code-linenumber,.d2h-code-side-linenumber { position:sticky; left:0; width:1%; text-align:right; background:var(--fill); color:var(--diff-gutter); user-select:none; border-inline-end:1px solid var(--line) }
+.d2h-code-linenumber div { display:inline-block; min-width:2ch } .d2h-code-linenumber div + div { margin-inline-start:4px }
+.d2h-code-line-prefix { user-select:none; opacity:.75 }.d2h-code-line-ctn { white-space:pre }
+.d2h-info { color:var(--diff-header-fg); background:var(--diff-header-bg) }.d2h-ins { background:var(--diff-add-bg); color:var(--diff-add-fg) }.d2h-del { background:var(--diff-remove-bg); color:var(--diff-remove-fg) }
+.d2h-code-line-ctn ins,.d2h-code-line-ctn del { color:inherit; text-decoration:none; border-radius:2px }.d2h-code-line-ctn ins { background:var(--diff-add-word) }.d2h-code-line-ctn del { background:var(--diff-remove-word) }
+/* A compact terminal grid on phones. Keep pinch zoom and touch targets independent of type size. */
+@media (max-width:719px), (pointer:coarse) and (orientation:landscape) and (max-height:500px) {
+  html { --head:calc(46px + env(safe-area-inset-top)); -webkit-text-size-adjust:100%; text-size-adjust:100% }
+  header h1 { font-size:13px } #folder { font-size:10.5px }
+  main { padding:2px max(6px,env(safe-area-inset-right)) 20px max(6px,env(safe-area-inset-left)) }
+  .picker,#layout button,#message,.note { font-size:11px }
+  #layout { background:transparent; padding:0; gap:2px } #layout button { min-height:44px; padding:0 9px }
+  #layout button[aria-pressed=true] { background:transparent; color:var(--accent); box-shadow:none }
+  details { margin:2px 0 8px; border-radius:8px } summary { gap:7px; padding:4px 8px }
+  .filename { font-size:11.5px } .status { font-size:10px }
+  .d2h-wrapper { font-size:11px; line-height:15px }
+  .d2h-diff-table td { padding-inline:4px } .d2h-code-linenumber,.d2h-code-side-linenumber { font-size:10px; font-variant-numeric:tabular-nums }
+  .d2h-code-linenumber div + div { margin-inline-start:2px }
+}
+@media(min-width:720px) and (min-height:501px), (min-width:720px) and (pointer:fine) { main { padding:16px 24px 48px }.d2h-wrapper { font-size:13px; line-height:21px } }
