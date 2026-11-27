@@ -76,7 +76,7 @@ evot-activity[data-running] { color:var(--accent); }
 /* Smaller painted disc, unchanged tap area. */
 .remote-page #send { color:var(--btn-ink); border:4px solid transparent; background-clip:padding-box; font-size:14px; }
 .remote-page #draft { caret-color:var(--green); }
-.remote-page .message-assistant :is(pre,code),.pair-card input { font-family:ui-monospace,Menlo,monospace; }
+.remote-page .message-assistant :is(pre,code) { font-family:ui-monospace,Menlo,monospace; }
 .remote-page .code-copy { width:44px; height:40px; }
 .remote-page .composer-seat { position:relative; flex:0 1 auto; min-height:0; padding:5px max(12px,env(safe-area-inset-left)) max(10px,env(safe-area-inset-bottom)); }
 /* Keyboard open on a phone: keep the whole draft, its shortcuts and send row in view.
@@ -254,18 +254,24 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #queueSummary { display:none; flex:none; white-space:nowrap; }
 .composer-seat[data-reading] .run-place { display:none; }
 .composer-seat[data-reading] #queueSummary:not([hidden]) { display:block; }
-.remote-page .welcome { min-height:100%; padding:6vh 0; } .welcome h2,.pair-card h2,.drawer-head h2 { font-size:clamp(21px,4vw,26px); letter-spacing:-.04em; }
+.remote-page .welcome { min-height:100%; padding:6vh 0; }
 #pair-screen { display:grid; flex:1; place-items:center; overflow-y:auto; padding:20px; }
-.pair-card,.question-card { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:18px; padding:20px; }
-.pair-card { max-width:380px; border:0; background:transparent; } .eyebrow { letter-spacing:.12em; color:var(--accent); font-size:10px; font-weight:700; }
-#pickSession { margin:auto; text-align:center; padding:24px; }
-#approvalCode { display:block; font:600 1.8rem ui-monospace,monospace; letter-spacing:.15em; margin-top:12px; }
-.pair-card output { display:block; margin-top:14px; }
-.pair-card[aria-busy=true] .primary { opacity:.8; cursor:progress; }
-.pair-card h2 { margin:12px 0 8px; } .pair-card p { color:var(--muted); }
-.pair-card label { display:block; margin:20px 0 6px; font-size:13px; } .pair-card small { display:block; margin-top:12px; }
-.pair-card input,.question-card textarea { width:100%; background:var(--page); color:var(--ink); font-size:16px; border:1px solid var(--line); border-radius:10px; padding:10px; }
-.pair-card input { letter-spacing:.2em; } .pair-card .primary { width:100%; }
+.question-card { width:100%; background:var(--bg); border:1px solid var(--line); border-radius:18px; }
+.pair-card,#pickSession { display:grid; justify-items:center; gap:16px; text-align:center; }
+.pair-card { width:min(100%,360px); }
+#pickSession { margin:auto; padding:24px; }
+.device-link,.session-mark { color:var(--accent); fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.device-link { width:136px; }.link-trace { stroke-dasharray:2 7; opacity:.65; }
+.session-mark { width:44px; }
+#approvalCode { padding:10px 14px; border:1px solid var(--line); background:var(--fill); border-radius:12px; font:600 1rem ui-monospace,monospace; user-select:all; }
+#approvalClock { font-variant-numeric:tabular-nums; }
+.approval-scope { font-size:13px; color:var(--muted); }
+.approval-scope summary { cursor:pointer; padding:6px; }
+#approvalCode[hidden] ~ .approval-scope { display:none; }
+.pair-card output { color:var(--muted); font-size:15px; }
+.pair-card output:empty,.pair-card .primary:disabled { display:none; }
+.pair-card .primary,#pickSession .primary { min-width:132px; margin:0; }
+.question-card textarea { width:100%; background:var(--page); color:var(--ink); font-size:16px; border:1px solid var(--line); border-radius:10px; padding:10px; }
 .primary { min-height:44px; margin-top:10px; padding:7px 14px; border:0; border-radius:12px; background:var(--accent); color:var(--btn-ink); font:inherit; cursor:pointer; } button:disabled { opacity:.5; }
 .question-card { pointer-events:auto; max-height:60dvh; overflow:auto; overscroll-behavior:contain; padding:8px 12px; font-size:14px; overflow-wrap:anywhere; }
 .question-card h2,.question-card dt,.question-card dd { white-space:pre-wrap; }
@@ -328,14 +334,14 @@ div.terminal-row { cursor:default; opacity:.7; }
 @media(prefers-reduced-motion:no-preference) { #sessionsDrawer[open] { animation:drawer-in .16s ease-out; } @keyframes drawer-in { from {transform:translateX(-20px);opacity:.6;} } }
 @media(max-height:480px) { .remote-page .composer-seat { padding-block:0 4px; } .remote-page .conversation-head { min-height:40px; padding-block:2px; } }
 
-/* Loading: a spinner while pairing or opening a session, placeholder rows while the list loads. */
-.spinner { width:26px; height:26px; border-radius:50%; border:2.5px solid var(--line); border-top-color:var(--accent); animation:spin .8s linear infinite; }
-@keyframes spin { to { transform:rotate(360deg); } }
-@media(prefers-reduced-motion:reduce) { .spinner { animation:none; } }
-.pair-spinner { display:none; margin:0 auto 6px; }
-.pair-card:is([aria-busy=true],:has(button.primary:disabled)) .pair-spinner { display:block; }
-.pair-card:is([aria-busy=true],:has(button.primary:disabled)) { text-align:center; }
-.chat-loading { display:grid; justify-items:center; gap:12px; padding-top:28vh; color:var(--muted); font-size:14px; }
+@media(prefers-reduced-motion:no-preference) {
+  .pair-card:has(button:disabled) .link-trace { animation:link-flow 1.3s linear infinite; }
+  @keyframes link-flow { to { stroke-dashoffset:-18; } }
+  .chat-loading i { animation:pulse 1.2s ease-in-out infinite; }
+}
+.chat-loading { display:grid; gap:16px; margin:16px auto; max-width:var(--composer-width); }
+.chat-loading i { height:32px; width:48%; background:var(--fill); border-radius:12px 12px 12px 3px; }
+.chat-loading i:first-of-type { justify-self:end; width:30%; background:var(--accent-soft); border-radius:12px 12px 3px; }
 .skeleton-row { gap:7px; cursor:default; }
 .skeleton-row i { display:block; height:11px; border-radius:6px; background:color-mix(in srgb,var(--ink) 11%,transparent); }
 .skeleton-row i + i { height:9px; opacity:.7; }

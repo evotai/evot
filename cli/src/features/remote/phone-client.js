@@ -98,7 +98,7 @@ async function choose(id, session, folder) {
   controls();
   drawer.close();
   const credential = token;
-  notice(id ? 'Connecting to live session…' : session ? 'Opening saved session…' : 'Starting a new terminal…', true);
+  notice(id ? '' : session ? 'Opening session…' : 'Starting terminal…', true);
   try {
     if (!id) {
       const request = session || folder ? requestId() : (newRequest ??= requestId());
@@ -108,6 +108,7 @@ async function choose(id, session, folder) {
     }
     if (credential !== token) return;
     selectTarget(id, session);
+    notice('');
     connected = false;
     ++epoch;
     view = null;
@@ -145,22 +146,22 @@ function paired(yes) {
     $('threadTitle').textContent = 'evot remote';
     $('history').replaceChildren();
     $('draft').value = '';
-    $('deviceStatus').textContent = 'Connect to request device access.';
+    $('deviceStatus').textContent = '';
   }
   $('pair-screen').hidden = yes;
   $('openChanges').hidden = !yes || !terminal;
   syncReview();
   $('pickSession').hidden = !yes || !!terminal;
-  $('chat').hidden = $('seat').hidden = !yes || !terminal;
+  $('chat').hidden = !yes || !terminal;
+  $('seat').hidden = $('chat').hidden || !view;
   $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected' : 'Not connected';
   if (yes && terminal && !view) {
     $('statusDetail').textContent = $('nextModel').textContent = '';
     $('activity').removeAttribute('data-running');
     $('welcome').hidden = true;
     background.render(null);
-    $('threadTitle').textContent = 'Opening session…';
+    $('threadTitle').textContent = 'Session';
     $('chatLoading').hidden = false;
-    $('status').textContent = 'Waiting for the first live update…';
   }
   if (yes && !terminal) {
     $('threadTitle').textContent = 'Your sessions';
@@ -258,6 +259,7 @@ function render(s, mode) {
   missingTarget = null;
   connected = true;
   $('chatLoading').hidden = true;
+  $('seat').hidden = false;
   if (draftCarried) {
     draftCarried = false;
     const kept = $('draft').value ? '' : drafts.take(terminal);
@@ -355,7 +357,7 @@ function unpair() {
   etag = '';
   reconnecting();
   if (!approvedBefore()) showPairScreen();
-  $('deviceStatus').textContent = 'Your connection expired or access was revoked. Reconnect to check this browser’s approval.';
+  $('deviceStatus').textContent = 'Access ended.';
   $('pair').querySelector('button').textContent = 'Reconnect';
   reconnectFailures++;
   scheduleReconnect();
@@ -501,28 +503,20 @@ async function pair(auto = false) {
   clearTimeout(reconnectTimer);
   const form = $('pair'), button = form.querySelector('button');
   let countdown;
-  button.disabled = true; form.setAttribute('aria-busy', 'true');
+  button.disabled = true;
   $('approvalCode').hidden = $('approvalClock').hidden = true;
-  button.textContent = auto ? 'Reconnecting…' : 'Connecting…';
-  $('deviceStatus').textContent = auto ? 'Reconnecting to your computer…' : 'Contacting your computer…';
+  $('deviceStatus').textContent = auto ? 'Reconnecting…' : 'Connecting…';
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
       if (step !== 'verify') showPairScreen();
       if (step === 'signin') {
-        button.textContent = 'Opening sign-in…';
-        $('deviceStatus').textContent = 'Continue with your evot account. You’ll return here automatically.';
-      } else if (step === 'verify') {
-        button.textContent = 'Verifying browser…';
-        $('deviceStatus').textContent = 'Checking whether the computer already knows this browser…';
-      } else {
-        button.textContent = 'Waiting for approval…';
-        $('deviceStatus').textContent = invitedTerminal
-          ? `In the terminal that displayed the QR, match this code and run /remote approve ${code}.`
-          : `In the TUI that received the request, check the code, then run /remote approve ${code}.`;
+        $('deviceStatus').textContent = 'Opening sign-in…';
+      } else if (step === 'approval') {
+        $('deviceStatus').textContent = invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:';
         $('approvalCode').hidden = $('approvalClock').hidden = false;
-        $('approvalCode').textContent = code;
-        const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s · this page updates automatically`; };
+        $('approvalCode').textContent = `/remote approve ${code}`;
+        const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s`; };
         tick(); countdown = setInterval(tick, 1000);
       }
     }, url => { keepDraft(); nav.redirect(); location.assign(url); leaving = true; });
@@ -531,7 +525,6 @@ async function pair(auto = false) {
     token = result.token;
     rememberApproval(true); reconnectFailures = 0;
     etag = '';
-    $('deviceStatus').textContent = 'This device is approved.';
     notice('');
     // Silent renewal is not navigation: paired() would reset the reader's scroll.
     if (!$('pair-screen').hidden) paired(true);
@@ -543,18 +536,17 @@ async function pair(auto = false) {
     if (!unreachable || !approvedBefore()) showPairScreen();
     if (!storage && !unreachable) rememberApproval(false); // denied, expired or revoked: wait for the user
     $('deviceStatus').textContent = storage
-      ? 'Browser storage is blocked. Open the invite in Safari or Chrome with site data enabled.'
+      ? 'Enable browser storage to connect.'
       : unreachable
-        ? approvedBefore() ? 'Could not reach the computer. Retrying automatically; check that /remote is still running.'
-          : 'Could not reach the computer. Check that /remote is still running and try again.'
-        : e.message || 'Could not connect. Try again.';
+        ? 'Computer unreachable. Check /remote.'
+        : e.message || 'Could not connect.';
     button.textContent = unreachable && approvedBefore() ? 'Retry now' : 'Try again';
     if (unreachable) { reconnectFailures++; scheduleReconnect(); }
   } finally {
     clearInterval(countdown);
     $('approvalCode').hidden = $('approvalClock').hidden = true;
     pairing = false;
-    if (!leaving) { button.disabled = false; form.removeAttribute('aria-busy'); }
+    if (!leaving) button.disabled = false;
   }
 }
 async function action(payload, done, failed, command = false, dispatch = message => api('/action',message)) {
@@ -893,7 +885,7 @@ window.addEventListener('online', refreshOnReturn);
 $('browseSessions').onclick = drawer.open;
 window.addEventListener('pageshow', event => {
   if (event.persisted && leaving) {
-    leaving = false; $('pair').removeAttribute('aria-busy');
+    leaving = false;
     const button = $('pair').querySelector('button'); button.disabled = false; button.textContent = 'Continue sign-in';
     $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
   }
@@ -903,7 +895,7 @@ paired(!!token || (!!terminal && approvedBefore() && !returnTicket && !invitedTe
 const connectButton = $('pair').querySelector('button');
 connectButton.textContent = 'Connect';
 connectButton.disabled = false;
-$('deviceStatus').textContent = 'Tap Connect to ask your computer for access.';
+$('deviceStatus').textContent = '';
 if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(!returnTicket && !invitedTerminal);
 else if (token && !terminal) drawer.open();
 else void refresh();

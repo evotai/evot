@@ -47,7 +47,7 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(html).not.toContain('id="foldComposer"')
     expect(html).toContain('id="queueSummary" role="status" hidden')
     expect(html).toContain(`data-activity-frames="${spinnerFrames(process.platform, process.env.TERM).join(' ')}"`)
-    expect(html).toMatch(/id="pair"[\s\S]*?<button[^>]*disabled[^>]*>Loading…<\/button>/)
+    expect(html).toMatch(/id="pair"[\s\S]*?<button[^>]*disabled[^>]*>Connect<\/button>/)
     expect(new Bun.Transpiler({loader:'js'}).scanImports(client)).toEqual([])
     const csp = r.headers.get('content-security-policy') ?? ''
     expect(csp).toContain(`'sha256-${createHash('sha256').update(client).digest('base64')}'`)

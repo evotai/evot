@@ -13,17 +13,17 @@
     <button id="newSession" class="icon-button" type="button" aria-label="New session" title="New session" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M11 13l1-4 7-7 3 3-7 7z"/></svg></button>
   </header>
   <section id="pair-screen"><form id="pair" class="pair-card">
-    <div class="spinner pair-spinner" aria-hidden="true"></div>
-    <h2>Connect to your computer</h2><p>Approve this browser in the evot TUI to access sessions in this profile, including windows opened later.</p>
-    <output id="deviceStatus" aria-live="polite">Opening the connection page…</output><noscript><p>Enable JavaScript, or open the invite in Safari or Chrome.</p></noscript>
-    <strong id="approvalCode" hidden></strong><small id="approvalClock" hidden></small>
-    <button class="primary" type="submit" disabled>Loading…</button>
+    <svg class="device-link" viewBox="0 0 136 52" aria-hidden="true"><g><rect x="4" y="6" width="25" height="40" rx="6"/><path d="M14 40h5"/></g><path class="link-trace" d="M38 26h37"/><g><rect x="84" y="7" width="47" height="32" rx="5"/><path d="M107 39v6m-10 0h20"/></g></svg>
+    <output id="deviceStatus" aria-live="polite">Connecting…</output><noscript><p>Enable JavaScript to connect.</p></noscript>
+    <code id="approvalCode" hidden></code><small id="approvalClock" hidden></small>
+    <details class="approval-scope"><summary>Access scope</summary>This browser can access current and future sessions in this profile.</details>
+    <button class="primary" type="submit" disabled>Connect</button>
   </form></section>
-  <section id="pickSession" hidden><h2>Your computer is connected</h2><p>Choose a session to follow its terminal window live or resume a saved conversation.</p><button class="primary" id="browseSessions" type="button">Choose a session</button></section>
+  <section id="pickSession" hidden><svg class="session-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="5"/><path d="M11 5v22m5-15h7m-7 5h4"/></svg><button class="primary" id="browseSessions" type="button">Choose session</button></section>
   <div class="chat-scroll" id="chat" role="region" aria-label="Conversation" tabindex="0" hidden>
-    <div class="chat-loading" id="chatLoading" role="status" hidden><div class="spinner" aria-hidden="true"></div><span>Opening session…</span></div>
-    <div class="welcome" id="welcome"><h2>What can I help you build?</h2>
-      <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain this codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run relevant tests</button></div>
+    <div class="chat-loading" id="chatLoading" role="status" hidden><span class="sr-only">Opening session…</span><i aria-hidden="true"></i><i aria-hidden="true"></i></div>
+    <div class="welcome" id="welcome"><svg class="session-mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="22" rx="5"/><path d="m9 12 4 4-4 4m7 0h6"/></svg>
+      <div class="suggestions"><button type="button" data-prompt="Explain this codebase and its architecture">Explain codebase</button><button type="button" data-prompt="Run the relevant tests and summarize the result">Run tests</button></div>
     </div><div id="history" aria-label="Recent conversation"></div><div id="outbox" aria-live="polite"></div>
   </div>
   <div class="composer-seat" id="seat" hidden>
