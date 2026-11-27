@@ -40,6 +40,8 @@ export interface ConfigInfo {
   baseUrl: string | null
   availableModels: ModelOption[]
   thinkingLevel: string
+  /** Advertised context capacity of the active model. Absent from older addons. */
+  contextWindow?: number
   /** Retired field, decoded only for historical addon compatibility. */
   judge?: string
   /** The account's pinned landing model (cloud wire id), set with Space in the
@@ -76,6 +78,7 @@ function validateConfigInfo(value: unknown): asserts value is ConfigInfo {
   protocol(value.protocol, '$.protocol')
   field(value.hasApiKey, 'boolean', '$.hasApiKey')
   if (value.baseUrl !== null) field(value.baseUrl, 'string', '$.baseUrl')
+  optional(value, 'contextWindow', 'number', '$')
   optional(value, 'judge', 'string', '$')
   optional(value, 'defaultModel', 'string', '$')
   optional(value, 'sessionHook', 'string', '$')

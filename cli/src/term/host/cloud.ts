@@ -258,6 +258,7 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
       const knownCampaignIds = new Set([...st.adSlot.notices, ...st.adSlot.ads].map(c => c.id))
       const knownFingerprints = new Set([...st.adSlot.notices, ...st.adSlot.ads].map(campaignFingerprint))
       const knownAvailability = modelAvailabilityKey(st.configInfo)
+      const knownContextWindow = st.configInfo?.contextWindow
 
       const synced = await deps.cloudSync.run(force)
       if (st.destroyed || !synced) return
@@ -285,12 +286,12 @@ export function createCloudController(st: ReplState, deps: CloudDeps): CloudCont
         else showCloudCampaign(campaignId)
       }
       const refreshedOpenPicker = modelsSynced && deps.refreshOpenModelSelector()
-      // The footer marks the next model while the server reports it
-      // unavailable; redraw when that set changes, in either direction.
+      // Redraw when the footer's availability or live context budget changes.
       const availabilityChanged = modelAvailabilityKey(st.configInfo) !== knownAvailability
       if (
         refreshedOpenPicker
         || availabilityChanged
+        || st.configInfo?.contextWindow !== knownContextWindow
         || (!deps.commandWindow.commandWindowMounted() && (addedModels.length > 0 || addedCampaigns.length > 0 || copyChanged))
       ) {
         deps.renderer.requestRender()

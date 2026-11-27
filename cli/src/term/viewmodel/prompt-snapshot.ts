@@ -74,6 +74,11 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
   // one a finished run happened to call.
   const selected = config?.availableModels.find(option => option.model === session.model && option.provider === selectedProvider)
   const modelAvailability = modelAvailabilityLabel(selected)
+  // A running turn or a different displayed route owns its pinned window.
+  // At idle use the live capacity with the most recent token estimate.
+  const contextWindow = !input.busy && !input.logMode && !differentModel
+    ? config?.contextWindow ?? session.sessionTokens.contextWindow
+    : session.sessionTokens.contextWindow
   return {
     lines: editor.lines,
     cursorLine: editor.cursorLine,
@@ -95,7 +100,7 @@ export function promptFromSnapshot(input: PromptSnapshot): PromptVMInput {
     cloudBadge: session.cloudBadge ?? '',
     gitBranch: input.gitBranch,
     contextTokens: session.sessionTokens.contextTokens,
-    contextWindow: session.sessionTokens.contextWindow,
+    contextWindow,
     backgroundProcessCount: input.backgroundProcessCount,
     backgroundStopHint: input.backgroundStopHint,
     backgroundStopPending: input.backgroundStopPending,

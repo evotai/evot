@@ -13,6 +13,9 @@ pub struct ConfigInfo {
     pub base_url: Option<String>,
     pub available_models: Vec<serde_json::Value>,
     pub thinking_level: String,
+    /// Advertised context capacity of the active model. Older addons omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
     /// Retired capability, retained only for historical addon JSON. Current
     /// writers leave it absent; it never enables model calls.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -201,6 +201,7 @@ impl NapiAgent {
     pub fn config_info(&self) -> Result<String> {
         let config = self.load_config()?;
         self.agent.refresh_model_catalog(&config);
+        self.agent.refresh_cloud_context_window(&config);
         let llm = self.agent.llm();
         let provider = llm.provider.clone();
         let env_path = config.env_file_path.to_string_lossy().to_string();
@@ -215,6 +216,7 @@ impl NapiAgent {
             base_url: Some(llm.base_url),
             available_models: available,
             thinking_level,
+            context_window: has_api_key.then(|| llm.model_config.advertised_context_window()),
             judge: None,
             default_model: config.cloud_default_model.clone(),
             session_hook: config.session_hook.clone(),

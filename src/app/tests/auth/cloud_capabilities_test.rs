@@ -88,6 +88,9 @@ fn cloud_alias_capabilities_reach_runtime_and_request_without_renaming_model() -
 
         // The same model id on a custom provider must not inherit cloud policy.
         let mut custom = config.clone();
+        custom
+            .cloud_context_windows
+            .insert("evot-fast".into(), 500_000);
         let mut profile = custom
             .providers
             .get("evot-free")
@@ -99,7 +102,8 @@ fn cloud_alias_capabilities_reach_runtime_and_request_without_renaming_model() -
         assert_eq!(byok.model_config.max_tokens(), 128_000);
         assert_eq!(byok.model_config.context_window(), 1_000_000);
 
-        // Explicit provider settings override both published profile and limits.
+        // A published window wins for the cloud provider only. Other explicit
+        // local settings retain their existing precedence.
         let profile = custom
             .providers
             .get_mut("evot-free")
@@ -110,9 +114,14 @@ fn cloud_alias_capabilities_reach_runtime_and_request_without_renaming_model() -
         profile.thinking_level = Some(ThinkingLevel::Off);
         let overridden = custom.build_llm("evot-free", Some("evot-fast".into()))?;
         assert_eq!(overridden.model_config.max_tokens(), 2048);
-        assert_eq!(overridden.model_config.context_window(), 64_000);
+        assert_eq!(overridden.model_config.context_window(), 500_000);
+        assert_eq!(overridden.model_config.advertised_context_window(), 500_000);
         assert!(!overridden.model_config.supports_image());
         assert_eq!(overridden.thinking_level, ThinkingLevel::Off);
+
+        custom.cloud_context_windows.remove("evot-fast");
+        let fallback = custom.build_llm("evot-free", Some("evot-fast".into()))?;
+        assert_eq!(fallback.model_config.context_window(), 64_000);
         Ok(())
     })();
     match previous {

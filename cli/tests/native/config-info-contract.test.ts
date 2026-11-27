@@ -9,7 +9,7 @@ import hookFixture from '../fixtures/contracts/config-info-hook.json'
 function legacyReader(json: string): void {
   const value = JSON.parse(json)
   // Top-level additive-optional fields a c922f341 reader simply ignored.
-  const additive = ['judge', 'defaultModel', 'sessionHook']
+  const additive = ['judge', 'defaultModel', 'sessionHook', 'contextWindow']
   expect(Object.keys(value).filter(key => !additive.includes(key)).sort()).toEqual([
     'availableModels', 'baseUrl', 'envPath', 'hasApiKey', 'protocol', 'provider', 'thinkingLevel',
   ])
@@ -55,6 +55,15 @@ describe('ConfigInfo boundary', () => {
     legacyReader(JSON.stringify(hookFixture))
     expect(() => decodeConfigInfo(JSON.stringify({ ...legacy, sessionHook: 7 }))).toThrow('$.sessionHook')
   })
+  test('active context capacity is optional and validated', () => {
+    expect(decodeConfigInfo(JSON.stringify(legacy)).contextWindow).toBeUndefined()
+    expect(decodeConfigInfo(JSON.stringify(current)).contextWindow).toBe(500_000)
+    const malformed = JSON.stringify({ ...current, contextWindow: '500k' })
+    expect(() => {
+      decodeConfigInfo(malformed)
+    }).toThrow('$.contextWindow')
+  })
+
   test('legacy optional metadata remains absent, not fabricated', () => {
     const decoded = decodeConfigInfo(JSON.stringify(legacy))
     expect(decoded).toEqual(legacy)
@@ -114,9 +123,8 @@ describe('ConfigInfo boundary', () => {
     for (const key of Object.keys(current)) {
       const payload: Record<string, unknown> = { ...current }
       delete payload[key]
-      // The account default is additive-optional: absent means "no pin".
-      if (key === 'defaultModel') {
-        expect(decodeConfigInfo(JSON.stringify(payload)).defaultModel).toBeUndefined()
+      if (key === 'defaultModel' || key === 'contextWindow') {
+        expect(decodeConfigInfo(JSON.stringify(payload))[key]).toBeUndefined()
         continue
       }
       expect(() => decodeConfigInfo(JSON.stringify(payload))).toThrow(`$.${key}`)

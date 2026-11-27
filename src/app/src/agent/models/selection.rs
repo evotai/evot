@@ -221,6 +221,26 @@ impl ModelSelection {
         Ok(next)
     }
 
+    /// Adopt a new window for the same listed cloud model. A catalog poll
+    /// must not switch models. Runs already own their previous snapshot.
+    pub(crate) fn refresh_cloud_context_window(&self, config: &Config) {
+        let mut current = self.llm.write();
+        if !config.cloud_providers.contains(&current.provider)
+            || !config.serves(&current.provider, &current.model)
+        {
+            return;
+        }
+        let Some(next) = Self::rebuild_with_effort(config, &current.provider, &current) else {
+            return;
+        };
+        if current.model_config.context_window() != next.model_config.context_window()
+            || current.model_config.advertised_context_window()
+                != next.model_config.advertised_context_window()
+        {
+            *current = next;
+        }
+    }
+
     /// Keep a still-served live selection on fresh configuration, inheriting
     /// and clamping effort. The model id is what the user chose: if the
     /// catalog moved that id to another provider (free → premium), follow it

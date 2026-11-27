@@ -415,11 +415,15 @@ impl Config {
         let model = model_override.unwrap_or_else(|| profile.model().to_string());
         let protocol = self.protocol_for(provider_name, profile, &model);
         let compat_caps = self.compat_caps_for(provider_name, profile, &protocol);
-        let cloud_capabilities = self
-            .cloud_providers
-            .contains(provider_name)
-            .then(|| self.cloud_model_capabilities.get(&model))
-            .flatten();
+        let is_cloud = self.cloud_providers.contains(provider_name);
+        let (published_window, cloud_capabilities) = if is_cloud {
+            (
+                self.cloud_context_windows.get(&model).copied(),
+                self.cloud_model_capabilities.get(&model),
+            )
+        } else {
+            (None, None)
+        };
         let model_config = resolve_model_config_with_capabilities(
             protocol.clone(),
             provider_name,
@@ -427,9 +431,7 @@ impl Config {
             Some(&profile.base_url),
             compat_caps,
             profile.route_capabilities,
-            profile
-                .context_window
-                .or_else(|| self.cloud_context_windows.get(&model).copied()),
+            published_window.or(profile.context_window),
             profile.max_tokens,
             profile.supports_image,
             cloud_capabilities,

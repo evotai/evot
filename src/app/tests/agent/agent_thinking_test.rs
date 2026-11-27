@@ -541,6 +541,47 @@ fn cloud_profile(models: &[&str]) -> ProviderProfile {
     }
 }
 
+#[test]
+fn cloud_window_refresh_keeps_the_selection_and_existing_run_snapshot() -> TestResult {
+    let dir = TempDir::new()?;
+    let mut config = Config::new(dir.path().to_path_buf());
+    let provider = "evot-pro";
+    let model = "claude-opus-4-6";
+    config
+        .providers
+        .insert(provider.into(), cloud_profile(&[model, "other"]));
+    config.cloud_providers.insert(provider.into());
+    config.cloud_default_model = Some(model.into());
+    let default_llm = config.build_llm(provider, Some(model.into()))?;
+    config.cloud_context_windows.insert(model.into(), 1_000_000);
+    let agent = Agent::new(&config, "/work")?;
+    agent.set_thinking_level(ThinkingLevel::Low);
+    let admitted = agent.llm();
+
+    config.cloud_default_model = Some("other".into());
+    config.cloud_context_windows.insert(model.into(), 500_000);
+    agent.refresh_cloud_context_window(&config);
+    assert_eq!(agent.llm().model, model);
+    assert_eq!(agent.llm().thinking_level, ThinkingLevel::Low);
+    assert_eq!(agent.resolved_context_window(), 500_000);
+    assert_eq!(
+        agent.llm().model_config.advertised_context_window(),
+        500_000
+    );
+    assert_eq!(admitted.model_config.context_window(), 1_000_000);
+
+    let default_window = default_llm.model_config.context_window();
+    config.cloud_context_windows.clear();
+    agent.refresh_cloud_context_window(&config);
+    assert_eq!(agent.resolved_context_window(), default_window);
+
+    config.cloud_context_windows.insert(model.into(), 272_000);
+    config.cloud_providers.clear();
+    agent.refresh_cloud_context_window(&config);
+    assert_eq!(agent.resolved_context_window(), default_window);
+    Ok(())
+}
+
 /// The user picks a model id, not a catalog group. When the server moves that
 /// id from the free group to a premium group the account can use, a reload
 /// must follow the id there instead of jumping to the premium default.

@@ -66,14 +66,14 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
             serde_json::from_str::<serde_json::Value>(&written)?,
             original
         );
-        // The strict legacy reader predates the additive-optional top-level
-        // keys (`judge`, `defaultModel`); a c922f341 client ignored unknown
-        // keys, so stripping them is what that reader actually saw.
+        // The historical client ignored additive-optional top-level keys.
+        // Strip them before validating its strict historical shape.
         let mut for_legacy: serde_json::Value = serde_json::from_str(&written)?;
         if let Some(object) = for_legacy.as_object_mut() {
             object.remove("judge");
             object.remove("defaultModel");
             object.remove("sessionHook");
+            object.remove("contextWindow");
         }
         let legacy: LegacyConfigInfo = serde_json::from_value(for_legacy)?;
         assert_eq!(legacy.provider, current.provider);
@@ -91,6 +91,7 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
     ))?;
     assert_eq!(legacy_fixture.default_model, None);
     assert_eq!(legacy_fixture.session_hook, None);
+    assert_eq!(legacy_fixture.context_window, None);
     let current_fixture: ConfigInfo = serde_json::from_str(include_str!(
         "../../../../cli/tests/fixtures/contracts/config-info-current.json"
     ))?;
@@ -98,6 +99,7 @@ fn config_info_contract_round_trips_shared_fixtures() -> TestResult {
         current_fixture.default_model.as_deref(),
         Some("fixture-model")
     );
+    assert_eq!(current_fixture.context_window, Some(500_000));
     Ok(())
 }
 

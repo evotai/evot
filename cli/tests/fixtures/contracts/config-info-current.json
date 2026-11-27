@@ -20,5 +20,6 @@
     { "provider": "byok", "protocol": "openai_responses", "model": "custom", "spec": "byok:custom" }
   ],
   "thinkingLevel": "high",
+  "contextWindow": 500000,
   "defaultModel": "fixture-model"
 }

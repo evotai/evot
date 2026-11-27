@@ -102,6 +102,11 @@ impl Agent {
         self.selection.reload_provider_for_resume(config, spec)
     }
 
+    /// Refresh the active cloud model's context capacity for future runs.
+    pub fn refresh_cloud_context_window(&self, config: &Config) {
+        self.selection.refresh_cloud_context_window(config);
+    }
+
     /// Refresh the available handoff targets without changing the active model.
     pub fn refresh_model_catalog(&self, config: &Config) {
         *self.model_catalog_config.write() = std::sync::Arc::new(config.clone());

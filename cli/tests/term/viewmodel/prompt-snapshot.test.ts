@@ -120,6 +120,17 @@ describe('prompt snapshot projection', () => {
     expect(output.backgroundProcessCount).toBe(2)
   })
 
+  test('idle footer uses the synced window with the last context usage', () => {
+    const input = { ...snapshot(), columns: 140 }
+    input.session.sessionTokens = { ...input.session.sessionTokens, contextTokens: 88_600, contextWindow: 1_000_000 }
+    input.config!.contextWindow = 500_000
+    expect(footerText(input)).toContain('context: 17.7% (88.6k/500k)')
+    expect(footerText({ ...input, busy: true })).toContain('context: 8.9% (88.6k/1M)')
+    expect(footerText({ ...input, logMode: true })).toContain('context: 8.9% (88.6k/1M)')
+    input.session.lastCallModel = { model: 'shared', provider: 'first' }
+    expect(promptFromSnapshot(input).contextWindow).toBe(1_000_000)
+  })
+
   test('context uses session stats and missing configuration stays explicit', () => {
     const input = snapshot()
     input.config = undefined
