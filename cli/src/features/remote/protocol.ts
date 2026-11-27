@@ -63,6 +63,8 @@ export interface RemoteSlashHints {
   inventory: CommandInventory
 }
 export interface RemoteSnapshot {
+  /** Net changes inside this window's cwd. Missing on older peers or when Git status is unknown. */
+  worktreeChanged?: boolean
   /** Legacy runnable catalog, also describes phone-native shortcuts. */
   commands?: readonly RemoteCommand[]
   /** The followed window's TUI hints. May include commands that only run locally. */

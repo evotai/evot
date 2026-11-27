@@ -1,4 +1,4 @@
-import { reviewNavigation } from './phone-review.js';
+import { paintChangesButton, reviewNavigation } from './phone-review.js';
 import { questionPanel } from './phone-ask.js';
 import { inlineCommandGhost, installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
@@ -173,7 +173,7 @@ function controls() {
   const input = connected ? view?.input : null,
     switchable = connected && !!(input || view?.ask) && !busy;
   commands.render(input && !busy && !tab.composing ? view : null);
-  $('openChanges').disabled = !connected || !token;
+  paintChangesButton($('openChanges'), connected && !!token, view);
   drawer.lock(busy || !token);
   $('openSessions').disabled = $('browseSessions').disabled = busy || !token;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';

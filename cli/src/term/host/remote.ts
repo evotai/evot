@@ -11,6 +11,7 @@ import { terminalInvite } from '../../features/remote/cloud-connect.js'
 import { GatewayOccupied, openEnvironment } from '../../features/remote/environment.js'
 import { gatewayPolicy, updateGatewayPolicy } from '../../features/remote/gateway-policy.js'
 import { machineIdentity } from '../../features/remote/machine-identity.js'
+import { worktreeStatusCache } from '../../features/remote/worktree-status.js'
 import { worktreeReview } from '../../features/remote/worktree-review.js'
 import { sessionLineTitle, shortenSessionCwd } from '../../session/resume.js'
 import { profileKey, registerTerminal, validTerminal, type SessionBadge } from '../../features/remote/discovery.js'
@@ -376,7 +377,14 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       default: return { phase: 'working', runState: kind }
     }
   }
-  const remoteHost = { snapshot, act, changes: () => worktreeReview(deps.agent.cwd) }
+  const changesStatus = worktreeStatusCache()
+  const remoteHost = {
+    snapshot(background?: string): RemoteSnapshot {
+      const view = snapshot(background)
+      return { ...view, worktreeChanged:changesStatus(deps.agent.cwd) }
+    },
+    act, changes: () => worktreeReview(deps.agent.cwd),
+  }
   function register(handoff: RemoteHandoff | null = null) {
     if (st.terminalBus) return
     // A restart hands over the window's identity; otherwise a phone launch names it.

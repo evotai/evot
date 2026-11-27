@@ -80,7 +80,7 @@ Use comma-separated model names to configure multiple models. For OpenAI-compati
 
 On macOS and Linux, `evot --host` moves the Console and the profile’s **already enabled** Remote gateway to the new TUI. Use `evot --host --resume <id>` to open a particular conversation there. The previous window and its agent run keep going; browsers may briefly reconnect. `evot restart --list` marks the current service host.
 
-In a Remote chat, **Changes** opens a read-only review of the selected window’s working directory. It compares the working tree to `HEAD`, includes untracked (not ignored) files, and never stages or modifies files. Git runs only when you open or refresh the review. Switch between unified and split diffs, then return to chat without losing your draft.
+In a Remote chat, **Changes** opens a read-only review of the selected window’s working directory. It compares the working tree to `HEAD`, includes untracked (not ignored) files, and never stages or modifies files. A dot on **Changes** indicates uncommitted changes. Only the workspace status is checked while viewing the chat; diffs load only when you open or refresh the review. Switch between unified and split diffs, then return to chat without losing your draft.
 
 An ordinary idle desktop window can fill a vacancy, but never displaces a host. Busy, phone-created and tmux windows do not automatically take the role. To host from your own tmux window, use `--host`. Another `--host` can take over immediately, including during the old host’s 30-second restart reservation. Restarting does not repeat the original `--host` request. Use the same profile and Console port in both windows. An independent `evot serve` or an older gateway must be stopped by its owner; `--host` does not kill them.
 

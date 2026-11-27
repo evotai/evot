@@ -1,5 +1,12 @@
 // A separate, lazy document keeps diff2html and review state out of chat.
 // Browser Back dismisses it without unloading the chat or resetting its scroll.
+export function paintChangesButton(button, connected, view) {
+  const dirty = connected ? view?.worktreeChanged : undefined;
+  button.disabled = !connected;
+  button.toggleAttribute('data-changed', dirty === true);
+  const label = dirty === true ? 'Changes · Uncommitted changes' : dirty === false ? 'Changes · Working tree clean' : 'Changes';
+  if (button.title !== label) button.title = button.ariaLabel = label;
+}
 export function reviewNavigation(dialog, button, target) {
   let showing = null;
   function sync() {

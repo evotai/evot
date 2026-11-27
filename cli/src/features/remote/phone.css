@@ -21,7 +21,9 @@ html.remote-shell[data-theme="light"] {
 /* One line: the title. Only a lost connection earns a second line. */
 .identity { flex:1; min-width:0; padding-inline:2px; text-align:center; }
 .identity h1 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:15px; font-weight:600; line-height:1.4; letter-spacing:-.01em; }
-#openChanges { color:var(--muted); }
+#openChanges { position:relative; color:var(--muted); }
+#openChanges[data-changed] { color:var(--accent); }
+#openChanges[data-changed]::after { content:''; position:absolute; top:8px; right:7px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--side-bg); pointer-events:none; }
 #changesPage[open] { position:fixed; inset:0; margin:0; width:100%; height:100%; max-width:none; max-height:none; padding:0; border:0; border-radius:0; overflow:hidden; }
 #changesPage iframe { display:block; width:100%; height:100%; border:0; }
 .connection { display:block; font-size:12px; color:var(--amber); } .connection[data-online] { display:none; }

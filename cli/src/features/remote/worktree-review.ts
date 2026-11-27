@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process'
+import { emptyTree, reviewGit } from './worktree-status.js'
 import { constants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
 import { basename, resolve, sep } from 'node:path'
-import { promisify } from 'node:util'
 import { html, parse } from 'diff2html'
 
-const exec = promisify(execFile)
 const fileLimit = 96, patchLimit = 128 * 1024, lineLimit = 2000
 export interface ReviewFile { name: string; status: string; note?: string; unified?: string; split?: string }
 export interface WorktreeReview { folder: string; branch: string; files: ReviewFile[]; message?: string }
@@ -13,15 +11,13 @@ export interface WorktreeReview { folder: string; branch: string; files: ReviewF
 /** No request paths or shell commands: the shared terminal supplies its own cwd. */
 export async function worktreeReview(cwd: string): Promise<WorktreeReview> {
   const root = await realpath(cwd), deadline = Date.now() + 9000
-  const git = (args: string[], maxBuffer = patchLimit) => exec('git', ['--no-pager', '--no-optional-locks', '--literal-pathspecs', '-c', 'core.fsmonitor=false', ...args], {
-    cwd: root, timeout: Math.max(1, Math.min(3000, deadline - Date.now())), maxBuffer, encoding:'utf8',
-  }).then(r => r.stdout)
+  const git = reviewGit(root, deadline)
   const result: WorktreeReview = {folder:basename(root) || '/', branch:'', files:[]}
   if (await git(['rev-parse','--is-inside-work-tree']).catch(() => '') !== 'true\n')
     return {...result, message:'No Git working tree in this folder.'}
   result.branch = (await git(['symbolic-ref','--short','-q','HEAD']).catch(() => '')).trim()
   // hash-object without -w computes the empty tree ID (including for SHA-256 repos).
-  const head = (await git(['rev-parse','--verify','HEAD']).catch(() => git(['hash-object','-t','tree','/dev/null']))).trim()
+  const head = (await git(['rev-parse','--verify','HEAD']).catch(() => git(emptyTree))).trim()
   const diff = ['diff','--relative','--no-ext-diff','--no-textconv','--no-color','--ignore-submodules=dirty','--find-renames']
   const [tracked, untracked] = await Promise.all([git([...diff,'--name-status','-z',head,'--','.'], 1024*1024),
     git(['ls-files','--others','--exclude-standard','-z','--','.'], 1024*1024)])
