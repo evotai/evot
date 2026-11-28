@@ -3,7 +3,7 @@
 <p align="center">An open-source terminal coding agent. A short prompt, four core tools, and the model does the thinking.</p>
 
 <p align="center">
-  <a href=".github/assets/demo.gif"><img src=".github/assets/demo.gif" alt="evot demo" width="960" /></a>
+  <a href=".github/assets/demo.gif"><img src=".github/assets/demo.gif" alt="Evot Remote: approve a phone in the terminal, review a diff, and see the test result on both screens." width="960" /></a>
 </p>
 
 ## News
