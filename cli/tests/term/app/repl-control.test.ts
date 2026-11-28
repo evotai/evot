@@ -179,7 +179,12 @@ describe('repl control', () => {
     expect(kinds({ ...base, event: { type: 'escape' }, logMode: true })).toEqual(['exit-log-mode'])
   })
 
-  test('help overlay closes on any key', () => {
+  test('help pages with navigation keys and closes on other ordinary keys', () => {
+    for (const type of ['down', 'page-down', 'up', 'page-up'] as const) {
+      expect(decideReplControl({ ...base, event: { type }, overlay: help })).toEqual([
+        { kind: 'help-page', delta: type === 'down' || type === 'page-down' ? 1 : -1 },
+      ])
+    }
     expect(kinds({ ...base, event: { type: 'char', char: 'x' }, overlay: help })).toEqual(['close-overlay'])
   })
 

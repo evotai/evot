@@ -26,6 +26,7 @@ import type { SlashController } from './slash.js'
 import type { ReplState } from './state.js'
 import type { SubmitController } from './submit.js'
 import { closeCompletion, getEditorText, insertText, showCompletions } from '../input/editor.js'
+import { buildHelpPage } from '../viewmodel/help.js'
 import type { TermRenderer } from '../screen/renderer.js'
 import type { KeyEvent } from '../../ui/keys.js'
 import { SELECTOR_OWNER, isBackgroundSelector, isCommandSelector } from '../../ui/selector-identity.js'
@@ -272,6 +273,13 @@ export function createKeysController(st: ReplState, deps: KeysDeps): KeysControl
         if (st.overlay.kind === 'selector') st.overlay = { kind: 'selector', state: selectorClearQuery(st.overlay.state) }
         deps.renderer.requestRender()
         return true
+      case 'help-page': {
+        if (st.overlay.kind !== 'help') return true
+        const { page, count } = buildHelpPage(deps.renderer.termCols, deps.renderer.termRows, st.overlay.page)
+        st.overlay = { kind: 'help', page: Math.max(0, Math.min(page + action.delta, count - 1)) }
+        deps.renderer.requestRender()
+        return true
+      }
       case 'close-overlay': {
         // Closing a promoted command window also consumes its slash command,
         // matching the previous one-Esc lifecycle. The hot focus/navigation

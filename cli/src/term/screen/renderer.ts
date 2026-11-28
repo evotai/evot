@@ -30,6 +30,7 @@
 
 import { CURSOR_MARKER, type RenderFrame, type RenderOverlay } from './render-frame.js'
 import { performance } from 'node:perf_hooks'
+import { overlaySize } from '../../ui/overlay-size.js'
 import stringWidth from 'string-width'
 import stripAnsi from 'strip-ansi'
 import { normalizeTerminalOutput, wrapTextWithAnsi, visibleWidth } from '../../ui/wrap.js'
@@ -910,13 +911,15 @@ export class TermRenderer {
     height: number,
   ): string[] {
     const result = [...baseLines]
-    const workingHeight = Math.max(result.length, height)
+    // A prior in-place shrink leaves spare rows *below* the editor. The
+    // physical viewport still starts at its old origin, not lines.length - height.
+    const origin = this.previousWidth === width && this.previousHeight === height ? this.previousViewportTop : 0
+    const workingHeight = Math.max(result.length, origin + height)
     while (result.length < workingHeight) result.push('')
 
-    const overlayWidth = Math.max(1, width - Math.min(4, Math.max(0, width - 1)))
-    const wrapped = overlay.lines.flatMap(line => wrapTextWithAnsi(line, overlayWidth))
-    const maxHeight = Math.max(1, height - Math.min(2, Math.max(0, height - 1)))
-    const visibleOverlay = wrapped.slice(0, maxHeight)
+    const size = overlaySize(width, height)
+    const wrapped = overlay.lines.flatMap(line => wrapTextWithAnsi(line, size.width))
+    const visibleOverlay = wrapped.slice(0, size.height)
     const viewportStart = Math.max(0, workingHeight - height)
     const row = Math.max(0, Math.floor((height - visibleOverlay.length) / 2))
 

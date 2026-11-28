@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import stripAnsi from 'strip-ansi'
+import { visibleWidth } from '../../../src/ui/wrap.js'
+import { buildHelpPage } from '../../../src/term/viewmodel/help.js'
 import { buildOverlayBlocks } from '../../../src/term/viewmodel/overlays.js'
 import { blocksToLines } from '../../../src/term/viewmodel/types.js'
 
@@ -25,6 +27,22 @@ function descColumn(row: string): number {
 }
 
 describe('help overlay layout', () => {
+  test.each([[40, 12], [80, 24], [160, 80]])('help pages fit a %ix%i pane without dropping content', (columns, rows) => {
+    const { count } = buildHelpPage(columns, rows)
+    const body: string[] = []
+    for (let page = 0; page < count; page++) {
+      const { lines } = buildHelpPage(columns, rows, page)
+      expect(lines.length).toBeLessThanOrEqual(rows - 2)
+      expect(lines.every(row => visibleWidth(row) <= columns - 4)).toBe(true)
+      expect(stripAnsi(lines.at(-1)!)).toContain('esc close')
+      body.push(...lines.slice(1, -1).map(stripAnsi))
+    }
+    const normalize = (lines: string[]) => lines.join('').replace(/\s+/g, '')
+    const original = helpRows()
+    expect(normalize(body)).toBe(normalize(original.slice(original.indexOf('  Keys'), -1)))
+    expect(count === 1).toBe(rows === 80)
+  })
+
   test('commands all start in the same column', () => {
     const entries = entryRows(helpRows())
     expect(entries.length).toBeGreaterThan(10)

@@ -1,6 +1,9 @@
 import { backgroundChordLabel } from '../../ui/key-hints.js'
+import { overlaySize } from '../../ui/overlay-size.js'
+import { visibleWidth, wrapTextWithAnsi } from '../../ui/wrap.js'
+import { truncateToWidth } from './width.js'
 import { selectorHints } from './selector-chrome.js'
-import { line, block, plain, dim, bold, colored, type StyledLine, type ViewBlock } from './types.js'
+import { line, block, plain, dim, bold, colored, styledLineToAnsi, type StyledLine, type ViewBlock } from './types.js'
 
 const INDENT = 2
 const KEY_GAP = 2
@@ -69,23 +72,41 @@ function sectionWidth(entries: Entry[]): number {
   return INDENT + keyWidth + KEY_GAP + Math.max(...entries.map(([, description]) => description.length))
 }
 
-/** Pure help surface: independent of selectors, ask state and terminal I/O. */
+const TITLE = 'Keyboard Shortcuts & Commands'
+const TABLE_WIDTH = Math.max(sectionWidth(KEYS), sectionWidth(COMMANDS))
+
+function helpBody(): StyledLine[] {
+  return [...section('Keys', KEYS), line(plain('')), ...section('Commands', COMMANDS)]
+}
+
+function centred(row: StyledLine, width: number): StyledLine {
+  const cells = visibleWidth(row.spans.map(span => span.text).join(''))
+  return line(plain(' '.repeat(Math.max(0, Math.floor((width - cells) / 2)))), ...row.spans)
+}
+
 export function buildHelpBlocks(columns: number): ViewBlock[] {
-  const TITLE = 'Keyboard Shortcuts & Commands'
-  const blockWidth = Math.max(sectionWidth(KEYS), sectionWidth(COMMANDS), INDENT + TITLE.length)
-  const centred = (width: number): string => ' '.repeat(Math.max(0, Math.floor((blockWidth - width) / 2)))
   const footer = selectorHints([{ keys: 'escape', action: 'close' }], Math.max(1, columns - INDENT))
   return [block([
-    line(bold(`${centred(TITLE.length)}${TITLE}`)),
-    line(plain('')),
-    ...section('Keys', KEYS),
-    line(plain('')),
-    ...section('Commands', COMMANDS),
-    line(plain('')),
-    ...footer.map(row => line(plain(centred(spansLength(row))), ...row.spans)),
+    centred(line(bold(TITLE)), TABLE_WIDTH), line(plain('')), ...helpBody(), line(plain('')),
+    ...footer.map(row => centred(row, TABLE_WIDTH)),
   ], 1)]
 }
 
-function spansLength(row: StyledLine): number {
-  return row.spans.reduce((total, span) => total + span.text.length, 0)
+/** Page physical rows, not bindings: a description can wrap several times in tmux. */
+export function buildHelpPage(columns: number, rows: number, requested = 0) {
+  const { width, height } = overlaySize(columns, rows)
+  const body = helpBody().flatMap(row => wrapTextWithAnsi(styledLineToAnsi(row), width))
+  const room = Math.max(1, height - 2) // title and navigation, when there is room
+  const count = Math.ceil(body.length / room)
+  const page = Math.max(0, Math.min(requested, count - 1))
+  const lines = body.slice(page * room, (page + 1) * room)
+  // Keep the header and navigation on the same screen rows on the last page.
+  if (count > 1) while (lines.length < room) lines.push('')
+  const blockWidth = Math.min(width, TABLE_WIDTH)
+  if (height >= 3) lines.unshift(styledLineToAnsi(centred(line(bold(truncateToWidth(TITLE, width))), blockWidth)))
+  if (height >= 2) {
+    const hint = count > 1 ? `${page + 1}/${count}  ↑↓ page  esc close` : 'esc close'
+    lines.push(styledLineToAnsi(centred(line(dim(truncateToWidth(hint, width))), blockWidth)))
+  }
+  return { lines, page, count }
 }

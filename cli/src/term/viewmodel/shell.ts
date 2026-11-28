@@ -6,7 +6,7 @@ import type { PreviewViewport } from '../../ui/preview-scroll.js'
 import { buildCommandSelectorRegion } from './command-selector.js'
 import { buildAskRegionLines } from './ask.js'
 import { buildSelectorRegionLines } from './selector.js'
-import { buildOverlayBlocks } from './overlays.js'
+import { buildHelpPage } from './help.js'
 import { buildPromptBlocks, type PromptVMInput } from './prompt.js'
 import { buildPromptFooterBlocks } from './prompt-footer.js'
 import { blocksToLines, type ViewBlock } from './types.js'
@@ -80,21 +80,18 @@ export function buildShellFrame(input: ShellSnapshot): ShellFrame {
       transientRows: surfaceLines.length,
     }
   }
-  const modalLines = blocksToLines(buildOverlayBlocks(overlay, prompt.columns))
-  const previewLines = preview
-    ? preview.kind === 'selector'
-      ? buildCommandSelectorRegion(preview.state, prompt.columns, prompt.rows, false).lines
-      : blocksToLines(buildOverlayBlocks({ kind: 'help' }, prompt.columns))
-    : []
-  const composer = preview ? { ...prompt, completion: null } : prompt
+  // Help opens on demand. Inserting its whole table while typing `/h` would
+  // scroll the transcript before the viewport-relative modal even opens.
+  const composer = overlay.kind === 'none' && preview?.kind === 'help'
+    ? { ...prompt, completion: null, ghostHint: '  Enter or ↑↓ to open help' } : prompt
   const promptLines = blocksToLines(buildPromptBlocks(composer, {
-    attachedAbove: preEditorLines.length > 0 || previewLines.length > 0,
-    reservedAboveRows: preEditorLines.length + previewLines.length,
+    attachedAbove: preEditorLines.length > 0,
+    reservedAboveRows: preEditorLines.length,
   }))
   return {
     ...base,
-    lines: contentLines.concat(preEditorLines, previewLines, promptLines),
-    transientRows: previewLines.length,
-    ...(modalLines.length > 0 ? { overlay: { lines: modalLines } } : {}),
+    lines: contentLines.concat(preEditorLines, promptLines),
+    transientRows: 0,
+    ...(overlay.kind === 'help' ? { overlay: { lines: buildHelpPage(prompt.columns, prompt.rows, overlay.page).lines } } : {}),
   }
 }

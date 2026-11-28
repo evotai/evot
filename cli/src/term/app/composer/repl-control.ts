@@ -38,6 +38,7 @@ export type ReplControlAction =
   | { kind: 'cancel-ask' }
   | { kind: 'clear-selector-query' }
   | { kind: 'close-overlay' }
+  | { kind: 'help-page'; delta: -1 | 1 }
   | { kind: 'exit-log-mode' }
   | { kind: 'selector-key' }
   | { kind: 'ask-key' }
@@ -86,7 +87,11 @@ export function decideReplControl(input: ReplControlInput): ReplControlAction[] 
     return actions
   }
 
-  if (overlay.kind === 'help') return actions.concat({ kind: 'close-overlay' })
+  if (overlay.kind === 'help') {
+    if (event.type === 'up' || event.type === 'page-up') return actions.concat({ kind: 'help-page', delta: -1 })
+    if (event.type === 'down' || event.type === 'page-down') return actions.concat({ kind: 'help-page', delta: 1 })
+    return actions.concat({ kind: 'close-overlay' })
+  }
   if (overlay.kind === 'selector') return actions.concat({ kind: 'selector-key' })
   if (overlay.kind === 'ask-user') return actions.concat({ kind: 'ask-key' })
 

@@ -109,6 +109,50 @@ describe('shell composition', () => {
     expect(normal.transientRows).toBe(0)
   })
 
+  test('help preview, paging and dismissal preserve a scrolled composer', async () => {
+    const screen = new ScreenHarness(64, 16)
+    const renderer = new TermRenderer({ stdout: screen.stdout })
+    const input = snapshot(64, 16)
+    input.contentLines = Array.from({ length: 30 }, (_, i) => `history ${i}`)
+    input.prompt.lines = ['/help']
+    let frame = buildShellFrame(input)
+    renderer.init()
+    renderer.setRenderCallback(() => frame)
+    const paint = async () => {
+      renderer.requestRender()
+      await Bun.sleep(25)
+      await screen.settle()
+    }
+    try {
+      // Simulate a completion menu that scrolled history, then shrank in place.
+      frame = { lines: frame.lines.concat(Array(8).fill('candidate')) }
+      await paint()
+      frame = buildShellFrame(input)
+      await paint()
+      const before = screen.viewport()
+      const origin = screen.terminal.buffer.active.baseY
+      frame = buildShellFrame({ ...input, preview: { kind: 'help' } })
+      await paint()
+      expect(screen.rowOf('/help')).toBe(before.findIndex(row => row.includes('/help')))
+      expect(screen.rowOf('Enter or ↑↓ to open help')).toBeGreaterThanOrEqual(0)
+      for (const page of [0, 999, 0]) {
+        frame = buildShellFrame({ ...input, overlay: { kind: 'help', page } })
+        await paint()
+        expect(screen.rowOf('Keyboard Shortcuts & Commands')).toBeGreaterThanOrEqual(0)
+        expect(screen.rowOf(page ? '/exit' : 'Send now')).toBeGreaterThanOrEqual(0)
+        expect(screen.rowOf('esc close')).toBeGreaterThanOrEqual(0)
+        expect(screen.terminal.buffer.active.baseY).toBe(origin)
+      }
+      frame = buildShellFrame(input)
+      await paint()
+      expect(screen.viewport()).toEqual(before)
+    } finally {
+      renderer.destroy()
+      await screen.settle()
+      screen.terminal.dispose()
+    }
+  })
+
   test('real compositor restores the composer after closing a transient selector', async () => {
     const screen = new ScreenHarness(80, 24)
     const renderer = new TermRenderer({ stdout: screen.stdout })

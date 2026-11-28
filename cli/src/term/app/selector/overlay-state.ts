@@ -5,6 +5,6 @@ import type { SelectorState } from '../../../ui/selector.js'
  * commands and input routing never need to import the renderer to change it. */
 export type OverlayState =
   | { kind: 'none' }
-  | { kind: 'help' }
+  | { kind: 'help'; page?: number }
   | { kind: 'selector'; state: SelectorState }
   | { kind: 'ask-user'; state: AskState }
