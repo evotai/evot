@@ -38,7 +38,7 @@ const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
-  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, compactChanged:value => { shortcuts.setCompact(value); tab.setCompact(value); }});
+  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, isComposing:() => tab.composing, compactChanged:value => { shortcuts.setCompact(value); tab.setCompact(value); }});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();

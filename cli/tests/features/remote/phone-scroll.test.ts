@@ -4,7 +4,8 @@ import { conversationScroll } from '../../../src/features/remote/phone-scroll.js
 function transcript(reducedMotion = false) {
   let resize = () => {}, reading = false, top = 0, time = 0, rafId = 0
   const frames = new Map<number, (time:number) => void>()
-  const events = new Map<string, (event?: unknown) => void>()
+  const events = new Map<string, (event?: unknown) => void>(), seatEvents = new Map<string, (event:unknown) => void>()
+  let composing = false
   const document = {
     activeElement: null as object | null,
     defaultView: {
@@ -20,10 +21,11 @@ function transcript(reducedMotion = false) {
   const write = { focus() { document.activeElement = this }, ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
   const dock = { inert: true, contains(node: object | null) { return node === write } }
   const jump = { hidden: true, onclick() {} }
-  const draft = { value: 'A draft for later', focus() { document.activeElement = this } }
+  const draft = { scrollTop:0, selectionStart:2, selectionEnd:2, closest:(s:string) => s === '#draft', value: 'A draft for later', focus() { document.activeElement = this } }
   const editor = { inert:false, contains(node:object | null) { return node === draft } }
   const seat = {
     height: 200,
+    addEventListener(event:string, callback:(event:unknown) => void) { seatEvents.set(event,callback) },
     get offsetHeight() { return reading ? 60 : this.height },
     toggleAttribute(_name: string, value: boolean) {
       reading = value
@@ -38,7 +40,7 @@ function transcript(reducedMotion = false) {
     focus() { document.activeElement = this },
     addEventListener(event: string, callback: (event?: unknown) => void) { events.set(event, callback) },
   }
-  const controller = conversationScroll({ chat, seat, editor, dock, write, jump, draft })
+  const controller = conversationScroll({ chat, seat, editor, dock, write, jump, draft, isComposing:() => composing })
   controller.update(true, true)
   controller.latest()
   return {
@@ -50,6 +52,14 @@ function transcript(reducedMotion = false) {
     touch(event: string, x = 100, y = 100, rail?: {scrollHeight:number; clientHeight:number}) {
       const points = [{identifier:1, clientX:x, clientY:y}]
       events.get(event)?.(event === 'touchend' ? {changedTouches:points} : {touches:points, target:{closest: () => rail}})
+    },
+    composing(value:boolean) { composing = value },
+    seatSwipe(target:object, dy:number, dx = 0, cancel = false) {
+      const touch = {identifier:3,clientX:100,clientY:100}; let prevented = false
+      seatEvents.get('touchstart')?.({target,touches:[touch]})
+      if (cancel) seatEvents.get('touchcancel')?.({})
+      seatEvents.get('touchend')?.({changedTouches:[{...touch,clientX:100+dx,clientY:100+dy}],cancelable:true,preventDefault(){prevented=true}})
+      return prevented
     },
     resize() { resize() },
     frame(ms: number) {
@@ -193,6 +203,24 @@ test('tap the collapsed field to focus the original draft without moving history
   ui.resize()
   expect(ui.chat.scrollTop).toBe(top)
   expect(ui.jump.hidden).toBe(false)
+})
+
+test('swipe the draft down and the dock up without focusing or leaving history', () => {
+  const ui = transcript(); ui.scrollBack(600); ui.write.onclick(); const top = ui.chat.scrollTop
+  expect(ui.seatSwipe(ui.draft,42)).toBe(true); expect(ui.reading).toBe(true)
+  expect(ui.seatSwipe(ui.write,-48)).toBe(true); expect(ui.reading).toBe(false)
+  expect(ui.document.activeElement).toBe(ui.chat); expect(ui.chat.scrollTop).toBe(top)
+  expect(ui.draft.value).toBe('A draft for later'); expect(ui.draft.selectionStart).toBe(2)
+})
+
+test('composer swipes leave taps, sideways movement, native editing, and questions alone', () => {
+  const ui = transcript(); ui.draft.focus()
+  expect(ui.seatSwipe(ui.draft,12)).toBe(false); expect(ui.seatSwipe(ui.draft,30,60)).toBe(false)
+  expect(ui.seatSwipe(ui.draft,50,0,true)).toBe(false)
+  ui.draft.scrollTop=35; expect(ui.seatSwipe(ui.draft,50)).toBe(false); ui.draft.scrollTop=0
+  ui.draft.selectionEnd=5; expect(ui.seatSwipe(ui.draft,50)).toBe(false); ui.draft.selectionEnd=2
+  ui.composing(true); expect(ui.seatSwipe(ui.draft,50)).toBe(false); ui.composing(false)
+  ui.controller.update(false,true); expect(ui.seatSwipe(ui.draft,50)).toBe(false); expect(ui.reading).toBe(false)
 })
 
 test('a downward drag folds before release and streaming does not pull history back to the bottom', () => {

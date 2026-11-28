@@ -5,7 +5,7 @@ const TOUCH_FOLD_DISTANCE = 24;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
-export function conversationScroll({ chat, seat, editor, dock, write, jump, draft, compactChanged }) {
+export function conversationScroll({ chat, seat, editor, dock, write, jump, draft, compactChanged, isComposing = () => false }) {
   let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
   let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false;
   const { ownerDocument } = chat, window = ownerDocument.defaultView;
@@ -179,6 +179,36 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
   chat.addEventListener('keydown', event => {
     if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) nonTouchScroll();
   });
+
+  // Swiping the composer changes its size, not the reader's position. Leave
+  // taps, native text selection, IME and the draft's own scrolling alone.
+  let composerSwipe = null;
+  const editingSelection = () => ownerDocument.activeElement === draft && draft.selectionStart !== draft.selectionEnd;
+  seat.addEventListener('touchstart', e => {
+    composerSwipe = null;
+    if (e.touches.length !== 1 || !canCompact || isComposing() || editingSelection()) return;
+    const target = e.target;
+    if (shownCompact ? !dock.contains(target) : !editor.contains(target) ||
+      target.closest('button,select,input,label,a,.command-menu,#attachments,#promptQueue') ||
+      editor.scrollTop > 0 || (target.closest('#draft') && draft.scrollTop > 0)) return;
+    composerSwipe = {touch:e.touches[0], folded:shownCompact};
+  }, {passive:true});
+  seat.addEventListener('touchmove', e => {
+    if (e.touches.length !== 1) composerSwipe = null;
+  }, {passive:true});
+  seat.addEventListener('touchcancel', () => { composerSwipe = null; }, {passive:true});
+  seat.addEventListener('touchend', e => {
+    const start = composerSwipe; composerSwipe = null;
+    if (!start || !canCompact || isComposing() || editingSelection() || start.folded !== shownCompact) return;
+    const end = Array.from(e.changedTouches).find(t => t.identifier === start.touch.identifier);
+    if (!end) return;
+    const dy = end.clientY - start.touch.clientY;
+    if (Math.abs(dy) <= Math.abs(end.clientX - start.touch.clientX) ||
+      (start.folded ? -dy < REVEAL_DISTANCE : dy < TOUCH_FOLD_DISTANCE)) return;
+    if (e.cancelable) e.preventDefault(); // No synthetic tap reopening the keyboard after a swipe.
+    stopJump();
+    if (start.folded) openComposer(); else fold();
+  }, {passive:false});
 
   write.onclick = () => {
     stopJump();
