@@ -17,7 +17,6 @@ function transcript(reducedMotion = false) {
       },
     },
   }
-  const collapse = { onclick() {} }
   const write = { focus() { document.activeElement = this }, ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
   const dock = { inert: true, contains(node: object | null) { return node === write } }
   const jump = { hidden: true, onclick() {} }
@@ -39,11 +38,11 @@ function transcript(reducedMotion = false) {
     focus() { document.activeElement = this },
     addEventListener(event: string, callback: (event?: unknown) => void) { events.set(event, callback) },
   }
-  const controller = conversationScroll({ chat, seat, editor, dock, write, collapse, jump, draft })
+  const controller = conversationScroll({ chat, seat, editor, dock, write, jump, draft })
   controller.update(true, true)
   controller.latest()
   return {
-    controller, chat, seat, editor, document, draft, dock, write, collapse, jump, events,
+    controller, chat, seat, editor, document, draft, dock, write, jump, events,
     get reading() { return reading },
     get bottom() { return Math.max(0, chat.scrollHeight - chat.clientHeight) },
     scrollTo(top: number) { chat.scrollTop = top; events.get('scroll')?.() },
@@ -63,12 +62,11 @@ function transcript(reducedMotion = false) {
   }
 }
 
-test('manual collapse preserves the draft and reading position through live updates; tapping reopens the editor', () => {
+test('scrolling into history preserves the draft and reading position through live updates; tapping reopens the editor', () => {
   const ui = transcript()
-  ui.scrollBack(600); ui.write.onclick()
+  ui.draft.focus(); ui.scrollBack(600)
   const top = ui.chat.scrollTop
-  ui.collapse.onclick()
-  expect(ui.reading).toBe(true); expect(ui.document.activeElement).toBe(ui.write)
+  expect(ui.reading).toBe(true); expect(ui.document.activeElement).toBe(ui.chat)
   ui.chat.scrollHeight += 300; ui.controller.update(true,true); ui.controller.keepLatest()
   expect(ui.chat.scrollTop).toBe(top); expect(ui.editor.inert).toBe(true)
   ui.write.onclick()

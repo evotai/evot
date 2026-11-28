@@ -3,80 +3,53 @@ import { taskKeys } from '../../../src/features/remote/phone-task-keys.js'
 import legacy from '../../fixtures/contracts/remote-composer-legacy.json'
 
 function harness() {
-  const button = () => ({hidden:true, disabled:false, lastElementChild:{textContent:''}, toggleAttribute(){},
-    onclick(){}, click(){ if (!this.disabled && !this.hidden) this.onclick() }})
-  const stop = button(), dock = button()
+  const esc = {hidden:true, disabled:false, textContent:'', title:'', toggleAttribute(){}, onclick(){}}
   const actions: unknown[] = []
-  const keys = taskKeys(stop, { act:(a:unknown) => actions.push(a), dockAction:dock,
-    pull:(id:string) => actions.push({pull:id}), clear:() => actions.push('clear'), dismissMenu:() => actions.push('dismiss')})
-  const press = (key:string, value='', extra={}, fromDock=false) => keys.keydown({key, target:{value}, preventDefault(){}, ...extra}, fromDock)
-  return {stop, dock, actions, press, render:keys.render}
+  const keys = taskKeys(esc, { act:(a:unknown) => actions.push(a), pull:(id:string) => actions.push({pull:id}),
+    interruptAsk:() => actions.push('interrupt question'), clear:() => actions.push('clear'), dismissMenu:() => actions.push('dismiss')})
+  const press = (key:string, extra={}) => keys.keydown({key, preventDefault(){}, ...extra})
+  return {esc, actions, press, render:keys.render, compact:keys.setCompact}
 }
+const run = {...legacy,input:'steer',canStop:true,generation:1}
 
-test('only Escape is intercepted, even while a background task is present', () => {
-  const {stop, actions, press, render} = harness()
-  render(legacy,false); expect(stop.disabled).toBe(true)
-  const running = {...legacy, canStop:true, background:{tasks:[{id:'fixture'}]}}
-  render(running,false); expect(stop.hidden).toBe(false)
+test('idle Esc stays hidden, and only an unmodified non-IME Escape interrupts', () => {
+  const {esc, actions, press, render} = harness()
+  render(legacy,false); expect(esc.hidden).toBe(true)
+  render(run,false); expect(esc.hidden).toBe(false); expect(esc.textContent).toBe('Esc')
   expect(press('ArrowDown')).toBe(false)
-  for (const ch of ['b','t','k']) expect(press(ch,'draft',{ctrlKey:true})).toBe(false)
-  expect(actions).toEqual([])
-  render(running,true); expect(press('Escape')).toBe(false)
-  render(running,true,'',null,false,true); press('Escape'); press('Escape')
-  expect(actions).toEqual([{kind:'stop'}]) // The turn has started, but the send receipt is delayed.
-  render(null,false); expect(stop.hidden).toBe(true)
+  for (const mod of ['isComposing','metaKey','ctrlKey','altKey','shiftKey']) expect(press('Escape',{[mod]:true})).toBe(false)
+  render(run,true); expect(press('Escape')).toBe(false)
+  render(run,true,'',null,false,true); press('Escape'); expect(actions).toEqual([])
+  expect(esc.textContent).toBe('Esc again'); esc.onclick(); expect(actions).toEqual([{kind:'stop'}])
 })
 
-test('Esc pulls back first, then interrupts with the draft intact; idle input is no longer steer', () => {
-  const {render, press, stop, actions} = harness(), run = {...legacy, input:'steer', canStop:true}
-  render(run, false, false, 'pending'); expect(stop.lastElementChild.textContent).toBe('Pull back')
-  press('Escape'); expect(actions).toEqual([{pull:'pending'}])
-  render(run, false, 'restored draft'); stop.click(); press('Escape')
-  expect(actions).toEqual([{pull:'pending'}, {kind:'stop'}])
-  render(legacy, false, 'restored draft'); expect(stop.lastElementChild.textContent).toBe('Clear draft')
-  render({...run, input:null, ask:{id:'new'}}, false); expect(press('Escape')).toBe(false)
-  expect(stop.hidden).toBe(true) // the question panel owns Escape, never the composer
+test('one key dismisses a hint, pulls back, then interrupts; idle draft and question actions remain reachable', () => {
+  const {render, press, esc, actions} = harness()
+  render(run,false,false,'draft',true); esc.onclick()
+  render(run,false,false,'draft'); press('Escape')
+  render(run,false,'unfinished'); esc.onclick(); press('Escape')
+  render(legacy,false,'unfinished'); esc.onclick()
+  render({...run,input:null,ask:{id:'new'}},false); esc.onclick()
+  expect(actions).toEqual(['dismiss',{pull:'draft'},{kind:'stop'},'clear','interrupt question'])
 })
 
-test('Esc dismisses a visible hint before pullback or stopping, with the same label on touch', () => {
-  const {stop, render, press, actions} = harness(), run = {...legacy,input:'steer',canStop:true}
-  render(run,false,false,'draft',true); expect(stop.lastElementChild.textContent).toBe('Dismiss')
-  stop.click(); render(run,false,false,'draft',false); press('Escape')
-  render(run,false,false,undefined,true); press('Escape'); render(run,false); press('Escape')
-  expect(actions).toEqual(['dismiss',{pull:'draft'},'dismiss']); press('Escape'); expect(actions.at(-1)).toEqual({kind:'stop'})
+test('the status key follows compact mode without clearing a hidden draft or dismissing a hidden hint', () => {
+  const {render, press, esc, actions, compact} = harness()
+  render(run,false,'unfinished','pending',true); compact(true)
+  expect(esc.title).toContain('Stop run'); esc.onclick(); expect(esc.textContent).toBe('Esc again')
+  press('Escape'); expect(actions).toEqual([{kind:'stop'}])
+  render(run,false,false,'pending'); esc.onclick(); expect(actions.at(-1)).toEqual({pull:'pending'})
+  render(legacy,false,'unfinished'); expect(esc.hidden).toBe(true); expect(press('Escape')).toBe(false)
+  compact(false); expect(esc.hidden).toBe(false); expect(esc.title).toContain('Clear draft')
 })
 
-test('compact dock shares stop confirmation and supports pullback without acting on hidden drafts or hints', () => {
-  const {stop, dock, render, press, actions} = harness(), run = {...legacy, input:'steer', canStop:true}
-  render(run, false, false, 'pending')
-  expect(dock.lastElementChild.textContent).toBe('Pull back')
-  dock.click()
-  expect(actions).toEqual([{pull:'pending'}])
-  render(run, false, 'unfinished', 'pending', true)
-  expect(stop.lastElementChild.textContent).toBe('Dismiss')
-  expect(dock.lastElementChild.textContent).toBe('Stop run')
-  dock.click()
-  expect(dock.lastElementChild.textContent).toBe('Confirm stop')
-  expect(press('Escape', '', {}, true)).toBe(true)
-  expect(actions).toEqual([{pull:'pending'}, {kind:'stop'}])
-  render(run, false)
-  dock.click()
-  expect(stop.lastElementChild.textContent).toBe('Confirm stop')
-  render(legacy, false, 'unfinished')
-  expect(dock.hidden).toBe(true)
-  expect(press('Escape', '', {}, true)).toBe(false)
-  expect(actions).toHaveLength(2)
-})
-
-test('stop confirmation cannot carry over to a successor run, a changed task set or a reconnect', () => {
-  const {stop, render, press, actions} = harness()
-  const run = {...legacy, canStop:true, generation:1}
-  render(run, false); stop.click(); expect(stop.lastElementChild.textContent).toBe('Confirm stop')
-  render({...run, generation:2}, false); expect(stop.lastElementChild.textContent).toBe('Stop run')
-  const parked = {...legacy, stopBackgroundTarget:'a'}
-  render(parked, false); press('Escape'); press('Escape', '', {repeat:true})
-  render({...parked, stopBackgroundTarget:'b'}, false); stop.click()
-  render(null, false); render(parked, false); stop.click()
-  expect(actions).toEqual([])
-  stop.click(); expect(actions).toEqual([{kind:'stop-background', target:'a'}])
+test('confirmation cannot carry over to a successor run, a changed task set or a reconnect', () => {
+  const {esc, render, press, actions} = harness()
+  render(run,false); esc.onclick(); expect(esc.textContent).toBe('Esc again')
+  render({...run,generation:2},false); expect(esc.textContent).toBe('Esc')
+  const parked = {...legacy,stopBackgroundTarget:'a'}
+  render(parked,false); press('Escape'); press('Escape',{repeat:true})
+  render({...parked,stopBackgroundTarget:'b'},false); esc.onclick()
+  render(null,false); render(parked,false); esc.onclick(); expect(actions).toEqual([])
+  esc.onclick(); expect(actions).toEqual([{kind:'stop-background',target:'a'}])
 })

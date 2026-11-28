@@ -5,7 +5,7 @@ const TOUCH_FOLD_DISTANCE = 24;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
-export function conversationScroll({ chat, seat, editor, dock, write, collapse, jump, draft }) {
+export function conversationScroll({ chat, seat, editor, dock, write, jump, draft, compactChanged }) {
   let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
   let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false;
   const { ownerDocument } = chat, window = ownerDocument.defaultView;
@@ -42,6 +42,7 @@ export function conversationScroll({ chat, seat, editor, dock, write, collapse, 
     if (shownCompact !== folded) {
       shownCompact = folded;
       seat.toggleAttribute('data-reading', folded);
+      compactChanged?.(folded);
       rememberPosition();
     }
   }
@@ -179,12 +180,6 @@ export function conversationScroll({ chat, seat, editor, dock, write, collapse, 
     if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) nonTouchScroll();
   });
 
-  collapse.onclick = () => {
-    if (!canCompact) return;
-    stopJump();
-    fold();
-    write.focus({preventScroll:true}); // Release the keyboard; keep the caret in the original draft.
-  };
   write.onclick = () => {
     stopJump();
     // Stop any outstanding momentum before focusing the real editor in place.

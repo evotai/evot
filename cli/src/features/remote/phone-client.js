@@ -38,7 +38,7 @@ const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
-  dock:compactComposer, write:$('writeMessage'), collapse:$('foldComposer'), jump:$('jump'), draft:messageField});
+  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, compactChanged:value => shortcuts.setCompact(value)});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
@@ -46,6 +46,7 @@ const pickStart = new WeakMap();
 // always the user's pick from the list, never the window that happened to show the code.
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
+let linkStatus = null;
 const starting = turnStartFeedback(paintRunStatus);
 const stopping = runInterrupt({
   lock(locked) { busy = locked || sendingMessage; paintRunStatus(); controls(); },
@@ -56,7 +57,7 @@ const stopping = runInterrupt({
   replace(state) {
     // An SSE patch from before the stop cannot be merged onto the POST snapshot.
     ++epoch; liveRequest?.abort(); etag = '';
-    render(state,'poll'); void refresh();
+    render(state); void refresh();
   }, refresh, error:e => notice(e.message + ' Check the current run before retrying.',true),
 });
 const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
@@ -86,8 +87,7 @@ function dismissHint() {
   const preview = currentSuggestion();
   if (preview) { dismissed = preview.key; controls(); }
 }
-const shortcuts = taskKeys($('stop'), {pull:pullDraft, dismissMenu:dismissHint, clear:clearDraft, dockAction:$('compactTask'),
-  act:payload => { if (compactComposer.inert) messageField.focus({preventScroll:true}); return action(payload); }});
+const shortcuts = taskKeys($('escapeKey'), {pull:pullDraft, dismissMenu:dismissHint, clear:clearDraft, interruptAsk:askPanel.interrupt, act:action});
 const commands = commandMenu($('draft'), $('commandMenu'), resize);
 const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue:() => submitMessage('queue'),
   suggest:() => action({kind:'suggest'}), disarm:shortcuts.disarm});
@@ -166,11 +166,9 @@ function paired(yes) {
   syncReview();
   $('pickSession').hidden = !yes || !!terminal;
   $('chat').hidden = !yes || !terminal;
-  $('seat').hidden = $('chat').hidden || !view;
-  $('connection').textContent = yes ? terminal ? 'Connecting…' : 'Connected' : 'Not connected';
+  setLinkStatus(yes && terminal ? 'Connecting…' : '', true);
   if (yes && terminal && !view) {
     $('statusDetail').textContent = $('nextModel').textContent = '';
-    $('activity').removeAttribute('data-running');
     $('welcome').hidden = true;
     background.render(null);
     $('threadTitle').textContent = 'Session';
@@ -181,7 +179,6 @@ function paired(yes) {
   }
   transcript.latest();
   controls();
-  $('connection').removeAttribute('data-online');
 }
 function controls() {
   const input = connected ? view?.input : null,
@@ -213,7 +210,7 @@ function controls() {
     pending && outbox.some(item => item.draftId === pending) ? pending : null,
     !!input && (commandHint || !$('commandMenu').hidden || !!preview), sendingMessage && !stopping.pending);
   tab.render(connected ? view : null, busy, photos.count, candidate);
-  $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
+  $('taskKeys').hidden = $('tabKey').hidden;
   background.setConnected(connected);
   $('models').disabled = !switchable || !view.models.options.length;
   $('effort').disabled = !switchable || !!view.models.pending;
@@ -252,16 +249,23 @@ function models(m) {
   $('effort').value = m.effort;
   $('effortLabel').textContent = titleCase(m.effort) || 'Thinking';
 }
-function paintRunStatus() {
-  if (!view) return;
-  const pending = stopping.pending ? 'Stopping…' : starting.label;
-  const label = pending ?? view.status;
-  if ($('status').textContent !== label) $('status').textContent = label;
-  $('statusDetail').textContent = pending ? '' : view.statusDetail ?? '';
-  $('activity').toggleAttribute('data-running', !!pending || (!!view.active && !view.ask));
-  document.querySelector('.run-line').toggleAttribute('data-active', !!pending || !!view.active);
+function setLinkStatus(label, spinning = false) {
+  linkStatus = label ? {label, spinning} : null;
+  $('seat').hidden = !$('pair-screen').hidden || (!view && !linkStatus);
+  $('composerStack').hidden = !view;
+  paintRunStatus();
 }
-function render(s, mode) {
+function paintRunStatus() {
+  const pending = stopping.pending ? 'Stopping…' : starting.label;
+  const label = linkStatus?.label ?? pending ?? view?.status ?? '';
+  if ($('status').textContent !== label) $('status').textContent = label;
+  $('statusDetail').textContent = linkStatus || pending ? '' : view?.statusDetail ?? '';
+  $('activity').toggleAttribute('data-running', linkStatus?.spinning ?? (!!pending || (!!view?.active && !view.ask)));
+  const line = document.querySelector('.run-line');
+  line.toggleAttribute('data-connection', !!linkStatus);
+  line.toggleAttribute('data-active', !!linkStatus || !!pending || !!view?.active);
+}
+function render(s) {
   if (nav.target?.session && nav.target.session !== s.sessionId)
     throw Object.assign(Error('This window changed sessions. Choose the session again.'), {status:409});
   // Bind a newly opened window to its conversation as soon as the host assigns
@@ -279,7 +283,6 @@ function render(s, mode) {
   $('sessionUnavailable').hidden = true;
   connected = true;
   $('chatLoading').hidden = true;
-  $('seat').hidden = false;
   if (draftCarried) {
     draftCarried = false;
     const kept = $('draft').value ? '' : drafts.take(terminal);
@@ -288,13 +291,12 @@ function render(s, mode) {
   if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
   stopping.observe(s);
-  $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
-  $('connection').toggleAttribute('data-online', true);
+  $('resumeConnection').hidden = true;
   $('threadTitle').textContent = s.title || (s.sessionId ? `Session ${s.sessionId.slice(-8)}` : 'New conversation');
   const pending = s.models.pending,
     next = pending && s.models.options.find((o) => o.spec === pending.spec);
   starting.observe(s);
-  paintRunStatus();
+  setLinkStatus('');
   $('nextModel').textContent = pending
     ? `next: ${next?.label || pending.spec}${pending.effort ? ' · ' + pending.effort : ''}`
     : '';
@@ -362,8 +364,7 @@ function scheduleReconnect() {
 function reconnecting() {
   starting.clear();
   connected = false;
-  $('connection').removeAttribute('data-online');
-  $('connection').textContent = 'Reconnecting…';
+  setLinkStatus('Reconnecting…', true);
   controls();
 }
 function unpair() {
@@ -412,8 +413,7 @@ function followOwner(owner, session) {
   selectTarget(owner.terminal, session);
   view = null; connected = false; etag = '';
   background.render(null);
-  $('connection').textContent = 'Following live window…';
-  $('connection').removeAttribute('data-online');
+  setLinkStatus('Following live window…', true);
   controls();
 }
 // A saved conversation can later become active in a shared TUI. Follow
@@ -464,7 +464,7 @@ async function synchronize(ready) {
           if (frame.status === 401) unpair();
           if (frame.status) throw Object.assign(Error('Live session unavailable.'), {status:frame.status});
           if (!frame.view && !initialized) throw Error('Missing first snapshot.');
-          render(frame.view ?? { ...view, ...frame.patch }, 'stream');
+          render(frame.view ?? { ...view, ...frame.patch });
           initialized = true; etag = ''; failures = 0; ready();
           void checkIdleOwner(mine);
         }
@@ -475,7 +475,7 @@ async function synchronize(ready) {
     if (mine !== epoch) return;
     if (snapshot) {
       etag = res.headers.get('etag');
-      render(snapshot, 'poll');
+      render(snapshot);
     }
     failures = 0;
     void checkIdleOwner(mine);
@@ -501,7 +501,7 @@ async function synchronize(ready) {
           if (session) {
             // Keep the bookmark (and any draft). Opening a saved session can
             // launch a terminal; do that only on an explicit resume.
-            $('connection').textContent = 'Session unavailable';
+            setLinkStatus('Session unavailable');
             $('chatLoading').hidden = $('welcome').hidden = true; $('sessionUnavailable').hidden = false;
             return;
           }
@@ -526,21 +526,23 @@ async function pair(auto = false) {
   clearTimeout(reconnectTimer);
   const form = $('pair'), button = form.querySelector('button');
   const inPlace = $('pair-screen').hidden;
-  const status = inPlace ? $('connection') : $('deviceStatus');
+  const showStatus = (label, spinning = false) => {
+    if (inPlace) setLinkStatus(label, spinning); else $('deviceStatus').textContent = label;
+  };
   needsInteraction = false;
   $('resumeConnection').hidden = true;
   let countdown;
   button.disabled = true;
   $('approvalCode').hidden = $('approvalClock').hidden = true;
-  status.textContent = auto ? 'Reconnecting…' : 'Connecting…';
+  showStatus(auto ? 'Reconnecting…' : 'Connecting…', true);
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
       if (step === 'signin') {
-        status.textContent = 'Opening sign-in…';
+        showStatus('Opening sign-in…', true);
       } else if (step === 'approval') {
-        if (inPlace) { status.textContent = `In evot: /remote approve ${code}`; return; }
-        status.textContent = invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:';
+        if (inPlace) { showStatus(`In evot: /remote approve ${code}`); return; }
+        showStatus(invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:');
         $('approvalCode').hidden = $('approvalClock').hidden = false;
         $('approvalCode').textContent = `/remote approve ${code}`;
         const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s`; };
@@ -559,16 +561,16 @@ async function pair(auto = false) {
     controls();
     if (terminal) await refresh();
     else if (!inPlace) drawer.open();
-    else $('connection').textContent = 'Connected';
+    else setLinkStatus('');
   } catch (e) {
     const storage = e.name === 'SecurityError' || e.name === 'QuotaExceededError';
     const unreachable = e.name === 'TimeoutError' || e instanceof TypeError || e.status === 429 || e.status >= 500;
     needsInteraction = !unreachable;
-    status.textContent = storage
+    showStatus(storage
       ? 'Enable browser storage to connect.'
       : unreachable
         ? inPlace ? 'Reconnecting…' : 'Computer unreachable. Check /remote.'
-        : e.message || 'Could not connect.';
+        : e.message || 'Could not connect.', unreachable);
     const label = e.signIn ? 'Sign in' : unreachable ? 'Retry now' : 'Reconnect';
     button.textContent = $('resumeConnection').textContent = label;
     $('resumeConnection').hidden = !inPlace || unreachable;
@@ -879,11 +881,8 @@ $('draft').onkeydown = (e) => {
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented || e.target === $('draft') || document.querySelector('dialog[open]') || e.target.closest('select')) return;
   if (view?.ask && (e.target === document.body || e.target.closest('#questions'))) askPanel.keydown(e);
-  else if (e.key === 'Escape') {
-    if (!compactComposer.inert) {
-      if (e.target === document.body || e.target === $('chat') || compactComposer.contains(e.target)) shortcuts.keydown(e, true);
-    } else if (e.target === document.body || e.target.closest('#compose')) shortcuts.keydown(e);
-  }
+  else if (e.key === 'Escape' && (e.target === document.body || e.target === $('escapeKey') ||
+    (compactComposer.inert ? e.target.closest('#compose') : e.target === $('chat') || compactComposer.contains(e.target)))) shortcuts.keydown(e);
 });
 $('welcome').onclick = (e) => {
   const prompt = e.target.closest('[data-prompt]')?.dataset.prompt;
@@ -923,8 +922,7 @@ function refreshOnReturn() {
   if (!document.hidden && token && terminal && view) {
     connected = false;
     etag = ''; // Request a snapshot even when polling: render restores the live controls.
-    $('connection').textContent = 'Syncing messages…';
-    $('connection').removeAttribute('data-online');
+    setLinkStatus('Syncing messages…', true);
     controls();
   }
   void refresh(); // When hidden, this just cancels the current stream and poll timer.
@@ -941,7 +939,8 @@ window.addEventListener('pageshow', event => {
     const button = $('pair').querySelector('button'); button.disabled = false; button.textContent = 'Continue sign-in';
     needsInteraction = true;
     const inPlace = $('pair-screen').hidden;
-    $(inPlace ? 'connection' : 'deviceStatus').textContent = 'Sign-in wasn’t finished.';
+    if (inPlace) setLinkStatus('Sign-in wasn’t finished.');
+    else $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
     $('resumeConnection').textContent = 'Sign in'; $('resumeConnection').hidden = !inPlace;
   }
 });

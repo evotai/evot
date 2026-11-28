@@ -19,7 +19,7 @@ export function questionPanel(panel, act) {
   const submit = () => act({kind:'answer', id, generation, answers:askResponses(state).map(a => a.answer)});
   // The TUI routes Esc through run interruption. Selecting Cancel on the
   // review page instead resolves the pending question without stopping the run.
-  const stop = () => act({kind:'interrupt-ask', id, generation});
+  const stop = () => { if (id && !panel.inert && !composing) act({kind:'interrupt-ask', id, generation}); };
   function choose(index) {
     const result = askSelect(focusOption(state, index));
     state = result.state;
@@ -76,8 +76,7 @@ export function questionPanel(panel, act) {
       if (custom) label.append(node('span',`${custom+1}. Other${answer.customText !== null ? ' ✓' : ''}`));
       label.append(input); panel.append(label); footer.append(confirm); sync();
     }
-    const escape = button('Esc · Stop run',stop);
-    escape.setAttribute('aria-keyshortcuts','Escape'); footer.append(escape); panel.append(footer);
+    panel.append(footer);
     panel.scrollTop = 0;
     if (focus) heading.focus({preventScroll:true});
   }
@@ -108,5 +107,5 @@ export function questionPanel(panel, act) {
     }
     if (run) { e.preventDefault(); if (!e.repeat) run(); }
   }
-  return { render, keydown };
+  return { render, keydown, interrupt:stop };
 }
