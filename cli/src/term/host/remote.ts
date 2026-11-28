@@ -144,9 +144,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     }
     return entry.title || st.conversationTail.openingTitle || `Session ${session.slice(-8)}`
   }
-  function snapshot(backgroundView?: string): RemoteSnapshot {
-    if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
-    st.remoteWatchedAt = Date.now()
+  function inputState() {
     const running = st.isLoading && !!st.streamMachine
     const q = st.overlay.kind === 'ask-user' ? st.overlay.state : null
     const ask = running && st.pendingAsk && q?.requestId ? { id: q.requestId, questions: q.questions } : null
@@ -160,7 +158,12 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       st.pendingQueue.blocked ||
       st.revocationCleanup ||
       st.cloudLoginRequired
-    const input = local ? null : running ? 'steer' : !st.isLoading ? 'send' : null
+    return { input: local ? null : running ? 'steer' as const : !st.isLoading ? 'send' as const : null, ask, canStop: running && (!local || !!ask) }
+  }
+  function snapshot(backgroundView?: string): RemoteSnapshot {
+    if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
+    st.remoteWatchedAt = Date.now()
+    const {input, ask, canStop} = inputState()
     const activity = deps.activity.current()
     const interaction = activity?.kind === 'spinner' ? activity.options.interaction : resolveRunInteraction(deps.runCtl.runInteractionInput())
     const stopTarget = input === 'send' && interaction.interruptTarget === 'background' ? deps.backgroundTerminals.stopTarget() : null
@@ -219,7 +222,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       pendingSteers: pending.filter(e => e.queue === 'steering').map(e => e.phoneDraftId!),
       stopBackgroundTarget: stopTarget ? targetRevision(stopTarget) : undefined,
       input,
-      canStop: running && (!local || !!ask),
+      canStop,
       ask,
     }
   }
@@ -260,8 +263,20 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
 
   function act(action: RemoteAction): void {
     st.remoteWatchedAt = Date.now()
+    if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
+    if (deps.runOwnership.owner + st.remoteEpoch !== action.generation) throw new RemoteConflict('The run changed. Refresh and try again.')
+    if (action.kind === 'stop' || action.kind === 'interrupt-ask') {
+      // Abort before formatting the transcript, tool cards or slash catalog.
+      const {ask, canStop} = inputState()
+      const id = action.kind === 'stop' ? action.askId : action.id
+      if (!canStop || (id !== undefined && id !== ask?.id)) throw new RemoteConflict('This action is no longer available.')
+      if (ask) {
+        st.overlay = { kind: 'none' }
+        deps.runCtl.interruptStream('sys-ask-cancel', '  ⏺ Cancelled.')
+      } else deps.runCtl.interruptStream('sys-int', '  Interrupted.')
+      return
+    }
     const s = snapshot()
-    if (s.generation !== action.generation) throw new RemoteConflict('The run changed. Refresh and try again.')
     if (action.kind === 'tool-view') {
       if (st.expanded !== action.expanded) deps.composer.toggleExpanded()
       return
@@ -308,14 +323,6 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       const target = deps.backgroundTerminals.stopTarget()
       if (!target || targetRevision(target) !== action.target) throw new RemoteConflict('The background tasks changed. Check again.')
       deps.backgroundTerminals.stopAll(target)
-      return
-    }
-    if (s.canStop && ((action.kind === 'interrupt-ask' && s.ask?.id === action.id) ||
-        (action.kind === 'stop' && (action.askId === undefined || action.askId === s.ask?.id)))) {
-      if (s.ask) {
-        st.overlay = { kind: 'none' }
-        deps.runCtl.interruptStream('sys-ask-cancel', '  ⏺ Cancelled.')
-      } else deps.runCtl.interruptStream('sys-remote-stop', '  Interrupted from phone.')
       return
     }
     if (((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) || (action.kind === 'queue' && s.composerKeys?.queue)) {

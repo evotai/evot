@@ -22,7 +22,7 @@ export function draftHintText(empty, view, preview, queuedCount) {
 export function tabIntent(view, draft, cursor, {choices, photos, ghost}) {
   if (!view?.input) return null;
   if (choices) return 'Complete';
-  if (!draft && !photos) return view.composerKeys?.suggest ? 'Suggest' : ghost ? 'Accept' : null;
+  if (!draft && !photos) return ghost ? 'Accept' : view.composerKeys?.suggest ? 'Suggest' : null;
   if (!view.composerKeys?.queue || (!draft.trim() && !photos)) return null;
   const before = draft.slice(0,cursor), line = before.slice(before.lastIndexOf('\n') + 1);
   const path = pathToken(line,line.length)?.word;
@@ -51,7 +51,7 @@ export function composerTab(draft, tab, {commands, changed, queue, suggest, disa
     else accept();
   }
   tab.onclick = invoke; tab.onmousedown = e => e.preventDefault();
-  return { accept, get composing() { return composing; },
+  return { get composing() { return composing; },
     render(view, busy, photos, suggestion) {
       locked = busy || !view?.input; ghost = photos ? '' : suggestion;
       intent = tabIntent(view,draft.value,draft.selectionStart,{choices:commands.hasChoices,photos,ghost});

@@ -35,7 +35,7 @@ const fragment = new URLSearchParams(location.hash.slice(1));
 export const returnTicket = fragment.get('ticket');
 // The QR selects where to show approval, not which conversation to open.
 export const invitedTerminal = location.hash ? fragment.get('terminal') : window.history?.state?.evotPairingWindow ?? null;
-if (location.hash) history.replaceState({...history.state, evotPairingWindow: invitedTerminal}, '', location.pathname);
+if (location.hash) history.replaceState({...history.state, evotPairingWindow: invitedTerminal}, '', location.pathname + location.search);
 // A second invite opened in the same tab can be a fragment-only navigation:
 // the browser does not run the module again unless we reload that entry.
 window.addEventListener('hashchange', () => {

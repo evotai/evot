@@ -32,6 +32,9 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
     const meta = byId.get(w.session)
     return meta ? { ...w, title: sessionLineTitle(meta, w.title) } : w
   })
+  // Match the session, not just its preferred follow target: a second window
+  // can be running the same conversation while its idle sibling hosts Remote.
+  const gateway = live.find(w => w.gateway === true)
   const matched = new Set<string>()
   function row(meta?: SessionMeta, window?: OnlineTerminal) {
     const savedAt = Date.parse(meta?.updated_at ?? '') || 0
@@ -42,23 +45,26 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
     const unshared = !window && !!meta && occupied.has(meta.session_id)
     // A window the phone opened runs hidden in tmux. Idle, it is nothing the user can see
     // on the computer: list it as a saved session. Tapping it still follows that window.
-    const parked = !!window?.phoneCreated && window.phase === 'idle'
+    const hostsRemote = !!gateway && !!window && (gateway.terminal === window.terminal || (!!gateway.session && gateway.session === window.session))
+    const parked = !hostsRemote && !!window?.phoneCreated && window.phase === 'idle'
     return { session: meta?.session_id ?? window?.session ?? '',
       title: window?.title || (meta ? sessionLineTitle(meta) : 'New conversation'),
       workspace: meta ? basename(meta.cwd) || '/' : window?.workspace,
       updatedAt, updated: updatedAt ? new Date(updatedAt).toISOString() : '',
       terminal: window?.terminal, phase: parked ? undefined : window?.phase, runState: window?.runState,
+      ...(hostsRemote ? { gateway:true as const } : {}),
       completed: window?.completed, ...(window?.tmux && !parked ? { tmux: true } : {}),
       ...(unshared ? { unshared } : {}), ...(parked ? { parked } : {}) }
   }
-  const nonempty = live.filter(w => {
+  const listed = live.filter(w => {
+    if (w === gateway) return true // The shared host is useful even before its first prompt.
     if ((byId.get(w.session)?.turns ?? 0) > 0) return true
     if (w.hasConversation !== undefined) return w.hasConversation
     // Legacy badges only have a display title. Exclude their known empty
     // placeholders, but retain the opening prompt before the first save.
     return !!w.title.trim() && w.title !== 'New conversation' && w.title !== `Session ${w.session.slice(-8)}`
   })
-  const all = liveSessions(nonempty).map(w => {
+  const all = liveSessions(listed).map(w => {
     matched.add(w.session)
     const meta = byId.get(w.session)
     return row(meta, meta ? {...w, title:sessionLineTitle(meta, w.title)} : w)
@@ -67,7 +73,7 @@ export function phoneCatalog(visible: SessionMeta[], live: OnlineTerminal[], pag
   // Every word must appear somewhere in the title, id, project or transcript text.
   const words = page.query.split(/\s+/).filter(Boolean)
   const filtered = all.filter(r => !words.length || words.every(word =>
-    [r.title, r.session, r.workspace, byId.get(r.session)?.title, text?.get(r.session)].some(value => value?.toLowerCase().includes(word))))
+    [r.title, r.session, r.workspace, r.gateway ? 'remote gateway' : undefined, byId.get(r.session)?.title, text?.get(r.session)].some(value => value?.toLowerCase().includes(word))))
   filtered.sort((a, b) => b.updatedAt - a.updatedAt || a.session.localeCompare(b.session) || (a.terminal ?? '').localeCompare(b.terminal ?? ''))
   return { rows: filtered.slice(0, page.limit), count: filtered.length, more: filtered.length > page.limit, online: [...online].sort(compareActivity) }
 }

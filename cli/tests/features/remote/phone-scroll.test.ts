@@ -17,7 +17,8 @@ function transcript(reducedMotion = false) {
       },
     },
   }
-  const write = { ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
+  const collapse = { onclick() {} }
+  const write = { focus() { document.activeElement = this }, ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
   const dock = { inert: true, contains(node: object | null) { return node === write } }
   const jump = { hidden: true, onclick() {} }
   const draft = { value: 'A draft for later', focus() { document.activeElement = this } }
@@ -38,11 +39,11 @@ function transcript(reducedMotion = false) {
     focus() { document.activeElement = this },
     addEventListener(event: string, callback: (event?: unknown) => void) { events.set(event, callback) },
   }
-  const controller = conversationScroll({ chat, seat, editor, dock, write, jump, draft })
+  const controller = conversationScroll({ chat, seat, editor, dock, write, collapse, jump, draft })
   controller.update(true, true)
   controller.latest()
   return {
-    controller, chat, seat, editor, document, draft, dock, write, jump, events,
+    controller, chat, seat, editor, document, draft, dock, write, collapse, jump, events,
     get reading() { return reading },
     get bottom() { return Math.max(0, chat.scrollHeight - chat.clientHeight) },
     scrollTo(top: number) { chat.scrollTop = top; events.get('scroll')?.() },
@@ -61,6 +62,39 @@ function transcript(reducedMotion = false) {
     },
   }
 }
+
+test('manual collapse preserves the draft and reading position through live updates; tapping reopens the editor', () => {
+  const ui = transcript()
+  ui.scrollBack(600); ui.write.onclick()
+  const top = ui.chat.scrollTop
+  ui.collapse.onclick()
+  expect(ui.reading).toBe(true); expect(ui.document.activeElement).toBe(ui.write)
+  ui.chat.scrollHeight += 300; ui.controller.update(true,true); ui.controller.keepLatest()
+  expect(ui.chat.scrollTop).toBe(top); expect(ui.editor.inert).toBe(true)
+  ui.write.onclick()
+  expect(ui.document.activeElement).toBe(ui.draft); expect(ui.draft.value).toBe('A draft for later')
+  expect(ui.chat.scrollTop).toBe(top)
+})
+
+test('a reader keeps the rendered history even when the live tail rolls over; Latest paints only the newest frame', () => {
+  const ui = transcript(true), painted:number[]=[]
+  ui.controller.paintHistory(()=>painted.push(0))
+  // Scroll position has moved but Safari has not delivered the scroll event yet.
+  ui.chat.scrollTop -= 400
+  ui.controller.paintHistory(()=>painted.push(1)); ui.controller.keepLatest()
+  ui.events.get('scroll')?.(); const top=ui.chat.scrollTop
+  ui.controller.paintHistory(()=>painted.push(2)); ui.resize()
+  expect(painted).toEqual([0]); expect(ui.chat.scrollTop).toBe(top)
+  ui.jump.onclick(); expect(painted).toEqual([0,2]); expect(ui.chat.scrollTop).toBe(ui.bottom)
+  ui.scrollBack(600); ui.controller.paintHistory(()=>painted.push(3)); ui.controller.latest()
+  expect(painted).toEqual([0,2]) // a different session must not replay the pending old frame
+})
+
+test('scrolling down to the live edge resumes painting without another server event', () => {
+  const ui=transcript(); let paints=0
+  ui.scrollBack(600); ui.controller.paintHistory(()=>{paints++;ui.chat.scrollHeight+=500})
+  ui.scrollTo(ui.bottom); expect(paints).toBe(1); expect(ui.chat.scrollTop).toBe(ui.bottom)
+})
 
 test('a send folds and releases editor focus immediately, then follows streaming until the user scrolls back', () => {
   const ui = transcript()

@@ -44,7 +44,7 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(header).toMatch(/id="bgChip"[^>]*aria-controls="bgPanel"[^>]*hidden><evot-activity id="bgActivity" aria-hidden="true"/)
     expect(html.match(/id="bgChip"/g)).toHaveLength(1)
     expect(html).toMatch(/class="run-state"[^\n]*id="bgStatus"[^>]*aria-controls="bgPanel"/)
-    expect(html).not.toContain('id="foldComposer"')
+    expect(html).toMatch(/class="composer-trailing"><button id="foldComposer"[^>]*aria-controls="composerContent"[^>]*aria-label="Collapse composer"/)
     expect(html).toContain('id="queueSummary" role="status" hidden')
     expect(html).toContain(`data-activity-frames="${spinnerFrames(process.platform, process.env.TERM).join(' ')}"`)
     expect(html).toMatch(/id="pair"[\s\S]*?<button[^>]*disabled[^>]*>Connect<\/button>/)

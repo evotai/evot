@@ -509,7 +509,10 @@ export function createRunController(st: ReplState, deps: RunDeps): RunController
     // Unconsumed work stays paused and individually recoverable with Esc.
     // The transcript has no record of a user-side interrupt, so this line is
     // captured as a client notice and survives into a shared session.
-    if (!st.logMode) st.conversationTail.outcome = 'Stopped'
+    if (!st.logMode) {
+      st.conversationTail.outcome = 'Stopped'
+      st.conversationTail.append('notice', text)
+    }
     deps.committer.commitNotice([{ id, kind: 'cancelled', text }])
     deps.scrollback.commitRunFooter()
     deps.backgroundTerminals.parkUntilBackground()

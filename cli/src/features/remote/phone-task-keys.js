@@ -18,7 +18,7 @@ export function taskKeys(esc, {act, pull, clear, dismissMenu, dockAction}) {
     if (dockAction) paintButton(dockAction, dockKind);
   }
   function disarm() { clearTimeout(timer); confirmation.clear(); paint(); }
-  function render(next, busy, draft, draftId, dismissible = false) {
+  function render(next, busy, draft, draftId, dismissible = false, interruptDuringSend = false) {
     view = next; pending = draftId;
     const input = {pending:!!pending && !!view?.input, running:view?.input === 'steer', draft:!!draft && !!view?.input,
       interrupt:view?.canStop ? 'agent' : view?.stopBackgroundTarget ? 'background' : null};
@@ -28,14 +28,15 @@ export function taskKeys(esc, {act, pull, clear, dismissMenu, dockAction}) {
     dockKind = dockAction && !view?.ask ? composerEscape({...input, pending:input.pending && !draft, draft:false}) : null;
     const stopKind = isStop(kind) ? kind : dockKind;
     const target = stopKind === 'interrupt' ? 'run' : stopKind === 'stop-background' ? view.stopBackgroundTarget : null;
-    const nextOwner = target && !busy ? JSON.stringify([view.sessionId, view.generation, target]) : null;
+    const locked = intent => busy && !(interruptDuringSend && intent === 'interrupt');
+    const nextOwner = target && !locked(stopKind) ? JSON.stringify([view.sessionId, view.generation, target]) : null;
     if (owner !== nextOwner) { clearTimeout(timer); confirmation.clear(); }
     owner = nextOwner;
     esc.hidden = !view?.input && !kind;
-    esc.disabled = busy || !kind;
+    esc.disabled = locked(kind) || !kind;
     if (dockAction) {
       dockAction.hidden = !dockKind;
-      dockAction.disabled = busy || !dockKind;
+      dockAction.disabled = locked(dockKind) || !dockKind;
     }
     paint();
   }

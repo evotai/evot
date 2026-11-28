@@ -22,6 +22,8 @@ test('only Escape is intercepted, even while a background task is present', () =
   for (const ch of ['b','t','k']) expect(press(ch,'draft',{ctrlKey:true})).toBe(false)
   expect(actions).toEqual([])
   render(running,true); expect(press('Escape')).toBe(false)
+  render(running,true,'',null,false,true); press('Escape'); press('Escape')
+  expect(actions).toEqual([{kind:'stop'}]) // The turn has started, but the send receipt is delayed.
   render(null,false); expect(stop.hidden).toBe(true)
 })
 

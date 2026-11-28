@@ -37,6 +37,7 @@ test('Tab never submits an idle/legacy draft, an unfinished command or a file co
   expect(tabIntent(running,'/rev',4,{...plain,choices:true})).toBe('Complete')
   expect(tabIntent(old,'next step',9,plain)).toBeNull(); expect(tabIntent(null,'hi',2,plain)).toBeNull()
   expect(tabIntent({...old,composerKeys:{suggest:true}},'',0,plain)).toBe('Suggest')
+  expect(tabIntent({...old,composerKeys:{suggest:true}},'',0,{...plain,ghost:'Run tests.'})).toBe('Accept')
   expect(tabIntent(running,'',0,{...plain,photos:1})).toBe('Send after')
 })
 

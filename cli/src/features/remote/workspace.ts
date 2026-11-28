@@ -107,7 +107,7 @@ export function phoneWorkspace(
     if (inventory.occupied.has(session)) {
       const owners = inventory.online.filter(t => t.session === session)
       const tmux = Bun.which('tmux'), target = (t: { terminal: string }) => '=chat-' + t.terminal
-      const parked = !!tmux && owners.length > 0 && owners.every(t => t.phoneCreated && t.phase === 'idle'
+      const parked = !!tmux && owners.length > 0 && owners.every(t => !t.gateway && t.phoneCreated && t.phase === 'idle'
         && tmuxIn(tmux, 'has-session', '-t', target(t)).exitCode === 0)
       // A hidden (unshared) window holds the session without a badge row, so it has no owner here and stays.
       if (!parked) throw new RemoteConflict('This session is open in a terminal window. Close it there first.')

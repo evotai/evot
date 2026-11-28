@@ -107,6 +107,29 @@ test('the completion mark is additive to the legacy catalog, including for a par
   expect(windowStatusLabel(parked)).toBe('Completed')
 })
 
+test('the gateway badge follows the hosted session without changing order or the preferred follow target', () => {
+  const host = {...legacyCatalog.online[0]!, phase:'idle' as const, gateway:true}
+  const mirror = {...host, terminal:'mirror', gateway:false, phase:'working' as const}
+  const other = {...host, session:'s2', terminal:'other', gateway:false, updatedAt:host.updatedAt + 1}
+  const page = {limit:40, query:''}
+  const rows = phoneCatalog([], [host, mirror, other], page).rows
+  expect(rows.map(r=>[r.terminal,r.gateway])).toEqual([['other',undefined],['mirror',true]])
+  const moved = phoneCatalog([], [{...host,gateway:false}, mirror, {...other,gateway:true}], {...page,query:'gateway'}).rows
+  expect(moved.map(r=>r.terminal)).toEqual(['other'])
+  // A legacy reader still sees the same idle, followable row; old catalogs need no badge.
+  const {gateway,...legacyRow} = JSON.parse(JSON.stringify(phoneCatalog([], [host], page))).rows[0]
+  expect(gateway).toBe(true); expect(legacyRow).toEqual(legacyCatalog.rows[0])
+})
+
+test('an empty shared gateway is discoverable without exposing other unused windows', () => {
+  const empty = {...legacyCatalog.online[0]!,session:'',title:'New conversation',hasConversation:false,phase:'idle' as const,phoneCreated:true}
+  const host = {...empty,gateway:true}, page = {limit:40,query:'gateway'}
+  const list = phoneCatalog([], [host,{...empty,terminal:'unused'}],page)
+  expect(list.rows).toHaveLength(1); expect(list.rows[0]).toMatchObject({terminal:host.terminal,gateway:true})
+  expect(list.rows[0]?.parked).toBeUndefined()
+  expect(phoneCatalog([], [empty],page).rows).toEqual([])
+})
+
 test('open rows carry only an icon place: tmux when the window says so, a visible terminal otherwise', () => {
   const window = { ...legacyCatalog.online[0]!, phase:'idle' as const }
   const page = { limit:40, query:'' }
@@ -241,6 +264,10 @@ test('profile gateway discovers a new live window; another profile and an opted-
       expect(list.privateWindows).toEqual([])
       expect(list.online).toEqual([expect.objectContaining({...badge,terminal:window.id})])
     }
+    gateway.share(scope)
+    expect((await ws.catalog({query:'remote gateway',limit:40})).rows.map(r=>[r.terminal,r.gateway])).toEqual([[gateway.id,true]])
+    gateway.share(null)
+    expect((await ws.catalog({query:'remote gateway',limit:40})).rows).toEqual([])
     gateway.route('other'); expect(JSON.stringify(await ws.catalog({query:'',limit:40}))).not.toContain('private-')
     gateway.route(null); gateway.share(scope); expect((await ws.list(true)).online.some(t=>t.terminal===window.id)).toBe(false)
     gateway.route(scope); window.share(null)

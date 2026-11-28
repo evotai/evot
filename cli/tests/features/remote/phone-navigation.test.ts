@@ -22,6 +22,21 @@ test('reload keeps the chosen session, a new environment visit opens the picker 
   expect(navigation(first, false, page, tab).target).toEqual({terminal: first, session: null})
 })
 
+test('an address survives reload, copying to another tab and sign-in without relying on history state', () => {
+  const url = new URL('https://remote.example/'), tab = storage()
+  const page = { state:{} as Record<string,unknown>, replaceState(state:Record<string,unknown>, _:string, href:string) { this.state=state; url.href=href } }
+  const open = (returning=false)=>navigation(null,returning,page,tab,()=>100,url)
+  const initial = open(); expect(initial.target).toBeNull(); initial.select(first)
+  expect(url.searchParams.get('window')).toBe(first); expect(url.searchParams.has('session')).toBe(false)
+  const session='project/a + b'; initial.select(first, session); const bookmark=url.href
+  page.state={}; expect(open().target).toEqual({terminal:first,session}); expect(url.href).toBe(bookmark)
+  open().select(second,'other'); url.href=bookmark
+  expect(open().target).toEqual({terminal:first,session}) // address wins over a stale entry
+  open().redirect(); page.state={}; url.search=''; expect(open(true).target?.session).toBe(session); expect(url.href).toBe(bookmark)
+  url.search='?window=invalid&session=x'; expect(open().target).toBeNull(); expect(url.search).toBe('')
+  url.href=bookmark; open().select(null); expect(url.href).toBe('https://remote.example/')
+})
+
 test('account verification restores only an unexpired same-tab destination and consumes it once', () => {
   const tab = storage(), source = navigation(first, false, entry(), tab, () => 100)
   source.redirect()

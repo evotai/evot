@@ -113,6 +113,16 @@ function paintDiff(node, rows) {
   }
   node.append(box);
 }
+export function updateToolAt(toggle, s) {
+  const node = toggle.closest('[data-kind="tool"]'), row = node?.parentElement;
+  if (!row) return false;
+  const i = Number(row.dataset.index) - (s.messageOffset ?? 0);
+  const blocks = i === s.messages.length ? s.liveBlocks : s.messages[i]?.blocks;
+  const block = blocks?.[Array.prototype.indexOf.call(row.children, node)];
+  if (block?.kind !== 'tool') return false;
+  paintBlock(node, block, !!s.expanded);
+  return true;
+}
 export function renderHistory(root, s, photos, thumbnail) {
   const rows = [...s.messages];
   if (s.live || s.liveBlocks?.length) rows.push({ role: 'assistant', text: s.live, blocks: s.liveBlocks });

@@ -2,6 +2,7 @@ import { paintChangesButton, reviewNavigation } from './phone-review.js';
 import { questionPanel } from './phone-ask.js';
 import { inlineCommandGhost, installTouchDraft } from './phone-draft.js';
 import { backgroundPanel } from './phone-background.js';
+import { runInterrupt } from './phone-interrupt.js';
 import { turnStartFeedback } from './phone-turn-start.js';
 import { registerActivityMarks } from './phone-activity.js';
 import { completionReminder } from './phone-reminder.js';
@@ -11,7 +12,7 @@ import { photoViewer, messagePhotos } from './phone-photo-preview.js';
 import { taskKeys } from './phone-task-keys.js';
 import { lastDraft, pendingDrafts, queueStrip } from './phone-queue.js';
 import { sessionDrawer } from './phone-directory.js';
-import { renderHistory } from './phone-history.js';
+import { renderHistory, updateToolAt } from './phone-history.js';
 import { conversationScroll } from './phone-scroll.js';
 import { fitConversationViewport } from './phone-viewport.js';
 import { navigation } from './phone-navigation.js';
@@ -25,7 +26,7 @@ const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('evot.remote'),
   view = null,
   etag = '',
-  busy = false;
+  busy = false, sendingMessage = false;
 let timer,
   noticeTimer,
   epoch = 0,
@@ -37,7 +38,7 @@ const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
-  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField});
+  dock:compactComposer, write:$('writeMessage'), collapse:$('foldComposer'), jump:$('jump'), draft:messageField});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
@@ -46,6 +47,18 @@ const pickStart = new WeakMap();
 const nav = navigation(null, !!returnTicket, history, sessionStorage);
 let terminal = nav.target?.terminal ?? null, newRequest = null, pairing = false, leaving = false, connected = false;
 const starting = turnStartFeedback(paintRunStatus);
+const stopping = runInterrupt({
+  lock(locked) { busy = locked || sendingMessage; paintRunStatus(); controls(); },
+  async post(message) {
+    const res = await api('/action',message,{Accept:'application/json'});
+    return res.status === 204 ? null : res.json();
+  },
+  replace(state) {
+    // An SSE patch from before the stop cannot be merged onto the POST snapshot.
+    ++epoch; liveRequest?.abort(); etag = '';
+    render(state,'poll'); void refresh();
+  }, refresh, error:e => notice(e.message + ' Check the current run before retrying.',true),
+});
 const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
 // The draft typed for this window survives a page update, a sign-in redirect and re-pairing.
 const drafts = draftCarry(sessionStorage);
@@ -57,8 +70,9 @@ const pageUpdated = pageUpdates(document.documentElement.dataset.build, sessionS
 // Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
 let dismissed = '';
 function selectTarget(id, session) {
-  starting.clear();
+  stopping.clear(); starting.clear();
   nav.select(id, session);
+  reminder.select(nav.target);
   terminal = nav.target?.terminal ?? null;
 }
 const background = backgroundPanel(document, () => {
@@ -137,8 +151,10 @@ function notice(text, persistent = false) {
     }, 3600);
 }
 function paired(yes) {
+  $('sessionUnavailable').hidden = true;
   $('openSessions').hidden = $('newSession').hidden = !yes;
-  reminder.setPaired(yes);
+  reminder.select(nav.target);
+  reminder.setPaired(yes && !!token);
   if (!yes) {
     drawer.reset();
     clearOutbox(); photos.clear();
@@ -176,20 +192,21 @@ function controls() {
   commands.render(input && !busy && !tab.composing ? view : null);
   paintChangesButton($('openChanges'), connected && !!token, view);
   drawer.lock(busy || !token);
+  $('resumeLinked').disabled = busy || !token;
   $('openSessions').disabled = $('browseSessions').disabled = busy || !token;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
   $('send').disabled = busy || !input || (!$('draft').value.trim() && !photos.count && !candidate);
   $('attach').disabled = busy || !input || photos.count >= 4;
   const queuedCount = renderQueue(view, outbox), queueSummary = $('queueSummary');
-  const queueLabel = queuedCount ? `${queuedCount} queued` : '';
+  const paused = view?.promptQueue?.filter(r => r.state === 'paused').length ?? 0;
+  const queueLabel = [queuedCount > paused && `${queuedCount - paused} queued`, paused && `${paused} paused`].filter(Boolean).join(' · ');
   if (queueSummary.textContent !== queueLabel) queueSummary.textContent = queueLabel;
   queueSummary.hidden = !queuedCount;
-  const accept = !!candidate;
-  $('send').textContent = busy ? '…' : accept ? '→' : input === 'steer' ? '↱' : '↑';
+  $('send').textContent = busy ? '…' : input === 'steer' ? '↱' : '↑';
   $('send').toggleAttribute('aria-busy', busy);
   $('newSession').disabled = $('drawerNew').disabled = !token || busy;
-  $('send').ariaLabel = $('send').title = accept ? 'Accept suggestion' : input === 'steer' ? 'Steer active run' : 'Send message';
-  const hint = $('draftHint'), text = draftHintText(empty, connected ? view : null, preview, queuedCount);
+  $('send').ariaLabel = $('send').title = candidate ? 'Send suggestion' : input === 'steer' ? 'Steer active run' : 'Send message';
+  const hint = $('draftHint'), text = draftHintText(empty, connected ? view : null, preview, queuedCount - paused);
   if (hint.textContent !== text) hint.textContent = text;
   hint.hidden = !text;
   hint.toggleAttribute('data-preview', !!preview);
@@ -197,7 +214,7 @@ function controls() {
   const pending = lastDraft(view);
   shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count,
     pending && outbox.some(item => item.draftId === pending) ? pending : null,
-    !!input && (commandHint || !$('commandMenu').hidden || !!preview));
+    !!input && (commandHint || !$('commandMenu').hidden || !!preview), sendingMessage && !stopping.pending);
   tab.render(connected ? view : null, busy, photos.count, candidate);
   $('taskKeys').hidden = $('tabKey').hidden && $('stop').hidden;
   background.setConnected(connected);
@@ -240,23 +257,29 @@ function models(m) {
 }
 function paintRunStatus() {
   if (!view) return;
-  const label = starting.label ?? view.status;
+  const pending = stopping.pending ? 'Stopping…' : starting.label;
+  const label = pending ?? view.status;
   if ($('status').textContent !== label) $('status').textContent = label;
-  $('statusDetail').textContent = starting.label ? '' : view.statusDetail ?? '';
-  $('activity').toggleAttribute('data-running', !!starting.label || (!!view.active && !view.ask));
-  document.querySelector('.run-line').toggleAttribute('data-active', !!starting.label || !!view.active);
+  $('statusDetail').textContent = pending ? '' : view.statusDetail ?? '';
+  $('activity').toggleAttribute('data-running', !!pending || (!!view.active && !view.ask));
+  document.querySelector('.run-line').toggleAttribute('data-active', !!pending || !!view.active);
 }
 function render(s, mode) {
   if (nav.target?.session && nav.target.session !== s.sessionId)
     throw Object.assign(Error('This window changed sessions. Choose the session again.'), {status:409});
-  // A QR points at a window, not at a conversation chosen from Sessions.
-  // Never reuse that window's unsent input after a local /new or /resume.
+  // Bind a newly opened window to its conversation as soon as the host assigns
+  // an ID. A reload or copied URL must never silently follow a different chat.
+  if (terminal && !nav.target?.session && s.sessionId) {
+    nav.select(terminal, s.sessionId); reminder.select(nav.target);
+  }
+  // Never reuse a window's unsent input across conversations.
   if (view?.sessionId && view.sessionId !== s.sessionId) {
     $('draft').value = ''; $('draft').rows = 1; clearOutbox(); photos.clear(); askPanel.render(null, null, true);
     background.render(null);
     transcript.latest();
   }
   missingTarget = null;
+  $('sessionUnavailable').hidden = true;
   connected = true;
   $('chatLoading').hidden = true;
   $('seat').hidden = false;
@@ -267,6 +290,7 @@ function render(s, mode) {
   }
   if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
+  stopping.observe(s);
   $('connection').textContent = mode === 'stream' ? 'Live' : 'Connected · polling';
   $('connection').toggleAttribute('data-online', true);
   $('threadTitle').textContent = s.title || (s.sessionId ? `Session ${s.sessionId.slice(-8)}` : 'New conversation');
@@ -281,7 +305,9 @@ function render(s, mode) {
   place(s.place);
   background.render(s.background);
   settleOutbox(s);
-  $('welcome').hidden = !!renderHistory($('history'), s, sentPhotos, viewer.thumbnail) || !!s.ask || s.active || outbox.length > 0;
+  transcript.paintHistory(() => {
+    $('welcome').hidden = !!renderHistory($('history'), s, sentPhotos, viewer.thumbnail) || !!s.ask || s.active || outbox.length > 0;
+  });
   controls();
   transcript.keepLatest();
 }
@@ -353,6 +379,8 @@ function reconnecting() {
 function unpair() {
   ++epoch; liveRequest?.abort(); clearTimeout(timer);
   token = null;
+  reminder.setPaired(false);
+  stopping.clear();
   sessionStorage.removeItem('evot.remote');
   etag = '';
   reconnecting();
@@ -482,6 +510,13 @@ async function synchronize(ready) {
         // A restarting window can briefly disappear from the directory.
         if (missingTarget?.id !== terminal) missingTarget = {id:terminal, since:Date.now()};
         if (e.status === 403 || Date.now() - missingTarget.since >= 8000) {
+          if (session) {
+            // Keep the bookmark (and any draft). Opening a saved session can
+            // launch a terminal; do that only on an explicit resume.
+            $('connection').textContent = 'Session unavailable';
+            $('chatLoading').hidden = $('welcome').hidden = true; $('sessionUnavailable').hidden = false;
+            return;
+          }
           missingTarget = null;
           selectTarget(null, null); view = null; paired(true); notice('');
           drawer.open('That window has closed or stopped sharing. Tap the session to resume it.');
@@ -528,6 +563,7 @@ async function pair(auto = false) {
     notice('');
     // Silent renewal is not navigation: paired() would reset the reader's scroll.
     if (!$('pair-screen').hidden) paired(true);
+    else reminder.setPaired(true);
     controls();
     if (terminal) await refresh(); else if (!$('sessionsDrawer').open) drawer.open();
   } catch (e) {
@@ -550,13 +586,20 @@ async function pair(auto = false) {
   }
 }
 async function action(payload, done, failed, command = false, dispatch = message => api('/action',message)) {
-  if (!connected || !view || busy) return;
+  if (!connected || !view) return;
+  if (payload.kind === 'stop' || payload.kind === 'interrupt-ask') {
+    if (busy && !sendingMessage) return;
+    notice(''); return stopping.request(view, payload);
+  }
+  if (busy) return;
   busy = true;
+  sendingMessage = !command && ['send','queue','steer'].includes(payload.kind);
+  const generation = view.generation;
   if (payload.kind === 'suggest') dismissed = ''; // an explicit retry may return the same candidate
   controls();
   const feedback = command ? ['Running command…', ''] : {
-    'cancel-ask': ['Cancelling question…', 'Question cancelled.'], 'interrupt-ask': ['Stopping this run…', 'Stop requested.'],
-    answer: ['Sending answers…', 'Answers sent.'], stop: ['Stopping this run…', 'Stop requested.'],
+    'cancel-ask': ['Cancelling question…', 'Question cancelled.'],
+    answer: ['Sending answers…', 'Answers sent.'],
     'pull-draft': ['Pulling back pending message…', 'Pulled back · not sent.'],
     'stop-background': ['Stopping background tasks…', 'Stop requested.'],
     'select-model': ['Applying selection…', 'Selection received.'], 'tool-view': ['Updating details…', 'Details updated.'],
@@ -571,9 +614,12 @@ async function action(payload, done, failed, command = false, dispatch = message
     // A send whose fate is unknown checks the transcript before saying anything.
     if (!failed?.(e)) notice(e.status === 409 ? e.message : e.message + ' Check before retrying.', true);
   } finally {
-    etag = '';
-    await refresh();
-    busy = false;
+    // A newer streamed run already supersedes this send. Don't stall Esc (or
+    // reopen an obsolete stream) waiting for another round trip to that state.
+    if (!(sendingMessage && connected && (stopping.pending || view?.generation !== generation))) {
+      etag = ''; await refresh();
+    }
+    sendingMessage = false; busy = stopping.pending;
     controls();
   }
 }
@@ -659,7 +705,7 @@ function pullDraft(draftId) {
   })
     .finally(() => { item.pulling = false; $('draft').readOnly = false; $('draft').focus({preventScroll:true}); });
 }
-$('send').onclick = () => { if (currentSuggestion()?.candidate) tab.accept(); else submitMessage(view?.input); };
+$('send').onclick = () => submitMessage(view?.input, currentSuggestion()?.candidate);
 function bubblePhotos(bubble, previews) {
   bubble.querySelector('.bubble-images')?.remove();
   if (!previews.length) return;
@@ -680,10 +726,13 @@ function sendingBubble(text, previews) {
   state.className = 'outbox-state'; state.textContent = previews.length ? 'Uploading…' : 'Sending…';
   el.append(bubble,state); $('outbox').append(el); return el;
 }
-function submitMessage(kind) {
+function submitMessage(kind, suggested) {
   if (kind === 'queue' && !view?.composerKeys?.queue) return;
-  const text = $('draft').value;
   if (!connected || !kind || tab.composing || messageField.readOnly || busy) return;
+  // Only the explicit Send button submits a preview. Tab can instead copy it
+  // into the draft for editing; status hints are never message text.
+  if (!messageField.value && suggested && !photos.count) { messageField.value = suggested; resize(); }
+  const text = messageField.value;
   if (!text.trim() && !photos.count) return;
   if (text.length > messageField.maxLength) { notice(`Message is too long (${text.length}/${messageField.maxLength}). Shorten it before sending.`); return; }
   const shortcut = phoneShortcut(text, view.commands, view.slashHints);
@@ -850,8 +899,14 @@ $('welcome').onclick = (e) => {
   }
 };
 $('history').onclick = async (e) => {
-  if (e.target.closest('.tool-details')) {
-    if (view) void action({ kind: 'tool-view', expanded: !view.expanded });
+  const toggle = e.target.closest('.tool-details');
+  if (toggle) {
+    if (!view || !connected || busy) return;
+    const expanded = toggle.getAttribute('aria-pressed') !== 'true';
+    if (view.expanded !== expanded) await action({ kind: 'tool-view', expanded });
+    // A reader's transcript stays pinned. An explicit detail toggle updates
+    // only the card they chose, not earlier rows or the moving live tail.
+    if (toggle.isConnected && view?.expanded === expanded && !updateToolAt(toggle, view)) notice('This tool is outside the current live history.');
     return;
   }
   const button = e.target.closest('[data-copy-code]');
@@ -883,6 +938,7 @@ function refreshOnReturn() {
 document.addEventListener('visibilitychange', refreshOnReturn);
 window.addEventListener('online', refreshOnReturn);
 $('browseSessions').onclick = drawer.open;
+$('resumeLinked').onclick = () => { if (nav.target?.session) void choose(null, nav.target.session); };
 window.addEventListener('pageshow', event => {
   if (event.persisted && leaving) {
     leaving = false;

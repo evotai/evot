@@ -1,64 +1,44 @@
 import { expect, test } from 'bun:test'
 import { completionReminder, roundCompletions } from '../../../src/features/remote/phone-reminder.js'
 
-const badge = (terminal: string, finishedRound: number | null) => ({terminal, finishedRound})
-
-test('all live sessions contribute to the same reminder, without replaying old or legacy results', () => {
-  const first = roundCompletions(new Map(), [badge('A', 5), badge('B', null), {terminal:'old'}])
-  expect(first.finished).toBe(false)
-  expect(first.seen.has('old')).toBe(false)
-  const unrelated = roundCompletions(first.seen, [badge('A', 5), {...badge('B', null), phase:'idle'}, badge('new', 7)])
-  expect(unrelated.finished).toBe(false) // Status changed; the new window may contain an old result.
-  const end = roundCompletions(unrelated.seen, [badge('A', 5), badge('B', 1), badge('new', 7)])
-  expect(end.finished).toBe(true)
-  expect(roundCompletions(end.seen, [badge('A', 5), badge('B', 1), badge('new', 7)]).finished).toBe(false)
-  expect(roundCompletions(end.seen, [badge('A', 6), badge('B', 2)]).finished).toBe(true)
+const badge = (terminal:string, session:string, finishedRound:number|null) => ({terminal,session,finishedRound})
+const a=badge('window-a','a',1), b=badge('window-b','b',3)
+test('a new window or conversation establishes a baseline, not a notification', () => {
+  const first = roundCompletions(new Map(), [a,b,{terminal:'old'}]); expect(first.finished).toBe(false); expect(first.seen.size).toBe(2)
+  expect(roundCompletions(first.seen,[{...a,session:'new',finishedRound:4}]).finished).toBe(false)
+  expect(roundCompletions(first.seen,[a,{...b,finishedRound:4}]).finished).toBe(true)
 })
-
-test('one tap enables ongoing sound until disabled; hidden pages pause and unpair discards a late result', async () => {
-  let plays = 0, unlocks = 0, loads = 0, pressed = '', tick = () => {}, visibility = () => {}
-  let pending = Promise.withResolvers<{online: ReturnType<typeof badge>[]}>()
+function page(values = new Map<string,string>()) {
+  let plays=0, tick=()=>{}, pressed='', pending=Promise.withResolvers<{online:typeof a[]}>()
+  const events=new Map<string,()=>void>()
   class Audio {
-    state = 'running'
-    currentTime = 0
-    destination = {}
-    async resume() { unlocks++ }
-    createOscillator() { return {frequency:{value:0}, connect:() => ({connect() {}}), start() { plays++ }, stop() {}} }
-    createGain() { return {gain:{setValueAtTime() {}, linearRampToValueAtTime() {}}} }
+    state='suspended'; currentTime=0; destination={}
+    async resume() { this.state='running' }
+    createOscillator() { return {frequency:{value:0},connect:()=>({connect(){}}),start(){plays++},stop(){}} }
+    createGain() { return {gain:{setValueAtTime(){},linearRampToValueAtTime(){}}} }
   }
-  const document = {hidden:false, defaultView:{AudioContext:Audio, setTimeout(callback: () => void) { tick = callback; return 1 },
-    clearTimeout() { tick = () => {} }}, addEventListener(_name: string, callback: () => void) { visibility = callback }}
-  const button = {hidden:true, ownerDocument:document, onclick() {}, setAttribute(_name: string, value: string) { pressed = value }}
-  const reminder = completionReminder(button, () => { loads++; return pending.promise }, () => {})
-  const settle = async (...online: ReturnType<typeof badge>[]) => {
-    pending.resolve({ online })
-    await Promise.resolve()
-    pending = Promise.withResolvers()
-  }
-  reminder.setPaired(true)
-  expect(button.hidden).toBe(false)
-  expect(loads).toBe(0)
-  button.onclick()
-  expect(pressed).toBe('true')
-  expect(unlocks).toBe(1)
-  await settle(badge('A', 1), badge('B', null))
-  expect(plays).toBe(0)
-  tick(); await settle(badge('A', 1), badge('B', 7))
-  expect(plays).toBe(2) // Two notes, one chime.
-  reminder.setPaired(true) // Navigating to any other conversation does not reset the toggle.
-  tick(); await settle(badge('A', 2), badge('B', 7))
-  expect(plays).toBe(4)
-  document.hidden = true; visibility(); tick()
-  expect(loads).toBe(3)
-  document.hidden = false; visibility()
-  expect(loads).toBe(4)
-  button.onclick()
-  await settle(badge('A', 3), badge('B', 8))
-  expect(pressed).toBe('false')
-  expect(plays).toBe(4)
-  button.onclick(); await settle(badge('A', 3), badge('B', 8))
-  tick(); reminder.setPaired(false); await settle(badge('A', 4), badge('B', 9))
-  expect(button.hidden).toBe(true)
-  expect(pressed).toBe('false')
-  expect(plays).toBe(4)
+  const document={hidden:false, addEventListener:(k:string,fn:()=>void)=>events.set(k,fn),defaultView:{AudioContext:Audio,
+    localStorage:{get length(){return values.size},key:(i:number)=>[...values.keys()][i],getItem:(k:string)=>values.get(k),setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k)},
+    addEventListener(){},setTimeout(fn:()=>void){tick=fn;return 1},clearTimeout(){tick=()=>{}}}}
+  const button={hidden:true,ownerDocument:document,onclick(){},setAttribute(_:string,v:string){pressed=v}}
+  const reminder=completionReminder(button,()=>pending.promise,()=>{})
+  reminder.select(a);reminder.setPaired(true)
+  return {reminder,button,values,get pressed(){return pressed},get plays(){return plays}, tick:()=>tick(), async settle(...online:typeof a[]) {
+    pending.resolve({online});await Promise.resolve();pending=Promise.withResolvers()
+  }}
+}
+test('only opted-in sessions chime; refresh, window moves and re-pair restore the switch without replay',async()=>{
+  const p=page(); p.button.onclick(); expect(p.pressed).toBe('true'); await p.settle(a,b)
+  p.reminder.select(b);expect(p.pressed).toBe('false');p.tick();await p.settle(a,{...b,finishedRound:4});expect(p.plays).toBe(0)
+  p.tick();await p.settle({...a,finishedRound:2},b);expect(p.plays).toBe(2)
+  const reload=page(p.values);expect(reload.pressed).toBe('true');await reload.settle({...a,finishedRound:6});expect(reload.plays).toBe(0)
+  reload.tick();reload.reminder.setPaired(false);await reload.settle({...a,finishedRound:7});expect(reload.plays).toBe(0)
+  reload.reminder.select({...a,terminal:'moved'});reload.reminder.setPaired(true);expect(reload.pressed).toBe('true')
+  await reload.settle({...a,terminal:'moved',finishedRound:9});expect(reload.plays).toBe(0)
+  reload.button.onclick();expect(page(p.values).pressed).toBe('false')
+})
+test('a fresh window keeps the preference when its first session ID arrives',()=>{
+  const p=page();p.reminder.select({...a,session:null});p.button.onclick();p.reminder.select(a)
+  expect(p.pressed).toBe('true');expect(page(p.values).pressed).toBe('true')
+  p.reminder.select({...a,session:'other'});expect(p.pressed).toBe('false')
 })

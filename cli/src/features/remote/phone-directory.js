@@ -71,6 +71,11 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     heading.className = 'terminal-heading';
     title.textContent = r.title || 'New conversation';
     heading.append(title);
+    if (r.gateway === true) {
+      const badge = document.createElement('span');
+      badge.className = 'terminal-gateway'; badge.textContent = 'Gateway';
+      badge.title = 'Hosts the Remote gateway'; heading.append(badge);
+    }
     if (['working','completed','input','busy'].includes(phase)) {
       const badge = document.createElement('span');
       badge.className = 'terminal-status';
@@ -100,7 +105,7 @@ export function sessionDrawer({ api, selected, choose, create, createIn, host, a
     const note = r.unshared ? 'Not shared · run /remote in that window' : r.kind === 'private' ? 'Update evot there' : '';
     meta.textContent = [r.age, r.workspace, note].filter(Boolean).join(' · ');
     const status = r.unshared ? 'Not shared' : place && phase === 'idle' ? '' : label;
-    button.setAttribute('aria-label', [title.textContent, place && placeIcons[place][0], status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
+    button.setAttribute('aria-label', [title.textContent, r.gateway && 'Hosts the Remote gateway', place && placeIcons[place][0], status, r.workspace, r.timeLabel].filter(Boolean).join(', '));
     button.append(heading, meta);
     if (!statusOnly) button.onclick = () => current ? dialog.close() : choose(r.terminal || null, r.session || null);
     // Saved sessions and idle windows the phone opened can be deleted; the computer closes such a window first.

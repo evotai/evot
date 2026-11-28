@@ -5,11 +5,26 @@ const TOUCH_FOLD_DISTANCE = 24;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
-export function conversationScroll({ chat, seat, editor, dock, write, jump, draft }) {
+export function conversationScroll({ chat, seat, editor, dock, write, collapse, jump, draft }) {
   let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
   let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false;
   const { ownerDocument } = chat, window = ownerDocument.defaultView;
-  let jumpFrame = null;
+  let jumpFrame = null, pendingPaint = null;
+  function observeBackwardScroll() {
+    // A fold/keyboard resize may run before the native scroll event. Clamping
+    // to a shorter bottom is layout; moving farther back is the reader.
+    if (following && chat.clientHeight && scrollTop() < Math.min(lastTop,bottom()) - 1) {
+      following = false; showLatest = true; layout();
+    }
+  }
+  // Keep one latest frame, not a growing backlog. The host sends a bounded
+  // tail: repainting it while reading could evict the very row on screen.
+  function paintHistory(paint) {
+    // Native scrollTop can change before its scroll event is delivered.
+    observeBackwardScroll();
+    if (following) paint();
+    else { pendingPaint = paint; showLatest = true; layout(); }
+  }
   // Safari can report negative or past-bottom positions during rubber-banding.
   const bottom = () => Math.max(0, chat.scrollHeight - chat.clientHeight);
   const scrollTop = () => Math.max(0, Math.min(chat.scrollTop, bottom()));
@@ -44,11 +59,14 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
   }
   function followBottom() {
     following = true;
+    const paint = pendingPaint; pendingPaint = null;
+    paint?.();
     showLatest = false;
     layout();
     keepLatest();
   }
   function latest() {
+    pendingPaint = null; // Resetting or changing the session discards the old view.
     stopJump();
     compact = false;
     followBottom();
@@ -93,7 +111,7 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
   }
   chat.addEventListener('scroll', () => {
     if (!chat.clientHeight || jumpFrame !== null) return;
-    if (chat.clientHeight !== lastHeight) { rememberPosition(); return; }
+    if (chat.clientHeight !== lastHeight) { observeBackwardScroll(); rememberPosition(); return; }
     const top = scrollTop(), previous = lastTop, gap = bottom() - top;
     lastTop = top;
     if (top > previous) {
@@ -108,6 +126,7 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
     layout();
   }, {passive:true});
   new window.ResizeObserver(() => {
+    observeBackwardScroll();
     if (following) keepLatest();
     else if (chat.clientHeight !== lastHeight || scrollTop() !== lastTop) rememberPosition();
   }).observe(chat);
@@ -160,6 +179,12 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
     if (['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)) nonTouchScroll();
   });
 
+  collapse.onclick = () => {
+    if (!canCompact) return;
+    stopJump();
+    fold();
+    write.focus({preventScroll:true}); // Release the keyboard; keep the caret in the original draft.
+  };
   write.onclick = () => {
     stopJump();
     // Stop any outstanding momentum before focusing the real editor in place.
@@ -170,7 +195,7 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
     draft.focus({preventScroll:true});
   };
   jump.onclick = scrollToLatest;
-  return { latest, keepLatest, submitted, openComposer, update(compactable, hasDraft) {
+  return { latest, keepLatest, paintHistory, submitted, openComposer, update(compactable, hasDraft) {
     canCompact = compactable;
     const label = hasDraft ? 'Resume draft' : 'Open composer';
     if (write.ariaLabel !== label) {

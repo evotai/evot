@@ -25,7 +25,9 @@ export function reviewNavigation(dialog, button, target) {
   }
   button.onclick = () => {
     if (!target()) return;
-    history.pushState({...history.state, reviewTerminal:target()}, '', '?changes');
+    const url = new URL(location.href);
+    url.searchParams.set('changes','');
+    history.pushState({...history.state, reviewTerminal:target()}, '', url.href);
     sync();
   };
   window.addEventListener('popstate',sync);

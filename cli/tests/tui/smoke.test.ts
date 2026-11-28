@@ -2200,9 +2200,13 @@ describe.skipIf(!canRun)('evot binary smoke (PTY)', () => {
       const second = await state(); expect(second.sessionId).toBe(first.sessionId); expect(second.generation).not.toBe(first.generation)
       const interrupt = {kind:'interrupt-ask', id:second.ask!.id, generation:second.generation}
       expect((await post('/action', {...interrupt, generation:first.generation})).status).toBe(409)
-      expect((await post('/action', interrupt)).status).toBe(204)
+      headers.Accept = 'application/json'
+      const receipt = await post('/action', interrupt); delete headers.Accept
+      expect(receipt.status).toBe(200)
+      const stopped = await receipt.json() as RemoteSnapshot
+      expect(stopped).toMatchObject({status:'Stopped',input:'send',ask:null,canStop:false,composerKeys:{queue:false}})
+      expect(stopped.messages.at(-1)?.text).toContain('Cancelled.')
       await session.waitForScreen('Cancelled.')
-      const stopped = await state(); expect(stopped).toMatchObject({status:'Stopped', input:'send', ask:null})
       expect(await finishedRound()).toBe(first.generation) // A manual interrupt never publishes a completion.
       session.checkpoint(); session.write('/new\r'); await session.waitForScreen(/^\s*new session\s*$/m)
       expect(await state()).toMatchObject({sessionId:null, messages:[], input:'send'})

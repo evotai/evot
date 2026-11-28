@@ -233,6 +233,14 @@ export function listenRemote(
         if (!r.ok) return fail(r.status, await r.text())
       } else host.act(action)
       photos.release(stashed.refs)
+      // Return the selected host's post-interrupt state in this round trip.
+      // Existing clients keep the empty 204; old peers only need /state.
+      if ((action.kind === 'stop' || action.kind === 'interrupt-ask') && req.headers.get('accept') === 'application/json') {
+        const state = other ? await workspace!.bus.request(other, '/state') : Response.json(host.snapshot())
+        if (!authorized() || !shared()) return unauthorized()
+        if (!state.ok) return fail(state.status, 'Window no longer available.')
+        return new Response(state.body,{headers:{...headers,'Content-Type':'application/json'}})
+      }
       return new Response(null, { status: 204, headers })
     },
     error: (e: Error) =>
