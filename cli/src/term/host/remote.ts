@@ -7,7 +7,7 @@ import { runSessionShare, type SessionShareContext, type SessionShareMode } from
 import { getThemeScheme } from '../../ui/theme/index.js'
 import { remoteHome, sharingScope } from '../../features/remote/transport.js'
 import { approvePairing, manageGrants } from '../../features/remote/grants.js'
-import { terminalInvite } from '../../features/remote/cloud-connect.js'
+import { ConnectRetryable, terminalInvite } from '../../features/remote/cloud-connect.js'
 import { GatewayOccupied, openEnvironment } from '../../features/remote/environment.js'
 import { gatewayPolicy, updateGatewayPolicy } from '../../features/remote/gateway-policy.js'
 import { machineIdentity } from '../../features/remote/machine-identity.js'
@@ -668,8 +668,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           st.terminalBus.route(scope, { url: gateway.url, address: gateway.address, windowApproval: true })
           deps.replCommands.requestRender()
           if (!gateway.cloud) status?.finish('success', 'Local approval gateway is on.')
-          else if (gateway.online) status?.finish('success', `Online at ${new URL(gateway.address).host}.`)
-          else status?.finish('info', `Started, but ${new URL(gateway.address).host} is not answering yet. The QR code works once Cloudflare connects.`)
+          else status?.finish('info', `Gateway started for ${new URL(gateway.address).host}. The address works once the tunnel connects.`)
         } catch (e) {
           const stillActive = active()
           if (invite && stillActive && !(e instanceof GatewayOccupied)) st.terminalBus?.share(null)
@@ -705,10 +704,20 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     const p = profile()
     const policyHome = p.account ? join(homedir(), '.evotai') : p.home
     if (gatewayPolicy(policyHome) !== p.scope) return false
-    if (currentScope() !== p.scope || st.remoteChild || (!st.remoteListener && deps.outdatedBuild?.() === true))
+    if (currentScope() !== p.scope || st.remoteChild)
       throw Error('This window cannot serve the enabled Remote profile.')
-    if (!st.remoteListener) await enable(gatewayProfile(), false, current)
-    if (!st.remoteListener?.online) throw Error('Remote gateway did not become ready.')
+    if (!st.remoteListener) {
+      if (Date.now() < st.remoteRetryAt) return 'reconnecting' as const
+      try { await enable(gatewayProfile(), false, current) }
+      catch (error) {
+        if (!(error instanceof ConnectRetryable) || !current()) throw error
+        // Keep the Console and the host election intact during a control-plane
+        // restart. Only registration needs to be retried on maintenance ticks.
+        st.remoteRetryAt = Date.now() + 15_000
+        return 'reconnecting' as const
+      }
+    }
+    if (!st.remoteListener) throw Error('Remote gateway did not start.')
     return true
   }
 
@@ -756,6 +765,10 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     maintain,
     ensureHosted,
     hostScope: () => profile().scope,
+    remoteOptedIn: () => {
+      const p = profile()
+      return allowed(p.account ? join(homedir(), '.evotai') : p.home, p.scope)
+    },
     idleForHost: () => windowStatus().phase === 'idle' && !st.remoteChild && !st.restarting && !st.restartPending && !st.logMode,
     releaseHost: () => { if (st.remoteListener || st.remoteOpening) close(false) },
     resume,

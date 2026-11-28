@@ -64,14 +64,3 @@ test('a cloudflared already on PATH is used as is', async () => {
   mkdirSync(join(home, 'empty')); writeFileSync(join(home, 'empty', 'cloudflared'), '#!/bin/sh\n', { mode: 0o755 })
   expect(await ensureCloudflared(home, () => { throw Error('must not install') }, { download: async () => { throw Error('no') } })).toBe(join(home, 'empty', 'cloudflared'))
 })
-
-test('the gateway reports online only when its own page answers through the edge', async () => {
-  const { reachable } = await import('../../../src/features/remote/environment.js')
-  let calls = 0
-  const probe = (async () => { calls++; if (calls < 3) throw Error('dns'); return new Response('ok') }) as unknown as typeof fetch
-  expect(await reachable('https://evot-x.example', () => false, 10_000, probe)).toBe(true)
-  expect(calls).toBe(3)
-  const never = (async () => new Response('', { status: 530 })) as unknown as typeof fetch
-  expect(await reachable('https://evot-x.example', () => false, 1_500, never)).toBe(false)
-  expect(await reachable('https://evot-x.example', () => true, 10_000, never)).toBe(false)
-})

@@ -74,6 +74,7 @@ function signedIn(account: string) {
 }
 
 export class ConnectRetryable extends Error {}
+export class ConnectDenied extends Error {}
 
 export async function allocateCloud(identity: MachineIdentity, account: string, connector: () => Promise<string>, binding?: string) {
   const bin = await connector()
@@ -87,9 +88,9 @@ export async function allocateCloud(identity: MachineIdentity, account: string, 
     body: JSON.stringify({ secret, label: machineName(), binding }),
   }).catch(() => { throw new ConnectRetryable('Could not reach evot Connect.') })
   if (!res.ok) {
-    if (res.status === 401) throw Error('Sign in again with /login.')
-    if (res.status === 403) throw Error('The account cannot enable Remote.')
-    if (res.status === 409) throw Error('Remote account binding changed. Run /remote to start a new gateway.')
+    if (res.status === 401) throw new ConnectDenied('Sign in again with /login.')
+    if (res.status === 403) throw new ConnectDenied('The account cannot enable Remote.')
+    if (res.status === 409) throw new ConnectDenied('Remote account binding changed. Run /remote to start a new gateway.')
     if (res.status === 404) throw Error('The account server must be upgraded to support machine addresses.')
     if (res.status >= 500 || res.status === 429) {
       const body = await res.json().catch(() => null) as { error?: unknown } | null
@@ -98,7 +99,10 @@ export async function allocateCloud(identity: MachineIdentity, account: string, 
     }
     throw Error(`Connect registration refused (${res.status}).`)
   }
-  const data = (await res.json()) as Record<string, unknown>
+  // A process can drain after sending headers but before the complete body.
+  // Retry transport/read failures; a complete but invalid allocation is rejected.
+  const body = await res.text().catch(() => { throw new ConnectRetryable('Connect registration response was interrupted.') })
+  const data = JSON.parse(body) as Record<string, unknown>
   if (
     data.version !== 2 ||
     typeof data.binding !== 'string' || !/^[0-9a-f]{32}$/.test(data.binding) ||

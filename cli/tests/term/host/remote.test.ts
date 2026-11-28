@@ -1,4 +1,9 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
+import { ConnectRetryable } from '../../../src/features/remote/cloud-connect.js'
+import * as environment from '../../../src/features/remote/environment.js'
+import { updateGatewayPolicy } from '../../../src/features/remote/gateway-policy.js'
+import * as consoleServer from '../../../src/term/app/server.js'
+import { createServiceController } from '../../../src/term/host/services.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -766,6 +771,35 @@ test('a hidden gateway owner restarts the profile without exposing its own sessi
     if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
     if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
     rmSync(privateSocketDirectory(home), {recursive:true,force:true}); rmSync(home, {recursive:true,force:true})
+  }
+})
+
+test('an opted-in older idle window fills a vacancy and retains Console ownership during a registration outage', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'evot-upgrade-host-')), previous = process.env.EVOT_HOME, local = process.env.EVOT_REMOTE_LOCAL_TEST
+  const {st,remote} = harness(undefined,undefined,{outdatedBuild:()=>true,coordinatedHost:true})
+  const clock = spyOn(Date,'now'), launch = spyOn(environment,'openEnvironment')
+  const start = spyOn(consoleServer,'tryStartServer').mockResolvedValue({owned:true,port:8082,address:'http://127.0.0.1:8082',channels:[],envFile:'/fixture',startedAt:0})
+  const stop = spyOn(consoleServer,'drainOwnedServer').mockResolvedValue(undefined)
+  try {
+    process.env.EVOT_HOME = home; process.env.EVOT_REMOTE_LOCAL_TEST = '1'
+    const envPath = join(home,'evot.env'); await Bun.write(envPath,'')
+    st.configInfo = {...st.configInfo!,envPath}; remote.register()
+    await updateGatewayPolicy(home,remote.hostScope(),'enable',()=>true)
+    const services = createServiceController(st,{remote,port:8082,insideTmux:()=>false,outdated:()=>true,notice(){},publish(){}},false)
+    const now = Date.now(); clock.mockReturnValue(now)
+    launch.mockRejectedValueOnce(new ConnectRetryable('Connect is restarting'))
+    await services.tick(); expect(st.serviceHost?.controller.owner).toBe(true)
+    expect(st.remoteListener).toBeNull(); expect(stop).not.toHaveBeenCalled()
+    clock.mockReturnValue(now+6000); await services.tick(); expect(launch).toHaveBeenCalledTimes(1)
+    clock.mockReturnValue(now+16000); await services.tick(); expect(st.remoteListener?.active()).toBe(true)
+    expect(launch).toHaveBeenCalledTimes(2); expect(stop).not.toHaveBeenCalled()
+    await remote.command('off'); await services.tick(); expect(st.remoteListener).toBeNull()
+  } finally {
+    await st.serviceHost?.controller.dispose(false); remote.dispose()
+    clock.mockRestore(); launch.mockRestore(); start.mockRestore(); stop.mockRestore()
+    if (previous === undefined) delete process.env.EVOT_HOME; else process.env.EVOT_HOME = previous
+    if (local === undefined) delete process.env.EVOT_REMOTE_LOCAL_TEST; else process.env.EVOT_REMOTE_LOCAL_TEST = local
+    rmSync(privateSocketDirectory(home),{recursive:true,force:true}); rmSync(home,{recursive:true,force:true})
   }
 })
 

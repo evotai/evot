@@ -38,7 +38,9 @@ export function createServiceController(st: ReplState, d: ServiceDeps, request: 
       const election = new HostElection(dir,scope,bus.id,port)
       const valid = () => !st.destroyed && d.remote.hostScope() === scope
       const controller = new ServiceHost(election, {
-        eligible: () => !d.insideTmux() && !d.outdated() && d.remote.idleForHost(),
+        // An installed update alone must not strand an opted-in profile with
+        // only older windows. This is vacancy recovery, never preemption.
+        eligible: () => !d.insideTmux() && d.remote.idleForHost() && (!d.outdated() || d.remote.remoteOptedIn()),
         gone: id => windowGone(dir,id),
         preflight: async () => {
           if (st.remoteChild || d.outdated()) throw Error('Use an up-to-date local TUI window.')
@@ -55,6 +57,7 @@ export function createServiceController(st: ReplState, d: ServiceDeps, request: 
           if (!valid() || !current()) throw Error('Host request changed.')
           const remote = await d.remote.ensureHosted(() => current() && valid())
           if (current() && valid()) d.publish(state)
+          if (remote === 'reconnecting') return 'Console (Remote registration is retrying)'
           return remote ? 'Console and Remote' : 'Console (Remote is off)'
         },
         stop: async () => {
