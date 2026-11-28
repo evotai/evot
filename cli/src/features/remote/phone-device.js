@@ -52,7 +52,7 @@ export async function connectDevice(post, progress, redirect, background = false
   try {
     if (!window.indexedDB) throw Error('Device storage is unavailable. Open this invite in Safari or Chrome with site data enabled.');
     pair = await Promise.race([identity(), new Promise((_, reject) => {
-      timer = setTimeout(() => reject(Error('Device storage did not respond. Close other Connect tabs and try again.')), 10000);
+      timer = setTimeout(() => reject(new DOMException('Device storage did not respond.', 'TimeoutError')), 10000);
     })]);
   } finally { clearTimeout(timer); }
   const key = encode(await crypto.subtle.exportKey('raw', pair.publicKey));
@@ -79,11 +79,11 @@ export async function connectDevice(post, progress, redirect, background = false
     progress('approval', code, deadline);
     do {
       await new Promise((ok) => setTimeout(ok, 1000));
-      if (Date.now() >= deadline) throw Error('Approval expired. Request a new code.');
+      if (Date.now() >= deadline) throw Object.assign(Error('Approval expired.'), {approvalExpired:true});
       try {
         reply = await post('/device/poll', { receipt });
       } catch (error) {
-        if (error.status === 403) throw Error('Approval is no longer pending. Connect again to request a new code.');
+        if (error.status === 403) throw Object.assign(Error('Approval is no longer pending.'), {approvalExpired:true});
         if (error.status && error.status < 500) throw error;
         reply = {pending:true}; // network loss: keep the same pending request
       }

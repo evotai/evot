@@ -21,6 +21,7 @@ import { CONFIRM_MS, delivered, photoExpired, refused, requestTimeout, uploadReq
 import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
 import { draftCarry } from './phone-update.js';
 
+import { sessionRecovery, temporaryDisconnect, pairingFeedback } from './phone-recovery.js';
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('evot.remote'),
@@ -68,6 +69,7 @@ const keepDraft = () => drafts.keep(terminal, $('draft').value);
 // Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
 let dismissed = '';
 function selectTarget(id, session) {
+  recovery.reset();
   stopping.clear(); starting.clear();
   nav.select(id, session);
   reminder.select(nav.target);
@@ -148,7 +150,6 @@ function notice(text, persistent = false) {
     }, 3600);
 }
 function paired(yes) {
-  $('sessionUnavailable').hidden = true;
   $('openSessions').hidden = $('newSession').hidden = !yes;
   reminder.select(nav.target);
   reminder.setPaired(yes && !!token);
@@ -186,7 +187,6 @@ function controls() {
   commands.render(input && !busy && !tab.composing ? view : null);
   paintChangesButton($('openChanges'), connected && !!token, view);
   drawer.lock(busy || !token);
-  $('resumeLinked').disabled = busy || !token;
   $('openSessions').disabled = $('browseSessions').disabled = busy || !token;
   const empty = draftEmpty(), preview = currentSuggestion(empty), candidate = preview?.candidate || '';
   $('send').disabled = busy || !input || (!$('draft').value.trim() && !photos.count && !candidate);
@@ -279,8 +279,7 @@ function render(s) {
     background.render(null);
     transcript.latest();
   }
-  missingTarget = null;
-  $('sessionUnavailable').hidden = true;
+  recovery.reset();
   connected = true;
   $('chatLoading').hidden = true;
   if (draftCarried) {
@@ -353,12 +352,12 @@ folderPanel.onclick = (e) => { if (e.target === folderPanel) folderPanel.close()
 // A browser the computer already approved reconnects by itself: after the gateway
 // restarts, the tab was suspended, or the network came back. Only an explicit
 // denial or a storage failure hands control back to the button.
-let reconnectTimer, reconnectFailures = 0, needsInteraction = false;
+let reconnectTimer, reconnectFailures = 0, needsInteraction = false, pairingStarted = false;
 const approvedBefore = () => { try { return localStorage.getItem('evot.remote.approved') === '1'; } catch { return false; } };
 const rememberApproval = () => { try { localStorage.setItem('evot.remote.approved', '1'); } catch { /* Without site data, every visit pairs manually. */ } };
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
-  if (token || needsInteraction || (!approvedBefore() && !$('pair-screen').hidden) || document.hidden) return;
+  if (token || needsInteraction || (!pairingStarted && !approvedBefore() && !$('pair-screen').hidden) || document.hidden) return;
   reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 1000 * 2 ** Math.min(reconnectFailures, 4)));
 }
 function reconnecting() {
@@ -376,7 +375,6 @@ function unpair() {
   etag = '';
   reconnecting();
   $('deviceStatus').textContent = 'Access ended.';
-  $('pair').querySelector('button').textContent = 'Reconnect';
   reconnectFailures++;
   scheduleReconnect();
 }
@@ -406,14 +404,17 @@ async function api(path, body, extra = {}, signal, progress) {
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
 }
-let missingTarget = null;
 let liveRequest, pollUntil = 0, nextOwnerCheck = 0, checkingOwner = false, failures = 0;
 const inventory = async () => (await api('/sessions?online')).json();
+const recovery = sessionRecovery({requestId, onResume:() => setLinkStatus('Resuming session…', true),
+  lookup:async session => (await api('/sessions?limit=40&q=' + encodeURIComponent(session))).json(),
+  open:async body => (await api('/open', body)).json(),
+});
 function followOwner(owner, session) {
   selectTarget(owner.terminal, session);
-  view = null; connected = false; etag = '';
-  background.render(null);
-  setLinkStatus('Following live window…', true);
+  // Keep the mounted editor, transcript and reader position until the same session answers.
+  connected = false; etag = '';
+  setLinkStatus('Connecting…', true);
   controls();
 }
 // A saved conversation can later become active in a shared TUI. Follow
@@ -483,33 +484,32 @@ async function synchronize(ready) {
     if (mine !== epoch) return;
     failures++; etag = ''; reconnecting();
     if (e.status === 409 || e.status === 403) {
-      // Never silently resume a copy or send a draft to a different session.
-      // If the conversation moved to another shared TUI, follow that same session only.
+      // Prefer the existing live owner to opening the saved conversation.
       const session = nav.target?.session;
       let rows;
       try { rows = await inventory(); } catch { /* inconclusive; retry the selected window */ }
       if (mine !== epoch || !token) return;
       const owner = session && rows?.online.find(row => row.session === session);
-      if (owner && owner.terminal !== terminal) {
-        followOwner(owner, session);
+      if (owner) {
+        recovery.reset();
+        if (!busy && owner.terminal !== terminal) followOwner(owner, session);
         return;
       }
       if (rows && !rows.unavailable && !owner && (session || !rows.online.some(row => row.terminal === terminal))) {
-        // A restarting window can briefly disappear from the directory.
-        if (missingTarget?.id !== terminal) missingTarget = {id:terminal, since:Date.now()};
-        if (e.status === 403 || Date.now() - missingTarget.since >= 8000) {
-          if (session) {
-            // Keep the bookmark (and any draft). Opening a saved session can
-            // launch a terminal; do that only on an explicit resume.
-            setLinkStatus('Session unavailable');
-            $('chatLoading').hidden = $('welcome').hidden = true; $('sessionUnavailable').hidden = false;
-            return;
+        if (session) {
+          const original = terminal, current = () => mine === epoch && !!token && !busy && !document.hidden &&
+            terminal === original && nav.target?.session === session;
+          try {
+            const restored = await recovery.recover(original, session, current);
+            if (restored && current()) followOwner(restored, session);
+          } catch (err) {
+            if (current() && !temporaryDisconnect(err)) setLinkStatus(err.message || 'Session unavailable');
           }
-          missingTarget = null;
-          selectTarget(null, null); view = null; paired(true); notice('');
-          drawer.open('That window has closed or stopped sharing. Tap the session to resume it.');
           return;
         }
+        // An empty window may not have a saved session yet. Keep its draft and
+        // bookmark and let the poll below find that exact window when it returns.
+        setLinkStatus('Waiting for window…', true);
       }
     }
     if (live) pollUntil = Date.now() + 10000;
@@ -522,7 +522,7 @@ async function synchronize(ready) {
 }
 async function pair(auto = false) {
   if (pairing || leaving) return;
-  pairing = true;
+  pairing = pairingStarted = true;
   clearTimeout(reconnectTimer);
   const form = $('pair'), button = form.querySelector('button');
   const inPlace = $('pair-screen').hidden;
@@ -532,7 +532,7 @@ async function pair(auto = false) {
   needsInteraction = false;
   $('resumeConnection').hidden = true;
   let countdown;
-  button.disabled = true;
+  button.hidden = button.disabled = true;
   $('approvalCode').hidden = $('approvalClock').hidden = true;
   showStatus(auto ? 'Reconnecting…' : 'Connecting…', true);
   notice('');
@@ -563,18 +563,17 @@ async function pair(auto = false) {
     else if (!inPlace) drawer.open();
     else setLinkStatus('');
   } catch (e) {
-    const storage = e.name === 'SecurityError' || e.name === 'QuotaExceededError';
-    const unreachable = e.name === 'TimeoutError' || e instanceof TypeError || e.status === 429 || e.status >= 500;
-    needsInteraction = !unreachable;
-    showStatus(storage
-      ? 'Enable browser storage to connect.'
-      : unreachable
-        ? inPlace ? 'Reconnecting…' : 'Computer unreachable. Check /remote.'
-        : e.message || 'Could not connect.', unreachable);
-    const label = e.signIn ? 'Sign in' : unreachable ? 'Retry now' : 'Reconnect';
-    button.textContent = $('resumeConnection').textContent = label;
-    $('resumeConnection').hidden = !inPlace || unreachable;
-    if (unreachable) { reconnectFailures++; scheduleReconnect(); }
+    const feedback = pairingFeedback(e);
+    needsInteraction = !feedback.retry;
+    showStatus(feedback.status, feedback.retry);
+    if (feedback.action) {
+      const action = inPlace ? $('resumeConnection') : button;
+      action.textContent = feedback.action;
+      action.hidden = false;
+    } else if (!inPlace && !feedback.retry) {
+      button.textContent = 'Connect'; button.hidden = false;
+    }
+    if (feedback.retry) { reconnectFailures++; scheduleReconnect(); }
   } finally {
     clearInterval(countdown);
     $('approvalCode').hidden = $('approvalClock').hidden = true;
@@ -932,11 +931,10 @@ document.addEventListener('visibilitychange', refreshOnReturn);
 window.addEventListener('online', refreshOnReturn);
 $('browseSessions').onclick = drawer.open;
 $('resumeConnection').onclick = () => void pair();
-$('resumeLinked').onclick = () => { if (nav.target?.session) void choose(null, nav.target.session); };
 window.addEventListener('pageshow', event => {
   if (event.persisted && leaving) {
     leaving = false;
-    const button = $('pair').querySelector('button'); button.disabled = false; button.textContent = 'Continue sign-in';
+    const button = $('pair').querySelector('button'); button.hidden = button.disabled = false; button.textContent = 'Continue sign-in';
     needsInteraction = true;
     const inPlace = $('pair-screen').hidden;
     if (inPlace) setLinkStatus('Sign-in wasn’t finished.');
