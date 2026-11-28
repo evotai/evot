@@ -1,7 +1,5 @@
-// A restarted gateway can serve a newer page. The open page reloads once to
-// pick it up, and the unsent draft rides along through that reload, a sign-in
-// redirect or a silent re-pairing. Tab-scoped storage only; it never leaves the phone.
-const DRAFT = 'evot.remote.draft', RELOADED = 'evot.remote.reloadedFor';
+// Carry an unsent draft through an explicit sign-in. Tab-scoped; it never leaves the phone.
+const DRAFT = 'evot.remote.draft';
 const DRAFT_TTL_MS = 10 * 60 * 1000;
 
 export function draftCarry(storage, now = Date.now) {
@@ -20,19 +18,5 @@ export function draftCarry(storage, now = Date.now) {
         return typeof saved.text === 'string' && now() - saved.at < DRAFT_TTL_MS ? saved.text : '';
       } catch { return ''; }
     },
-  };
-}
-
-/** Returns a check for each reply's build. It reloads at most once per served
- * build, so a cached old page can never loop. */
-export function pageUpdates(current, storage, reload) {
-  return served => {
-    if (!served || !current || served === current) return false;
-    try {
-      if (storage.getItem(RELOADED) === served) return false;
-      storage.setItem(RELOADED, served);
-    } catch { return false; }
-    reload();
-    return true;
   };
 }

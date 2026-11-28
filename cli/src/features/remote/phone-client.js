@@ -19,7 +19,7 @@ import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
 import { CONFIRM_MS, delivered, photoExpired, refused, requestTimeout, uploadRequest } from './phone-send.js';
 import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
-import { draftCarry, pageUpdates } from './phone-update.js';
+import { draftCarry } from './phone-update.js';
 
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
@@ -60,13 +60,10 @@ const stopping = runInterrupt({
   }, refresh, error:e => notice(e.message + ' Check the current run before retrying.',true),
 });
 const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
-// The draft typed for this window survives a page update, a sign-in redirect and re-pairing.
+// Only an explicit sign-in navigates away; keep its draft for the return trip.
 const drafts = draftCarry(sessionStorage);
 let draftCarried = true;
 const keepDraft = () => drafts.keep(terminal, $('draft').value);
-const pageUpdated = pageUpdates(document.documentElement.dataset.build, sessionStorage, () => {
-  keepDraft(); leaving = true; location.reload();
-});
 // Only dismissal is phone-local. Candidates and feedback always come from the selected TUI.
 let dismissed = '';
 function selectTarget(id, session) {
@@ -405,7 +402,6 @@ async function api(path, body, extra = {}, signal, progress) {
     signal: signal ?? AbortSignal.timeout(timeout),
   });
   if (res.status === 401 && credential && token === credential) unpair();
-  pageUpdated(res.headers.get('x-evot-build'));
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
 }
