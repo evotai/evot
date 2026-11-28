@@ -29,8 +29,6 @@ html.remote-shell[data-theme="light"] {
 #resumeConnection { pointer-events:auto; flex:none; min-height:32px; padding:2px 10px; border:0; border-radius:8px; background:var(--fill); color:var(--accent); cursor:pointer; }
 .run-line[data-connection] :is(#nextModel,#bgStatus,.run-place) { display:none; }
 .run-line[data-connection] #status { color:var(--amber); }
-#bgChip { display:inline-flex; align-items:center; gap:4px; flex:none; min-height:44px; padding:0 8px; border:0; border-radius:12px; color:var(--accent); background:var(--fill); font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }
-#bgChip:is(:hover,:active):not(:disabled) { background:var(--accent-soft); }
 .native-picker { display:flex; align-items:center; }
 .pair-card small { font-size:12px; color:var(--muted); }
 /* A fixed slot for the same glyph changes as the TUI, without layout movement. */
@@ -83,7 +81,7 @@ evot-activity[data-running] { color:var(--accent); }
 /* Keyboard open on a phone: keep the whole draft, its shortcuts and send row in view.
    The transcript may shrink to nothing first; the status line returns with the keyboard. */
 .remote-page .conversation[data-tight] .chat-scroll { min-height:0; padding-block:6px; }
-.remote-page .conversation[data-tight] .run-line:not([data-active]):not(:has(#escapeKey:not([hidden]))) { display:none; }
+.remote-page .conversation[data-tight] .run-line:not([data-active]):not(:has(.task-keys button:not([hidden]),#bgStatus:not([hidden]))) { display:none; }
 .remote-page .conversation[data-tight] .run-line[data-active] { min-height:20px; padding-block:0; }
 .remote-page .conversation[data-tight] .composer-seat { padding-top:2px; padding-bottom:6px; }
 .remote-page .conversation[data-tight] .composer-card :is(#draft,#draftGhost) { max-height:max(36px,calc(var(--remote-viewport-height,100dvh) * .25)); }
@@ -141,9 +139,8 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 /* The only line above the composer: what the window is doing, then where it runs. */
 .run-line { display:flex; flex:none; align-items:center; gap:10px; width:min(var(--composer-width),100%); min-height:32px; padding:0 12px 4px; font-size:12px; color:var(--muted); }
 .run-state { position:relative; flex:1; min-width:0; align-self:stretch; align-content:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-variant-numeric:tabular-nums; }
-#bgStatus { position:absolute; inset:0; width:100%; padding:0; border:0; background:transparent; cursor:pointer; pointer-events:auto; }
-#bgStatus:focus-visible { outline-offset:-2px; }
-.run-state:has(#bgStatus:not([hidden])) #status { color:var(--accent); }
+#bgStatus { flex:none; min-height:32px; padding:0 6px; border:0; border-radius:8px; background:transparent; color:var(--accent); font:inherit; cursor:pointer; pointer-events:auto; }
+#bgStatus:is(:focus-visible,:active) { background:var(--fill); outline-offset:-2px; }
 #statusDetail:not(:empty)::before,#nextModel:not(:empty)::before,#placeBranch:not(:empty)::before { content:' · '; }
 /* While a run is busy its own detail needs the room; the place returns when idle. */
 .run-line[data-active] .run-place { display:none; }
@@ -195,15 +192,14 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 .diff-row[data-kind=remove] mark { background:var(--diff-remove-word); color:inherit; }
 .diff-row[data-kind=header] { background:var(--diff-header-bg); color:var(--diff-header-fg); }
 .diff-row[data-kind=ellipsis] { color:var(--diff-gutter); }
-/* An accessory row inside the composer. Only the keys scroll on a very narrow phone. */
-.task-keys { display:flex; align-items:center; gap:4px; margin:0 2px 2px; padding:0 2px; overflow-x:auto; border-bottom:1px solid var(--line); }
-.task-keys button { flex:none; display:flex; align-items:center; gap:5px; min-height:44px; padding:0 7px; border:0; border-radius:12px; background:transparent; color:var(--ink); font-size:12px; font-weight:550; cursor:pointer; }
-.task-keys kbd { padding:3px 5px; border:1px solid var(--line); border-radius:5px; background:var(--fill); color:var(--muted); font:11px/1.1 ui-monospace,monospace; }
+/* Editing keys share the trailing edge of the status line, never a draft row. */
+.task-keys { display:flex; flex:none; align-items:center; }
+.task-keys:not(:has(button:not([hidden]))) { display:none; }
+.task-keys button { min-width:44px; min-height:44px; padding:0 6px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:600 12px ui-monospace,monospace; white-space:nowrap; cursor:pointer; pointer-events:auto; }
+#tabKey span { font:12px system-ui,sans-serif; }
 .task-keys button:disabled { opacity:.5; cursor:default; }
 .task-keys button:is(:active,:focus-visible) { background:var(--fill); outline-offset:-2px; }
-#escapeKey { flex:none; min-width:44px; min-height:38px; padding:0 8px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:600 12px ui-monospace,monospace; cursor:pointer; pointer-events:auto; }
-#escapeKey:is(:active,:focus-visible),#escapeKey[data-confirm] { background:var(--fill); }
-#escapeKey[data-confirm] { color:var(--red); }
+#escapeKey[data-confirm] { background:var(--fill); color:var(--red); }
 #bgPanel { width:min(92vw,560px); max-height:80dvh; padding:18px; border:1px solid var(--line); border-radius:20px; background:var(--side-bg); color:var(--ink); }
 #bgPanel::backdrop,#sessionsDrawer::backdrop { background:#0008; }
 #bgSubtitle { margin:3px 0 12px; color:var(--muted); font-size:13px; overflow-wrap:anywhere; }

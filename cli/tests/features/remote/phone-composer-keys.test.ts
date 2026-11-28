@@ -11,6 +11,7 @@ test('inline feedback is never insertable and respects local drafts, dismissal, 
   const hint = '· nothing to suggest · ⇥ retry', empty = {...old, suggestionHint:hint}
   expect(inlineSuggestion(empty,true,'')).toEqual({key:hint,candidate:'',text:hint})
   expect(inlineSuggestion(empty,true,hint)).toBeNull()
+  expect(inlineSuggestion({...old,suggestionHint:'no suggestion'},true,'')).toBeNull()
   for (const view of [{...empty,input:null},{...empty,ask:{id:'ask'}},null]) expect(inlineSuggestion(view,true,'')).toBeNull()
   const ready = {...old, suggestion:'Run tests.'}
   expect(inlineSuggestion(ready,true,'')?.candidate).toBe(ready.suggestion) // old host: candidate only
@@ -52,15 +53,22 @@ test('showing builtins in the shared hint catalog does not let them queue', () =
 })
 
 test('only unmodified Tab is intercepted by the accessory; typing, Shift+Tab and IME stay native', () => {
-  const calls:string[] = [], button = {hidden:false,disabled:false,lastElementChild:{textContent:''},onclick(){}},
-    draft = {value:'later',selectionStart:5,addEventListener(){},focus(){}}
+  const calls:string[] = [], button = {hidden:false,disabled:false,lastElementChild:{textContent:''},onclick(){},addEventListener(){}},
+    doc = {activeElement:null as object | null}, draft = {ownerDocument:doc,value:'later',selectionStart:5,addEventListener(){},focus(){}}
   const tab = composerTab(draft,button,{commands:{hasChoices:false}, queue:()=>calls.push('queue'), disarm(){}, suggest(){},changed(){}})
-  tab.render(old,false,0,''); expect(button.hidden).toBe(true)
+  draft.value = ''; const idle = {...old,composerKeys:{suggest:true}}
+  tab.render(idle,false,0,''); expect(button.hidden).toBe(true)
+  doc.activeElement = draft; tab.render(idle,false,0,''); expect(button.hidden).toBe(false)
+  tab.render(idle,true,0,''); expect(button.hidden).toBe(true)
+  draft.value = 'later'; tab.render(old,false,0,''); expect(button.hidden).toBe(true)
   tab.render(running,false,0,''); expect(button.hidden).toBe(false); expect(button.lastElementChild.textContent).toBe('Send after')
   for (const e of [{key:'Tab',shiftKey:true},{key:'Tab',isComposing:true},{key:'Tab',keyCode:229},{key:'k',ctrlKey:true},{key:'ArrowDown'},{key:'d',altKey:true}])
     expect(tab.keydown(e)).toBe(false)
   expect(calls).toBeEmpty(); expect(tab.keydown({key:'Tab',preventDefault(){}})).toBe(true); button.onclick()
   expect(calls).toEqual(['queue','queue'])
+  tab.setCompact(true); tab.render(running,false,0,''); expect(button.hidden).toBe(true)
+  button.onclick(); expect(tab.keydown({key:'Tab'})).toBe(false); expect(calls).toHaveLength(2)
+  tab.setCompact(false); expect(button.hidden).toBe(false); button.onclick(); expect(calls).toHaveLength(3)
 })
 
 test('slash hints stay inline; only explicit completion opens a menu or edits the draft', () => {

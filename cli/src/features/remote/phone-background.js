@@ -2,14 +2,13 @@
 // resolves the task, formats status/output and restricts it to its session.
 export function backgroundPanel(document, refresh) {
   const el = (id) => document.getElementById(id),
-    panel = el('bgPanel'), chip = el('bgChip'), statusButton = el('bgStatus'), countLabel = el('bgCount'),
-    output = el('bgOutput'), subtitle = el('bgSubtitle'), activity = el('bgActivity'), outputActivity = el('bgOutputActivity'),
+    panel = el('bgPanel'), statusButton = el('bgStatus'),
+    output = el('bgOutput'), subtitle = el('bgSubtitle'), outputActivity = el('bgOutputActivity'),
     list = el('bgTasks'), allTasks = el('allTasks');
   let selected = null, background = null, connected = false, loading = false, shownTask = null;
   function setConnected(yes) {
     if (connected === yes) return;
     connected = yes;
-    activity.toggleAttribute('data-running', yes);
     outputActivity.toggleAttribute('data-running', yes);
     for (const mark of list.querySelectorAll('evot-activity')) mark.toggleAttribute('data-running', yes);
     if (panel.open && loading) paint();
@@ -21,7 +20,7 @@ export function backgroundPanel(document, refresh) {
     if (!panel.open) panel.showModal();
     void refresh();
   }
-  chip.onclick = statusButton.onclick = () => {
+  statusButton.onclick = () => {
     const tasks = background?.tasks;
     if (tasks?.length) select(tasks.length === 1 ? tasks[0].id : 'list');
   };
@@ -41,11 +40,11 @@ export function backgroundPanel(document, refresh) {
     background = bg;
     loading = false;
     const count = bg?.tasks.length ?? 0;
-    chip.hidden = statusButton.hidden = !count;
-    const label = count ? `${count} ${count === 1 ? 'task' : 'tasks'} running` : '';
-    if (countLabel.textContent !== label) {
-      countLabel.textContent = label;
-      chip.ariaLabel = label ? `Background: ${label}` : '';
+    statusButton.hidden = !count;
+    const label = count ? `${count} ${count === 1 ? 'task' : 'tasks'}` : '';
+    if (statusButton.textContent !== label) {
+      statusButton.textContent = label;
+      statusButton.ariaLabel = count ? `Open background tasks: ${label} running` : '';
     }
     if (!count) {
       clearSelection();

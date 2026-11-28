@@ -5,7 +5,7 @@ import { phoneSkill } from './phone-commands.js';
 // Feedback belongs to the same host snapshot as the candidate, but is never draft text.
 export function inlineSuggestion(view, empty, dismissed) {
   if (!empty || !view?.input || view.ask) return null;
-  const candidate = view.suggestion || '', hint = view.suggestionHint || '';
+  const candidate = view.suggestion || '', hint = view.suggestionHint === 'no suggestion' ? '' : view.suggestionHint || '';
   const key = candidate || hint;
   return key && key !== dismissed ? { key, candidate, text: [candidate,hint].filter(Boolean).join('  ') } : null;
 }
@@ -35,7 +35,19 @@ export function tabIntent(view, draft, cursor, {choices, photos, ghost}) {
 // Tab is the only editing shortcut we take from the draft. In particular,
 // Shift+Tab still moves focus and Ctrl/Cmd keys still belong to the browser / IME.
 export function composerTab(draft, tab, {commands, changed, queue, suggest, disarm}) {
-  let intent, ghost, locked, composing = false;
+  let intent, ghost, locked, composing = false, compact = false;
+  function paint() {
+    tab.disabled = compact || !intent || locked || composing || draft.readOnly;
+    // An empty, untouched composer is not an invitation to generate a suggestion.
+    const focused = draft.ownerDocument?.activeElement;
+    tab.hidden = tab.disabled || (intent === 'Suggest' && focused !== draft && focused !== tab);
+    if (tab.lastElementChild.textContent !== (intent || '')) tab.lastElementChild.textContent = intent || '';
+  }
+  // Defer blur until focus has reached the shortcut (keyboard navigation).
+  for (const el of [draft, tab]) {
+    el.addEventListener('focus', paint);
+    el.addEventListener('blur', () => queueMicrotask(paint));
+  }
   draft.addEventListener('compositionstart', () => { composing = true; changed(); });
   draft.addEventListener('compositionend', () => { composing = false; changed(); });
   function accept() {
@@ -43,7 +55,7 @@ export function composerTab(draft, tab, {commands, changed, queue, suggest, disa
     draft.focus({preventScroll:true}); applyEdit(draft,{start:0,end:0,text:ghost}); changed();
   }
   function invoke() {
-    if (locked || composing || draft.readOnly || !intent) return;
+    if (tab.disabled || draft.readOnly || !intent) return;
     disarm(); draft.focus({preventScroll:true});
     if (intent === 'Complete') commands.complete();
     else if (intent === 'Send after') queue();
@@ -52,13 +64,14 @@ export function composerTab(draft, tab, {commands, changed, queue, suggest, disa
   }
   tab.onclick = invoke; tab.onmousedown = e => e.preventDefault();
   return { get composing() { return composing; },
+    setCompact(value) { compact = value; paint(); },
     render(view, busy, photos, suggestion) {
       locked = busy || !view?.input; ghost = photos ? '' : suggestion;
       intent = tabIntent(view,draft.value,draft.selectionStart,{choices:commands.hasChoices,photos,ghost});
-      tab.hidden = !intent; tab.disabled = !intent || locked || composing; tab.lastElementChild.textContent = intent || '';
+      paint();
     },
     keydown(e) {
-      if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229 || composing || tab.disabled || tab.hidden) return false;
+      if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.keyCode === 229 || composing || tab.disabled) return false;
       e.preventDefault(); if (!e.repeat) invoke(); return true;
     },
   };

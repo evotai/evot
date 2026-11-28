@@ -1,10 +1,8 @@
 import { expect, mock, test } from 'bun:test'
 import { backgroundPanel } from '../../../src/features/remote/phone-background.js'
 
-test('the header and open output follow live task status, then clear when the task finishes', () => {
-  const chip = { hidden:true, ariaLabel:'', onclick() {} }
-  const statusButton = { hidden:true, onclick() {} }
-  const count = { textContent:'' }
+test('the composer status row opens live background output and clears when the task finishes', () => {
+  const statusButton = { hidden:true, textContent:'', ariaLabel:'', onclick() {} }
   const panel = {
     open:false, onclose() {},
     showModal() { this.open = true },
@@ -13,10 +11,10 @@ test('the header and open output follow live task status, then clear when the ta
   const output = { hidden:true, textContent:'', scrollHeight:60, scrollTop:0, clientHeight:60 }
   const subtitle = { textContent:'' }
   const mark = () => ({hidden:true, running:false, toggleAttribute(_attr: string, enabled: boolean) { this.running = enabled }})
-  const activity = mark(), outputActivity = mark()
+  const outputActivity = mark()
   const nodes = new Map<string, object>([
-    ['bgChip', chip], ['bgStatus', statusButton], ['bgCount', count], ['bgPanel', panel], ['bgOutput', output], ['bgSubtitle', subtitle],
-    ['bgTitle', {}], ['bgActivity', activity], ['bgOutputActivity', outputActivity],
+    ['bgStatus', statusButton], ['bgPanel', panel], ['bgOutput', output], ['bgSubtitle', subtitle],
+    ['bgTitle', {}], ['bgOutputActivity', outputActivity],
     ['bgTasks', {querySelectorAll: () => []}], ['allTasks', {}], ['closeBg', {}],
   ])
   const refresh = mock(() => {})
@@ -24,10 +22,7 @@ test('the header and open output follow live task status, then clear when the ta
   const task = { id:'shell-id', title:'Run tests', status:'running · 3s' }
   ui.setConnected(true)
   ui.render({ tasks:[task] })
-  expect(activity.running).toBe(true)
-  expect(chip).toMatchObject({ hidden:false, ariaLabel:'Background: 1 task running' })
-  expect(count.textContent).toBe('1 task running')
-  expect(statusButton.hidden).toBe(false)
+  expect(statusButton).toMatchObject({hidden:false, textContent:'1 task', ariaLabel:'Open background tasks: 1 task running'})
   statusButton.onclick()
   expect(panel.open).toBe(true)
   expect(refresh).toHaveBeenCalledTimes(1)
@@ -48,17 +43,14 @@ test('the header and open output follow live task status, then clear when the ta
   panel.close()
   expect(ui.selected).toBeNull()
   expect(refresh).toHaveBeenCalledTimes(2)
-  chip.onclick()
+  statusButton.onclick()
   expect(ui.selected).toBe(task.id)
   expect(output.textContent).toBe('Loading task output…')
 
   ui.setConnected(false)
-  expect(activity.running).toBe(false)
   expect(outputActivity.running).toBe(false)
   ui.render(null)
-  expect(chip).toMatchObject({ hidden:true, ariaLabel:'' })
-  expect(statusButton.hidden).toBe(true)
-  expect(count.textContent).toBe('')
+  expect(statusButton).toMatchObject({hidden:true, textContent:'', ariaLabel:''})
   expect(panel.open).toBe(false)
   expect(ui.selected).toBeNull()
   expect(output.textContent).toBe('')

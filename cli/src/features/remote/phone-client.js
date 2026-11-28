@@ -38,7 +38,7 @@ const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
-  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, compactChanged:value => shortcuts.setCompact(value)});
+  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, compactChanged:value => { shortcuts.setCompact(value); tab.setCompact(value); }});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
@@ -206,11 +206,11 @@ function controls() {
   hint.toggleAttribute('data-preview', !!preview);
   const commandHint = renderCommandGhost(commands.hint);
   const pending = lastDraft(view);
-  shortcuts.render(connected ? view : null, busy, $('draft').value || photos.count,
+  const hintKind = !$('commandMenu').hidden ? 'menu' : commandHint || preview?.candidate ? 'inline' : null;
+  shortcuts.render(connected && !tab.composing ? view : null, busy, $('draft').value || photos.count,
     pending && outbox.some(item => item.draftId === pending) ? pending : null,
-    !!input && (commandHint || !$('commandMenu').hidden || !!preview), sendingMessage && !stopping.pending);
+    input && hintKind, sendingMessage && !stopping.pending);
   tab.render(connected ? view : null, busy, photos.count, candidate);
-  $('taskKeys').hidden = $('tabKey').hidden;
   background.setConnected(connected);
   $('models').disabled = !switchable || !view.models.options.length;
   $('effort').disabled = !switchable || !!view.models.pending;
@@ -881,7 +881,7 @@ $('draft').onkeydown = (e) => {
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented || e.target === $('draft') || document.querySelector('dialog[open]') || e.target.closest('select')) return;
   if (view?.ask && (e.target === document.body || e.target.closest('#questions'))) askPanel.keydown(e);
-  else if (e.key === 'Escape' && (e.target === document.body || e.target === $('escapeKey') ||
+  else if (e.key === 'Escape' && (e.target === document.body || e.target.closest('.task-keys') ||
     (compactComposer.inert ? e.target.closest('#compose') : e.target === $('chat') || compactComposer.contains(e.target)))) shortcuts.keydown(e);
 });
 $('welcome').onclick = (e) => {
