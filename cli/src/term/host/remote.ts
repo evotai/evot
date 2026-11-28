@@ -160,13 +160,17 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       st.cloudLoginRequired
     return { input: local ? null : running ? 'steer' as const : !st.isLoading ? 'send' as const : null, ask, canStop: running && (!local || !!ask) }
   }
+  function backgroundTarget(input: ReturnType<typeof inputState>['input'], activity: ReturnType<typeof deps.activity.current>) {
+    if (input !== 'send') return null
+    const interaction = activity?.kind === 'spinner' ? activity.options.interaction : resolveRunInteraction(deps.runCtl.runInteractionInput())
+    return interaction.interruptTarget === 'background' ? deps.backgroundTerminals.stopTarget() : null
+  }
   function snapshot(backgroundView?: string): RemoteSnapshot {
     if (st.logMode || st.destroyed) throw new RemoteConflict('Session no longer shared.')
     st.remoteWatchedAt = Date.now()
     const {input, ask, canStop} = inputState()
     const activity = deps.activity.current()
-    const interaction = activity?.kind === 'spinner' ? activity.options.interaction : resolveRunInteraction(deps.runCtl.runInteractionInput())
-    const stopTarget = input === 'send' && interaction.interruptTarget === 'background' ? deps.backgroundTerminals.stopTarget() : null
+    const stopTarget = backgroundTarget(input, activity)
     const description =
       activity?.kind === 'spinner'
         ? spinnerDescription(activity.state, Date.now(), activity.stats, activity.options)
@@ -280,6 +284,14 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       } else deps.runCtl.interruptStream('sys-int', '  Interrupted.')
       return
     }
+    if (action.kind === 'stop-background') {
+      // Dispatch confirmed Esc without rebuilding history, suggestions or model lists.
+      deps.backgroundTerminals.refresh(false)
+      const target = backgroundTarget(inputState().input, deps.activity.current())
+      if (!target || targetRevision(target) !== action.target) throw new RemoteConflict('The background tasks changed. Check again.')
+      deps.backgroundTerminals.stopAll(target)
+      return
+    }
     const s = snapshot()
     if (action.kind === 'tool-view') {
       if (st.expanded !== action.expanded) deps.composer.toggleExpanded()
@@ -319,14 +331,6 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       try { deps.pendingQueue.remove(entry, 1) } // native compare-and-remove can still lose to consumption
       catch { deps.queueLifecycle.reconcile(); throw new RemoteConflict('Message changed or was already sent.') }
       deps.replCommands.requestRender()
-      return
-    }
-    if (action.kind === 'stop-background' && action.target === s.stopBackgroundTarget) {
-      // As for the TUI's confirmed Esc: reread before stopping, never include a replacement task.
-      deps.backgroundTerminals.refresh(false)
-      const target = deps.backgroundTerminals.stopTarget()
-      if (!target || targetRevision(target) !== action.target) throw new RemoteConflict('The background tasks changed. Check again.')
-      deps.backgroundTerminals.stopAll(target)
       return
     }
     if (((action.kind === 'send' || action.kind === 'steer') && action.kind === s.input) || (action.kind === 'queue' && s.composerKeys?.queue)) {

@@ -431,8 +431,8 @@ test('Tab Suggest mirrors TUI pending → empty → retry → candidate and cycl
   tab(); expect(preview()?.text).toContain('suggesting…')
   await finishSuggestion(['Run the tests.', 'Review the diff.'])
   expect(remote.snapshot().suggestionCandidates).toEqual(['Run the tests.', 'Review the diff.'])
-  expect(preview()).toMatchObject({ candidate:suggestions.text(), text:'Run the tests.  1/2' })
-  tab(); expect(preview()?.text).toBe('Review the diff.  2/2')
+  expect(preview()).toMatchObject({ candidate:suggestions.text(), text:'Run the tests.' })
+  tab(); expect(preview()?.text).toBe('Review the diff.')
   tab(); expect(preview()?.candidate).toBe('Run the tests.')
   expect(calls).toEqual(['suggest','suggest']) // cycling didn't start another request or send a message
   st.editor = insertText(st.editor, 'private draft')

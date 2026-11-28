@@ -309,9 +309,11 @@ fn every_prediction_mode_decides_reply_type_then_conversation_then_runtime() -> 
             "ONE INTENT each: a suggestion may combine small steps that belong together"
         ));
         assert!(text.contains("but not unrelated concerns"));
-        assert!(
-            text.contains("several live issues become separate alternatives, most pressing first")
+        assert_eq!(
+            text.contains("single most likely next instruction"),
+            hints.draft.is_none()
         );
+        assert!(text.contains("Don't recap the reply"));
     }
     Ok(())
 }

@@ -53,7 +53,7 @@ export function taskKeys(esc, {act, pull, clear, dismissMenu, interruptAsk}) {
   esc.onmousedown = e => e.preventDefault();
   function keydown(e) {
     if (e.isComposing || e.keyCode === 229 || e.altKey || e.metaKey || e.shiftKey) return false;
-    if (e.key === 'Escape' && !e.ctrlKey && inlineHint && !compact && !busy) {
+    if (e.key === 'Escape' && !e.ctrlKey && inlineHint && !isStop(kind) && !compact && !busy) {
       e.preventDefault(); if (!e.repeat) { disarm(); dismissMenu(); } return true;
     }
     if (e.key === 'Escape' && !e.ctrlKey && kind && !esc.disabled) {

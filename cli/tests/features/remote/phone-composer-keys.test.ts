@@ -17,7 +17,7 @@ test('inline feedback is never insertable and respects local drafts, dismissal, 
   expect(inlineSuggestion(ready,true,'')?.candidate).toBe(ready.suggestion) // old host: candidate only
   expect(inlineSuggestion(ready,false,'')).toBeNull() // user typed, composing, or attached a photo while waiting
   expect(inlineSuggestion(ready,true,ready.suggestion)).toBeNull()
-  expect(inlineSuggestion({...ready,suggestionHint:'· suggesting…'},true,'')).toMatchObject({candidate:ready.suggestion,text:'Run tests.  · suggesting…'})
+  expect(inlineSuggestion({...ready,suggestionHint:'· suggesting…'},true,'')).toMatchObject({candidate:ready.suggestion,text:'Run tests.'})
 })
 
 test('only one line of guidance owns the empty field, and none paints over typing or IME', () => {
@@ -38,7 +38,7 @@ test('Tab never submits an idle/legacy draft, an unfinished command or a file co
   expect(tabIntent(running,'/rev',4,{...plain,choices:true})).toBe('Complete')
   expect(tabIntent(old,'next step',9,plain)).toBeNull(); expect(tabIntent(null,'hi',2,plain)).toBeNull()
   expect(tabIntent({...old,composerKeys:{suggest:true}},'',0,plain)).toBe('Suggest')
-  expect(tabIntent({...old,composerKeys:{suggest:true}},'',0,{...plain,ghost:'Run tests.'})).toBe('Next')
+  expect(tabIntent({...old,composerKeys:{suggest:true}},'',0,{...plain,ghost:'Run tests.'})).toBeNull()
   expect(tabIntent(running,'',0,{...plain,photos:1})).toBe('Send after')
 })
 
@@ -71,15 +71,15 @@ test('only unmodified Tab is intercepted by the accessory; typing, Shift+Tab and
   tab.setCompact(false); expect(button.hidden).toBe(false); button.onclick(); expect(calls).toHaveLength(3)
 })
 
-test('hardware Tab can still cycle without editing or focusing; the phone has no Next button', () => {
+test('a visible suggestion leaves Tab to native focus navigation, without cycling', () => {
   let next = 0
   const draft = {value:'', selectionStart:0, addEventListener(){}, focus(){throw Error('unexpected focus')}}
   const button = {hidden:true, disabled:true, lastElementChild:{textContent:''}, onclick(){}, addEventListener(){}}
   const tab = composerTab(draft,button,{commands:{hasChoices:false}, suggest(){next++}, disarm(){}})
   tab.render({...old,composerKeys:{suggest:true}},false,0,'First')
-  expect(button.hidden).toBe(true); expect(button.lastElementChild.textContent).toBe('Next')
-  expect(tab.keydown({key:'Tab',preventDefault(){}})).toBe(true)
-  expect(next).toBe(1); expect(draft.value).toBe('')
+  expect(button.hidden).toBe(true)
+  expect(tab.keydown({key:'Tab',preventDefault(){}})).toBe(false)
+  expect(next).toBe(0); expect(draft.value).toBe('')
 })
 
 test('tapping a suggestion inserts only the current candidate, without cycling or sending', () => {
@@ -87,8 +87,8 @@ test('tapping a suggestion inserts only the current candidate, without cycling o
     setSelectionRange(){}, setRangeText(text:string){this.value = text}}
   const button = {lastElementChild:{textContent:''},addEventListener(){}}
   const tab = composerTab(draft,button,{commands:{hasChoices:false},changed(){}})
-  tab.render(old,false,0,'First'); tab.accept('Second')
-  expect(draft.value).toBe('Second'); draft.value = 'my draft'; tab.accept(); expect(draft.value).toBe('my draft')
+  tab.render(old,false,0,'First'); tab.accept()
+  expect(draft.value).toBe('First'); draft.value = 'my draft'; tab.accept(); expect(draft.value).toBe('my draft')
   draft.value = ''; tab.render(old,true,0,'Second'); tab.accept(); expect(draft.value).toBe('')
 })
 

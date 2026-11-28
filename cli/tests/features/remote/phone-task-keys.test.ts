@@ -53,6 +53,13 @@ test('the status key follows compact mode without clearing a hidden draft or dis
   compact(false); expect(esc.hidden).toBe(true); expect(press('Escape')).toBe(true); expect(actions.at(-1)).toBe('clear')
 })
 
+test('a passive suggestion never consumes the first Esc of a confirmed background stop', () => {
+  const {render, press, esc, actions} = harness()
+  render({...legacy,stopBackgroundTarget:'tasks'},false,'',null,'inline')
+  press('Escape'); expect(esc.textContent).toBe('Esc again'); expect(actions).toBeEmpty()
+  press('Escape'); expect(actions).toEqual([{kind:'stop-background',target:'tasks'}])
+})
+
 test('confirmation cannot carry over to a successor run, a changed task set or a reconnect', () => {
   const {esc, render, press, actions} = harness()
   render(run,false); esc.onclick(); expect(esc.textContent).toBe('Esc again')

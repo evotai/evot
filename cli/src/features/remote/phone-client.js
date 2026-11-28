@@ -93,13 +93,7 @@ const shortcuts = taskKeys($('escapeKey'), {pull:pullDraft, dismissMenu:dismissH
 const commands = commandMenu($('draft'), $('commandMenu'), resize);
 const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue:() => submitMessage('queue'),
   suggest:() => action({kind:'suggest'}), disarm:shortcuts.disarm});
-const suggestionPicker = $('suggestionPicker');
-let pickerOptions = [];
-suggestionPicker.onchange = () => {
-  const choice = suggestionPicker.value;
-  suggestionPicker.value = '';
-  if (!suggestionPicker.hidden && pickerOptions.includes(choice)) tab.accept(choice);
-};
+$('useSuggestion').onclick = () => tab.accept();
 const viewer = photoViewer($('photoPreview')), sentPhotos = messagePhotos();
 const outbox = [], renderQueue = queueStrip($('promptQueue'),viewer.thumbnail);
 const photos = imageTray({ thumbnail:viewer.thumbnail, tray: $('attachments'), input: $('imageInput'), button: $('attach'),
@@ -214,12 +208,7 @@ function controls() {
   $('send').ariaLabel = $('send').title = candidate ? 'Send suggestion' : input === 'steer' ? 'Steer active run' : 'Send message';
   const hint = $('draftHint'), text = draftHintText(empty, connected ? view : null, preview, queuedCount - paused);
   if (hint.textContent !== text) hint.textContent = text;
-  const options = candidate && !busy && !messageField.readOnly ? view.suggestionCandidates ?? [candidate] : [];
-  if (pickerOptions.length !== options.length || options.some((s,i) => s !== pickerOptions[i])) {
-    pickerOptions = options;
-    suggestionPicker.replaceChildren(new Option('Suggestions',''), ...options.map(s => new Option(s,s)));
-  }
-  suggestionPicker.hidden = !options.length;
+  $('useSuggestion').hidden = !candidate || busy || messageField.readOnly;
   hint.hidden = !text;
   hint.toggleAttribute('data-preview', !!preview);
   const commandHint = renderCommandGhost(commands.hint);
@@ -423,6 +412,8 @@ async function api(path, body, extra = {}, signal, progress) {
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
 }
+let lastHealthy = 0;
+const recentView = () => connected && !!view && view.sessionId === nav.target?.session && Date.now() - lastHealthy < 12000;
 let liveRequest, pollUntil = 0, nextOwnerCheck = 0, checkingOwner = false, failures = 0;
 const inventory = async () => (await api('/sessions?online')).json();
 const recovery = sessionRecovery({requestId, onResume:() => setLinkStatus('Resuming session…', true),
@@ -475,6 +466,7 @@ async function synchronize(ready) {
         if (mine !== epoch || !token) return;
         if (chunk.done) throw Error('Connection closed.');
         heartbeat();
+        if (initialized) lastHealthy = Date.now();
         buffer += decoder.decode(chunk.value, { stream: true });
         let end;
         while ((end = buffer.indexOf('\n\n')) >= 0) {
@@ -485,7 +477,7 @@ async function synchronize(ready) {
           if (frame.status) throw Object.assign(Error('Live session unavailable.'), {status:frame.status});
           if (!frame.view && !initialized) throw Error('Missing first snapshot.');
           render(frame.view ?? { ...view, ...frame.patch });
-          initialized = true; etag = ''; failures = 0; ready();
+          initialized = true; lastHealthy = Date.now(); etag = ''; failures = 0; ready();
           void checkIdleOwner(mine);
         }
       }
@@ -497,11 +489,14 @@ async function synchronize(ready) {
       etag = res.headers.get('etag');
       render(snapshot);
     }
-    failures = 0;
+    lastHealthy = Date.now(); failures = 0;
     void checkIdleOwner(mine);
   } catch (e) {
     if (mine !== epoch) return;
-    failures++; etag = ''; reconnecting();
+    failures++; etag = '';
+    // A stream rollover isn't necessarily an outage. Try one full snapshot
+    // quietly while the current view is fresh; explicit denials never wait.
+    if (!recentView() || failures > 1 || (e.status && !temporaryDisconnect(e))) reconnecting();
     // Even when the directory returns the same window, retry a full snapshot:
     // a failing stream must not keep us returning before the polling fallback.
     if (live) pollUntil = Date.now() + 10000;
@@ -620,7 +615,7 @@ async function action(payload, done, failed, command = false, dispatch = message
   } finally {
     // A newer streamed run already supersedes this send. Don't stall Esc (or
     // reopen an obsolete stream) waiting for another round trip to that state.
-    if (!(sendingMessage && connected && (stopping.pending || view?.generation !== generation))) {
+    if (payload.kind !== 'stop-background' && !(sendingMessage && connected && (stopping.pending || view?.generation !== generation))) {
       etag = ''; await refresh();
     }
     sendingMessage = false; busy = stopping.pending;
@@ -927,16 +922,18 @@ $('history').onclick = async (e) => {
 };
 function refreshOnReturn() {
   if (!document.hidden && token && terminal && view) {
-    connected = false;
-    etag = ''; // Request a snapshot even when polling: render restores the live controls.
-    setLinkStatus('Syncing messages…', true);
-    controls();
+    etag = ''; // Always fetch a full view, without flickering controls on a brief switch.
+    if (!recentView()) {
+      connected = false;
+      setLinkStatus('Syncing messages…', true);
+      controls();
+    }
   }
   void refresh(); // When hidden, this just cancels the current stream and poll timer.
   scheduleReconnect();
 }
 document.addEventListener('visibilitychange', refreshOnReturn);
-window.addEventListener('online', refreshOnReturn);
+window.addEventListener('online', () => { if (!recentView() || failures) refreshOnReturn(); });
 $('browseSessions').onclick = drawer.open;
 $('resumeConnection').onclick = () => void pair();
 window.addEventListener('pageshow', event => {
