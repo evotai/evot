@@ -32,7 +32,7 @@ export function listenRemote(
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Evot-Build': phoneBuild,
-    'Content-Security-Policy': `default-src 'none'; frame-src 'self'; script-src ${phoneScriptHash}; connect-src 'self'; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    'Content-Security-Policy': `default-src 'none'; frame-src 'self'; script-src ${phoneScriptHash}; connect-src 'self'${cloud?.renewal ? ' ' + new URL(cloud.renewal.endpoint).href : ''}; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
   const handler = {
@@ -177,7 +177,10 @@ export function listenRemote(
         }
         if (cloud && path === '/device/challenge') {
           if (!validKey(b.key)) return fail(400, 'Invalid device key.')
-          if (!b.ticket) return Response.json({ login: cloud.login(b.key, terminal) }, { headers })
+          if (!b.ticket) {
+            const renew = cloud.renewal && cloud.renewal.endpoint + '?' + new URLSearchParams({ env: cloud.renewal.env, key: b.key })
+            return Response.json({ login: cloud.login(b.key, terminal), renew }, { headers })
+          }
           if (!cloud.admit(b.key, b.ticket)) return fail(403, 'Account sign-in expired. Connect again.')
         }
         const result =

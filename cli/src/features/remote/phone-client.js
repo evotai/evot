@@ -354,20 +354,13 @@ folderPanel.onclick = (e) => { if (e.target === folderPanel) folderPanel.close()
 // A browser the computer already approved reconnects by itself: after the gateway
 // restarts, the tab was suspended, or the network came back. Only an explicit
 // denial or a storage failure hands control back to the button.
-let reconnectTimer, reconnectFailures = 0;
+let reconnectTimer, reconnectFailures = 0, needsInteraction = false;
 const approvedBefore = () => { try { return localStorage.getItem('evot.remote.approved') === '1'; } catch { return false; } };
-const rememberApproval = (yes) => { try { yes ? localStorage.setItem('evot.remote.approved', '1') : localStorage.removeItem('evot.remote.approved'); } catch { /* Without site data, every visit pairs manually. */ } };
+const rememberApproval = () => { try { localStorage.setItem('evot.remote.approved', '1'); } catch { /* Without site data, every visit pairs manually. */ } };
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
-  if (token || !approvedBefore() || document.hidden) return;
+  if (token || needsInteraction || (!approvedBefore() && !$('pair-screen').hidden) || document.hidden) return;
   reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 1000 * 2 ** Math.min(reconnectFailures, 4)));
-}
-function showPairScreen() {
-  if ($('pair-screen').hidden) {
-    keepDraft(); draftCarried = true;
-    view = null;
-    paired(false);
-  }
 }
 function reconnecting() {
   starting.clear();
@@ -384,7 +377,6 @@ function unpair() {
   sessionStorage.removeItem('evot.remote');
   etag = '';
   reconnecting();
-  if (!approvedBefore()) showPairScreen();
   $('deviceStatus').textContent = 'Access ended.';
   $('pair').querySelector('button').textContent = 'Reconnect';
   reconnectFailures++;
@@ -537,46 +529,53 @@ async function pair(auto = false) {
   pairing = true;
   clearTimeout(reconnectTimer);
   const form = $('pair'), button = form.querySelector('button');
+  const inPlace = $('pair-screen').hidden;
+  const status = inPlace ? $('connection') : $('deviceStatus');
+  needsInteraction = false;
+  $('resumeConnection').hidden = true;
   let countdown;
   button.disabled = true;
   $('approvalCode').hidden = $('approvalClock').hidden = true;
-  $('deviceStatus').textContent = auto ? 'Reconnecting…' : 'Connecting…';
+  status.textContent = auto ? 'Reconnecting…' : 'Connecting…';
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
-      if (step !== 'verify') showPairScreen();
       if (step === 'signin') {
-        $('deviceStatus').textContent = 'Opening sign-in…';
+        status.textContent = 'Opening sign-in…';
       } else if (step === 'approval') {
-        $('deviceStatus').textContent = invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:';
+        if (inPlace) { status.textContent = `In evot: /remote approve ${code}`; return; }
+        status.textContent = invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:';
         $('approvalCode').hidden = $('approvalClock').hidden = false;
         $('approvalCode').textContent = `/remote approve ${code}`;
         const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s`; };
         tick(); countdown = setInterval(tick, 1000);
       }
-    }, url => { keepDraft(); nav.redirect(); location.assign(url); leaving = true; });
+    }, url => { keepDraft(); nav.redirect(); location.assign(url); leaving = true; }, auto);
     if (!result) return;
     sessionStorage.setItem('evot.remote', result.token);
     token = result.token;
-    rememberApproval(true); reconnectFailures = 0;
+    rememberApproval(); reconnectFailures = 0;
     etag = '';
     notice('');
     // Silent renewal is not navigation: paired() would reset the reader's scroll.
     if (!$('pair-screen').hidden) paired(true);
     else reminder.setPaired(true);
     controls();
-    if (terminal) await refresh(); else if (!$('sessionsDrawer').open) drawer.open();
+    if (terminal) await refresh();
+    else if (!inPlace) drawer.open();
+    else $('connection').textContent = 'Connected';
   } catch (e) {
     const storage = e.name === 'SecurityError' || e.name === 'QuotaExceededError';
-    const unreachable = e.name === 'TimeoutError' || e instanceof TypeError || e.status >= 500;
-    if (!unreachable || !approvedBefore()) showPairScreen();
-    if (!storage && !unreachable) rememberApproval(false); // denied, expired or revoked: wait for the user
-    $('deviceStatus').textContent = storage
+    const unreachable = e.name === 'TimeoutError' || e instanceof TypeError || e.status === 429 || e.status >= 500;
+    needsInteraction = !unreachable;
+    status.textContent = storage
       ? 'Enable browser storage to connect.'
       : unreachable
-        ? 'Computer unreachable. Check /remote.'
+        ? inPlace ? 'Reconnecting…' : 'Computer unreachable. Check /remote.'
         : e.message || 'Could not connect.';
-    button.textContent = unreachable && approvedBefore() ? 'Retry now' : 'Try again';
+    const label = e.signIn ? 'Sign in' : unreachable ? 'Retry now' : 'Reconnect';
+    button.textContent = $('resumeConnection').textContent = label;
+    $('resumeConnection').hidden = !inPlace || unreachable;
     if (unreachable) { reconnectFailures++; scheduleReconnect(); }
   } finally {
     clearInterval(countdown);
@@ -938,20 +937,24 @@ function refreshOnReturn() {
 document.addEventListener('visibilitychange', refreshOnReturn);
 window.addEventListener('online', refreshOnReturn);
 $('browseSessions').onclick = drawer.open;
+$('resumeConnection').onclick = () => void pair();
 $('resumeLinked').onclick = () => { if (nav.target?.session) void choose(null, nav.target.session); };
 window.addEventListener('pageshow', event => {
   if (event.persisted && leaving) {
     leaving = false;
     const button = $('pair').querySelector('button'); button.disabled = false; button.textContent = 'Continue sign-in';
-    $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
+    needsInteraction = true;
+    const inPlace = $('pair-screen').hidden;
+    $(inPlace ? 'connection' : 'deviceStatus').textContent = 'Sign-in wasn’t finished.';
+    $('resumeConnection').textContent = 'Sign in'; $('resumeConnection').hidden = !inPlace;
   }
 });
 // A reload of a previously approved chat can also need a fresh credential.
-paired(!!token || (!!terminal && approvedBefore() && !returnTicket && !invitedTerminal));
+paired(!!token || (!!terminal && (approvedBefore() || !!returnTicket)));
 const connectButton = $('pair').querySelector('button');
 connectButton.textContent = 'Connect';
 connectButton.disabled = false;
 $('deviceStatus').textContent = '';
-if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(!returnTicket && !invitedTerminal);
+if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(approvedBefore() && !returnTicket);
 else if (token && !terminal) drawer.open();
 else void refresh();

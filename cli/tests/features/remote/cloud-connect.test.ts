@@ -68,7 +68,7 @@ test('managed Unix ingress requires exact public origin, an account ticket, devi
       },
     },
     access,
-    { cloud: { unix, origin, admit: gate, login: () => 'https://account.example/connect' } },
+    { cloud: { unix, origin, admit: gate, login: () => 'https://account.example/connect', renewal: {endpoint:'https://account.example/connect/renew', env} } },
   )
   const post = (path: string, data: unknown, token = '', host = 'environment.example') =>
     fetch('http://localhost' + path, {
@@ -80,7 +80,9 @@ test('managed Unix ingress requires exact public origin, an account ticket, devi
   try {
     const route = '/device/challenge',
       key = phone.key
-    expect(await (await post(route, { key })).json()).toHaveProperty('login')
+    const initial = await post(route, { key })
+    expect(initial.headers.get('content-security-policy')).toContain("connect-src 'self' https://account.example/connect/renew;")
+    expect(await initial.json()).toEqual({login:'https://account.example/connect', renew:`https://account.example/connect/renew?env=${env}&key=${key}`})
     for (const ticket of [sign('another'), sign(env, -1), 'invalid'])
       expect((await post(route, { key, ticket })).status).toBe(403)
     const ticket = sign()

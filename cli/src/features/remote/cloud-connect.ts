@@ -9,6 +9,7 @@ import type { MachineIdentity } from './machine-identity.js'
 export interface CloudGate {
   origin: string
   unix: string
+  renewal?: { endpoint: string; env: string }
   admit: (key: unknown, ticket: unknown) => boolean
   login: (key: string, terminal?: string) => string
 }
@@ -114,6 +115,7 @@ export async function allocateCloud(identity: MachineIdentity, account: string, 
   const gate: CloudGate = {
     unix: join(machineSocketDirectory(env), 'gateway.sock'),
     origin: data.origin,
+    renewal: data.browser_renew === true ? { endpoint: base + '/connect/renew', env } : undefined,
     admit: ticketGate(env, data.ticket_key),
     login: (key, terminal) => base + '/connect?' + new URLSearchParams({ env, key, ...(terminal ? { terminal } : {}) }),
   }

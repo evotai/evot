@@ -26,6 +26,7 @@ html.remote-shell[data-theme="light"] {
 #openChanges[data-changed]::after { content:''; position:absolute; top:8px; right:7px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--side-bg); pointer-events:none; }
 #changesPage[open] { position:fixed; inset:0; margin:0; width:100%; height:100%; max-width:none; max-height:none; padding:0; border:0; border-radius:0; overflow:hidden; }
 #changesPage iframe { display:block; width:100%; height:100%; border:0; }
+#resumeConnection { min-height:32px; padding:2px 10px; border:0; border-radius:8px; background:var(--fill); color:var(--accent); cursor:pointer; }
 .connection { display:block; font-size:12px; color:var(--amber); } .connection[data-online] { display:none; }
 .conversation:has(#pair-screen:not([hidden])) .connection { display:none; }
 #bgChip { display:inline-flex; align-items:center; gap:4px; flex:none; min-height:44px; padding:0 8px; border:0; border-radius:12px; color:var(--accent); background:var(--fill); font-size:12px; font-weight:600; white-space:nowrap; cursor:pointer; }

@@ -1,3 +1,5 @@
+import { deviceChallenge } from './phone-renew.js';
+
 // The private key is deliberately non-exportable; losing site data means approving again.
 const request = (r) =>
   new Promise((ok, fail) => {
@@ -43,7 +45,7 @@ window.addEventListener('hashchange', () => {
   if (next.has('terminal') || next.has('ticket')) location.reload();
 });
 let ticket = returnTicket;
-export async function connectDevice(post, progress, redirect) {
+export async function connectDevice(post, progress, redirect, background = false) {
   // Bound local key storage separately from the network and approval poll.
   // A stuck IndexedDB open must not leave Connecting… spinning indefinitely.
   let pair, timer;
@@ -56,7 +58,7 @@ export async function connectDevice(post, progress, redirect) {
   const key = encode(await crypto.subtle.exportKey('raw', pair.publicKey));
   const attestation = ticket;
   ticket = null;
-  const { nonce, login } = await post('/device/challenge', { key, ticket: attestation, terminal: invitedTerminal ?? undefined });
+  const { nonce, login } = await deviceChallenge(post, { key, ticket: attestation, terminal: invitedTerminal ?? undefined }, background);
   if (login) {
     progress('signin');
     redirect(login);
