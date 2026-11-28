@@ -16,7 +16,7 @@ function rows(call: UIToolCall, expanded = true): string[] {
   return blocksToLines(buildOutputBlocks(buildToolCard(call, expanded), { columns: 100 }))
 }
 
-test('ordinary terminal: write streaming preserves reading position and completion replaces the preview once', async () => {
+test('ordinary terminal: write streaming and commit preserve a scrolled-up reader', async () => {
   const screen = new ScreenHarness(100, 24)
   const traces: RendererTraceEntry[] = []
   const renderer = new TermRenderer({ stdout: screen.stdout, trace: entry => traces.push(entry) })
@@ -59,21 +59,21 @@ test('ordinary terminal: write streaming preserves reading position and completi
     expect(traces.every(e => e.branch === 'differential_update' || e.branch === 'no_change')).toBe(true)
     expect(traces.flatMap(e => e.ansiWrites).join('')).not.toContain('\x1b[3J')
 
-    // Completion can recover the visible tail without clearing history. The
-    // next durable commit repairs the provisional preview in scrollback once.
+    // Test the transition itself, not just the idle frame after a commit.
+    expect(readingTop).toBeGreaterThan(0)
     call = { ...call, status: 'done', result: 'Wrote content', durationMs: 12 }
     await paint(renderer, screen)
     expect(traces.flatMap(e => e.ansiWrites).join('')).not.toContain('\x1b[3J')
     traces.length = 0
     committed = rows(call)
     await paint(renderer, screen)
-    expect(traces.map(e => e.branch)).toEqual(['scrollback_shift'])
-    const completedRows = screen.viewport()
-    const completedTop = screen.terminal.buffer.active.viewportY
+    expect(screen.terminal.buffer.active.viewportY).toBe(readingTop)
+    expect(screen.viewport()).toEqual(readingRows)
+    expect(traces.flatMap(e => e.ansiWrites).join('')).not.toContain('\x1b[3J')
     traces.length = 0
     await paint(renderer, screen)
-    expect(screen.viewport()).toEqual(completedRows)
-    expect(screen.terminal.buffer.active.viewportY).toBe(completedTop)
+    expect(screen.viewport()).toEqual(readingRows)
+    expect(screen.terminal.buffer.active.viewportY).toBe(readingTop)
     expect(traces.every(e => e.branch === 'no_change')).toBe(true)
     const ansi = traces.flatMap(e => e.ansiWrites).join('')
     expect(ansi).not.toContain('\x1b[3J')
@@ -83,7 +83,8 @@ test('ordinary terminal: write streaming preserves reading position and completi
     const all = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)?.translateToString(true) ?? '')
     expect(all.filter(line => line === 'history 0')).toHaveLength(1)
     expect(all.join('\n')).toContain('authoritative preview')
-    expect(all.join('\n')).not.toContain('const value')
+    screen.terminal.scrollToBottom()
+    expect(screen.viewport().join('\n')).toContain('authoritative preview')
   } finally {
     renderer.destroy()
   }

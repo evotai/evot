@@ -49,6 +49,7 @@ export async function connectDevice(post, progress, redirect, background = false
   // Bound local key storage separately from the network and approval poll.
   // A stuck IndexedDB open must not leave Connecting… spinning indefinitely.
   let pair, timer;
+  progress('identity');
   try {
     if (!window.indexedDB) throw Error('Device storage is unavailable. Open this invite in Safari or Chrome with site data enabled.');
     pair = await Promise.race([identity(), new Promise((_, reject) => {
@@ -58,7 +59,7 @@ export async function connectDevice(post, progress, redirect, background = false
   const key = encode(await crypto.subtle.exportKey('raw', pair.publicKey));
   const attestation = ticket;
   ticket = null;
-  const { nonce, login } = await deviceChallenge(post, { key, ticket: attestation, terminal: invitedTerminal ?? undefined }, background);
+  const { nonce, login } = await deviceChallenge(post, { key, ticket: attestation, terminal: invitedTerminal ?? undefined }, background, fetch, progress);
   if (login) {
     progress('signin');
     redirect(login);
@@ -72,6 +73,7 @@ export async function connectDevice(post, progress, redirect, background = false
       new TextEncoder().encode('evot-device-v1:' + nonce)
     )
   );
+  progress('proof');
   let reply = await post('/device/prove', { nonce, signature });
   if (!reply.token) {
     const { code, receipt } = reply;

@@ -19,9 +19,9 @@ import { navigation } from './phone-navigation.js';
 import { imageTray } from './phone-images.js';
 import { CONFIRM_MS, delivered, photoExpired, refused, requestTimeout, uploadRequest } from './phone-send.js';
 import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
-import { draftCarry } from './phone-update.js';
+import { draftCarry, reloadForRecovery } from './phone-update.js';
 
-import { sessionRecovery, temporaryDisconnect, pairingFeedback } from './phone-recovery.js';
+import { sessionRecovery, temporaryDisconnect, pairingFeedback, retryStatus, stageStatus, useLiveStream } from './phone-recovery.js';
 import { connectDevice, returnTicket, invitedTerminal } from './phone-device.js';
 const $ = (id) => document.getElementById(id);
 let token = sessionStorage.getItem('evot.remote'),
@@ -39,7 +39,7 @@ const renderCommandGhost = inlineCommandGhost(messageField, $('draftGhost'));
 fitConversationViewport($('conversation'));
 const compactComposer = $('compactComposer');
 const transcript = conversationScroll({chat:$('chat'), seat:$('seat'), editor:$('composerContent'),
-  dock:compactComposer, write:$('writeMessage'), jump:$('jump'), draft:messageField, isComposing:() => tab.composing, compactChanged:value => { shortcuts.setCompact(value); tab.setCompact(value); }});
+  dock:compactComposer, write:$('writeMessage'), writeLabel:$('writeLabel'), jump:$('jump'), draft:messageField, isComposing:() => tab.composing, compactChanged:value => { shortcuts.setCompact(value); tab.setCompact(value); }});
 const askPanel = questionPanel($('questions'), action);
 const reminder = completionReminder($('completionSound'), () => inventory(), notice);
 const pickStart = new WeakMap();
@@ -62,7 +62,7 @@ const stopping = runInterrupt({
   }, refresh, error:e => notice(e.message + ' Check the current run before retrying.',true),
 });
 const syncReview = reviewNavigation($('changesPage'), $('openChanges'), () => $('pair-screen').hidden ? terminal : null);
-// Only an explicit sign-in navigates away; keep its draft for the return trip.
+// Keep the draft when reconnect has to open the account page.
 const drafts = draftCarry(sessionStorage);
 let draftCarried = true;
 const keepDraft = () => drafts.keep(terminal, $('draft').value);
@@ -244,7 +244,9 @@ function models(m) {
   }
   const active = m.options.find((o) => o.spec === m.active);
   select.value = m.active;
-  $('modelLabel').textContent = active?.label || m.active || 'Model';
+  const label = active?.label || m.active || '';
+  $('modelLabel').textContent = label || 'Model';
+  $('compactModel').textContent = label;
   select.title = active?.spec || m.active;
   const levels = active?.levels ?? [],
     lk = JSON.stringify(levels);
@@ -254,7 +256,9 @@ function models(m) {
   }
   $('effortPicker').hidden = !levels.length;
   $('effort').value = m.effort;
-  $('effortLabel').textContent = titleCase(m.effort) || 'Thinking';
+  const effort = titleCase(m.effort);
+  $('effortLabel').textContent = effort || 'Thinking';
+  $('compactEffort').textContent = levels.length ? effort : '';
 }
 function setLinkStatus(label, spinning = false) {
   linkStatus = label ? {label, spinning} : null;
@@ -368,10 +372,13 @@ function scheduleReconnect() {
   if (token || needsInteraction || (!pairingStarted && !approvedBefore() && !$('pair-screen').hidden) || document.hidden) return;
   reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 250 * 2 ** Math.min(Math.max(0,reconnectFailures - 1), 6)));
 }
-function reconnecting() {
+function reconnecting(error, stage) {
   starting.clear();
   connected = false;
-  setLinkStatus('Reconnecting…', true);
+  const button = $('resumeConnection');
+  button.hidden = !error;
+  if (error) button.textContent = 'Retry now';
+  setLinkStatus(error ? retryStatus(error, stage) : 'Gateway · access expired (401), renewing…', true);
   controls();
 }
 function unpair() {
@@ -382,9 +389,17 @@ function unpair() {
   sessionStorage.removeItem('evot.remote');
   etag = '';
   reconnecting();
-  $('deviceStatus').textContent = 'Access ended.';
-  reconnectFailures++;
-  scheduleReconnect();
+  $('deviceStatus').textContent = linkStatus.label;
+  if (!recoverPage(++reconnectFailures)) scheduleReconnect();
+}
+let gatewayBuild = null;
+function recoverPage(count) {
+  if (!reloadForRecovery({page:document.documentElement.dataset.build, gateway:gatewayBuild, failures:count,
+    protectedWork:leaving || document.hidden || busy || tab.composing || !!photos.count || !!outbox.length,
+    storage:sessionStorage, saveDraft:keepDraft})) return false;
+  leaving = true;
+  location.reload();
+  return true;
 }
 // iPadOS in desktop mode describes itself as a Mac in its user agent.
 const touchMac = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
@@ -408,6 +423,8 @@ async function api(path, body, extra = {}, signal, progress) {
     cache: 'no-store',
     signal: signal ?? AbortSignal.timeout(timeout),
   });
+  const build = res.headers.get('x-evot-build');
+  if (build) gatewayBuild = build;
   if (res.status === 401 && credential && token === credential) unpair();
   if (!res.ok && res.status !== 304) throw Object.assign(Error(await res.text()), {status:res.status});
   return res;
@@ -416,7 +433,7 @@ let lastHealthy = 0;
 const recentView = () => connected && !!view && view.sessionId === nav.target?.session && Date.now() - lastHealthy < 12000;
 let liveRequest, pollUntil = 0, nextOwnerCheck = 0, checkingOwner = false, failures = 0;
 const inventory = async () => (await api('/sessions?online')).json();
-const recovery = sessionRecovery({requestId, onResume:() => setLinkStatus('Resuming session…', true),
+const recovery = sessionRecovery({requestId,
   lookup:async session => (await api('/sessions?resolve=' + encodeURIComponent(session))).json(),
   open:async body => (await api('/open', body)).json(),
 });
@@ -451,7 +468,10 @@ async function synchronize(ready) {
   const mine = ++epoch;
   liveRequest?.abort();
   if (!token || !terminal || document.hidden) { ready(); return; }
-  const ctrl = liveRequest = new AbortController(), live = Date.now() >= pollUntil;
+  const ctrl = liveRequest = new AbortController(), live = useLiveStream(failures, pollUntil, Date.now());
+  let stage = live ? 'stream' : 'snapshot';
+  const showStage = () => { if (!connected) setLinkStatus(stageStatus(stage), true); };
+  showStage();
   let watchdog;
   const heartbeat = () => { clearTimeout(watchdog); watchdog = setTimeout(() => ctrl.abort(), 10000); };
   try {
@@ -459,14 +479,14 @@ async function synchronize(ready) {
     const res = await api('/state', null, live ? { Accept: 'text/event-stream' } : etag ? { 'If-None-Match': etag } : {}, ctrl.signal);
     if (mine !== epoch || !token) return;
     if (res.headers.get('content-type')?.startsWith('text/event-stream')) {
+      stage = 'firstFrame'; showStage();
       const reader = res.body.getReader(), decoder = new TextDecoder();
       let buffer = '', initialized = false;
       while (mine === epoch && token) {
         const chunk = await reader.read();
         if (mine !== epoch || !token) return;
         if (chunk.done) throw Error('Connection closed.');
-        heartbeat();
-        if (initialized) lastHealthy = Date.now();
+        if (initialized) { heartbeat(); lastHealthy = Date.now(); } // Keepalives cannot postpone the first snapshot deadline.
         buffer += decoder.decode(chunk.value, { stream: true });
         let end;
         while ((end = buffer.indexOf('\n\n')) >= 0) {
@@ -477,26 +497,29 @@ async function synchronize(ready) {
           if (frame.status) throw Object.assign(Error('Live session unavailable.'), {status:frame.status});
           if (!frame.view && !initialized) throw Error('Missing first snapshot.');
           render(frame.view ?? { ...view, ...frame.patch });
-          initialized = true; lastHealthy = Date.now(); etag = ''; failures = 0; ready();
+          if (!initialized) heartbeat();
+          initialized = true; stage = 'updates'; lastHealthy = Date.now(); etag = ''; failures = reconnectFailures = 0; ready();
           void checkIdleOwner(mine);
         }
       }
       return;
     }
+    stage = 'sync'; showStage();
     const snapshot = res.status === 304 ? null : await res.json();
     if (mine !== epoch) return;
     if (snapshot) {
       etag = res.headers.get('etag');
       render(snapshot);
     }
-    lastHealthy = Date.now(); failures = 0;
+    lastHealthy = Date.now(); failures = reconnectFailures = 0;
     void checkIdleOwner(mine);
   } catch (e) {
     if (mine !== epoch) return;
     failures++; etag = '';
+    if (recoverPage(failures)) return;
     // A stream rollover isn't necessarily an outage. Try one full snapshot
     // quietly while the current view is fresh; explicit denials never wait.
-    if (!recentView() || failures > 1 || (e.status && !temporaryDisconnect(e))) reconnecting();
+    if (!recentView() || failures > 1 || (e.status && !temporaryDisconnect(e))) reconnecting(e, stage);
     // Even when the directory returns the same window, retry a full snapshot:
     // a failing stream must not keep us returning before the polling fallback.
     if (live) pollUntil = Date.now() + 10000;
@@ -504,22 +527,24 @@ async function synchronize(ready) {
     if (session && (e.status === 409 || e.status === 403 || e.status === 404 || failures >= 2)) {
       const current = () => mine === epoch && !!token && !busy && !document.hidden &&
         terminal === original && nav.target?.session === session;
+      let recoveryStage;
       try {
-        const restored = await recovery.recover(original, session, current);
+        const restored = await recovery.recover(original, session, current, step => {
+          recoveryStage = step;
+          setLinkStatus(stageStatus(step), true);
+        });
         if (restored?.terminal && restored.terminal !== original && current()) {
           followOwner(restored, session);
           void refresh();
-        }
+        } else if (recoveryStage && current()) reconnecting(e, stage);
       } catch (err) {
-        if (current() && !temporaryDisconnect(err)) setLinkStatus(err.message || 'Session unavailable');
+        if (current()) reconnecting(err, recoveryStage);
       }
-    } else if (!session && (e.status === 409 || e.status === 403)) {
-      setLinkStatus('Waiting for window…', true);
     }
   } finally {
     clearTimeout(watchdog);
     ctrl.abort(); ready();
-    if (mine === epoch && token && terminal && !document.hidden)
+    if (mine === epoch && token && terminal && !leaving && !document.hidden)
       timer = setTimeout(refresh, failures ? Math.min(5000, 300 * 2 ** Math.min(failures - 1, 5)) : view?.active && !view.ask ? 300 : 800);
   }
 }
@@ -537,37 +562,44 @@ async function pair(auto = false) {
   let countdown;
   button.hidden = button.disabled = true;
   $('approvalCode').hidden = $('approvalClock').hidden = true;
-  showStatus(auto ? 'Reconnecting…' : 'Connecting…', true);
+  let stage = 'identity';
   notice('');
   try {
     const result = await connectDevice(async (path,data) => (await api(path,data)).json(), (step, code, until) => {
-      if (step === 'signin') {
-        showStatus('Opening sign-in…', true);
-      } else if (step === 'approval') {
-        if (inPlace) { showStatus(`In evot: /remote approve ${code}`); return; }
+      stage = step;
+      if (step === 'approval') {
+        if (inPlace) { showStatus(stageStatus(step, `/remote approve ${code}`)); return; }
         showStatus(invitedTerminal ? 'Match the code in the QR terminal:' : 'Match the code in your evot terminal:');
         $('approvalCode').hidden = $('approvalClock').hidden = false;
         $('approvalCode').textContent = `/remote approve ${code}`;
         const tick = () => { $('approvalClock').textContent = `Expires in ${Math.max(0, Math.ceil((until - Date.now()) / 1000))}s`; };
         tick(); countdown = setInterval(tick, 1000);
-      }
-    }, url => { keepDraft(); nav.redirect(); location.assign(url); leaving = true; }, auto);
+      } else showStatus(stageStatus(step), true);
+    }, url => {
+      if (auto && document.hidden) return; // visibilitychange retries when the reader returns.
+      keepDraft(); nav.redirect();
+      history.replaceState({...history.state, evotSigningIn:true}, '');
+      location.assign(url); leaving = true;
+    }, auto);
     if (!result) return;
     sessionStorage.setItem('evot.remote', result.token);
     token = result.token;
-    rememberApproval(); reconnectFailures = 0;
+    rememberApproval();
+    // A proof is not recovery until the gateway accepts the new token for /state.
+    if (!terminal) reconnectFailures = 0;
     etag = '';
     notice('');
     // Silent renewal is not navigation: paired() would reset the reader's scroll.
     if (!$('pair-screen').hidden) paired(true);
     else reminder.setPaired(true);
     controls();
-    if (terminal) await refresh();
+    if (terminal) void refresh(); // A 401 on the next state request must be able to pair again.
     else if (!inPlace) drawer.open();
     else setLinkStatus('');
   } catch (e) {
-    const feedback = pairingFeedback(e);
+    const feedback = pairingFeedback(e, stage);
     needsInteraction = !feedback.retry;
+    if (feedback.retry && recoverPage(++reconnectFailures)) return;
     showStatus(feedback.status, feedback.retry);
     if (feedback.action) {
       const action = inPlace ? $('resumeConnection') : button;
@@ -576,7 +608,7 @@ async function pair(auto = false) {
     } else if (!inPlace && !feedback.retry) {
       button.textContent = 'Connect'; button.hidden = false;
     }
-    if (feedback.retry) { reconnectFailures++; scheduleReconnect(); }
+    if (feedback.retry) scheduleReconnect();
   } finally {
     clearInterval(countdown);
     $('approvalCode').hidden = $('approvalClock').hidden = true;
@@ -935,17 +967,23 @@ function refreshOnReturn() {
 document.addEventListener('visibilitychange', refreshOnReturn);
 window.addEventListener('online', () => { if (!recentView() || failures) refreshOnReturn(); });
 $('browseSessions').onclick = drawer.open;
-$('resumeConnection').onclick = () => void pair();
+$('resumeConnection').onclick = () => {
+  if (!token) { void pair(!needsInteraction); return; }
+  etag = ''; pollUntil = Date.now() + 10000;
+  void refresh(); // Retry the read only; never replay a message or other action.
+};
+function signInCancelled() {
+  leaving = false;
+  clearTimeout(reconnectTimer);
+  needsInteraction = true;
+  const button = $('pair').querySelector('button'); button.hidden = button.disabled = false; button.textContent = 'Continue sign-in';
+  const inPlace = $('pair-screen').hidden;
+  if (inPlace) setLinkStatus('Sign-in wasn’t finished.');
+  else $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
+  $('resumeConnection').textContent = 'Sign in'; $('resumeConnection').hidden = !inPlace;
+}
 window.addEventListener('pageshow', event => {
-  if (event.persisted && leaving) {
-    leaving = false;
-    const button = $('pair').querySelector('button'); button.hidden = button.disabled = false; button.textContent = 'Continue sign-in';
-    needsInteraction = true;
-    const inPlace = $('pair-screen').hidden;
-    if (inPlace) setLinkStatus('Sign-in wasn’t finished.');
-    else $('deviceStatus').textContent = 'Sign-in wasn’t finished.';
-    $('resumeConnection').textContent = 'Sign in'; $('resumeConnection').hidden = !inPlace;
-  }
+  if (event.persisted && leaving) signInCancelled();
 });
 // A reload of a previously approved chat can also need a fresh credential.
 paired(!!token || (!!terminal && (approvedBefore() || !!returnTicket)));
@@ -953,6 +991,8 @@ const connectButton = $('pair').querySelector('button');
 connectButton.textContent = 'Connect';
 connectButton.disabled = false;
 $('deviceStatus').textContent = '';
-if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(approvedBefore() && !returnTicket);
+// Back can rebuild the page instead of restoring it from the browser cache.
+if (!token && !returnTicket && history.state?.evotSigningIn && performance.getEntriesByType('navigation')[0]?.type === 'back_forward') signInCancelled();
+else if (!token && (returnTicket || invitedTerminal || approvedBefore())) void pair(approvedBefore() && !returnTicket);
 else if (token && !terminal) drawer.open();
 else void refresh();

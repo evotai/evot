@@ -5,7 +5,7 @@ const TOUCH_FOLD_DISTANCE = 24;
 const REVEAL_DISTANCE = 32;
 const LATEST_DISTANCE = 16;
 
-export function conversationScroll({ chat, seat, editor, dock, write, jump, draft, compactChanged, isComposing = () => false }) {
+export function conversationScroll({ chat, seat, editor, dock, write, writeLabel, jump, draft, compactChanged, isComposing = () => false }) {
   let following = true, showLatest = false, compact = false, canCompact = false, shownCompact = false;
   let lastTop = 0, backFrom = 0, lastHeight = 0, touchStart = null, touchScroll = false;
   const { ownerDocument } = chat, window = ownerDocument.defaultView;
@@ -225,7 +225,7 @@ export function conversationScroll({ chat, seat, editor, dock, write, jump, draf
     const label = hasDraft ? 'Resume draft' : 'Open composer';
     if (write.ariaLabel !== label) {
       write.ariaLabel = write.title = label;
-      write.textContent = hasDraft ? 'Resume draft…' : 'Message…';
+      writeLabel.textContent = hasDraft ? 'Resume draft…' : 'Message…';
     }
     layout();
   } };

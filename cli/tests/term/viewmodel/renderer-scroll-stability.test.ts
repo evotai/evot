@@ -158,7 +158,7 @@ describe('streaming viewport stability', () => {
     }
   })
 
-  test('committing a collapsed preview repairs removed rows beyond the new boundary once', async () => {
+  test('committing a collapsed preview preserves native history and leaves the visible tail current', async () => {
     const screen = new ScreenHarness(80, 12)
     const diagnostics: RendererDiagnostic[] = []
     const renderer = new TermRenderer({ stdout: screen.stdout, onDiagnostic: d => diagnostics.push(d) })
@@ -175,10 +175,8 @@ describe('streaming viewport stability', () => {
       diagnostics.length = 0
       committedRows = 12
       await paint(renderer, screen)
-      expect(diagnostics.filter(d => d.kind === 'full_redraw')).toHaveLength(1)
-      const buffer = screen.terminal.buffer.active
-      const all = Array.from({ length: buffer.length }, (_, i) => buffer.getLine(i)?.translateToString(true) ?? '')
-      expect(all.join('\n')).not.toContain('discarded')
+      expect(diagnostics).toEqual([])
+      expect(screen.viewport()).toEqual([...history, ...partial, 'draft', 'footer'].slice(-12))
       diagnostics.length = 0
       await paint(renderer, screen)
       expect(diagnostics).toEqual([])
@@ -189,7 +187,7 @@ describe('streaming viewport stability', () => {
     }
   })
 
-  test('hidden live reflow and append stay differential, with one history repair on commit', async () => {
+  test('hidden live reflow and append do not trigger a replay on commit', async () => {
     const screen = new ScreenHarness(80, 12)
     const diagnostics: RendererDiagnostic[] = []
     const renderer = new TermRenderer({ stdout: screen.stdout, onDiagnostic: d => diagnostics.push(d) })
@@ -212,9 +210,12 @@ describe('streaming viewport stability', () => {
       expect(diagnostics.filter(d => d.kind === 'stale_scrollback')).toHaveLength(4)
       expect(diagnostics.some(d => d.kind === 'full_redraw')).toBe(false)
       diagnostics.length = 0
+      screen.terminal.scrollLines(-15)
+      const reading = screen.viewport()
       committedRows = history.length + partial.length
       await paint(renderer, screen)
-      expect(diagnostics.filter(d => d.kind === 'full_redraw')).toHaveLength(1)
+      expect(screen.viewport()).toEqual(reading)
+      expect(diagnostics).toEqual([])
       diagnostics.length = 0
       await paint(renderer, screen)
       expect(diagnostics).toEqual([])

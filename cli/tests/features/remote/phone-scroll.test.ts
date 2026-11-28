@@ -18,7 +18,8 @@ function transcript(reducedMotion = false) {
       },
     },
   }
-  const write = { focus() { document.activeElement = this }, ariaLabel: 'Open composer', title: 'Open composer', textContent: 'Message…', onclick() {} }
+  const writeLabel = {textContent:'Message…'}
+  const write = { focus() { document.activeElement = this }, ariaLabel: 'Open composer', title: 'Open composer', get textContent() { return `${writeLabel.textContent}ModelHigh` }, onclick() {} }
   const dock = { inert: true, contains(node: object | null) { return node === write } }
   const jump = { hidden: true, onclick() {} }
   const draft = { scrollTop:0, selectionStart:2, selectionEnd:2, closest:(s:string) => s === '#draft', value: 'A draft for later', focus() { document.activeElement = this } }
@@ -40,7 +41,7 @@ function transcript(reducedMotion = false) {
     focus() { document.activeElement = this },
     addEventListener(event: string, callback: (event?: unknown) => void) { events.set(event, callback) },
   }
-  const controller = conversationScroll({ chat, seat, editor, dock, write, jump, draft, isComposing:() => composing })
+  const controller = conversationScroll({ chat, seat, editor, dock, write, writeLabel, jump, draft, isComposing:() => composing })
   controller.update(true, true)
   controller.latest()
   return {
@@ -71,6 +72,13 @@ function transcript(reducedMotion = false) {
     },
   }
 }
+
+test('changing the compact draft prompt preserves the sibling model and thinking labels', () => {
+  const ui = transcript()
+  expect(ui.write.textContent).toBe('Resume draft…ModelHigh')
+  ui.controller.update(true, false)
+  expect(ui.write.textContent).toBe('Message…ModelHigh')
+})
 
 test('scrolling into history preserves the draft and reading position through live updates; tapping reopens the editor', () => {
   const ui = transcript()
@@ -150,7 +158,7 @@ test('small scrolls do not flash controls; a folded composer stays folded throug
   ui.scrollBack(80)
   expect(ui.reading).toBe(true)
   expect(ui.dock.inert).toBe(false)
-  expect(ui.write).toMatchObject({ ariaLabel:'Resume draft', textContent:'Resume draft…' })
+  expect(ui.write.ariaLabel).toBe('Resume draft')
   expect(ui.jump.hidden).toBe(false)
   const top = ui.chat.scrollTop
   expect(top).toBe(1660) // The expanded transcript can clamp to its new bottom.
@@ -378,5 +386,5 @@ test('a pending question can replace the compact composer without snapping to th
   expect(ui.chat.scrollTop).toBe(top)
   ui.controller.update(true, false)
   expect(ui.reading).toBe(true)
-  expect(ui.write).toMatchObject({ ariaLabel:'Open composer', textContent:'Message…' })
+  expect(ui.write.ariaLabel).toBe('Open composer')
 })

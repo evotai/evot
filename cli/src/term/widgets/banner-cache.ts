@@ -31,7 +31,10 @@ export class BannerCache {
     return true
   }
 
-  render(opts: BannerOptions): string {
+  render(opts: BannerOptions, preservePainted = false): string {
+    // Disk and service state may keep changing. Once this startup block is in
+    // scrollback, changing its height would shift the entire transcript.
+    if (preservePainted) return this.text
     // Key by displayed values rather than ConfigInfo identity: cloud sync may
     // replace that object with equivalent data, or update it in place.
     const key = JSON.stringify([

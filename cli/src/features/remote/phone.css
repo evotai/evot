@@ -29,6 +29,7 @@ html.remote-shell[data-theme="light"] {
 #resumeConnection { pointer-events:auto; flex:none; min-height:32px; padding:2px 10px; border:0; border-radius:8px; background:var(--fill); color:var(--accent); cursor:pointer; }
 .run-line[data-connection] :is(#nextModel,#bgStatus,.run-place) { display:none; }
 .run-line[data-connection] #status { color:var(--amber); }
+.run-line[data-connection] .run-state { white-space:normal; overflow-wrap:anywhere; }
 .native-picker { display:flex; align-items:center; }
 .pair-card small { font-size:12px; color:var(--muted); }
 /* A fixed slot for the same glyph changes as the TUI, without layout movement. */
@@ -235,8 +236,12 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 #jump,.compact-composer button { min-height:44px; padding:0 14px; border:1px solid var(--line); border-radius:16px; background:var(--bg); font-size:13px; white-space:nowrap; cursor:pointer; }
 #jump { position:absolute; z-index:1; bottom:calc(100% + 4px); right:max(12px,env(safe-area-inset-right),calc((100% - var(--composer-width)) / 2)); color:var(--accent); pointer-events:auto; }
 .compact-composer { position:absolute; inset:auto 0 0; display:flex; gap:6px; opacity:0; pointer-events:none; }
-#writeMessage { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); text-align:start; }
-#writeMessage::after { content:''; float:inline-end; width:8px; height:8px; margin:5px 2px 0 8px; border-top:1.5px solid currentColor; border-inline-start:1.5px solid currentColor; transform:rotate(45deg); }
+#writeMessage { display:flex; align-items:center; gap:8px; flex:1; min-width:0; overflow:hidden; color:var(--muted); text-align:start; }
+#compactModel { margin-inline-start:auto; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+#compactEffort { flex:none; }
+#compactEffort:empty { display:none; }
+#compactEffort::before { content:'· '; }
+#writeMessage::after { content:''; flex:none; width:8px; height:8px; margin:4px 2px 0 0; border-top:1.5px solid currentColor; border-inline-start:1.5px solid currentColor; transform:rotate(45deg); }
 :is(#jump,.compact-composer button):is(:hover,:active):not(:disabled) { background:var(--fill); color:var(--ink); }
 .composer-stack { position:relative; display:flex; flex-direction:column; width:min(var(--composer-width),100%); min-height:0; }
 .composer-fold { display:grid; grid-template-rows:1fr; min-height:0; }

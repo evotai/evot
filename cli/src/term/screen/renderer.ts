@@ -14,9 +14,9 @@
  * any selection. Here an edit that leaves every row at its own index is left
  * stale instead, reported through the trace and diagnostics hooks.
  *
- * Hidden live rows may stay stale while streaming; replaying the transcript
- * per delta is worse than provisional history. Repair them at the next durable
- * commit, or when the user explicitly invalidates history. Geometry is
+ * A commit is not permission to clear native history: stdout cannot tell us
+ * whether someone is reading or selecting it. Leave hidden rows as painted
+ * until history is explicitly invalidated. Geometry is
  * separate: a shrink that moves the caret above the physical viewport redraws
  * only the visible tail instead of replaying history to recover the editor.
  *
@@ -128,16 +128,6 @@ export type RendererDiagnostic =
     previousLines: number
     newLines: number
   }
-  | {
-    /** Rows above the viewport shifted index; repainted rather than corrupted. */
-    kind: 'scrollback_shift'
-    frame: number
-    shiftedFrom: number
-    delta: number
-    viewportTop: number
-    previousLines: number
-    newLines: number
-  }
 
 export interface TermRendererOptions {
   stdout?: NodeJS.WriteStream
@@ -178,8 +168,6 @@ export class TermRenderer {
   private scrollbackInvalidated = false
   /** Lowest logical row this renderer left unpainted in scrollback, if any. */
   private scrollbackStaleFrom: number | null = null
-  /** Hidden live rows are repaired once on the next durable commit. */
-  private liveScrollbackStaleFrom: number | null = null
   private forcedRepaint = false
 
   // Render scheduling
@@ -207,6 +195,11 @@ export class TermRenderer {
 
   get termCols(): number {
     return safeDimension(this.stdout.columns, 80)
+  }
+
+  /** At this geometry the top of the last frame is no longer addressable. */
+  get frameStartsInScrollback(): boolean {
+    return this.previousViewportTop > 0 && this.previousWidth === this.termCols && this.previousHeight === this.termRows
   }
 
   // --- Lifecycle ---
@@ -311,7 +304,6 @@ export class TermRenderer {
       this.invalidatedRows.clear()
       this.scrollbackInvalidated = false
       this.scrollbackStaleFrom = null
-      this.liveScrollbackStaleFrom = null
       this.previousCommittedRows = Number.POSITIVE_INFINITY
       // Reported as its own branch: a forced repaint reaches the same code path
       // as a resize, and a log that called it `width_change` would send the
@@ -349,7 +341,6 @@ export class TermRenderer {
     this.invalidatedRows.clear()
     this.scrollbackInvalidated = false
     this.scrollbackStaleFrom = null
-    this.liveScrollbackStaleFrom = null
     this.previousCommittedRows = Number.POSITIVE_INFINITY
     this.previousWidth = this.termCols
     this.previousHeight = this.termRows
@@ -607,7 +598,6 @@ export class TermRenderer {
       this.previousWidth = width
       this.previousHeight = height
       this.scrollbackStaleFrom = null
-      this.liveScrollbackStaleFrom = null
       buffer += this.hardwareCursorSequence(cursorPos, newLines.length) + SYNC_END
       this.write(buffer)
       traceFrame(branch)
@@ -713,11 +703,6 @@ export class TermRenderer {
     let lastChanged = -1
     let firstVisibleChanged = -1
     let lastVisibleChanged = -1
-    /** First unaddressable changed row in the live region, which may have shifted. */
-    let firstShiftedChanged = -1
-    // Safe only if the row was committed in both frames: history appending moves
-    // the boundary down, and the new frame alone would call such a row safe.
-    const committedBoundary = Math.min(committedRows, previousCommittedRows)
     const maxLines = Math.max(newLines.length, this.previousLines.length)
     for (let i = 0; i < maxLines; i++) {
       const oldLine = i < this.previousLines.length ? this.previousLines[i] : ''
@@ -728,8 +713,6 @@ export class TermRenderer {
       lastChanged = i
       if (i < prevViewportTop) {
         staleScrollbackRows++
-        // An invalidation repaints identical bytes; only a real diff can shift.
-        if (changed && i >= committedBoundary && firstShiftedChanged === -1) firstShiftedChanged = i
         continue
       }
       if (firstVisibleChanged === -1) firstVisibleChanged = i
@@ -752,34 +735,6 @@ export class TermRenderer {
         this.scrollbackStaleFrom ?? maxLines,
       ))
       return
-    }
-    // Streaming changes are provisional. Rebuild on the next durable commit,
-    // including hidden changes adopted as stale earlier or removed by a shrink.
-    // Otherwise one reflow/animation can replay the transcript at 10Hz.
-    const newlyCommittedChange = firstShiftedChanged !== -1 && committedRows > previousCommittedRows
-      && firstShiftedChanged < committedRows
-    // A collapse can put the removed rows beyond the new committed boundary.
-    // The next commit must repair those too, even if it never crosses their index.
-    const committedStaleChange = this.liveScrollbackStaleFrom !== null && committedRows > previousCommittedRows
-    if (newlyCommittedChange || committedStaleChange) {
-      const shiftedFrom = Math.min(
-        firstShiftedChanged === -1 ? maxLines : firstShiftedChanged,
-        this.liveScrollbackStaleFrom ?? maxLines,
-      )
-      this.diagnose({
-        kind: 'scrollback_shift',
-        frame,
-        shiftedFrom,
-        delta: newLines.length - this.previousLines.length,
-        viewportTop: prevViewportTop,
-        previousLines: this.previousLines.length,
-        newLines: newLines.length,
-      })
-      fullRender(true, 'scrollback_shift', shiftedFrom)
-      return
-    }
-    if (firstShiftedChanged !== -1) {
-      this.liveScrollbackStaleFrom = Math.min(this.liveScrollbackStaleFrom ?? firstShiftedChanged, firstShiftedChanged)
     }
     if (staleScrollbackRows > 0) {
       this.scrollbackStaleFrom = Math.min(this.scrollbackStaleFrom ?? firstChanged, firstChanged)

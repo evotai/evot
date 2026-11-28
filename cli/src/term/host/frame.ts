@@ -126,7 +126,7 @@ export function createFrameController(st: ReplState, deps: FrameDeps): FrameCont
       serverState: st.serverState,
       releaseNotes: st.releaseNotes,
       installDrift: st.installDrift,
-    })
+    }, deps.renderer.frameStartsInScrollback)
   }
 
   // --- buildFrame: the single render callback for the new differential renderer ---

@@ -41,7 +41,7 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(html).toMatch(/<\/textarea><span id="draftHint"[^>]*><\/span><div id="draftGhost" hidden><span[^>]*aria-hidden="true"[^>]*><\/span><wbr><span id="draftCommandHint"><\/span><\/div>/)
     expect(html).toContain('<section class="composer-card" id="compose"')
     expect(html).toContain('<button id="send" type="button"')
-    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*>Message…/)
+    expect(html).toMatch(/id="writeMessage"[^>]*aria-label="Open composer"[^>]*aria-describedby="compactModel compactEffort"[^>]*><span id="writeLabel">Message…<\/span><span id="compactModel"><\/span><span id="compactEffort"><\/span><\/button>/)
     const header = html.match(/<header class="conversation-head">[\s\S]*?<\/header>/)?.[0] ?? ''
     expect(header).not.toMatch(/id="(?:connection|resumeConnection|status)"/)
     expect(html).toMatch(/class="run-line"[^\n]*id="activity"[^\n]*id="status" role="status"[^\n]*id="resumeConnection"/)

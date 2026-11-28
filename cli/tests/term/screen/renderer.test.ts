@@ -712,7 +712,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('hidden live shifts stay provisional, then repair once when committed', async () => {
+    test('hidden live shifts are repaired on explicit invalidation, not commit', async () => {
       const screen = new ScreenHarness(80, 10)
       const diagnostics: RendererDiagnostic[] = []
       const renderer = new TermRenderer({
@@ -734,13 +734,17 @@ describe('TermRenderer', () => {
       expect(diagnostics.map(d => d.kind)).toEqual(['stale_scrollback'])
       expect(screen.viewport()).toEqual(Array.from({ length: 10 }, (_, i) => `row ${20 + i}`))
 
-      // The already-adopted diff is no longer visible to comparison, but the
-      // commit boundary must still repair it so durable output is not lost.
+      screen.terminal.scrollLines(-12)
+      const reading = screen.viewport()
       diagnostics.length = 0
       committedRows = lines.length
       await paint(renderer, screen)
-      expect(diagnostics.map(d => d.kind)).toEqual(['scrollback_shift', 'full_redraw'])
-      expect(diagnostics.map(d => d.kind === 'full_redraw' && d.branch)).toEqual([false, 'scrollback_shift'])
+      expect(diagnostics).toEqual([])
+      expect(screen.viewport()).toEqual(reading)
+
+      renderer.invalidateScrollback()
+      await paint(renderer, screen)
+      expect(diagnostics.map(d => d.kind === 'full_redraw' && d.branch)).toEqual(['history_invalidated'])
       const buffer = screen.terminal.buffer.active
       const rows: string[] = []
       for (let i = 0; i < buffer.length; i++) {
@@ -779,7 +783,7 @@ describe('TermRenderer', () => {
       renderer.destroy()
     })
 
-    test('rows committed by this frame are judged against the old boundary', async () => {
+    test('inserting committed rows above the viewport does not replay native history', async () => {
       const screen = new ScreenHarness(80, 10)
       const diagnostics: RendererDiagnostic[] = []
       const renderer = new TermRenderer({
@@ -795,23 +799,18 @@ describe('TermRenderer', () => {
       renderer.setRenderCallback(() => ({ lines, committedRows }))
       await paint(renderer, screen)
 
-      // A 5-row tool result commits into history, taller than the overhang, so
-      // every shifted partial row lands inside the viewport and the only rows
-      // changed above it are the new tool rows. Those are committed in the new
-      // frame; judged by the new boundary alone they would be left stale.
+      // Insert a result and advance the commit boundary in the same frame.
+      screen.terminal.scrollLines(-4)
+      const readingTop = screen.terminal.buffer.active.viewportY
       const tool = Array.from({ length: 5 }, (_, i) => `tool ${i}`)
       lines = [...history, ...tool, ...partial]
       committedRows = 9
       await paint(renderer, screen)
 
-      expect(diagnostics.map(d => d.kind)).toEqual(['scrollback_shift', 'full_redraw'])
-      const buffer = screen.terminal.buffer.active
-      const rows: string[] = []
-      for (let i = 0; i < buffer.length; i++) {
-        rows.push((buffer.getLine(i)?.translateToString(true) ?? '').trimEnd())
-      }
-      for (const line of tool) expect(rows).toContain(line)
-      expect(rows.filter(r => r === 'partial 0')).toHaveLength(1)
+      expect(diagnostics.map(d => d.kind)).toEqual(['stale_scrollback'])
+      expect(screen.terminal.buffer.active.viewportY).toBe(readingTop)
+      screen.terminal.scrollToBottom()
+      expect(screen.viewport()).toEqual(lines.slice(-10))
       renderer.destroy()
     })
 
