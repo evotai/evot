@@ -16,7 +16,7 @@ import { renderHistory, updateToolAt } from './phone-history.js';
 import { conversationScroll } from './phone-scroll.js';
 import { fitConversationViewport } from './phone-viewport.js';
 import { navigation } from './phone-navigation.js';
-import { imageTray } from './phone-images.js';
+import { imageTray, pastePhotos } from './phone-images.js';
 import { CONFIRM_MS, delivered, photoExpired, refused, requestTimeout, uploadRequest } from './phone-send.js';
 import { commandMenu, phoneLocalCommand, phoneShortcut } from './phone-commands.js';
 import { draftCarry, reloadForRecovery } from './phone-update.js';
@@ -890,9 +890,8 @@ $('draft').oninput = () => { shortcuts.disarm(); resize(); };
 if (messageField.isContentEditable) document.addEventListener('selectionchange', () => { if (document.activeElement === messageField) controls(); });
 else messageField.addEventListener('selectionchange', controls);
 // A photo pasted into the box (desktop browsers, iPad) joins the tray instead of the text.
-$('draft').addEventListener('paste', (e) => {
-  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
-  if (files.length && view?.input && !busy) { e.preventDefault(); void photos.add(files); }
+messageField.addEventListener('paste', e => {
+  if (connected && view?.input && !busy && !messageField.readOnly) pastePhotos(e, photos.add);
 });
 $('draft').onkeydown = (e) => {
   if (tab.composing || e.isComposing || e.keyCode === 229) return;

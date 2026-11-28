@@ -2,6 +2,22 @@
 // moving a photo into the conversation never waits for a decoder or a network reply.
 const MAX_SIDE = 1600, QUALITY = 0.76, MAX_IMAGES = 4;
 
+// Read synchronously inside the paste event: the browser can revoke access to
+// DataTransferItem after dispatch. Some clipboards expose a bitmap only here,
+// not in files; when both lists contain it, attach it just once.
+export function pastePhotos(event, add) {
+  const data = event.clipboardData;
+  if (!data) return;
+  const isPhoto = file => file?.type.startsWith('image/');
+  const files = Array.from(data.files ?? []).filter(isPhoto);
+  const items = Array.from(data.items ?? []).filter(item => item.kind === 'file')
+    .map(item => item.getAsFile()).filter(isPhoto);
+  const picked = items.length > files.length ? items : files;
+  if (!picked.length) return; // Keep native text paste (including URLs and IME).
+  event.preventDefault();
+  add(picked);
+}
+
 async function shrink(file) {
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   try {

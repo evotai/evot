@@ -1,9 +1,26 @@
 import { expect, test } from 'bun:test'
-import { imageTray } from '../../../src/features/remote/phone-images.js'
+import { imageTray, pastePhotos } from '../../../src/features/remote/phone-images.js'
 
 const cell = () => ({ append() {}, setAttribute() {} })
 const tray = () => ({ ownerDocument:{ createElement:cell }, replaceChildren() {} })
 const photo = new File([new Uint8Array(100)], 'camera.jpg', { type:'image/jpeg' })
+
+test('image paste accepts items-only bitmaps, files-only photos and mirrored lists exactly once', () => {
+  const item = { kind:'file', getAsFile:() => photo }
+  for (const clipboardData of [{ items:[item], files:[] }, { files:[photo] }, { files:[photo], items:[item] }]) {
+    const attached:File[] = []
+    let cancelled = false
+    pastePhotos({ clipboardData, preventDefault:() => { cancelled = true } }, (files:File[]) => attached.push(...files))
+    expect(attached).toEqual([photo]); expect(cancelled).toBe(true)
+  }
+})
+
+test('text, links, and unavailable clipboard files leave native paste alone', () => {
+  const unexpected = () => { throw Error('intercepted native paste') }
+  for (const clipboardData of [null, { files:[], items:[{kind:'string',type:'text/html'}, {kind:'file',getAsFile:() => null}] }]) {
+    pastePhotos({ clipboardData, preventDefault:unexpected }, unexpected)
+  }
+})
 
 test('taking a batch is immediate even during decode; byte progress belongs to that batch, not the next draft', async () => {
   const decode = Promise.withResolvers<File>(), progress = Promise.withResolvers<(bytes:number) => void>(), receipt = Promise.withResolvers<string>()
