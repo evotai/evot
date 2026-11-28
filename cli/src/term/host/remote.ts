@@ -60,6 +60,7 @@ export interface RemoteDeps {
   readonly insideTmux?: () => boolean
   /** Present when the paired service election controls starts. */
   readonly coordinatedHost?: boolean
+  readonly terminalTitle: { refresh(): void }
   readonly backgroundTerminals: BackgroundTerminals
   readonly composer: ComposerController
   readonly activity: ActivityController
@@ -472,6 +473,17 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     deps.exitAfterCleanup(0)
     return true
   }
+  function showGateway(label: ReplState['gatewayLabel']) {
+    if (st.gatewayLabel === label) return
+    st.gatewayLabel = label
+    if (!st.destroyed) {
+      deps.terminalTitle.refresh()
+      deps.replCommands.requestRender()
+    }
+  }
+  function showListener() {
+    if (st.remoteListener) showGateway(st.remoteListener.reconnecting ? 'Gateway · 重连中' : 'Gateway')
+  }
   function close(hide = true) {
     st.remoteAttempt++
     st.remoteOpening = false
@@ -482,7 +494,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     st.terminalBus?.route(null)
     if (hide) st.terminalBus?.share(null)
     else st.terminalBus?.endInvite()
-    if (gateway && !st.destroyed) deps.replCommands.requestRender()
+    showGateway(null)
   }
   function dispose() {
     if (st.remoteParkTimer) clearInterval(st.remoteParkTimer)
@@ -642,6 +654,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
               },
             }, home, deps.agent.cwd, scope, st.configInfo?.envPath),
             pending: announcePairing,
+            connectorChanged: () => { if (attempt === st.remoteAttempt) showListener() },
             presenceChanged: () => {
               if (attempt === st.remoteAttempt && st.remoteListener) deps.replCommands.requestRender()
             },
@@ -666,7 +679,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
           installed = true
           st.remoteListener = gateway
           st.terminalBus.route(scope, { url: gateway.url, address: gateway.address, windowApproval: true })
-          deps.replCommands.requestRender()
+          showListener()
           if (!gateway.cloud) status?.finish('success', 'Local approval gateway is on.')
           else status?.finish('info', `Gateway started for ${new URL(gateway.address).host}. The address works once the tunnel connects.`)
         } catch (e) {
@@ -703,17 +716,21 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
     if (st.remoteListener && !st.remoteListener.active()) close(false)
     const p = profile()
     const policyHome = p.account ? join(homedir(), '.evotai') : p.home
-    if (gatewayPolicy(policyHome) !== p.scope) return false
+    if (gatewayPolicy(policyHome) !== p.scope) { showGateway(null); return false }
     if (currentScope() !== p.scope || st.remoteChild)
       throw Error('This window cannot serve the enabled Remote profile.')
     if (!st.remoteListener) {
-      if (Date.now() < st.remoteRetryAt) return 'reconnecting' as const
+      if (Date.now() < st.remoteRetryAt) {
+        showGateway('Gateway · 重连中')
+        return 'reconnecting' as const
+      }
       try { await enable(gatewayProfile(), false, current) }
       catch (error) {
         if (!(error instanceof ConnectRetryable) || !current()) throw error
         // Keep the Console and the host election intact during a control-plane
         // restart. Only registration needs to be retried on maintenance ticks.
         st.remoteRetryAt = Date.now() + 15_000
+        showGateway('Gateway · 重连中')
         return 'reconnecting' as const
       }
     }
@@ -770,7 +787,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       return allowed(p.account ? join(homedir(), '.evotai') : p.home, p.scope)
     },
     idleForHost: () => windowStatus().phase === 'idle' && !st.remoteChild && !st.restarting && !st.restartPending && !st.logMode,
-    releaseHost: () => { if (st.remoteListener || st.remoteOpening) close(false) },
+    releaseHost: () => { if (st.remoteListener || st.remoteOpening) close(false); else showGateway(null) },
     resume,
     dispose,
     snapshot,

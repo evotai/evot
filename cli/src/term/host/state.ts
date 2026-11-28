@@ -158,6 +158,7 @@ export interface ReplState {
   remoteOpening: boolean
   remoteRetryAt: number
   remoteListener: SharedEnvironment | null
+  gatewayLabel: 'Gateway' | 'Gateway · 重连中' | null
   /** Scope of the phone that opened this window; kept so a restart reopens it the same way. */
   remotePhoneScope: string | null
   /** A safe /restart is waiting for its moment; `restartPoll` re-checks it. */
@@ -275,7 +276,7 @@ export function createReplState(model: string, cwd: string): ReplState {
     liveContentWidth: 0,
     liveRegionStartRow: 0,
     terminalBus:null, remoteChild:false, remoteWatchedAt:0, remoteParkTimer:null, remoteAttempt:0, remoteOpening:false, remoteRetryAt:0, remoteEpoch:0, remoteListener: null,
-    remotePhoneScope: null, restartPending: false, restartPoll: null, restarting: false,
+    gatewayLabel: null, remotePhoneScope: null, restartPending: false, restartPoll: null, restarting: false,
     remoteTitle: null,
     conversationTail: new ConversationTail(),
     serviceHost: null, serverState: null,

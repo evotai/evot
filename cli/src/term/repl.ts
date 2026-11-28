@@ -359,7 +359,7 @@ export async function startRepl(opts: ReplOptions): Promise<void> {
     commitSystem: scrollback.commitSystem,
     requestRender: () => renderer.requestRender(),
   })
-  const terminalTitle = new TerminalTitle(agent.cwd, () => ownedDashboardPort(st.serverState))
+  const terminalTitle = new TerminalTitle(agent.cwd, () => ownedDashboardPort(st.serverState), () => st.gatewayLabel)
   const setTerminalTitle = terminalTitle.set.bind(terminalTitle)
   const freezeTerminalTitle = terminalTitle.freeze.bind(terminalTitle)
   const loopSession = new LoopSession({

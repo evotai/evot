@@ -30,6 +30,7 @@ export async function openEnvironment(input: {
   pending: (code: string, id: string) => void
   exited: (reason: string) => void
   presenceChanged: () => void
+  connectorChanged?: () => void
   /** Phase text while starting (and bytes while downloading the connector); later, reconnect notices. */
   progress?: InstallProgress
 }, retryDelay?: Parameters<typeof superviseConnector>[0]['delay']) {
@@ -86,6 +87,7 @@ export async function openEnvironment(input: {
     )
     const gateway = listenRemote(host, access, { port: gatewayPort(scope), cloud: allocation?.gate, active, workspace })
     let stopConnector: (() => void) | undefined
+    let reconnecting = false
     try {
       if (allocation && account && identity) {
         progress('Starting the tunnel connector…')
@@ -100,7 +102,12 @@ export async function openEnvironment(input: {
           // Deliver the terminal failure even when writing the denial has
           // already turned off the profile; explicit close still aborts it.
           active: () => denied || input.active(),
-          recovering: () => progress('Connector stopped; retrying on the same address…'),
+          recovering: () => {
+            reconnecting = true
+            input.connectorChanged?.()
+            progress('Connector stopped; retrying on the same address…')
+          },
+          restarted: () => { reconnecting = false; input.connectorChanged?.() },
           failed: reason => { if (!closed) input.exited(reason) },
         })
         // Ownership means the private socket is bound and the supervised
@@ -115,6 +122,7 @@ export async function openEnvironment(input: {
     return {
       ...gateway,
       scope,
+      get reconnecting() { return reconnecting },
       url: allocation?.url ?? gateway.address,
       cloud: !!allocation,
       active,

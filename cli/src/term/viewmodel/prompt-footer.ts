@@ -32,6 +32,7 @@ export interface PromptFooterVM {
   modelAvailability?: string
   logMode: boolean
   dashboardUrl: string | null
+  gatewayLabel?: string | null
   remotePresence?: RemotePresence
   cwd: string
   /** Fork ancestry titles, root → current; empty or absent for non-forks. */
@@ -249,12 +250,18 @@ function buildFooterCandidate(
   columns: number,
   remote: StyledSpan[],
 ): FooterCandidate {
-  const dashboard = layout.dashboard && input.dashboardUrl
-    ? [
-        { text: 'dashboard ', dim: true } satisfies StyledSpan,
-        { text: layout.dashboard === 'port' ? dashboardPort(input.dashboardUrl) : input.dashboardUrl, dim: true, link: input.dashboardUrl } satisfies StyledSpan,
-      ]
-    : []
+  const dashboard: StyledSpan[] = []
+  if (layout.dashboard) {
+    if (input.gatewayLabel) dashboard.push({ text: input.gatewayLabel, dim: true, link: input.dashboardUrl ?? undefined })
+    if (input.dashboardUrl) {
+      dashboard.push(dim(input.gatewayLabel ? ' │ Console ' : 'dashboard '))
+      // On the host this is the configuration entry point. Prefer a copyable
+      // URL even after cwd/model details shrink; abbreviate only as a last resort.
+      const fullUrl = layout.dashboard === 'full' || (input.gatewayLabel && layout.model)
+      const text = fullUrl ? input.dashboardUrl : dashboardPort(input.dashboardUrl)
+      dashboard.push({ text, dim: true, link: input.dashboardUrl })
+    }
+  }
   const right = dashboard.length && remote.length ? [...dashboard, dim(' │ '), ...remote] : [...dashboard, ...remote]
 
   const buildLeft = (location: string): StyledSpan[] => {

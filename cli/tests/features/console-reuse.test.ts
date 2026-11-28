@@ -56,7 +56,8 @@ test('terminal port appears only for the owner, including same-address ownership
     envFile: '/tmp/console.env', startedAt: 1, owned: true,
   }
   let state: ServerState | null = null
-  const title = new TerminalTitle('/tmp/evot', () => ownedDashboardPort(state))
+  let gateway: string | null = null
+  const title = new TerminalTitle('/tmp/evot', () => ownedDashboardPort(state), () => gateway)
   const writes: string[] = []
   const output = spyOn(process.stdout, 'write').mockImplementation(chunk => {
     writes.push(String(chunk))
@@ -85,6 +86,11 @@ test('terminal port appears only for the owner, including same-address ownership
     state = owned
     title.refresh()
     expect(writes.at(-1)).toBe('\x1b]0;? evot - evot · :8082\x07')
+    for (gateway of ['Gateway', 'Gateway · 重连中']) {
+      title.refresh()
+      expect(writes.at(-1)).toBe(`\x1b]0;? evot - evot · ${gateway}\x07`)
+    }
+    gateway = null
     title.unfreeze()
     state = null
     title.set()

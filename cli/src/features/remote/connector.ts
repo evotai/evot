@@ -13,6 +13,7 @@ export function superviseConnector(input: {
   refresh(): Promise<Start>
   active(): boolean
   recovering(): void
+  restarted?(): void
   failed(reason: string): void
   delay?: (ms: number, signal: AbortSignal) => Promise<unknown>
 }) {
@@ -39,6 +40,7 @@ export function superviseConnector(input: {
         if (!active()) return
         proc = start()
         started = Date.now()
+        input.restarted?.()
         break
       }
     }

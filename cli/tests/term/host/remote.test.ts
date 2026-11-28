@@ -80,7 +80,7 @@ function harness(findSession: (id: string) => Promise<SessionMeta | null> = asyn
   const activity = createActivityController(st, {manualCompaction:{active:false},loopSession:{waiting:false},runInteraction:new RunInteraction(),
     awaitedTaskSummary:()=>undefined, runInteractionInput,
   } as unknown as ActivityDeps)
-  const remote = createRemoteController(st, { activity, asks, pendingQueue, suggest:{suggestionInputReady:()=>true,suggestionInventory:()=>({models:[],sessions:[]})}, queueLifecycle:{reconcile(){ if (st.streamRef) pendingQueue.reconcile(st.streamRef) }, dispatchNext:() => calls.push('dispatch')}, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,
+  const remote = createRemoteController(st, { terminalTitle: { refresh() {} }, activity, asks, pendingQueue, suggest:{suggestionInputReady:()=>true,suggestionInventory:()=>({models:[],sessions:[]})}, queueLifecycle:{reconcile(){ if (st.streamRef) pendingQueue.reconcile(st.streamRef) }, dispatchNext:() => calls.push('dispatch')}, agent:{cwd:'/fixture',findSession,listSessions,listSessionsWithText:async()=>[],deleteSession:async()=>true,
     cloudShareSession:(sid:string,mode:string,progress:(value:CloudPushProgress)=>void) => share.push(sid,mode,progress), cloudUnshareSession:(sid:string) => share.off(sid)}, cloudSessions:{remoteFor:()=>undefined,forget(){}}, resumeCache:{remove(){}}, suggestions, gitInfo:{getBranch:()=>'main'}, replCommands:{commitLines(){}, replaceLine:()=>true, requestRender(){}}, readAuthIdentity:()=>null, rendererTrace:{isEnabled:false}, scrollback:{...scrollback, commitLocalNotice:(_key:string,text:string) => notices.push(text)}, modelSelection, runOwnership, backgroundTerminals:{presentation:()=>undefined,
       stopTarget:()=>shells.target,
       refresh:()=>{if (shells.afterRefresh) shells.target = shells.afterRefresh}, stopAll:(target:string)=>calls.push('stop:'+target)},composer:{cycleThinkingLevel(){calls.push('cycle'); return true}, toggleExpanded(){st.expanded=!st.expanded}, mutateEditor:(f:(e:typeof st.editor)=>typeof st.editor)=>{st.editor=f(st.editor)}}, pendingImages:{awaiting:false},
@@ -790,10 +790,13 @@ test('an opted-in older idle window fills a vacancy and retains Console ownershi
     launch.mockRejectedValueOnce(new ConnectRetryable('Connect is restarting'))
     await services.tick(); expect(st.serviceHost?.controller.owner).toBe(true)
     expect(st.remoteListener).toBeNull(); expect(stop).not.toHaveBeenCalled()
+    expect(st.gatewayLabel).toBe('Gateway · 重连中')
     clock.mockReturnValue(now+6000); await services.tick(); expect(launch).toHaveBeenCalledTimes(1)
     clock.mockReturnValue(now+16000); await services.tick(); expect(st.remoteListener?.active()).toBe(true)
     expect(launch).toHaveBeenCalledTimes(2); expect(stop).not.toHaveBeenCalled()
+    expect(st.gatewayLabel).toBe('Gateway')
     await remote.command('off'); await services.tick(); expect(st.remoteListener).toBeNull()
+    expect(st.gatewayLabel).toBeNull()
   } finally {
     await st.serviceHost?.controller.dispose(false); remote.dispose()
     clock.mockRestore(); launch.mockRestore(); start.mockRestore(); stop.mockRestore()
@@ -821,7 +824,9 @@ test('only an opted-in profile elects a gateway; /remote off from a sibling stop
     await b.remote.maintain()
     expect(b.st.remoteListener).toBeNull()
     expect(a.st.remoteListener).toBe(original)
+    expect(a.st.gatewayLabel).toBe('Gateway'); expect(b.st.gatewayLabel).toBeNull()
     a.remote.dispose()
+    expect(a.st.gatewayLabel).toBeNull()
     await other.remote.maintain()
     expect(other.st.remoteListener).toBeNull()
     await Promise.all([b.remote.maintain(), c.remote.maintain()])

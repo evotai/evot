@@ -5,6 +5,7 @@ export class TerminalTitle {
   constructor(
     private readonly cwd: string,
     private readonly port: () => number | null,
+    private readonly gatewayLabel: () => string | null = () => null,
   ) {}
 
   set(suffix?: string, force = false): void {
@@ -31,8 +32,8 @@ export class TerminalTitle {
     const dirName = this.cwd.split('/').pop() || this.cwd
     const base = `evot - ${dirName}`
     const port = this.port()
-    const portPart = port ? ` · :${port}` : ''
-    const title = suffix ? `${suffix} ${base}${portPart}` : `${base}${portPart}`
+    const service = this.gatewayLabel() ?? (port ? `:${port}` : '')
+    const title = `${suffix ? `${suffix} ` : ''}${base}${service ? ` · ${service}` : ''}`
     process.stdout.write(`\x1b]0;${title}\x07`)
   }
 }

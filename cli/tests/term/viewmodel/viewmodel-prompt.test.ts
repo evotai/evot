@@ -910,6 +910,18 @@ describe('prompt footer', () => {
     expect(footer).toEndWith('dashboard http://127.0.0.1:8082')
   })
 
+  test('the Gateway host names its role and shows the clickable Console address', () => {
+    const dashboardUrl = 'http://127.0.0.1:8082'
+    for (const gatewayLabel of ['Gateway', 'Gateway · 重连中']) {
+      const footer = buildPromptFooterBlocks(defaultInput({ columns: 100, dashboardUrl, gatewayLabel }))
+      expect(blocksToLines(footer).map(stripAnsi)[0]).toEndWith(`${gatewayLabel} │ Console ${dashboardUrl}`)
+      expect(footer.flatMap(b => b.lines.flatMap(l => l.spans))).toContainEqual({ text: dashboardUrl, dim: true, link: dashboardUrl })
+      const narrow = buildPromptFooterBlocks(defaultInput({ columns: 36, dashboardUrl, gatewayLabel }))
+      expect(blocksToLines(narrow).map(stripAnsi)[0]).toEndWith(`${gatewayLabel} │ Console :8082`)
+      expect(narrow.flatMap(b => b.lines.flatMap(l => l.spans))).toContainEqual({ text: ':8082', dim: true, link: dashboardUrl })
+    }
+  })
+
   test('puts the gateway device counts last, fixes their alignment and sheds detail at narrow widths', () => {
     const remotePresence = { phone: 1, tablet: 1, desktop: 1, unknown: 1 }
     const footer = (columns: number, presence = remotePresence) => blocksToLines(buildPromptFooterBlocks(defaultInput({
