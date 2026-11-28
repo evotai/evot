@@ -32,7 +32,7 @@ export function listenRemote(
     'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
     'X-Evot-Build': phoneBuild,
-    'Content-Security-Policy': `default-src 'none'; frame-src 'self'; script-src ${phoneScriptHash}; connect-src 'self'${cloud?.renewal ? ' ' + new URL(cloud.renewal.endpoint).href : ''}; style-src ${phoneStyleHash}; img-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    'Content-Security-Policy': `default-src 'none'; frame-src 'self'; script-src ${phoneScriptHash}; connect-src 'self'${cloud?.renewal ? ' ' + new URL(cloud.renewal.endpoint).href : ''}; style-src ${phoneStyleHash}; img-src blob:; media-src blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
   }
   const fail = (status: number, msg: string) => new Response(msg, { status, headers })
   const handler = {
@@ -88,6 +88,12 @@ export function listenRemote(
         return new Response(data,{headers:{...headers,'Content-Type':'application/json',Vary:'Accept-Encoding',...(gzip ? {'Content-Encoding':'gzip'} : {})}})
       }
       if (path === '/sessions' && req.method === 'GET') {
+        if (url.searchParams.has('resolve')) {
+          const session = url.searchParams.get('resolve')!
+          if (!session || session.length > 128) return fail(400, 'Invalid session id.')
+          const result = await workspace?.resolveSession(session) ?? { rows: [], unavailable: true }
+          return authorized() ? Response.json(result, { headers }) : unauthorized()
+        }
         const page = url.searchParams.has('limit') ? {
           limit: Math.max(1, Math.min(10000, Number(url.searchParams.get('limit')) || 40)),
           query: (url.searchParams.get('q') ?? '').trim().slice(0, 256).toLowerCase(),
@@ -132,7 +138,8 @@ export function listenRemote(
         }
         const response = other ? await workspace!.bus.request(other, '/state', undefined, bg) : Response.json(host.snapshot(bg))
         const body = await response.text()
-        if (!authorized() || !shared()) return unauthorized()
+        if (!authorized()) return unauthorized()
+        if (!shared()) return fail(409, 'Terminal no longer shared.')
         if (!response.ok) return fail(response.status, body)
         access.observe(auth, kind)
         const etag = `"${Bun.hash(body).toString(16)}"`

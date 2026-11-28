@@ -75,11 +75,15 @@ export interface RemoteSnapshot {
   place?: RemotePlace
   /** The TUI's next-prompt suggestion (Tab/→ there); a phone taps it into its own draft. */
   suggestion?: string
+  suggestionCandidates?: readonly string[]
+  suggestionPosition?: { current: number; total: number }
   /** Display-only feedback for the empty composer, never an insertable candidate. Older windows omit it. */
   suggestionHint?: string
   /** Same metadata title as /sessions; older windows omit it. */
   title?: string
   generation: number
+  /** Last settled round in this window and session. Older hosts omit it. */
+  finishedRound?: number | null
   status: string
   messageOffset?: number
   messages: readonly RemoteMessage[]

@@ -58,6 +58,7 @@ test('the public pairing page ships one complete client allowed by its CSP, with
     expect(csp).toContain(`'sha256-${createHash('sha256').update(client).digest('base64')}'`)
     expect(csp).not.toMatch(/unsafe-(inline|eval)/)
     expect(csp).toContain("form-action 'none'")
+    expect(csp).toContain('media-src blob:;')
     expect(r.headers.get('cache-control')).toContain('no-transform')
     // One fetch paints the page: styles and scripts are inline and hashed, nothing loads from 'self'.
     expect(html).not.toMatch(/<link\b|<script\b[^>]*\bsrc=/)

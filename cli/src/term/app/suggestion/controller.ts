@@ -276,6 +276,7 @@ export class PromptSuggestion {
   completing(): boolean { const intent = this.visible(); return intent?.slot === 'completion' && Boolean(intent.batch?.count()) }
   replacing(): boolean { const intent = this.visible(); return !!intent && intent.cursor < intent.draft.length }
   text(): string { return this.visible()?.batch?.text() ?? '' }
+  candidates(): readonly string[] { return this.visible()?.batch?.values() ?? [] }
   position(): SuggestionPosition { return this.visible()?.batch?.position() ?? { current: 1, total: 1 } }
 
   /** Cycle a cached batch; retries are only possible with no usable batch. */

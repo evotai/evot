@@ -73,6 +73,16 @@ export function phoneWorkspace(
         })),
     }
   }
+  // Reconnecting already knows the exact session id. Resolve the same live
+  // destination as the drawer without scanning history or loading transcripts.
+  async function resolveSession(session: string) {
+    const { online, occupied, unavailable } = await bus.inventory()
+    const owner = liveSessions(online).find(row => row.session === session)
+    if (owner) return { rows: [{ session, terminal: owner.terminal }], unavailable }
+    if (unavailable || occupied.has(session)) return { rows: [], unavailable }
+    const saved = (await listHistory()).some(row => row.session_id === session && row.turns > 0)
+    return { rows: saved ? [{ session }] : [], unavailable }
+  }
   async function catalog(page: CatalogPage) {
     let failed = false
     const { rows: history, truncated } = await listPage(page.query ? 0 : page.limit).catch(() => { failed = true; return { rows: [], truncated: false } })
@@ -216,6 +226,6 @@ export function phoneWorkspace(
     }
     throw new RemoteConflict('The window is still starting or failed. Check Sessions before retrying.')
   }
-  return { bus, list, catalog, open, remove, folders: async () => (await folders()).list }
+  return { bus, list, catalog, resolveSession, open, remove, folders: async () => (await folders()).list }
 }
 export type PhoneWorkspace = ReturnType<typeof phoneWorkspace>

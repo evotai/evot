@@ -1,4 +1,6 @@
-const CHECK_MS = 2000;
+import { mediaChime } from './phone-chime.js';
+
+const CHECK_MS = 2000, BACKGROUND_CHECK_MS = 10000;
 const prefix = 'evot.remote.sound.v1:';
 const keyOf = target => target?.session ? `session:${target.session}` : target?.terminal ? `window:${target.terminal}` : null;
 
@@ -16,28 +18,11 @@ export function roundCompletions(previous, rows) {
   return {seen, finished};
 }
 
-function chime(context) {
-  if (context?.state !== 'running') return;
-  const start = context.currentTime;
-  for (const [frequency, offset] of [[660, 0], [880, 0.12]]) {
-    const time = start + offset;
-    const tone = context.createOscillator(), envelope = context.createGain();
-    tone.frequency.value = frequency;
-    envelope.gain.setValueAtTime(0, time);
-    envelope.gain.linearRampToValueAtTime(0.1, time + 0.015);
-    envelope.gain.linearRampToValueAtTime(0, time + 0.16);
-    tone.connect(envelope).connect(context.destination);
-    tone.start(time);
-    tone.stop(time + 0.16);
-    tone.onended = () => { tone.disconnect(); envelope.disconnect(); };
-  }
-}
-
 export function completionReminder(button, inventory, notice) {
   const document = button.ownerDocument, window = document.defaultView;
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  const supported = !!window.Audio && !!window.URL?.createObjectURL;
   const enabled = new Set();
-  let context, timer, watcher = null, paired = false, target = null;
+  let player, timer, watcher = null, paired = false, target = null;
   try {
     const store = window.localStorage;
     for (let i = 0; i < store.length; i++) {
@@ -57,40 +42,76 @@ export function completionReminder(button, inventory, notice) {
       remember(keyOf(row),true); remember(temporary,false);
     }
   }
-  function unlock() {
-    if (!watcher || context?.state === 'running') return;
-    // Restoring the preference isn't itself a user gesture. Retry on the next
-    // interaction if the browser suspends audio; never erase the preference.
-    try { context ??= new AudioContext(); if (context.state !== 'running') void context.resume().catch(() => {}); } catch { /* unavailable until a gesture */ }
+  // Safari's ambient audio can follow the ringer switch. An explicitly enabled
+  // bell is media playback; the system still controls volume and suspension.
+  let previousAudioType;
+  function playbackMode(enable) {
+    try {
+      const session = window.navigator?.audioSession;
+      if (!session) return;
+      if (enable && previousAudioType === undefined && session.type !== 'playback') {
+        const previous = session.type;
+        session.type = 'playback'; previousAudioType = previous;
+      } else if (!enable && previousAudioType !== undefined) {
+        if (session.type === 'playback') session.type = previousAudioType;
+        previousAudioType = undefined;
+      }
+    } catch { /* Older WebKit: still use media element playback. */ }
+  }
+  function unlock(event) {
+    if (watcher && event.target !== button && !button.contains(event.target)) player.unlock();
+  }
+  // The open chat already receives its host's completion in the state stream.
+  // Do not wait for (or replay it from) the separate all-window inventory.
+  function observe(terminal, {sessionId:session, finishedRound}) {
+    if (!watcher || !enabled.has(keyOf({terminal, session})) ||
+        (finishedRound !== null && !Number.isSafeInteger(finishedRound))) return;
+    const id = JSON.stringify([terminal, session ?? null]);
+    watcher.live = id;
+    const previous = watcher.seen.get(id);
+    watcher.seen.set(id, finishedRound);
+    if (previous !== undefined && finishedRound !== null && finishedRound > (previous ?? -1)) player.ring();
   }
   async function check(current) {
-    if (watcher !== current || document.hidden || current.checking) return;
+    if (watcher !== current || current.checking) return;
     current.checking = true;
     try {
       const {online} = await inventory();
-      if (watcher !== current || document.hidden) return;
-      const {seen, finished} = roundCompletions(current.seen, online.filter(row => enabled.has(keyOf(row))));
+      if (watcher !== current) return;
+      const {seen, finished} = roundCompletions(current.seen, online.filter(row => enabled.has(keyOf(row)) &&
+        (document.hidden || JSON.stringify([row.terminal,row.session ?? null]) !== current.live)));
+      if (!seen.has(current.live) && current.seen.has(current.live)) seen.set(current.live,current.seen.get(current.live));
       current.seen = seen;
-      if (finished) chime(context);
-    } catch { current.seen.clear(); /* Reconnect with a fresh baseline, not a backlog of chimes. */ }
+      if (finished) player.ring();
+    } catch {
+      for (const id of current.seen.keys()) if (id !== current.live) current.seen.delete(id);
+    }
     finally {
       current.checking = false;
-      if (watcher === current && !document.hidden) timer = window.setTimeout(() => check(current), CHECK_MS);
+      if (watcher === current) timer = window.setTimeout(() => check(current), document.hidden ? BACKGROUND_CHECK_MS : CHECK_MS);
     }
   }
   function sync() {
-    button.hidden = !paired || !target || !AudioContext;
+    if (watcher && watcher.live && !enabled.has(keyOf(target))) {
+      watcher.seen.delete(watcher.live); watcher.live = null;
+    }
+    button.hidden = !paired || !target || !supported;
     button.setAttribute('aria-pressed',String(!button.hidden && enabled.has(keyOf(target))));
-    if (!paired || !enabled.size || !AudioContext) {
-      watcher = null; window.clearTimeout(timer);
+    if (!paired || !enabled.size || !supported) {
+      watcher = null; window.clearTimeout(timer); player?.dispose(); player = null; playbackMode(false);
     } else if (!watcher) {
-      watcher = {seen:new Map(),checking:false}; unlock(); void check(watcher);
+      playbackMode(true);
+      player = mediaChime(window, () => notice('Sound could not play. Tap the page to enable audio.'));
+      watcher = {seen:new Map(),checking:false}; void check(watcher);
     }
   }
   document.addEventListener('visibilitychange', () => {
     window.clearTimeout(timer);
-    if (watcher) { watcher.seen.clear(); void check(watcher); }
+    // The chat stream pauses when hidden. Let inventory cover it for as long as
+    // the browser runs this tab. Refetch when visible without losing the baseline.
+    if (watcher) { watcher.live = null; void check(watcher); }
   });
+  document.addEventListener('touchend',unlock,{capture:true,passive:true});
   document.addEventListener('click',unlock,true);
   document.addEventListener('keydown',unlock,true);
   window.addEventListener('storage', e => {
@@ -104,9 +125,11 @@ export function completionReminder(button, inventory, notice) {
     if (button.hidden) return;
     const key = keyOf(target), yes = !enabled.has(key);
     remember(key,yes); sync();
+    if (yes) player.ring(); // Audible check inside this tap, using the exact completion sound.
     notice(yes ? 'Round-end sound on for this session.' : 'Round-end sound off for this session.');
   };
-  return { setPaired(yes) { paired = yes; sync(); }, select(next) {
+  return { observe, setPaired(yes) { paired = yes; sync(); }, select(next) {
+    if (watcher && (target?.terminal !== next?.terminal || target?.session !== next?.session)) watcher.live = null;
     target = next;
     if (next) bind(next);
     sync();

@@ -64,7 +64,7 @@ export interface RemoteDeps {
   readonly composer: ComposerController
   readonly activity: ActivityController
   readonly agent: Agent
-  readonly suggestions: Pick<PromptSuggestion, 'text' | 'feedback' | 'completing' | 'replacing' | 'next' | 'complete'>
+  readonly suggestions: Pick<PromptSuggestion, 'text' | 'position' | 'candidates' | 'feedback' | 'completing' | 'replacing' | 'next' | 'complete'>
   readonly suggest: Pick<SuggestController, 'suggestionInputReady' | 'suggestionInventory'>
   readonly gitInfo: { getBranch(): string | null }
   readonly cloudSessions: Pick<CloudSessionSync, 'remoteFor' | 'forget'>
@@ -187,6 +187,7 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       )
     const canSuggest = !!input && isEditorEmpty(st.editor) && deps.suggest.suggestionInputReady()
     const shareSuggestion = canSuggest && !deps.suggestions.completing() && !deps.suggestions.replacing()
+    const suggestion = shareSuggestion ? deps.suggestions.text() || undefined : undefined
     const suggestionStatus = shareSuggestion ? deps.suggestions.feedback() : undefined
     const models = remoteModels(st.configInfo, st.appState.model, st.pendingModelHandoff)
     const entries = deps.pendingQueue.visible(currentQueueTarget(st))
@@ -198,10 +199,13 @@ export function createRemoteController(st: ReplState, deps: RemoteDeps) {
       slashHints: input ? { catalog: phoneCommandHints(st.skillEntries), forked: st.lastLineage.length > 1,
         inventory: deps.suggest.suggestionInventory(RECENT_SESSION_LIMIT) } : undefined,
       // Only a next-prompt suggestion; a completion of the TUI's own half-typed draft stays local.
-      suggestion: shareSuggestion ? deps.suggestions.text() || undefined : undefined,
+      suggestion,
+      suggestionPosition: suggestion ? deps.suggestions.position() : undefined,
+      suggestionCandidates: suggestion ? deps.suggestions.candidates() : undefined,
       suggestionHint: suggestionStatus === 'quiet' ? 'no suggestion' : suggestionStatusText({ suggestionStatus }).trim() || undefined,
       place: { name: basename(deps.agent.cwd) || '/', path: shortenSessionCwd(deps.agent.cwd), host: machineName(), branch: deps.gitInfo.getBranch() },
       generation: deps.runOwnership.owner + st.remoteEpoch,
+      finishedRound: st.conversationTail.finishedRound,
       status,
       models,
       composerKeys: {

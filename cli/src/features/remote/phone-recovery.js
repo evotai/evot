@@ -7,23 +7,27 @@ export function sessionRecovery({lookup, open, requestId, onResume = () => {}, n
     async recover(terminal, session, current) {
       if (!session || !current()) return null;
       if (episode?.terminal !== terminal || episode.session !== session)
-        episode = {terminal, session, next:now() + 8000, request:requestId(), pending:false, attempts:0};
+        episode = {terminal, session, next:0, openAfter:now() + 1000, request:requestId(), pending:false, attempts:0};
       const e = episode;
       if (e.pending || now() < e.next) return null;
       const valid = () => episode === e && current();
       e.pending = true;
       try {
-        const rows = await lookup(session);
-        if (!valid() || rows.unavailable) return null;
-        const owner = rows.online.find(row => row.session === session);
-        if (owner) return owner;
-        if (!rows.history.some(row => row.session === session)) return null;
+        const catalog = await lookup(session);
+        if (!valid()) return null;
+        // Same row and destination as tapping Sessions. A partial directory
+        // can still identify a live shared window, but cannot authorize a launch.
+        const row = catalog.rows.find(row => row.session === session);
+        if (!row || row.unshared || row.kind === 'private') return null;
+        if (row.terminal) return row;
+        if (catalog.unavailable || catalog.failed || now() < e.openAfter) return null;
         onResume();
         const result = await open({session, requestId:e.request});
         return valid() ? result : null;
       } finally {
         e.pending = false;
-        e.next = now() + Math.min(30000, 2000 * 2 ** Math.min(e.attempts++, 4));
+        const time = now();
+        e.next = time < e.openAfter ? e.openAfter : time + Math.min(30000,2000 * 2 ** Math.min(e.attempts++,4));
       }
     },
   };

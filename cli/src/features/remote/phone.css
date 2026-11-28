@@ -126,6 +126,7 @@ evot-message-draft:focus-visible { outline:1px solid var(--line); border-radius:
 .draft-surface > * { grid-area:1 / 1; min-width:0; }
 #draftHint { z-index:1; pointer-events:none; user-select:none; padding:4px 8px 6px; max-height:20dvh; overflow:hidden; white-space:pre-wrap; overflow-wrap:anywhere; font-size:15px; line-height:1.45; color:var(--faint); }
 #draftHint[data-preview] { color:var(--muted); }
+#suggestionPicker { width:6.7rem; max-width:27vw; min-height:36px; border:0; background:transparent; color:var(--accent); font:inherit; font-size:12px; cursor:pointer; }
 /* The invisible prefix lays out exactly like the real draft, while the suffix
    is paint only: it cannot be clicked, selected, copied or submitted. */
 #draftGhost { z-index:1; overflow:hidden; pointer-events:none; user-select:none; color:var(--muted); }
@@ -338,6 +339,7 @@ div.terminal-row { cursor:default; opacity:.7; }
   .chat-loading i { animation:pulse 1.2s ease-in-out infinite; }
 }
 .chat-loading { display:grid; gap:16px; margin:16px auto; max-width:var(--composer-width); }
+.chat-loading span { color:var(--muted); font-size:.9rem; text-align:center; }
 .chat-loading i { height:32px; width:48%; background:var(--fill); border-radius:12px 12px 12px 3px; }
 .chat-loading i:first-of-type { justify-self:end; width:30%; background:var(--accent-soft); border-radius:12px 12px 3px; }
 .skeleton-row { gap:7px; cursor:default; }

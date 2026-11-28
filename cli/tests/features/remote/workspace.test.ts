@@ -26,6 +26,7 @@ test('one live destination per session; attach without scanning history, preferr
       const list = await workspace.list(true)
       expect(list.online.filter(row => row.session === 's').map(row => row.terminal)).toEqual([owner.id])
       expect(list.online.filter(row => !row.session)).toHaveLength(2)
+      expect((await workspace.resolveSession('s')).rows).toEqual([{ session:'s', terminal:owner.id }])
       expect(await workspace.open(crypto.randomUUID(), 's', () => true)).toBe(owner.id)
     }
   } finally {
@@ -55,6 +56,7 @@ test('history does not disclose or duplicate an unshared occupied session; crash
         session_id,
         cwd: '/fixture',
         title: session_id,
+        turns: 1,
         source: session_id === 'scheduled' ? 'automation' : 'repl',
       } as SessionMeta)
   )
@@ -65,6 +67,8 @@ test('history does not disclose or duplicate an unshared occupied session; crash
     const state = await workspace.list()
     expect(state.online.map((t) => t.session)).toEqual(['a'])
     expect(state.history.map((t) => t.session)).toEqual(['saved'])
+    expect((await workspace.resolveSession('b')).rows).toEqual([])
+    expect((await workspace.resolveSession('saved')).rows).toEqual([{session:'saved'}])
     // Deletion from the phone: never while any terminal window (shared or hidden) holds the session.
     await expect(workspace.remove('b')).rejects.toThrow('open in a terminal window')
     await expect(workspace.remove('a')).rejects.toThrow('open in a terminal window')

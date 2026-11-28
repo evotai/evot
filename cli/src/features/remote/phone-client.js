@@ -93,6 +93,13 @@ const shortcuts = taskKeys($('escapeKey'), {pull:pullDraft, dismissMenu:dismissH
 const commands = commandMenu($('draft'), $('commandMenu'), resize);
 const tab = composerTab($('draft'),$('tabKey'), {commands, changed:resize, queue:() => submitMessage('queue'),
   suggest:() => action({kind:'suggest'}), disarm:shortcuts.disarm});
+const suggestionPicker = $('suggestionPicker');
+let pickerOptions = [];
+suggestionPicker.onchange = () => {
+  const choice = suggestionPicker.value;
+  suggestionPicker.value = '';
+  if (!suggestionPicker.hidden && pickerOptions.includes(choice)) tab.accept(choice);
+};
 const viewer = photoViewer($('photoPreview')), sentPhotos = messagePhotos();
 const outbox = [], renderQueue = queueStrip($('promptQueue'),viewer.thumbnail);
 const photos = imageTray({ thumbnail:viewer.thumbnail, tray: $('attachments'), input: $('imageInput'), button: $('attach'),
@@ -120,16 +127,21 @@ async function choose(id, session, folder) {
       if (!session) newRequest = null;
     }
     if (credential !== token) return;
-    selectTarget(id, session);
+    // Following another window for the conversation already on screen is
+    // a reconnect, not a switch. Keep its transcript, scroll, editor and tray.
+    if (session && view?.sessionId === session) {
+      followOwner({terminal:id}, session);
+    } else {
+      selectTarget(id, session);
+      connected = false;
+      view = null;
+      $('history').replaceChildren(); clearOutbox(); photos.clear();
+      $('draft').value = '';
+      $('draft').rows = 1;
+      etag = '';
+      paired(true);
+    }
     notice('');
-    connected = false;
-    ++epoch;
-    view = null;
-    paired(true);
-    etag = '';
-    $('history').replaceChildren(); clearOutbox(); photos.clear();
-    $('draft').value = '';
-    $('draft').rows = 1;
     await refresh();
     if (token && terminal) notice('');
   } catch (e) {
@@ -202,6 +214,12 @@ function controls() {
   $('send').ariaLabel = $('send').title = candidate ? 'Send suggestion' : input === 'steer' ? 'Steer active run' : 'Send message';
   const hint = $('draftHint'), text = draftHintText(empty, connected ? view : null, preview, queuedCount - paused);
   if (hint.textContent !== text) hint.textContent = text;
+  const options = candidate && !busy && !messageField.readOnly ? view.suggestionCandidates ?? [candidate] : [];
+  if (pickerOptions.length !== options.length || options.some((s,i) => s !== pickerOptions[i])) {
+    pickerOptions = options;
+    suggestionPicker.replaceChildren(new Option('Suggestions',''), ...options.map(s => new Option(s,s)));
+  }
+  suggestionPicker.hidden = !options.length;
   hint.hidden = !text;
   hint.toggleAttribute('data-preview', !!preview);
   const commandHint = renderCommandGhost(commands.hint);
@@ -289,6 +307,7 @@ function render(s) {
   }
   if ((s.suggestion || s.suggestionHint) !== (view?.suggestion || view?.suggestionHint)) dismissed = '';
   view = s;
+  reminder.observe(terminal, s);
   stopping.observe(s);
   $('resumeConnection').hidden = true;
   $('threadTitle').textContent = s.title || (s.sessionId ? `Session ${s.sessionId.slice(-8)}` : 'New conversation');
@@ -358,7 +377,7 @@ const rememberApproval = () => { try { localStorage.setItem('evot.remote.approve
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
   if (token || needsInteraction || (!pairingStarted && !approvedBefore() && !$('pair-screen').hidden) || document.hidden) return;
-  reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 1000 * 2 ** Math.min(reconnectFailures, 4)));
+  reconnectTimer = setTimeout(() => { if (!token && !document.hidden) void pair(true); }, Math.min(15000, 250 * 2 ** Math.min(Math.max(0,reconnectFailures - 1), 6)));
 }
 function reconnecting() {
   starting.clear();
@@ -407,7 +426,7 @@ async function api(path, body, extra = {}, signal, progress) {
 let liveRequest, pollUntil = 0, nextOwnerCheck = 0, checkingOwner = false, failures = 0;
 const inventory = async () => (await api('/sessions?online')).json();
 const recovery = sessionRecovery({requestId, onResume:() => setLinkStatus('Resuming session…', true),
-  lookup:async session => (await api('/sessions?limit=40&q=' + encodeURIComponent(session))).json(),
+  lookup:async session => (await api('/sessions?resolve=' + encodeURIComponent(session))).json(),
   open:async body => (await api('/open', body)).json(),
 });
 function followOwner(owner, session) {
@@ -483,36 +502,25 @@ async function synchronize(ready) {
   } catch (e) {
     if (mine !== epoch) return;
     failures++; etag = ''; reconnecting();
-    if (e.status === 409 || e.status === 403) {
-      // Prefer the existing live owner to opening the saved conversation.
-      const session = nav.target?.session;
-      let rows;
-      try { rows = await inventory(); } catch { /* inconclusive; retry the selected window */ }
-      if (mine !== epoch || !token) return;
-      const owner = session && rows?.online.find(row => row.session === session);
-      if (owner) {
-        recovery.reset();
-        if (!busy && owner.terminal !== terminal) followOwner(owner, session);
-        return;
-      }
-      if (rows && !rows.unavailable && !owner && (session || !rows.online.some(row => row.terminal === terminal))) {
-        if (session) {
-          const original = terminal, current = () => mine === epoch && !!token && !busy && !document.hidden &&
-            terminal === original && nav.target?.session === session;
-          try {
-            const restored = await recovery.recover(original, session, current);
-            if (restored && current()) followOwner(restored, session);
-          } catch (err) {
-            if (current() && !temporaryDisconnect(err)) setLinkStatus(err.message || 'Session unavailable');
-          }
-          return;
-        }
-        // An empty window may not have a saved session yet. Keep its draft and
-        // bookmark and let the poll below find that exact window when it returns.
-        setLinkStatus('Waiting for window…', true);
-      }
-    }
+    // Even when the directory returns the same window, retry a full snapshot:
+    // a failing stream must not keep us returning before the polling fallback.
     if (live) pollUntil = Date.now() + 10000;
+    const session = nav.target?.session, original = terminal;
+    if (session && (e.status === 409 || e.status === 403 || e.status === 404 || failures >= 2)) {
+      const current = () => mine === epoch && !!token && !busy && !document.hidden &&
+        terminal === original && nav.target?.session === session;
+      try {
+        const restored = await recovery.recover(original, session, current);
+        if (restored?.terminal && restored.terminal !== original && current()) {
+          followOwner(restored, session);
+          void refresh();
+        }
+      } catch (err) {
+        if (current() && !temporaryDisconnect(err)) setLinkStatus(err.message || 'Session unavailable');
+      }
+    } else if (!session && (e.status === 409 || e.status === 403)) {
+      setLinkStatus('Waiting for window…', true);
+    }
   } finally {
     clearTimeout(watchdog);
     ctrl.abort(); ready();
