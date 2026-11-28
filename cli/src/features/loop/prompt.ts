@@ -1,7 +1,7 @@
 import type { LoopMode } from './parser.js'
 import { formatDuration } from './parser.js'
 import type { LoopSnapshot } from './controller.js'
-import { CACHE_LEAD_SECONDS, CACHE_WINDOW_SECONDS, MIN_DELAY_SECONDS, MAX_DELAY_SECONDS } from './controller.js'
+import { CACHE_LEAD_SECONDS, CACHE_WINDOW_SECONDS } from './controller.js'
 import { buildCommandPrompt } from '../../session/command-envelope.js'
 
 /** A background shell the host is still tracking at wakeup time. */
@@ -10,18 +10,6 @@ export interface RunningBackgroundTask {
   command: string
   elapsedMs: number
 }
-
-const SHARED_RULES = [
-  'On the first pass, before doing anything else, call `loop_plan` with the checklist of what "done" means for this task. Read the task text broadly, not literally: include every kind of verification this conversation already established for this work (for example, if earlier rounds ran correctness tests and a performance comparison, both are items), and name each one. The user reads this card to correct the scope early, so record it before the first action.',
-  'Call `loop_plan` again, with the whole list, whenever an item changes state (todo, doing, done, blocked, deferred) or a new item appears from a review finding or a failure. Never silently drop an item; mark it deferred with a one-line note the user can see. Do not repeat the checklist in your reply: the card shows it.',
-  'Prefer event-driven waiting over polling: when something external must happen (CI, a review, a deploy), start one background shell command that blocks until the condition changes and exits. Its completion wakes you immediately, so you never need a short wakeup to check on it.',
-  'Arm a watcher once. Each wakeup lists the background shells still running; trust that list, not your memory. Never report a watcher as running unless it appears there, and do not start a second one for the same condition.',
-  'When woken by a background shell finishing, handle that event first, then decide whether to keep waiting.',
-  'When nothing actionable happened, reply in one short line; do not restate the checks you performed.',
-  'Keep a running cursor (last review id, last commit, last timestamp) in your reply so later wakeups can compare against it.',
-  'Tell the user in one line when the loop is newly blocked on a decision only they can make, or when something landed that they would want to act on now.',
-  'Before `stop: true`, re-read the `loop_plan` checklist. Stop only when every item is done or deferred with its note shown; if any item is still todo or doing, keep working on it or keep waiting. If you are unsure whether an item belongs in scope, ask the user in one line and wait rather than stop. Never stop with a summary that admits something was left undone.',
-]
 
 /** Largest delay that resumes on a warm cache; `clampDelaySeconds` snaps
  *  anything inside the lead window down to this value. */
@@ -39,23 +27,8 @@ export function buildLoopStartPrompt(
   background: readonly RunningBackgroundTask[] = [],
 ): string {
   const header = mode.kind === 'fixed'
-    ? [
-        `You are running a recurring loop. The host wakes you every ${formatDuration(mode.intervalMs)} with a short reminder; you do not schedule the next wakeup yourself.`,
-        'The loop runs until the user stops it or a week passes. When the task\'s goal is reached, call `schedule_wakeup` with `stop: true` as your final action so it does not keep firing.',
-      ].join(' ')
-    : [
-        'You are running a self-paced loop. Every turn: do the work, write a short status line (with your cursor), then call `schedule_wakeup` exactly once as the final action; the turn ends when it returns.',
-        'Call it with `stop: true` when the goal is reached or the loop cannot move further without the user. Quiet ticks while a watcher you armed is still running are expected and do not count; otherwise, on the third straight tick with nothing to do, stop and say so in one line rather than keep waking.',
-      ].join(' ')
-
-  const dynamicRules = mode.kind === 'dynamic'
-    ? [
-        `\`delay_seconds\` is clamped to [${MIN_DELAY_SECONDS}, ${MAX_DELAY_SECONDS}]. Use ${CACHE_SAFE_SECONDS}s (about 5 minutes) every time, including long waits such as a CI pipeline, a human review or a multi-hour benchmark; a watcher finishing wakes you sooner anyway. Do not lengthen the delay on your own because the wait looks long or because recent ticks were quiet; only the user changes the pace.`,
-        `The prompt cache lives ${formatDuration(CACHE_WINDOW_SECONDS * 1000)}: delays up to ${CACHE_SAFE_SECONDS}s resume on a warm cache, longer ones pay one miss. Do not choose ${CACHE_WINDOW_SECONDS}s exactly; stay at ${CACHE_SAFE_SECONDS}s.`,
-        '`noop` is required: true when this turn changed nothing and found nothing new; false when you edited files, pushed, commented, or surfaced a finding. Consecutive quiet ticks are counted and shown to you at the next wakeup.',
-        'The `reason` must be one specific sentence about what you are waiting for.',
-      ]
-    : []
+    ? `The host wakes you every ${formatDuration(mode.intervalMs)}; you do not schedule the next wakeup yourself.`
+    : `End each loop turn with \`schedule_wakeup\`. Use ${CACHE_SAFE_SECONDS}s unless the user requests another pace.`
 
   const instructions = [
     header,
@@ -63,8 +36,9 @@ export function buildLoopStartPrompt(
     'Task:',
     prompt,
     '',
-    'Rules:',
-    ...[...SHARED_RULES, ...dynamicRules].map(rule => `- ${rule}`),
+    'If there is work to repeat, use `loop_plan` to show the steps and relevant checks established in this conversation. Update it as the work progresses.',
+    'Use the live background list below rather than restarting a watcher that is already running. Report what changed.',
+    'When the goal is met or no useful pass remains, account for any unfinished items and call `schedule_wakeup` with `stop: true`.',
     '',
     `${describeBackground(background)} Start now: perform the first pass of the task.`,
   ].join('\n')
@@ -106,6 +80,6 @@ export function buildLoopWakeupPrompt(
   return buildCommandPrompt({
     name: 'loop-wakeup',
     input: `loop wakeup #${snapshot.tick} (${time})${streak}`,
-    instructions: `/loop wakeup #${snapshot.tick} (${time})${streak}. ${describeBackground(background)} Continue: ${snapshot.task.label}. Pick up from your last checklist; do not narrow it.${tail}`,
+    instructions: `/loop wakeup #${snapshot.tick} (${time})${streak}. ${describeBackground(background)} Continue: ${snapshot.task.label}. Resume from the last result.${tail}`,
   })
 }

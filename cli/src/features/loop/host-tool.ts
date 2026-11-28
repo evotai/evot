@@ -18,11 +18,8 @@ export const LOOP_PLAN_SPEC = {
   name: 'loop_plan',
   label: 'Loop Plan',
   description: [
-    'Record or update the checklist for the current /loop: what "done" means for this task. The host shows it to the user as a card and uses it to judge whether the loop may stop.',
-    'Call it on the first pass before any other action, with every item the task implies, read broadly: include each kind of verification this conversation already established for this work (tests, benchmarks, result comparison, review, CI), not just the literal words of the task.',
-    'Call it again whenever an item changes state or a new item appears (a review finding, a failure to fix). Always send the whole list, not a diff. Keep item text stable between calls so the host can tell what moved.',
-    `States: ${PLAN_STATES.join(', ')}. blocked and deferred require a one-line note the user reads. Never drop an item; mark it deferred with the reason instead.`,
-    'Do not repeat the checklist in your reply; the card already shows it. Your reply is one line: what this tick did and the cursor.',
+    'Show the user the current loop checklist. Each update replaces the whole list; keep item text stable so the card can highlight changes.',
+    'Mark skipped items deferred with a reason instead of silently dropping them.',
   ].join(' '),
   parameters_schema: {
     type: 'object',
@@ -54,10 +51,7 @@ export const SCHEDULE_WAKEUP_SPEC = {
   label: 'Schedule Wakeup',
   description: [
     'Schedule when the current /loop resumes, or stop it. Write your status line first, then call this exactly once as the final action of the turn; the turn ends when it returns.',
-    'When a background shell exits you are re-invoked automatically, so the delay is only a fallback in case it hangs. Use 270s (5 minutes; 300s exactly is snapped down to stay on the warm prompt cache) every time, for long waits too (a CI pipeline, a human review, a multi-hour run). Do not lengthen it on your own; only the user changes the pace.',
-    'To end the loop, pass stop: true and omit the other fields; the loop stops immediately and does not fire again. Do this only when every loop_plan item is done or deferred with a visible note, or when the loop cannot move further without the user. If an item is still todo or doing, keep working or keep waiting instead.',
-    'noop is required unless stop is true: true when you checked and nothing changed, false when you edited files, pushed, commented, advanced state, or surfaced a finding. Consecutive noop ticks are tracked as a streak and shown to you at the next wakeup, so a long quiet wait stays legible without re-reading the transcript.',
-    'reason is required: one specific sentence ("watching CI run 39", not "waiting"). It is shown to the user.',
+    'A background shell finishing can wake the loop sooner. To end the loop instead, pass stop: true.',
     'In a turn the user started while the loop is parked, call this only when they ask to change the pace or stop; otherwise leave the schedule alone.',
   ].join(' '),
   parameters_schema: {

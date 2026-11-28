@@ -13,7 +13,7 @@ import {
   MAX_CONSECUTIVE_ERRORS,
   type StopCause,
 } from '../../src/features/loop/controller.js'
-import { createLoopExtension, LOOP_PLAN_SPEC, SCHEDULE_WAKEUP_SPEC } from '../../src/features/loop/host-tool.js'
+import { createLoopExtension, SCHEDULE_WAKEUP_SPEC } from '../../src/features/loop/host-tool.js'
 import { changedIndices, formatPlanRows, parsePlanItems, parsePlanRecord, planProgressFromResult } from '../../src/render/loop-plan.js'
 import { buildLoopStartPrompt, buildLoopWakeupPrompt } from '../../src/features/loop/prompt.js'
 import type { HostToolExtension } from '../../src/features/host-tools.js'
@@ -59,9 +59,8 @@ describe('parseLoopArgs', () => {
     expect(parseLoopArgs('')).toEqual({ kind: 'start', mode: { kind: 'dynamic' }, task: BUILTIN_LOOP_TASK })
     expect(parseLoopArgs('15m')).toEqual({ kind: 'start', mode: { kind: 'fixed', intervalMs: 900_000 }, task: BUILTIN_LOOP_TASK })
     expect(BUILTIN_LOOP_TASK.label).toBe('continue this work')
-    expect(BUILTIN_LOOP_PROMPT).toContain('read the')
-    expect(BUILTIN_LOOP_PROMPT).toContain('If the conversation is driving a pull request')
-    expect(BUILTIN_LOOP_PROMPT).toContain('If unsure, wait once more rather than stop')
+    expect(BUILTIN_LOOP_PROMPT).toContain('actions already taken and their results')
+    expect(BUILTIN_LOOP_PROMPT).toContain('no useful next pass')
   })
 
   test('a long user prompt is labelled by its first 120 characters', () => {
@@ -303,8 +302,6 @@ describe('loop plan', () => {
     expect(JSON.parse(ext.specsJson).map((spec: { name: string }) => spec.name)).toEqual(['ask_user', 'loop_plan', 'schedule_wakeup'])
     expect(ext.handles('loop_plan')).toBe(true)
     expect(ext.handles('LoopPlan')).toBe(true)
-    expect(LOOP_PLAN_SPEC.description).toContain('before any other action')
-    expect(LOOP_PLAN_SPEC.description).toContain('Do not repeat the checklist in your reply')
   })
 
   test('items are validated; blocked and deferred need a note', () => {
@@ -490,53 +487,26 @@ describe('composeExtensions', () => {
 describe('prompts', () => {
   test('dynamic start self-paces; fixed start is host-paced but can still stop', () => {
     const dynamic = buildLoopStartPrompt({ kind: 'dynamic' }, 'watch')
-    expect(dynamic).toContain('`schedule_wakeup` exactly once')
-    expect(dynamic).toContain('third straight tick')
-    // Quiet ticks are normal while a watcher runs; they must not end the loop.
-    expect(dynamic).toContain('Quiet ticks while a watcher you armed is still running are expected and do not count')
-    // Always ~5 minutes, inside the warm cache; the model never lengthens it for long waits.
-    expect(dynamic).toContain('Use 270s (about 5 minutes) every time, including long waits')
-    expect(dynamic).toContain('Do not lengthen the delay on your own')
-    expect(dynamic).not.toMatch(/1200|1800/)
-    expect(SCHEDULE_WAKEUP_SPEC.description).toContain('Use 270s (5 minutes')
-    expect(SCHEDULE_WAKEUP_SPEC.description).toContain('Do not lengthen it on your own')
-    expect(SCHEDULE_WAKEUP_SPEC.description).not.toMatch(/1200|1800/)
-    expect(dynamic).toContain('`noop` is required')
-    // The 5-minute cache boundary: stay under it or go long, never land on it.
-    expect(dynamic).toContain('Do not choose 300s exactly')
+    expect(dynamic).toContain('End each loop turn with `schedule_wakeup`')
+    expect(dynamic).toContain('Use 270s unless the user requests another pace')
     const fixed = buildLoopStartPrompt({ kind: 'fixed', intervalMs: 300_000 }, 'watch')
     expect(fixed).toContain('every 5m')
     expect(fixed).toContain('you do not schedule the next wakeup yourself')
     // Claude Code's cron loops tell the model how to end them (CronDelete);
     // ours must say the same for stop: true or a done task fires for a week.
     expect(fixed).toContain('`stop: true`')
-    expect(fixed).not.toContain('`noop` is required')
   })
 
-  test('both modes tell the agent to trust the host\'s watcher list over memory', () => {
-    for (const mode of [{ kind: 'dynamic' } as const, { kind: 'fixed', intervalMs: 60_000 } as const]) {
-      const text = buildLoopStartPrompt(mode, 'watch')
-      expect(text).toContain('Never report a watcher as running unless it appears there')
-      expect(text).toContain('handle that event first')
+  test('only an unspecified task asks the model to discover the workflow', () => {
+    for (const [args, infer] of [['', true], ['5m', true], ['watch logs', false], ['5m watch logs', false]] as const) {
+      const command = parseLoopArgs(args)
+      if (command.kind !== 'start') throw new Error(`Expected loop start: ${args}`)
+      const text = buildLoopStartPrompt(command.mode, command.task.prompt, `/loop ${args}`.trim())
+      expect(text.includes(BUILTIN_LOOP_PROMPT)).toBe(infer)
+      if (!infer) expect(text).toContain('Task:\nwatch logs')
+      expect(text).toContain('`loop_plan`')
+      expect(text).toContain('`stop: true`')
     }
-  })
-
-  test('both modes scope the task as a checklist and gate stop on it', () => {
-    // A loop once stopped as "goal reached" after narrowing "run tests" to
-    // cargo test and skipping the performance comparison the conversation
-    // had been running. The scope must be written out first so the user can
-    // correct it, and stop must be checked against that list.
-    for (const mode of [{ kind: 'dynamic' } as const, { kind: 'fixed', intervalMs: 60_000 } as const]) {
-      const text = buildLoopStartPrompt(mode, 'watch')
-      expect(text).toContain('call `loop_plan` with the checklist')
-      expect(text).toContain('Read the task text broadly, not literally')
-      expect(text).toContain('every kind of verification this conversation already established')
-      expect(text).toContain('Before `stop: true`, re-read the `loop_plan` checklist')
-      expect(text).toContain('Never stop with a summary that admits something was left undone')
-    }
-    expect(SCHEDULE_WAKEUP_SPEC.description).toContain('only when every loop_plan item is done or deferred')
-    expect(BUILTIN_LOOP_PROMPT).toContain('record it with `loop_plan`')
-    expect(BUILTIN_LOOP_PROMPT).toContain('when every checklist item is')
   })
 
   test('the start prompt states the live background list too', () => {
@@ -732,11 +702,11 @@ describe('LoopSession', () => {
     expect(s.active).toBe(true)
     // A user turn while parked is not a loop run: endRun without a loop
     // launch is a no-op, the timer and error streak are untouched.
-    const before = s.waitRemaining()
+    const nextFireAt = s.snapshot?.nextFireAt
     s.endRun('error')
     s.endRun('error')
     expect(s.active).toBe(true)
-    expect(s.waitRemaining()?.remainingMs).toBe(before?.remainingMs)
+    expect(s.snapshot?.nextFireAt).toBe(nextFireAt)
     s.dispose()
   })
 

@@ -7,7 +7,7 @@ export type LoopMode =
 /**
  * What a loop repeats. `label` is how the transcript, the wakeup reminders
  * and `/loop status` name it: the user's own words for a user prompt, a fixed
- * short name for the built-in task, whose prompt is a page long.
+ * short name for the context-derived task.
  */
 export interface LoopTask {
   prompt: string
